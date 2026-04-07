@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 
-namespace AvaloniaApplication1.Models;
+namespace Clipthrough.Models;
 
 public sealed class ClipEntry
 {

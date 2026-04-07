@@ -1,5 +1,5 @@
 ﻿using ReactiveUI;
 
-namespace AvaloniaApplication1.ViewModels;
+namespace Clipthrough.ViewModels;
 
 public abstract class ViewModelBase : ReactiveObject {}

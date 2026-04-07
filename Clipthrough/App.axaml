@@ -1,15 +1,26 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             x:Class="AvaloniaApplication1.App"
-             xmlns:local="using:AvaloniaApplication1"
-             RequestedThemeVariant="Default">
+             x:Class="Clipthrough.App"
+             xmlns:local="using:Clipthrough"
+             RequestedThemeVariant="Dark">
              <!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
 
     <Application.DataTemplates>
         <local:ViewLocator/>
     </Application.DataTemplates>
+
+    <Application.Resources>
+        <Color x:Key="SystemAccentColor">#7C3AED</Color>
+        <Color x:Key="SystemAccentColorLight1">#8B5CF6</Color>
+        <Color x:Key="SystemAccentColorLight2">#A78BFA</Color>
+        <Color x:Key="SystemAccentColorLight3">#C4B5FD</Color>
+        <Color x:Key="SystemAccentColorDark1">#6D28D9</Color>
+        <Color x:Key="SystemAccentColorDark2">#5B21B6</Color>
+        <Color x:Key="SystemAccentColorDark3">#4C1D95</Color>
+    </Application.Resources>
   
     <Application.Styles>
         <FluentTheme />
+        <StyleInclude Source="avares://Clipthrough/Styles/ModernTheme.axaml" />
     </Application.Styles>
 </Application>

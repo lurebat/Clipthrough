@@ -1,9 +1,9 @@
 ﻿using System.Threading;
 using System.Threading.Tasks;
-using AvaloniaApplication1.Services;
+using Clipthrough.Services;
 using Microsoft.Data.Sqlite;
 
-namespace AvaloniaApplication1.Database;
+namespace Clipthrough.Database;
 
 public sealed class DatabaseInitializer
 {

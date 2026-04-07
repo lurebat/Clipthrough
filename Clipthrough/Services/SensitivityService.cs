@@ -1,9 +1,9 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
-using AvaloniaApplication1.Models;
+using Clipthrough.Models;
 
-namespace AvaloniaApplication1.Services;
+namespace Clipthrough.Services;
 
 public sealed class SensitivityService : ISensitivityService
 {

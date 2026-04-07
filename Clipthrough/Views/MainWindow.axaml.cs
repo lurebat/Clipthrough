@@ -1,6 +1,6 @@
 using Avalonia.Controls;
 
-namespace AvaloniaApplication1.Views;
+namespace Clipthrough.Views;
 
 public partial class MainWindow : Window
 {

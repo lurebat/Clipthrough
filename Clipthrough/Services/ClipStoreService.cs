@@ -6,11 +6,11 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using AvaloniaApplication1.Database;
-using AvaloniaApplication1.Models;
+using Clipthrough.Database;
+using Clipthrough.Models;
 using Microsoft.Data.Sqlite;
 
-namespace AvaloniaApplication1.Services;
+namespace Clipthrough.Services;
 
 public sealed class ClipStoreService : IClipStoreService
 {

@@ -1,0 +1,244 @@
+﻿<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Styles.Resources>
+        <SolidColorBrush x:Key="AppBackgroundBrush" Color="#070D17" />
+        <SolidColorBrush x:Key="AppForegroundBrush" Color="#F8FAFC" />
+        <SolidColorBrush x:Key="AppMutedForegroundBrush" Color="#94A3B8" />
+        <SolidColorBrush x:Key="SurfaceHeroBrush" Color="#0F172A" />
+        <SolidColorBrush x:Key="SurfacePrimaryBrush" Color="#111C30" />
+        <SolidColorBrush x:Key="SurfaceSecondaryBrush" Color="#0B1323" />
+        <SolidColorBrush x:Key="SurfaceInsetBrush" Color="#08101D" />
+        <SolidColorBrush x:Key="SurfaceInteractiveBrush" Color="#152238" />
+        <SolidColorBrush x:Key="SurfaceInteractiveHoverBrush" Color="#1A2A43" />
+        <SolidColorBrush x:Key="SurfaceSelectedBrush" Color="#1E293B" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#7C3AED" />
+        <SolidColorBrush x:Key="AccentHoverBrush" Color="#8B5CF6" />
+        <SolidColorBrush x:Key="SuccessBrush" Color="#10B981" />
+        <SolidColorBrush x:Key="WarningBrush" Color="#F59E0B" />
+        <SolidColorBrush x:Key="DangerBrush" Color="#EF4444" />
+        <SolidColorBrush x:Key="BorderBrush" Color="#243247" />
+        <SolidColorBrush x:Key="BorderStrongBrush" Color="#334155" />
+    </Styles.Resources>
+
+    <Style Selector="Window">
+        <Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource AppForegroundBrush}" />
+    </Style>
+
+    <Style Selector="Border.hero-surface">
+        <Setter Property="Background" Value="{DynamicResource SurfaceHeroBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="28" />
+        <Setter Property="BoxShadow" Value="0 24 56 0 #22000000" />
+    </Style>
+
+    <Style Selector="Border.surface-panel">
+        <Setter Property="Background" Value="{DynamicResource SurfacePrimaryBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="24" />
+        <Setter Property="BoxShadow" Value="0 18 42 0 #1A000000" />
+    </Style>
+
+    <Style Selector="Border.surface-subpanel">
+        <Setter Property="Background" Value="{DynamicResource SurfaceSecondaryBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="20" />
+    </Style>
+
+    <Style Selector="Border.inset-panel">
+        <Setter Property="Background" Value="{DynamicResource SurfaceInsetBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="18" />
+    </Style>
+
+    <Style Selector="Border.stat-card">
+        <Setter Property="Background" Value="#101D32" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="20" />
+    </Style>
+
+    <Style Selector="Border.clip-card">
+        <Setter Property="Background" Value="{DynamicResource SurfaceSecondaryBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="18" />
+    </Style>
+
+    <Style Selector="Border.meta-chip">
+        <Setter Property="Background" Value="#132238" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="999" />
+    </Style>
+
+    <Style Selector="Border.badge-chip">
+        <Setter Property="CornerRadius" Value="999" />
+        <Setter Property="Padding" Value="10,4" />
+    </Style>
+
+    <Style Selector="Border.badge-chip.favorite">
+        <Setter Property="Background" Value="#3A2300" />
+        <Setter Property="BorderBrush" Value="#7C5A16" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
+
+    <Style Selector="Border.badge-chip.sensitive">
+        <Setter Property="Background" Value="#2D1421" />
+        <Setter Property="BorderBrush" Value="#7F1D3A" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
+
+    <Style Selector="TextBlock.eyebrow">
+        <Setter Property="Foreground" Value="#C4B5FD" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style Selector="TextBlock.hero-title">
+        <Setter Property="FontSize" Value="34" />
+        <Setter Property="FontWeight" Value="Bold" />
+    </Style>
+
+    <Style Selector="TextBlock.section-title">
+        <Setter Property="FontSize" Value="22" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style Selector="TextBlock.card-title">
+        <Setter Property="FontSize" Value="15" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style Selector="TextBlock.metric-value">
+        <Setter Property="FontSize" Value="28" />
+        <Setter Property="FontWeight" Value="Bold" />
+    </Style>
+
+    <Style Selector="TextBlock.metric-label">
+        <Setter Property="Foreground" Value="{DynamicResource AppMutedForegroundBrush}" />
+        <Setter Property="FontSize" Value="13" />
+    </Style>
+
+    <Style Selector="TextBlock.body-muted">
+        <Setter Property="Foreground" Value="{DynamicResource AppMutedForegroundBrush}" />
+    </Style>
+
+    <Style Selector="TextBlock.item-title">
+        <Setter Property="FontSize" Value="15" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style Selector="TextBlock.item-preview">
+        <Setter Property="Foreground" Value="{DynamicResource AppMutedForegroundBrush}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+        <Setter Property="MaxLines" Value="2" />
+    </Style>
+
+    <Style Selector="TextBlock.empty-state">
+        <Setter Property="Foreground" Value="{DynamicResource AppMutedForegroundBrush}" />
+        <Setter Property="TextAlignment" Value="Center" />
+        <Setter Property="FontSize" Value="14" />
+    </Style>
+
+    <Style Selector="Button">
+        <Setter Property="Padding" Value="18,12" />
+        <Setter Property="CornerRadius" Value="14" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style Selector="Button.primary">
+        <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="Foreground" Value="White" />
+    </Style>
+
+    <Style Selector="Button.primary:pointerover">
+        <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentHoverBrush}" />
+    </Style>
+
+    <Style Selector="Button.secondary">
+        <Setter Property="Background" Value="{DynamicResource SurfaceInteractiveBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource AppForegroundBrush}" />
+    </Style>
+
+    <Style Selector="Button.secondary:pointerover">
+        <Setter Property="Background" Value="{DynamicResource SurfaceInteractiveHoverBrush}" />
+    </Style>
+
+    <Style Selector="Button.destructive">
+        <Setter Property="Background" Value="#31121A" />
+        <Setter Property="BorderBrush" Value="#7F1D3A" />
+        <Setter Property="Foreground" Value="#FECDD3" />
+    </Style>
+
+    <Style Selector="Button.destructive:pointerover">
+        <Setter Property="Background" Value="#3F1723" />
+    </Style>
+
+    <Style Selector="TextBox">
+        <Setter Property="Background" Value="{DynamicResource SurfaceInsetBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Foreground" Value="{DynamicResource AppForegroundBrush}" />
+        <Setter Property="MinHeight" Value="46" />
+        <Setter Property="Padding" Value="14,12" />
+    </Style>
+
+    <Style Selector="ComboBox">
+        <Setter Property="Background" Value="{DynamicResource SurfaceInsetBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Foreground" Value="{DynamicResource AppForegroundBrush}" />
+        <Setter Property="MinHeight" Value="46" />
+    </Style>
+
+    <Style Selector="CheckBox.filter-toggle">
+        <Setter Property="Foreground" Value="{DynamicResource AppForegroundBrush}" />
+    </Style>
+
+    <Style Selector="ListBox.clip-list">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+
+    <Style Selector="ListBox.clip-list ListBoxItem">
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Margin" Value="0,0,0,12" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+
+    <Style Selector="ListBox.clip-list ListBoxItem:pointerover Border.clip-card">
+        <Setter Property="Background" Value="{DynamicResource SurfaceInteractiveBrush}" />
+    </Style>
+
+    <Style Selector="ListBox.clip-list ListBoxItem:selected Border.clip-card">
+        <Setter Property="Background" Value="{DynamicResource SurfaceSelectedBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    </Style>
+
+    <Style Selector="TextBox.preview-editor">
+        <Setter Property="Background" Value="{DynamicResource SurfaceInsetBrush}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="18" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+        <Setter Property="VerticalContentAlignment" Value="Top" />
+    </Style>
+
+    <Style Selector="GridSplitter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+    <Style Selector="GridSplitter:pointerover">
+        <Setter Property="Background" Value="{DynamicResource BorderStrongBrush}" />
+    </Style>
+</Styles>
+

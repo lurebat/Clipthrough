@@ -1,8 +1,8 @@
 ﻿using System;
 using System.Linq;
-using AvaloniaApplication1.Models;
+using Clipthrough.Models;
 
-namespace AvaloniaApplication1.ViewModels;
+namespace Clipthrough.ViewModels;
 
 public sealed class ClipItemViewModel : ViewModelBase
 {
@@ -18,6 +18,8 @@ public sealed class ClipItemViewModel : ViewModelBase
     public string Title => BuildTitle(Clip.Content, Clip.ContentType);
 
     public string Preview => Clip.Content;
+
+    public string PreviewSnippet => BuildPreviewSnippet(Clip.Content, Clip.ContentType);
 
     public string FullContent => Clip.Content;
 
@@ -39,6 +41,8 @@ public sealed class ClipItemViewModel : ViewModelBase
     public string Subtitle => $"{RelativeCapturedAt} · {DisplayContentType}";
 
     public string SourceApp => string.IsNullOrWhiteSpace(Clip.SourceApp) ? "Unknown source" : Clip.SourceApp;
+
+    public string SourceSummary => $"{SourceApp} · {RelativeCapturedAt}";
 
     public string ByteSizeDisplay => $"{Clip.ByteSize:N0} bytes";
 
@@ -68,6 +72,30 @@ public sealed class ClipItemViewModel : ViewModelBase
             .FirstOrDefault() ?? content.Trim();
 
         return firstLine.Length <= 90 ? firstLine : $"{firstLine[..87]}...";
+    }
+
+    private static string BuildPreviewSnippet(string content, ContentType contentType)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return contentType switch
+            {
+                ContentType.Image => "Image data captured from the clipboard.",
+                ContentType.Files => "File paths captured from the clipboard.",
+                ContentType.RichText => "Formatted text content captured from the clipboard.",
+                _ => "This clip does not contain previewable text.",
+            };
+        }
+
+        var collapsed = string.Join(" ", content
+            .Split(['\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+        if (string.IsNullOrWhiteSpace(collapsed))
+        {
+            return "This clip does not contain previewable text.";
+        }
+
+        return collapsed.Length <= 140 ? collapsed : $"{collapsed[..137]}...";
     }
 
     private static string ToRelativeTime(DateTimeOffset timestamp)

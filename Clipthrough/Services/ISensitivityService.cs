@@ -1,7 +1,7 @@
 ﻿using System.Collections.Generic;
-using AvaloniaApplication1.Models;
+using Clipthrough.Models;
 
-namespace AvaloniaApplication1.Services;
+namespace Clipthrough.Services;
 
 public interface ISensitivityService
 {

@@ -2,7 +2,7 @@
 using System.IO;
 using Microsoft.Data.Sqlite;
 
-namespace AvaloniaApplication1.Database;
+namespace Clipthrough.Database;
 
 public sealed class SqliteConnectionFactory
 {

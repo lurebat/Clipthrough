@@ -5,25 +5,12 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="6aab2498-20b2-419b-adc1-591bfb87b46f" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/Clipthrough/Database/DatabaseInitializer.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Clipthrough/Database/SqliteConnectionFactory.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Clipthrough/Models/ClipEntry.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Clipthrough/Models/ClipSearchFilters.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Clipthrough/Models/ClipSearchResult.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Clipthrough/Models/ContentType.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Clipthrough/Models/ContentTypeExtensions.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Clipthrough/Models/SensitivityMatch.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Clipthrough/Models/SensitivityRule.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Clipthrough/Services/ClipStoreService.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Clipthrough/Services/ClipboardMonitorService.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Clipthrough/Services/IClipStoreService.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Clipthrough/Services/IClipboardMonitorService.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Clipthrough/Services/ISensitivityService.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Clipthrough/Services/SensitivityService.cs" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/Clipthrough/ViewModels/ClipItemViewModel.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Clipthrough/Styles/ModernTheme.axaml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/.idea.AvaloniaApplication1/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/.idea.AvaloniaApplication1/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Clipthrough/App.axaml" beforeDir="false" afterPath="$PROJECT_DIR$/Clipthrough/App.axaml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Clipthrough/App.axaml.cs" beforeDir="false" afterPath="$PROJECT_DIR$/Clipthrough/App.axaml.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Clipthrough/Clipthrough.csproj" beforeDir="false" afterPath="$PROJECT_DIR$/Clipthrough/Clipthrough.csproj" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Clipthrough/Program.cs" beforeDir="false" afterPath="$PROJECT_DIR$/Clipthrough/Program.cs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Clipthrough/ViewModels/ClipItemViewModel.cs" beforeDir="false" afterPath="$PROJECT_DIR$/Clipthrough/ViewModels/ClipItemViewModel.cs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Clipthrough/ViewModels/MainWindowViewModel.cs" beforeDir="false" afterPath="$PROJECT_DIR$/Clipthrough/ViewModels/MainWindowViewModel.cs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Clipthrough/Views/MainWindow.axaml" beforeDir="false" afterPath="$PROJECT_DIR$/Clipthrough/Views/MainWindow.axaml" afterDir="false" />
     </list>
@@ -54,12 +41,14 @@
   </component>
   <component name="HighlightingSettingsPerFile">
     <setting file="file://$USER_HOME$/.copilot/mcp-config.json" root0="FORCE_HIGHLIGHTING" />
+    <setting file="file://$APPLICATION_CONFIG_DIR$/resharper-host/DecompilerCache/metadata/6d9d97d5682b40e9aac260c3a75ce1ea206e00/07/be078649/Setter.cs" root0="SKIP_HIGHLIGHTING" />
     <setting file="file://$APPLICATION_CONFIG_DIR$/resharper-host/SourcesCache/7bee7b13bd905e8faeb9c124ef29cb3790f3d64a5cc72b2c7a5d0fbf1143d3/AppBuilder.cs" root0="SKIP_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/Clipthrough/Database/DatabaseInitializer.cs" root0="FORCE_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/Clipthrough/Database/SqliteConnectionFactory.cs" root0="FORCE_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/Clipthrough/Models/ClipSearchFilters.cs" root0="FORCE_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/Clipthrough/Models/ContentType.cs" root0="FORCE_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/Clipthrough/Services/SensitivityService.cs" root0="FORCE_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/Clipthrough/Styles/ModernTheme.axaml" root0="FORCE_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/Clipthrough/ViewModels/ClipItemViewModel.cs" root0="FORCE_HIGHLIGHTING" />
   </component>
   <component name="MetaFilesCheckinStateConfiguration" checkMetaFiles="true" />
@@ -126,7 +115,7 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1775546478457</updated>
-      <workItem from="1775546480265" duration="2138000" />
+      <workItem from="1775546480265" duration="2996000" />
     </task>
     <task id="LOCAL-00001" summary="Initial commit">
       <option name="closed" value="true" />
@@ -160,7 +149,15 @@
       <option name="project" value="LOCAL" />
       <updated>1775548135239</updated>
     </task>
-    <option name="localTasksCounter" value="5" />
+    <task id="LOCAL-00005" summary="Initial slop">
+      <option name="closed" value="true" />
+      <created>1775548895993</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1775548895993</updated>
+    </task>
+    <option name="localTasksCounter" value="6" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -174,7 +171,8 @@
     <MESSAGE value="Gitignore" />
     <MESSAGE value="Devtools" />
     <MESSAGE value="idea" />
-    <option name="LAST_COMMIT_MESSAGE" value="idea" />
+    <MESSAGE value="Initial slop" />
+    <option name="LAST_COMMIT_MESSAGE" value="Initial slop" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

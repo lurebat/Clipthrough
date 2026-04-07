@@ -5,7 +5,7 @@
         <Nullable>enable</Nullable>
         <ApplicationManifest>app.manifest</ApplicationManifest>
         <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-        <RootNamespace>AvaloniaApplication1</RootNamespace>
+        <RootNamespace>Clipthrough</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>

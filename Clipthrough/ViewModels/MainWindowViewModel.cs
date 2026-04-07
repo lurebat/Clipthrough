@@ -6,11 +6,11 @@ using System.Reactive;
 using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using System.Threading.Tasks;
-using AvaloniaApplication1.Models;
-using AvaloniaApplication1.Services;
+using Clipthrough.Models;
+using Clipthrough.Services;
 using ReactiveUI;
 
-namespace AvaloniaApplication1.ViewModels;
+namespace Clipthrough.ViewModels;
 
 public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
@@ -29,6 +29,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isBusy;
     private string _statusText = "Loading…";
     private int _currentOffset;
+    private int _matchingClipCount;
+    private int _totalClipCount;
+    private int _sensitiveClipCount;
+    private string _lastCaptureSummary = "Waiting for first capture";
 
     public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService)
     {
@@ -87,25 +91,45 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string SearchText
     {
         get => _searchText;
-        set => this.RaiseAndSetIfChanged(ref _searchText, value);
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _searchText, value);
+            this.RaisePropertyChanged(nameof(ActiveFilterSummary));
+            this.RaisePropertyChanged(nameof(EmptyListMessage));
+        }
     }
 
     public string SelectedContentType
     {
         get => _selectedContentType;
-        set => this.RaiseAndSetIfChanged(ref _selectedContentType, value);
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _selectedContentType, value);
+            this.RaisePropertyChanged(nameof(ActiveFilterSummary));
+            this.RaisePropertyChanged(nameof(EmptyListMessage));
+        }
     }
 
     public bool ShowFavoritesOnly
     {
         get => _showFavoritesOnly;
-        set => this.RaiseAndSetIfChanged(ref _showFavoritesOnly, value);
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _showFavoritesOnly, value);
+            this.RaisePropertyChanged(nameof(ActiveFilterSummary));
+            this.RaisePropertyChanged(nameof(EmptyListMessage));
+        }
     }
 
     public bool ShowSensitiveOnly
     {
         get => _showSensitiveOnly;
-        set => this.RaiseAndSetIfChanged(ref _showSensitiveOnly, value);
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _showSensitiveOnly, value);
+            this.RaisePropertyChanged(nameof(ActiveFilterSummary));
+            this.RaisePropertyChanged(nameof(EmptyListMessage));
+        }
     }
 
     public ClipItemViewModel? SelectedClip
@@ -115,19 +139,30 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             this.RaiseAndSetIfChanged(ref _selectedClip, value);
             this.RaisePropertyChanged(nameof(SelectedClipActionText));
+            this.RaisePropertyChanged(nameof(HasSelectedClip));
+            this.RaisePropertyChanged(nameof(SelectionStateTitle));
         }
     }
 
     public bool HasMoreResults
     {
         get => _hasMoreResults;
-        private set => this.RaiseAndSetIfChanged(ref _hasMoreResults, value);
+        private set
+        {
+            this.RaiseAndSetIfChanged(ref _hasMoreResults, value);
+            this.RaisePropertyChanged(nameof(ClipboardStateText));
+        }
     }
 
     public bool IsBusy
     {
         get => _isBusy;
-        private set => this.RaiseAndSetIfChanged(ref _isBusy, value);
+        private set
+        {
+            this.RaiseAndSetIfChanged(ref _isBusy, value);
+            this.RaisePropertyChanged(nameof(ClipboardStateText));
+            this.RaisePropertyChanged(nameof(EmptyListMessage));
+        }
     }
 
     public string StatusText
@@ -136,7 +171,79 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         private set => this.RaiseAndSetIfChanged(ref _statusText, value);
     }
 
+    public int MatchingClipCount
+    {
+        get => _matchingClipCount;
+        private set => this.RaiseAndSetIfChanged(ref _matchingClipCount, value);
+    }
+
+    public int TotalClipCount
+    {
+        get => _totalClipCount;
+        private set => this.RaiseAndSetIfChanged(ref _totalClipCount, value);
+    }
+
+    public int SensitiveClipCount
+    {
+        get => _sensitiveClipCount;
+        private set => this.RaiseAndSetIfChanged(ref _sensitiveClipCount, value);
+    }
+
+    public string LastCaptureSummary
+    {
+        get => _lastCaptureSummary;
+        private set => this.RaiseAndSetIfChanged(ref _lastCaptureSummary, value);
+    }
+
     public string SelectedClipActionText => SelectedClip?.IsFavorite == true ? "Unpin" : "Pin";
+
+    public bool HasSelectedClip => SelectedClip is not null;
+
+    public bool HasNoClips => Clips.Count == 0;
+
+    public string SelectionStateTitle => HasSelectedClip
+        ? "Selected clip"
+        : "Choose a clip from the list to preview its details.";
+
+    public string ClipboardStateText => IsBusy
+        ? "Refreshing clipboard library…"
+        : HasMoreResults
+            ? "More results are available to load."
+            : "Everything matching your filters is loaded.";
+
+    public string ActiveFilterSummary
+    {
+        get
+        {
+            var parts = new List<string>();
+
+            if (!string.Equals(SelectedContentType, "All", StringComparison.OrdinalIgnoreCase))
+            {
+                parts.Add(SelectedContentType);
+            }
+
+            if (ShowFavoritesOnly)
+            {
+                parts.Add("Favorites");
+            }
+
+            if (ShowSensitiveOnly)
+            {
+                parts.Add("Sensitive");
+            }
+
+            if (!string.IsNullOrWhiteSpace(SearchText))
+            {
+                parts.Add($"Search: \"{SearchText.Trim()}\"");
+            }
+
+            return parts.Count == 0 ? "Showing the full clipboard archive" : string.Join(" · ", parts);
+        }
+    }
+
+    public string EmptyListMessage => IsBusy
+        ? "Loading your clipboard history…"
+        : "No clips match the current filters.";
 
     public void Dispose()
     {
@@ -176,6 +283,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             _currentOffset += result.Items.Count;
             HasMoreResults = Clips.Count < result.TotalMatchingCount;
+                this.RaisePropertyChanged(nameof(HasNoClips));
             UpdateStatus(result);
         }
         finally
@@ -228,6 +336,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         _currentOffset = result.Items.Count;
         HasMoreResults = Clips.Count < result.TotalMatchingCount;
+        this.RaisePropertyChanged(nameof(HasNoClips));
         SelectedClip = previousSelectionId is null
             ? Clips.FirstOrDefault()
             : Clips.FirstOrDefault(clip => clip.Id == previousSelectionId) ?? Clips.FirstOrDefault();
@@ -240,6 +349,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var lastCaptured = result.LastCapturedAt is null
             ? "no captures yet"
             : ToRelative(result.LastCapturedAt.Value);
+
+        MatchingClipCount = result.TotalMatchingCount;
+        TotalClipCount = result.TotalClipCount;
+        SensitiveClipCount = result.SensitiveClipCount;
+        LastCaptureSummary = result.LastCapturedAt is null
+            ? "No captures yet"
+            : $"Last capture {lastCaptured}";
 
         StatusText = $"{result.TotalMatchingCount:N0} matching · {result.TotalClipCount:N0} total clips · {result.SensitiveClipCount:N0} sensitive · Last capture {lastCaptured}";
     }

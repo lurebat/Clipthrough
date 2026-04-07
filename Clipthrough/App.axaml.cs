@@ -2,13 +2,13 @@ using System;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
-using AvaloniaApplication1.Database;
-using AvaloniaApplication1.Services;
-using AvaloniaApplication1.ViewModels;
-using AvaloniaApplication1.Views;
+using Clipthrough.Database;
+using Clipthrough.Services;
+using Clipthrough.ViewModels;
+using Clipthrough.Views;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace AvaloniaApplication1;
+namespace Clipthrough;
 
 public partial class App : Application
 {
@@ -22,6 +22,9 @@ public partial class App : Application
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
+#if DEBUG
+        this.AttachDeveloperTools();
+#endif
     }
 
     public override void OnFrameworkInitializationCompleted()
