@@ -10,6 +10,8 @@ public sealed class ClipSearchFilters
 
     public bool SensitiveOnly { get; init; }
 
+    public bool UseRegex { get; init; }
+
     public int Limit { get; init; } = 200;
 
     public int Offset { get; init; }

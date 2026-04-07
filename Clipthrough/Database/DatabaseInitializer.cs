@@ -53,6 +53,11 @@ public sealed class DatabaseInitializer
         CREATE INDEX IF NOT EXISTS idx_clips_is_sensitive ON clips(is_sensitive) WHERE is_sensitive = 1;
         CREATE INDEX IF NOT EXISTS idx_clips_hash ON clips(hash);
 
+        CREATE TABLE IF NOT EXISTS app_metadata (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS sensitivity_rules (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             name        TEXT NOT NULL,
