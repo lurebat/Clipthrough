@@ -5,12 +5,27 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="6aab2498-20b2-419b-adc1-591bfb87b46f" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/.idea.AvaloniaApplication1/.idea/git_toolbox_prj.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Clipthrough/Database/DatabaseInitializer.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Clipthrough/Database/SqliteConnectionFactory.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Clipthrough/Models/ClipEntry.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Clipthrough/Models/ClipSearchFilters.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Clipthrough/Models/ClipSearchResult.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Clipthrough/Models/ContentType.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Clipthrough/Models/ContentTypeExtensions.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Clipthrough/Models/SensitivityMatch.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Clipthrough/Models/SensitivityRule.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Clipthrough/Services/ClipStoreService.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Clipthrough/Services/ClipboardMonitorService.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Clipthrough/Services/IClipStoreService.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Clipthrough/Services/IClipboardMonitorService.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Clipthrough/Services/ISensitivityService.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Clipthrough/Services/SensitivityService.cs" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Clipthrough/ViewModels/ClipItemViewModel.cs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/.idea.AvaloniaApplication1/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/.idea.AvaloniaApplication1/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Clipthrough/App.axaml.cs" beforeDir="false" afterPath="$PROJECT_DIR$/Clipthrough/App.axaml.cs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Clipthrough/Clipthrough.csproj" beforeDir="false" afterPath="$PROJECT_DIR$/Clipthrough/Clipthrough.csproj" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Clipthrough/Program.cs" beforeDir="false" afterPath="$PROJECT_DIR$/Clipthrough/Program.cs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Clipthrough/ViewModels/MainWindowViewModel.cs" beforeDir="false" afterPath="$PROJECT_DIR$/Clipthrough/ViewModels/MainWindowViewModel.cs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Clipthrough/Views/MainWindow.axaml" beforeDir="false" afterPath="$PROJECT_DIR$/Clipthrough/Views/MainWindow.axaml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -39,6 +54,13 @@
   </component>
   <component name="HighlightingSettingsPerFile">
     <setting file="file://$USER_HOME$/.copilot/mcp-config.json" root0="FORCE_HIGHLIGHTING" />
+    <setting file="file://$APPLICATION_CONFIG_DIR$/resharper-host/SourcesCache/7bee7b13bd905e8faeb9c124ef29cb3790f3d64a5cc72b2c7a5d0fbf1143d3/AppBuilder.cs" root0="SKIP_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/Clipthrough/Database/DatabaseInitializer.cs" root0="FORCE_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/Clipthrough/Database/SqliteConnectionFactory.cs" root0="FORCE_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/Clipthrough/Models/ClipSearchFilters.cs" root0="FORCE_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/Clipthrough/Models/ContentType.cs" root0="FORCE_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/Clipthrough/Services/SensitivityService.cs" root0="FORCE_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/Clipthrough/ViewModels/ClipItemViewModel.cs" root0="FORCE_HIGHLIGHTING" />
   </component>
   <component name="MetaFilesCheckinStateConfiguration" checkMetaFiles="true" />
   <component name="ProjectColorInfo">{
@@ -46,6 +68,9 @@
   &quot;fromUser&quot;: false
 }</component>
   <component name="ProjectId" id="3C1I6zTxopX58Rh8DisXPoQAjVe" />
+  <component name="ProjectLevelVcsManager">
+    <ConfirmationsSetting value="2" id="Add" />
+  </component>
   <component name="ProjectViewState">
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
@@ -67,7 +92,7 @@
     &quot;copilot.sensitive.allow.copilot_read_file.files_outside_workspace&quot;: &quot;true&quot;,
     &quot;git-widget-placeholder&quot;: &quot;master&quot;,
     &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;com.github.copilot.settings.keymap.KeymapConfigurable&quot;,
     &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
 }</component>
@@ -101,7 +126,7 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1775546478457</updated>
-      <workItem from="1775546480265" duration="1002000" />
+      <workItem from="1775546480265" duration="2138000" />
     </task>
     <task id="LOCAL-00001" summary="Initial commit">
       <option name="closed" value="true" />
@@ -111,7 +136,31 @@
       <option name="project" value="LOCAL" />
       <updated>1775547031028</updated>
     </task>
-    <option name="localTasksCounter" value="2" />
+    <task id="LOCAL-00002" summary="Gitignore">
+      <option name="closed" value="true" />
+      <created>1775547517615</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1775547517615</updated>
+    </task>
+    <task id="LOCAL-00003" summary="Devtools">
+      <option name="closed" value="true" />
+      <created>1775548112940</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1775548112940</updated>
+    </task>
+    <task id="LOCAL-00004" summary="idea">
+      <option name="closed" value="true" />
+      <created>1775548135239</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1775548135239</updated>
+    </task>
+    <option name="localTasksCounter" value="5" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -122,7 +171,10 @@
   <component name="VcsManagerConfiguration">
     <option name="CLEAR_INITIAL_COMMIT_MESSAGE" value="true" />
     <MESSAGE value="Initial commit" />
-    <option name="LAST_COMMIT_MESSAGE" value="Initial commit" />
+    <MESSAGE value="Gitignore" />
+    <MESSAGE value="Devtools" />
+    <MESSAGE value="idea" />
+    <option name="LAST_COMMIT_MESSAGE" value="idea" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -141,6 +193,10 @@
         </breakpoint>
       </breakpoints>
     </breakpoint-manager>
+  </component>
+  <component name="XSLT-Support.FileAssociations.UIState">
+    <expand />
+    <select />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>
