@@ -268,7 +268,7 @@
                                      Text="{Binding SelectedClipRenderedText}" />
 
                             <controls:RichContentView IsVisible="{Binding ShowSelectedRichTextRenderer}"
-                                                      Markup="{Binding SelectedClipRenderedText}"
+                                                      Markup="{Binding SelectedClipRawContent}"
                                                       ContentFormat="{Binding SelectedClipContentFormat}" />
 
                             <Grid IsVisible="{Binding ShowSelectedFilesRenderer}"
