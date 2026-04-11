@@ -2,7 +2,9 @@
 using System.Linq;
 using Avalonia;
 using Avalonia.Media;
+using Clipthrough.Localization;
 using Clipthrough.Models;
+using Clipthrough.Presentation;
 
 namespace Clipthrough.ViewModels;
 
@@ -23,13 +25,13 @@ public sealed class ClipItemViewModel : ViewModelBase
 
     public long Id => Clip.Id;
 
-    public string Title => BuildTitle(Clip.Content, Clip.ContentType);
+    public string Title => ClipDisplayFormatter.BuildTitle(Clip.Content, Clip.ContentType);
 
     public string Preview => Clip.Content;
 
-    public string PreviewSnippet => BuildPreviewSnippet(Clip.Content, Clip.ContentType);
+    public string PreviewSnippet => ClipDisplayFormatter.BuildPreviewSnippet(Clip.Content, Clip.ContentType);
 
-    public string SingleLinePreview => BuildSingleLinePreview(Clip.Content, Clip.ContentType);
+    public string SingleLinePreview => ClipDisplayFormatter.BuildSingleLinePreview(Clip.Content, Clip.ContentType);
 
     public string FullContent => Clip.Content;
 
@@ -44,23 +46,48 @@ public sealed class ClipItemViewModel : ViewModelBase
         _ => "📋",
     };
 
-    public string RelativeCapturedAt => ToRelativeTime(Clip.CapturedAt);
+    public int CopyCount => Clip.CopyCount;
 
-    public string CapturedAtDisplay => Clip.CapturedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt");
+    public bool HasMultipleCopies => Clip.CopyCount > 1;
 
-    public string CapturedAtCompact => Clip.CapturedAt.ToLocalTime().ToString("MMM d HH:mm");
+    public string CopyCountDisplay => AppText.FormatCopyCount(Clip.CopyCount);
 
-    public string Subtitle => $"{RelativeCapturedAt} · {DisplayContentType}";
+    public string CopyCountCompact => AppText.FormatCopyCountCompact(Clip.CopyCount);
 
-    public string SourceApp => string.IsNullOrWhiteSpace(Clip.SourceApp) ? "Unknown source" : Clip.SourceApp;
+    public string RelativeCapturedAt => ClipDisplayFormatter.ToRelativeTime(Clip.LastCopiedAt);
 
-    public string SourceSummary => $"{SourceApp} · {RelativeCapturedAt}";
+    public string CapturedAtDisplay => ClipDisplayFormatter.ToCapturedAtDisplay(Clip.LastCopiedAt);
 
-    public string ByteSizeDisplay => $"{Clip.ByteSize:N0} bytes";
+    public string FirstCopiedAtDisplay => ClipDisplayFormatter.ToCapturedAtDisplay(Clip.FirstCopiedAt);
+
+    public string LastCopiedAtDisplay => ClipDisplayFormatter.ToCapturedAtDisplay(Clip.LastCopiedAt);
+
+    public string CapturedAtCompact => RelativeCapturedAt;
+
+    public string Subtitle => HasMultipleCopies
+        ? $"{RelativeCapturedAt} · {DisplayContentType} · {CopyCountDisplay}"
+        : $"{RelativeCapturedAt} · {DisplayContentType}";
+
+    public string SourceApp => string.IsNullOrWhiteSpace(Clip.SourceApp) ? AppText.UnknownSource : Clip.SourceApp;
+
+    public string SourceSummary => HasMultipleCopies
+        ? $"{SourceApp} · {RelativeCapturedAt} · {CopyCountDisplay}"
+        : $"{SourceApp} · {RelativeCapturedAt}";
+
+    public string ByteSizeDisplay => AppText.FormatByteCount(Clip.ByteSize);
 
     public bool IsFavorite => Clip.IsFavorite;
 
     public bool IsSensitive => Clip.IsSensitive;
+
+    public string HighestSeverity => Clip.SensitivityMatches
+        .Select(static match => match.Severity)
+        .OrderByDescending(GetSeverityRank)
+        .FirstOrDefault() ?? string.Empty;
+
+    public bool HasCriticalSeverity => string.Equals(HighestSeverity, "critical", StringComparison.OrdinalIgnoreCase);
+
+    public bool HasWarningSeverity => IsSensitive && !HasCriticalSeverity;
 
     public IBrush StateAccentBrush => GetStateAccentBrush(IsFavorite, IsSensitive);
 
@@ -77,78 +104,18 @@ public sealed class ClipItemViewModel : ViewModelBase
             : new Thickness(1);
 
     public string SensitivitySummary => Clip.SensitivityMatches.Count == 0
-        ? "No sensitive patterns matched"
+        ? AppText.SensitivityNoMatch
         : string.Join(", ", Clip.SensitivityMatches.Select(static match => $"{match.RuleName} ({match.Severity})"));
 
     public string FavoriteMarker => IsFavorite ? "★" : string.Empty;
 
-    private static string BuildTitle(string content, ContentType contentType)
+    private static int GetSeverityRank(string? severity) => severity?.ToLowerInvariant() switch
     {
-        if (string.IsNullOrWhiteSpace(content))
-        {
-            return contentType switch
-            {
-                ContentType.Image => "Image clip",
-                ContentType.Files => "File list clip",
-                ContentType.RichText => "Rich text clip",
-                _ => "Empty text clip",
-            };
-        }
-
-        var firstLine = content
-            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .FirstOrDefault() ?? content.Trim();
-
-        return firstLine.Length <= 90 ? firstLine : $"{firstLine[..87]}...";
-    }
-
-    private static string BuildPreviewSnippet(string content, ContentType contentType)
-    {
-        if (string.IsNullOrWhiteSpace(content))
-        {
-            return contentType switch
-            {
-                ContentType.Image => "Image data captured from the clipboard.",
-                ContentType.Files => "File paths captured from the clipboard.",
-                ContentType.RichText => "Formatted text content captured from the clipboard.",
-                _ => "This clip does not contain previewable text.",
-            };
-        }
-
-        var collapsed = string.Join(" ", content
-            .Split(['\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-
-        if (string.IsNullOrWhiteSpace(collapsed))
-        {
-            return "This clip does not contain previewable text.";
-        }
-
-        return collapsed.Length <= 140 ? collapsed : $"{collapsed[..137]}...";
-    }
-
-    private static string BuildSingleLinePreview(string content, ContentType contentType)
-    {
-        if (string.IsNullOrWhiteSpace(content))
-        {
-            return contentType switch
-            {
-                ContentType.Image => "Image clip",
-                ContentType.Files => "File list",
-                ContentType.RichText => "Rich text clip",
-                _ => "Empty text clip",
-            };
-        }
-
-        var collapsed = string.Join(" ", content
-            .Split(['\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-
-        if (string.IsNullOrWhiteSpace(collapsed))
-        {
-            return "Empty clip";
-        }
-
-        return collapsed.Length <= 88 ? collapsed : $"{collapsed[..85]}...";
-    }
+        "critical" => 3,
+        "warning" => 2,
+        "info" => 1,
+        _ => 0,
+    };
 
     private static IBrush GetStateAccentBrush(bool isFavorite, bool isSensitive)
     {
@@ -168,28 +135,6 @@ public sealed class ClipItemViewModel : ViewModelBase
         }
 
         return s_defaultAccentBrush;
-    }
-
-    private static string ToRelativeTime(DateTimeOffset timestamp)
-    {
-        var delta = DateTimeOffset.UtcNow - timestamp.ToUniversalTime();
-
-        if (delta.TotalMinutes < 1)
-        {
-            return "just now";
-        }
-
-        if (delta.TotalHours < 1)
-        {
-            return $"{Math.Max(1, (int)delta.TotalMinutes)} min ago";
-        }
-
-        if (delta.TotalDays < 1)
-        {
-            return $"{Math.Max(1, (int)delta.TotalHours)} hr ago";
-        }
-
-        return $"{Math.Max(1, (int)delta.TotalDays)} day ago" + (delta.TotalDays >= 2 ? "s" : string.Empty);
     }
 }
 

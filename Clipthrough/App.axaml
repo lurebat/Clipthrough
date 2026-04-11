@@ -18,7 +18,7 @@
         <Color x:Key="SystemAccentColorDark2">#5B21B6</Color>
         <Color x:Key="SystemAccentColorDark3">#4C1D95</Color>
     </Application.Resources>
-  
+
     <Application.Styles>
         <FluentTheme />
         <StyleInclude Source="avares://Clipthrough/Styles/ModernTheme.axaml" />

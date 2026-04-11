@@ -1,4 +1,8 @@
-﻿using System.Threading;
+﻿using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Clipthrough.Services;
 using Microsoft.Data.Sqlite;
@@ -19,6 +23,9 @@ public sealed class DatabaseInitializer
             is_favorite  INTEGER NOT NULL DEFAULT 0,
             is_sensitive INTEGER NOT NULL DEFAULT 0,
             captured_at  TEXT NOT NULL,
+            copy_count   INTEGER NOT NULL DEFAULT 1,
+            first_copied_at TEXT NOT NULL,
+            last_copied_at  TEXT NOT NULL,
             byte_size    INTEGER NOT NULL DEFAULT 0
         );
 
@@ -51,7 +58,6 @@ public sealed class DatabaseInitializer
         CREATE INDEX IF NOT EXISTS idx_clips_content_type ON clips(content_type);
         CREATE INDEX IF NOT EXISTS idx_clips_is_favorite ON clips(is_favorite) WHERE is_favorite = 1;
         CREATE INDEX IF NOT EXISTS idx_clips_is_sensitive ON clips(is_sensitive) WHERE is_sensitive = 1;
-        CREATE INDEX IF NOT EXISTS idx_clips_hash ON clips(hash);
 
         CREATE TABLE IF NOT EXISTS app_metadata (
             key   TEXT PRIMARY KEY,
@@ -96,6 +102,12 @@ public sealed class DatabaseInitializer
             await schemaCommand.ExecuteNonQueryAsync(cancellationToken);
         }
 
+        await EnsureClipAggregationColumnsAsync(connection, cancellationToken);
+        await BackfillClipAggregationColumnsAsync(connection, cancellationToken);
+        await DeduplicateClipsByHashAsync(connection, cancellationToken);
+        await EnsureUniqueClipHashIndexAsync(connection, cancellationToken);
+        await RebuildClipSearchIndexAsync(connection, cancellationToken);
+
         foreach (var rule in _sensitivityService.GetDefaultRules())
         {
             await using var ruleCommand = connection.CreateCommand();
@@ -113,5 +125,220 @@ public sealed class DatabaseInitializer
             await ruleCommand.ExecuteNonQueryAsync(cancellationToken);
         }
     }
+
+    private static async Task EnsureClipAggregationColumnsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var existingColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "PRAGMA table_info(clips);";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                existingColumns.Add(reader.GetString(1));
+            }
+        }
+
+        if (!existingColumns.Contains("copy_count"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN copy_count INTEGER NOT NULL DEFAULT 1;", cancellationToken);
+        }
+
+        if (!existingColumns.Contains("first_copied_at"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN first_copied_at TEXT;", cancellationToken);
+        }
+
+        if (!existingColumns.Contains("last_copied_at"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN last_copied_at TEXT;", cancellationToken);
+        }
+    }
+
+    private static async Task BackfillClipAggregationColumnsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await ExecuteNonQueryAsync(connection, "UPDATE clips SET copy_count = 1 WHERE copy_count IS NULL OR copy_count < 1;", cancellationToken);
+        await ExecuteNonQueryAsync(connection, "UPDATE clips SET first_copied_at = captured_at WHERE first_copied_at IS NULL OR TRIM(first_copied_at) = '';", cancellationToken);
+        await ExecuteNonQueryAsync(connection, "UPDATE clips SET last_copied_at = captured_at WHERE last_copied_at IS NULL OR TRIM(last_copied_at) = '';", cancellationToken);
+        await ExecuteNonQueryAsync(connection, "UPDATE clips SET captured_at = last_copied_at WHERE captured_at IS NULL OR TRIM(captured_at) = '';", cancellationToken);
+    }
+
+    private static async Task DeduplicateClipsByHashAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var rows = new List<ClipAggregationRow>();
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT id,
+                       hash,
+                       source_app,
+                       is_favorite,
+                       is_sensitive,
+                       captured_at,
+                       first_copied_at,
+                       last_copied_at,
+                       copy_count
+                FROM clips
+                ORDER BY hash, COALESCE(last_copied_at, captured_at) DESC, id DESC;
+                """;
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var capturedAt = ParseTimestamp(reader.IsDBNull(5) ? null : reader.GetString(5));
+                rows.Add(new ClipAggregationRow(
+                    reader.GetInt64(0),
+                    reader.GetString(1),
+                    reader.IsDBNull(2) ? null : reader.GetString(2),
+                    reader.GetInt64(3) == 1,
+                    reader.GetInt64(4) == 1,
+                    capturedAt,
+                    ParseTimestamp(reader.IsDBNull(6) ? null : reader.GetString(6)) ?? capturedAt,
+                    ParseTimestamp(reader.IsDBNull(7) ? null : reader.GetString(7)) ?? capturedAt,
+                    reader.IsDBNull(8) ? 1 : Convert.ToInt32(reader.GetInt64(8), CultureInfo.InvariantCulture)));
+            }
+        }
+
+        foreach (var group in rows.GroupBy(static row => row.Hash, StringComparer.Ordinal))
+        {
+            var duplicates = group.ToList();
+            if (duplicates.Count <= 1)
+            {
+                continue;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var keepRow = duplicates[0];
+            var fallbackTimestamp = keepRow.LastCopiedAt
+                ?? keepRow.FirstCopiedAt
+                ?? keepRow.CapturedAt
+                ?? DateTimeOffset.UtcNow;
+            var firstCopiedAt = duplicates
+                .Select(static row => row.FirstCopiedAt ?? row.CapturedAt)
+                .Where(static timestamp => timestamp is not null)
+                .Select(static timestamp => timestamp!.Value)
+                .DefaultIfEmpty(fallbackTimestamp)
+                .Min();
+            var lastCopiedAt = duplicates
+                .Select(static row => row.LastCopiedAt ?? row.CapturedAt)
+                .Where(static timestamp => timestamp is not null)
+                .Select(static timestamp => timestamp!.Value)
+                .DefaultIfEmpty(fallbackTimestamp)
+                .Max();
+            var copyCount = duplicates.Sum(static row => Math.Max(1, row.CopyCount));
+            var isFavorite = duplicates.Any(static row => row.IsFavorite);
+            var isSensitive = duplicates.Any(static row => row.IsSensitive);
+            var sourceApp = duplicates
+                .OrderByDescending(static row => row.LastCopiedAt ?? row.CapturedAt ?? DateTimeOffset.MinValue)
+                .Select(static row => row.SourceApp)
+                .FirstOrDefault(static source => !string.IsNullOrWhiteSpace(source));
+            var duplicateIds = duplicates.Skip(1).Select(static row => row.Id).ToArray();
+
+            using var transaction = connection.BeginTransaction();
+
+            await using (var updateCommand = connection.CreateCommand())
+            {
+                updateCommand.Transaction = transaction;
+                updateCommand.CommandText = """
+                    UPDATE clips
+                    SET source_app = $sourceApp,
+                        is_favorite = $isFavorite,
+                        is_sensitive = $isSensitive,
+                        copy_count = $copyCount,
+                        first_copied_at = $firstCopiedAt,
+                        last_copied_at = $lastCopiedAt,
+                        captured_at = $lastCopiedAt
+                    WHERE id = $id;
+                    """;
+                updateCommand.Parameters.AddWithValue("$id", keepRow.Id);
+                updateCommand.Parameters.AddWithValue("$sourceApp", (object?)sourceApp ?? DBNull.Value);
+                updateCommand.Parameters.AddWithValue("$isFavorite", isFavorite ? 1 : 0);
+                updateCommand.Parameters.AddWithValue("$isSensitive", isSensitive ? 1 : 0);
+                updateCommand.Parameters.AddWithValue("$copyCount", copyCount);
+                updateCommand.Parameters.AddWithValue("$firstCopiedAt", firstCopiedAt.ToString("O", CultureInfo.InvariantCulture));
+                updateCommand.Parameters.AddWithValue("$lastCopiedAt", lastCopiedAt.ToString("O", CultureInfo.InvariantCulture));
+                await updateCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            if (duplicateIds.Length > 0)
+            {
+                var parameterNames = new List<string>(duplicateIds.Length);
+
+                await using (var mergeMatchesCommand = connection.CreateCommand())
+                {
+                    mergeMatchesCommand.Transaction = transaction;
+                    mergeMatchesCommand.Parameters.AddWithValue("$keepId", keepRow.Id);
+                    for (var index = 0; index < duplicateIds.Length; index++)
+                    {
+                        var parameterName = $"$duplicateId{index}";
+                        parameterNames.Add(parameterName);
+                        mergeMatchesCommand.Parameters.AddWithValue(parameterName, duplicateIds[index]);
+                    }
+
+                    mergeMatchesCommand.CommandText = $"""
+                        INSERT OR IGNORE INTO clip_sensitivity_matches (clip_id, rule_id)
+                        SELECT $keepId, rule_id
+                        FROM clip_sensitivity_matches
+                        WHERE clip_id IN ({string.Join(", ", parameterNames)});
+                        """;
+                    await mergeMatchesCommand.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                await using var deleteCommand = connection.CreateCommand();
+                deleteCommand.Transaction = transaction;
+                for (var index = 0; index < duplicateIds.Length; index++)
+                {
+                    deleteCommand.Parameters.AddWithValue(parameterNames[index], duplicateIds[index]);
+                }
+
+                deleteCommand.CommandText = $"DELETE FROM clips WHERE id IN ({string.Join(", ", parameterNames)});";
+                await deleteCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+    }
+
+    private static async Task EnsureUniqueClipHashIndexAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await ExecuteNonQueryAsync(connection, "DROP INDEX IF EXISTS idx_clips_hash;", cancellationToken);
+        await ExecuteNonQueryAsync(connection, "CREATE UNIQUE INDEX IF NOT EXISTS idx_clips_hash_unique ON clips(hash);", cancellationToken);
+    }
+
+    private static async Task RebuildClipSearchIndexAsync(SqliteConnection connection, CancellationToken cancellationToken)
+        => await ExecuteNonQueryAsync(connection, "INSERT INTO clips_fts(clips_fts) VALUES ('rebuild');", cancellationToken);
+
+    private static async Task ExecuteNonQueryAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static DateTimeOffset? ParseTimestamp(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    private sealed record ClipAggregationRow(
+        long Id,
+        string Hash,
+        string? SourceApp,
+        bool IsFavorite,
+        bool IsSensitive,
+        DateTimeOffset? CapturedAt,
+        DateTimeOffset? FirstCopiedAt,
+        DateTimeOffset? LastCopiedAt,
+        int CopyCount);
 }
 

@@ -19,7 +19,13 @@ public sealed class ClipEntry
 
     public bool IsSensitive { get; init; }
 
-    public DateTimeOffset CapturedAt { get; init; }
+    public int CopyCount { get; init; } = 1;
+
+    public DateTimeOffset FirstCopiedAt { get; init; } = DateTimeOffset.UtcNow;
+
+    public DateTimeOffset LastCopiedAt { get; init; } = DateTimeOffset.UtcNow;
+
+    public DateTimeOffset CapturedAt => LastCopiedAt;
 
     public long ByteSize { get; init; }
 

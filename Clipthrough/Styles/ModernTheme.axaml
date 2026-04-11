@@ -134,6 +134,17 @@
         <Setter Property="CornerRadius" Value="14" />
     </Style>
 
+    <Style Selector="Border.settings-backdrop">
+        <Setter Property="Background" Value="#8C020617" />
+        <Setter Property="Padding" Value="24" />
+    </Style>
+
+    <Style Selector="Border.settings-sheet">
+        <Setter Property="CornerRadius" Value="18" />
+        <Setter Property="MinWidth" Value="520" />
+        <Setter Property="BoxShadow" Value="0 20 48 0 #44000000" />
+    </Style>
+
     <Style Selector="Border.meta-chip">
         <Setter Property="Background" Value="#132238" />
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
@@ -144,6 +155,7 @@
     <Style Selector="Border.badge-chip">
         <Setter Property="CornerRadius" Value="999" />
         <Setter Property="Padding" Value="10,4" />
+        <Setter Property="BorderThickness" Value="1" />
     </Style>
 
     <Style Selector="Border.badge-chip.favorite">
@@ -156,6 +168,15 @@
         <Setter Property="Background" Value="#2D1421" />
         <Setter Property="BorderBrush" Value="#7F1D3A" />
         <Setter Property="BorderThickness" Value="1" />
+    </Style>
+
+    <Style Selector="Border.badge-chip > TextBlock">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style Selector="Border.badge-chip.favorite > TextBlock">
+        <Setter Property="Foreground" Value="#FCD34D" />
     </Style>
 
     <Style Selector="TextBlock.eyebrow">
@@ -284,6 +305,12 @@
 
     <Style Selector="Button.secondary:pointerover">
         <Setter Property="Background" Value="{DynamicResource SurfaceInteractiveHoverBrush}" />
+    </Style>
+
+    <Style Selector="Button.favorite-toggle.active">
+        <Setter Property="Background" Value="#3A2300" />
+        <Setter Property="BorderBrush" Value="#7C5A16" />
+        <Setter Property="Foreground" Value="#FCD34D" />
     </Style>
 
     <Style Selector="Button.destructive">

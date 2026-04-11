@@ -1,6 +1,9 @@
 using System;
 using System.Linq;
 using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Interactivity;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Clipthrough.ViewModels;
 
@@ -15,12 +18,14 @@ public partial class MainWindow : Window
         InitializeComponent();
         Opened += OnOpened;
         Closed += OnClosed;
+        AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
     }
 
     private void OnOpened(object? sender, EventArgs e)
     {
         if (m_clipListScrollViewer is not null)
         {
+            FocusSearchBox();
             return;
         }
 
@@ -30,6 +35,8 @@ public partial class MainWindow : Window
         {
             m_clipListScrollViewer.ScrollChanged += OnClipListScrollChanged;
         }
+
+        FocusSearchBox();
     }
 
     private void OnClosed(object? sender, EventArgs e)
@@ -62,5 +69,31 @@ public partial class MainWindow : Window
         }
 
         viewModel.LoadMoreCommand.Execute().Subscribe();
+    }
+
+    private void OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        if (!viewModel.TryHandleShortcut(e))
+        {
+            return;
+        }
+
+        e.Handled = true;
+    }
+
+    private void FocusSearchBox()
+    {
+        var searchTextBox = this.FindControl<TextBox>("SearchTextBox");
+        if (searchTextBox is null)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() => searchTextBox.Focus(), DispatcherPriority.Input);
     }
 }

@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="using:Clipthrough.Controls"
         xmlns:vm="using:Clipthrough.ViewModels"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -9,82 +10,70 @@
         x:Class="Clipthrough.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Icon="/Assets/avalonia-logo.ico"
-        Title="Clipthrough"
+        Title="{Binding WindowTitle}"
         Width="1360"
         Height="860"
         MinWidth="1080"
         MinHeight="700">
 
     <Grid RowDefinitions="Auto,*,Auto"
-          RowSpacing="12"
-          Margin="14">
+          RowSpacing="10"
+          Margin="10">
         <Border Grid.Row="0"
                 Classes="hero-toolbar"
-                Padding="14,12">
-            <Grid ColumnDefinitions="Auto,*"
-                  ColumnSpacing="18">
+                Padding="12,10">
+            <Grid ColumnDefinitions="Auto,*,160,Auto,Auto,Auto,Auto,Auto"
+                  ColumnSpacing="10">
                 <TextBlock Classes="window-title"
                            VerticalAlignment="Center"
-                           Text="Clipthrough" />
+                           Text="{Binding HeroTitle}" />
 
-                <TextBox Grid.Column="1"
-                         Watermark="Filter clips"
+                <TextBox x:Name="SearchTextBox"
+                         Grid.Column="1"
+                         Watermark="{Binding SearchWatermark}"
                          Text="{Binding SearchText}" />
+
+                <ComboBox Grid.Column="2"
+                          Classes="compact-field"
+                          ItemsSource="{Binding ContentTypeOptions}"
+                          SelectedItem="{Binding SelectedContentTypeOption}" />
+
+                <CheckBox Grid.Column="3"
+                          Classes="filter-toggle compact-toggle"
+                          IsChecked="{Binding ShowFavoritesOnly}"
+                          Content="{Binding FavoritesFilterLabel}" />
+
+                <CheckBox Grid.Column="4"
+                          Classes="filter-toggle compact-toggle"
+                          IsChecked="{Binding ShowSensitiveOnly}"
+                          Content="{Binding SensitiveFilterLabel}" />
+
+                <CheckBox Grid.Column="5"
+                          Classes="filter-toggle compact-toggle"
+                          IsChecked="{Binding UseRegexSearch}"
+                          Content="{Binding RegexFilterLabel}" />
+
+                <CheckBox Grid.Column="6"
+                          Classes="filter-toggle compact-toggle"
+                          IsChecked="{Binding CaseSensitiveSearch}"
+                          Content="{Binding CaseSensitiveFilterLabel}" />
+
+                <Button Grid.Column="7"
+                        Classes="secondary compact"
+                        Command="{Binding RefreshCommand}"
+                        Content="{Binding RefreshButtonLabel}" />
             </Grid>
         </Border>
 
         <Grid Grid.Row="1"
               ColumnDefinitions="380,6,*"
-              ColumnSpacing="12">
+              ColumnSpacing="10">
             <Border Grid.Column="0"
                     Classes="surface-panel">
-                <Grid RowDefinitions="Auto,Auto,*,Auto"
-                      RowSpacing="12"
-                      Margin="16">
-                    <Grid ColumnDefinitions="*,Auto"
-                          ColumnSpacing="12">
-                        <StackPanel Spacing="2">
-                            <TextBlock Classes="panel-caption"
-                                       Text="Clipboard history" />
-                            <TextBlock Classes="panel-title"
-                                       Text="Clips" />
-                        </StackPanel>
-
-                        <TextBlock Grid.Column="1"
-                                   Classes="body-muted"
-                                   VerticalAlignment="Center"
-                                   Text="{Binding MatchingClipCount, StringFormat='Matching {0:N0}'}" />
-                    </Grid>
-
-                    <Grid Grid.Row="1"
-                          ColumnDefinitions="150,Auto,Auto,Auto,Auto"
-                          ColumnSpacing="10">
-                        <ComboBox Classes="compact-field"
-                                  ItemsSource="{Binding ContentTypeOptions}"
-                                  SelectedItem="{Binding SelectedContentType}" />
-
-                        <CheckBox Grid.Column="1"
-                                  Classes="filter-toggle compact-toggle"
-                                  IsChecked="{Binding ShowFavoritesOnly}"
-                                  Content="Favorites" />
-
-                        <CheckBox Grid.Column="2"
-                                  Classes="filter-toggle compact-toggle"
-                                  IsChecked="{Binding ShowSensitiveOnly}"
-                                  Content="Sensitive" />
-
-                        <CheckBox Grid.Column="3"
-                                  Classes="filter-toggle compact-toggle"
-                                  IsChecked="{Binding UseRegexSearch}"
-                                  Content="Regex" />
-
-                        <Button Grid.Column="4"
-                                Classes="secondary compact"
-                                Command="{Binding RefreshCommand}"
-                                Content="Refresh" />
-                    </Grid>
-
-                    <Grid Grid.Row="2">
+                <Grid RowDefinitions="*,Auto"
+                      RowSpacing="10"
+                      Margin="12">
+                    <Grid>
                         <TextBlock Classes="empty-state"
                                    IsVisible="{Binding HasNoClips}"
                                    HorizontalAlignment="Center"
@@ -102,17 +91,9 @@
                                             BorderBrush="{Binding RowBorderBrush}"
                                             BorderThickness="{Binding RowBorderThickness}"
                                             Padding="10,8">
-                                        <Grid ColumnDefinitions="Auto,Auto,*,Auto"
+                                        <Grid ColumnDefinitions="Auto,*,Auto"
                                               ColumnSpacing="10">
-                                            <TextBlock Text="{Binding FavoriteMarker}"
-                                                       Foreground="{Binding StateAccentBrush}"
-                                                       FontSize="15"
-                                                       Width="18"
-                                                       HorizontalAlignment="Center"
-                                                       VerticalAlignment="Center"
-                                                       IsVisible="{Binding IsFavorite}" />
-
-                                            <Border Grid.Column="1"
+                                            <Border Grid.Column="0"
                                                     Classes="clip-row-icon"
                                                     VerticalAlignment="Center">
                                                 <TextBlock Text="{Binding TypeGlyph}"
@@ -120,13 +101,13 @@
                                                            VerticalAlignment="Center" />
                                             </Border>
 
-                                            <TextBlock Grid.Column="2"
+                                            <TextBlock Grid.Column="1"
                                                        Classes="clip-row-preview"
                                                        VerticalAlignment="Center"
                                                        Text="{Binding SingleLinePreview}"
                                                        TextTrimming="CharacterEllipsis" />
 
-                                            <StackPanel Grid.Column="3"
+                                            <StackPanel Grid.Column="2"
                                                         Orientation="Horizontal"
                                                         Spacing="8"
                                                         VerticalAlignment="Center">
@@ -143,9 +124,9 @@
                         </ListBox>
                     </Grid>
 
-                    <Border Grid.Row="3"
+                    <Border Grid.Row="1"
                             Classes="inset-panel"
-                            Padding="12,10">
+                            Padding="10,8">
                         <TextBlock Classes="body-muted"
                                    VerticalAlignment="Center"
                                    Text="{Binding ClipboardStateText}" />
@@ -158,21 +139,34 @@
                           Width="6" />
 
             <Border Grid.Column="2"
-                    Classes="surface-panel">
+                    Classes="surface-panel"
+                    BorderBrush="{Binding SelectedClipAreaBorderBrush}"
+                    BorderThickness="{Binding SelectedClipAreaBorderThickness}">
                 <Grid RowDefinitions="Auto,*,Auto"
-                      RowSpacing="12"
-                      Margin="18">
+                      RowSpacing="10"
+                      Margin="14">
                     <Grid ColumnDefinitions="*,Auto"
-                          ColumnSpacing="16">
+                          ColumnSpacing="12">
                         <StackPanel Spacing="4">
                             <TextBlock Classes="panel-caption"
-                                       Text="{Binding SelectedClip.DisplayContentType, TargetNullValue='Clip'}" />
+                                       Text="{Binding SelectedClipContentTypeText}" />
                             <TextBlock Classes="panel-title"
-                                       Text="{Binding SelectedClip.Title, TargetNullValue='Select a clip'}"
+                                       Foreground="{Binding SelectedClipAccentBrush}"
+                                       Text="{Binding SelectedClipTitleText}"
                                        TextTrimming="CharacterEllipsis" />
                             <TextBlock Classes="body-muted"
                                        Text="{Binding SelectionStateTitle}"
                                        TextWrapping="Wrap" />
+                            <StackPanel Orientation="Horizontal"
+                                        Spacing="8">
+                                <Border Classes="badge-chip"
+                                        IsVisible="{Binding ShowSelectedClipSeverityIndicator}"
+                                        Background="{Binding SelectedClipSeverityBadgeBackground}"
+                                        BorderBrush="{Binding SelectedClipSeverityBadgeBorderBrush}">
+                                    <TextBlock Text="{Binding SelectedClipSeverityIndicatorText}"
+                                               Foreground="{Binding SelectedClipSeverityBadgeForeground}" />
+                                </Border>
+                            </StackPanel>
                         </StackPanel>
 
                         <StackPanel Grid.Column="1"
@@ -185,7 +179,7 @@
                                         VerticalAlignment="Center">
                                 <TextBlock Classes="body-muted"
                                            VerticalAlignment="Center"
-                                           Text="Raw" />
+                                           Text="{Binding RawToggleLabel}" />
                                 <ToggleSwitch IsChecked="{Binding ShowRawContent}"
                                               IsEnabled="{Binding HasSelectedClip}"
                                               VerticalAlignment="Center" />
@@ -194,22 +188,25 @@
                             <Button Classes="secondary compact"
                                     Command="{Binding CopySelectedCommand}"
                                     IsEnabled="{Binding HasSelectedClip}"
-                                    Content="Copy" />
+                                    Content="{Binding CopyButtonLabel}" />
 
-                            <Button Classes="secondary compact"
+                            <Button Classes="secondary compact favorite-toggle"
                                     Command="{Binding ToggleFavoriteCommand}"
+                                    Classes.active="{Binding IsSelectedClipFavorite}"
                                     IsEnabled="{Binding HasSelectedClip}"
-                                    Content="{Binding SelectedClipActionText}" />
+                                    Content="{Binding FavoriteButtonLabel}" />
 
                             <Button Classes="destructive compact"
                                     Command="{Binding DeleteSelectedCommand}"
                                     IsEnabled="{Binding HasSelectedClip}"
-                                    Content="Delete" />
+                                    Content="{Binding DeleteButtonLabel}" />
                         </StackPanel>
                     </Grid>
 
                     <Border Grid.Row="1"
                             Classes="content-stage"
+                            BorderBrush="{Binding SelectedClipAreaBorderBrush}"
+                            BorderThickness="{Binding SelectedClipAreaBorderThickness}"
                             Padding="0">
                         <Grid>
                             <StackPanel IsVisible="{Binding ShowEmptySelectionState}"
@@ -222,11 +219,11 @@
                                            HorizontalAlignment="Center" />
                                 <TextBlock Classes="panel-title"
                                            HorizontalAlignment="Center"
-                                           Text="Select a clip" />
+                                           Text="{Binding EmptySelectionTitleText}" />
                                 <TextBlock Classes="body-muted"
                                            TextAlignment="Center"
                                            TextWrapping="Wrap"
-                                           Text="Choose a clip from the left to inspect its content, preview it in context, and review metadata below." />
+                                           Text="{Binding EmptySelectionDescriptionText}" />
                             </StackPanel>
 
                             <TextBox IsVisible="{Binding ShowRawTextContent}"
@@ -243,15 +240,11 @@
                                      HorizontalContentAlignment="Stretch"
                                      Text="{Binding SelectedClipRenderedText}" />
 
-                            <TextBox IsVisible="{Binding ShowSelectedRichTextRenderer}"
-                                     Classes="content-viewer"
-                                     IsReadOnly="True"
-                                     AcceptsReturn="True"
-                                     HorizontalContentAlignment="Stretch"
-                                     Text="{Binding SelectedClipRenderedText}" />
+                            <controls:RichContentView IsVisible="{Binding ShowSelectedRichTextRenderer}"
+                                                      Markup="{Binding SelectedClipRawContent}" />
 
                             <Grid IsVisible="{Binding ShowSelectedFilesRenderer}"
-                                  Margin="18">
+                                  Margin="14">
                                 <Grid RowDefinitions="Auto,*"
                                       RowSpacing="12">
                                     <TextBlock Classes="body-muted"
@@ -285,7 +278,7 @@
                                                         <Button Grid.Column="3"
                                                                 Classes="secondary compact"
                                                                 Command="{Binding CopyPathCommand}"
-                                                                Content="Copy" />
+                                                                Content="{Binding CopyLabel}" />
 
                                                         <StackPanel Grid.Column="4"
                                                                     Orientation="Horizontal"
@@ -293,11 +286,11 @@
                                                             <Button Classes="secondary compact"
                                                                     Command="{Binding OpenCommand}"
                                                                     IsEnabled="{Binding Exists}"
-                                                                    Content="Open" />
+                                                                    Content="{Binding OpenLabel}" />
                                                             <Button Classes="secondary compact"
                                                                     Command="{Binding OpenContainingFolderCommand}"
                                                                     IsEnabled="{Binding Exists}"
-                                                                    Content="Folder" />
+                                                                    Content="{Binding FolderLabel}" />
                                                         </StackPanel>
                                                     </Grid>
                                                 </Border>
@@ -315,7 +308,7 @@
                                      Text="{Binding SelectedClipRawContent}" />
 
                             <Grid IsVisible="{Binding ShowSelectedImageRenderer}"
-                                  Margin="18">
+                                  Margin="14">
                                 <Border Classes="image-placeholder"
                                         IsVisible="{Binding ShowSelectedImagePlaceholder}">
                                     <StackPanel HorizontalAlignment="Center"
@@ -327,7 +320,7 @@
                                                    HorizontalAlignment="Center" />
                                         <TextBlock Classes="panel-title"
                                                    HorizontalAlignment="Center"
-                                                   Text="Image clip" />
+                                                   Text="{Binding SelectedImageTypeText}" />
                                         <TextBlock Classes="body-muted"
                                                    TextAlignment="Center"
                                                    TextWrapping="Wrap"
@@ -353,9 +346,9 @@
                                 Padding="12,10">
                             <StackPanel Spacing="4">
                                 <TextBlock Classes="detail-label"
-                                           Text="Source" />
+                                           Text="{Binding SourceLabelText}" />
                                 <TextBlock Classes="detail-value"
-                                           Text="{Binding SelectedClip.SourceApp, TargetNullValue='Unknown source'}"
+                                           Text="{Binding SelectedClipSourceText}"
                                            TextTrimming="CharacterEllipsis" />
                             </StackPanel>
                         </Border>
@@ -365,9 +358,9 @@
                                 Padding="12,10">
                             <StackPanel Spacing="4">
                                 <TextBlock Classes="detail-label"
-                                           Text="Captured" />
+                                           Text="{Binding CapturedLabelText}" />
                                 <TextBlock Classes="detail-value"
-                                           Text="{Binding SelectedClip.CapturedAtDisplay, TargetNullValue='—'}"
+                                           Text="{Binding SelectedClipCapturedAtText}"
                                            TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
@@ -377,9 +370,9 @@
                                 Padding="12,10">
                             <StackPanel Spacing="4">
                                 <TextBlock Classes="detail-label"
-                                           Text="Size" />
+                                           Text="{Binding SizeLabelText}" />
                                 <TextBlock Classes="detail-value"
-                                           Text="{Binding SelectedClip.ByteSizeDisplay, TargetNullValue='0 bytes'}" />
+                                           Text="{Binding SelectedClipByteSizeText}" />
                             </StackPanel>
                         </Border>
 
@@ -388,9 +381,9 @@
                                 Padding="12,10">
                             <StackPanel Spacing="4">
                                 <TextBlock Classes="detail-label"
-                                           Text="Sensitivity" />
+                                           Text="{Binding SensitivityLabelText}" />
                                 <TextBlock Classes="detail-value"
-                                           Text="{Binding SelectedClip.SensitivitySummary, TargetNullValue='No clip selected'}"
+                                           Text="{Binding SelectedClipSensitivityText}"
                                            TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
@@ -401,22 +394,121 @@
 
         <Border Grid.Row="2"
                 Classes="inset-panel footer-panel"
-                Padding="14,10">
-            <Grid ColumnDefinitions="*,Auto,Auto,Auto"
-                  ColumnSpacing="16">
+                Padding="12,8">
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto"
+                  ColumnSpacing="14">
                 <TextBlock Classes="body-muted"
                            Text="{Binding ActiveFilterSummary}"
                            TextTrimming="CharacterEllipsis" />
                 <TextBlock Grid.Column="1"
                            Classes="footer-metric"
-                           Text="{Binding MatchingClipCount, StringFormat='Matching {0:N0}'}" />
+                           Text="{Binding MatchingClipCountText}" />
                 <TextBlock Grid.Column="2"
                            Classes="footer-metric"
-                           Text="{Binding SensitiveClipCount, StringFormat='Sensitive {0:N0}'}" />
+                           Text="{Binding SensitiveClipCountText}" />
                 <TextBlock Grid.Column="3"
                            Classes="body-muted"
                            Text="{Binding LastCaptureSummary}" />
+                <Button Grid.Column="4"
+                        Classes="secondary compact"
+                        Command="{Binding OpenSettingsCommand}"
+                        Content="{Binding SettingsButtonLabel}" />
             </Grid>
+        </Border>
+
+        <Border Grid.RowSpan="3"
+                Classes="settings-backdrop"
+                IsVisible="{Binding IsSettingsOpen}">
+            <Border Classes="surface-panel settings-sheet"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    MaxWidth="720"
+                    Padding="18">
+                <Grid RowDefinitions="Auto,Auto,*,Auto"
+                      RowSpacing="12">
+                    <StackPanel Spacing="4">
+                        <TextBlock Classes="panel-title"
+                                   Text="{Binding SettingsTitleText}" />
+                        <TextBlock Classes="body-muted"
+                                   Text="{Binding SettingsDescriptionText}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="1"
+                               Classes="body-muted"
+                               Text="{Binding SettingsHintText}"
+                               TextWrapping="Wrap" />
+
+                    <Grid Grid.Row="2"
+                          ColumnDefinitions="*,*"
+                          ColumnSpacing="18">
+                        <Border Classes="inset-panel"
+                                Padding="14">
+                            <StackPanel Spacing="12">
+                                <TextBlock Classes="panel-caption"
+                                           Text="{Binding SettingsLocalHotkeysTitle}" />
+
+                                <StackPanel Spacing="6">
+                                    <TextBlock Classes="detail-label"
+                                               Text="{Binding SettingsRegexHotkeyLabel}" />
+                                    <TextBox Text="{Binding SettingsToggleRegexHotkey}" />
+                                </StackPanel>
+
+                                <StackPanel Spacing="6">
+                                    <TextBlock Classes="detail-label"
+                                               Text="{Binding SettingsFavoritesHotkeyLabel}" />
+                                    <TextBox Text="{Binding SettingsToggleFavoritesHotkey}" />
+                                </StackPanel>
+
+                                <StackPanel Spacing="6">
+                                    <TextBlock Classes="detail-label"
+                                               Text="{Binding SettingsSensitiveHotkeyLabel}" />
+                                    <TextBox Text="{Binding SettingsToggleSensitiveHotkey}" />
+                                </StackPanel>
+
+                                <StackPanel Spacing="6">
+                                    <TextBlock Classes="detail-label"
+                                               Text="{Binding SettingsCaseSensitiveHotkeyLabel}" />
+                                    <TextBox Text="{Binding SettingsToggleCaseSensitiveHotkey}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="1"
+                                Classes="inset-panel"
+                                Padding="14">
+                            <StackPanel Spacing="12">
+                                <TextBlock Classes="panel-caption"
+                                           Text="{Binding SettingsGlobalHotkeyTitle}" />
+
+                                <StackPanel Spacing="6">
+                                    <TextBlock Classes="detail-label"
+                                               Text="{Binding SettingsToggleWindowHotkeyLabel}" />
+                                    <TextBox Text="{Binding SettingsToggleWindowHotkey}" />
+                                </StackPanel>
+
+                                <StackPanel Spacing="6">
+                                    <TextBlock Classes="detail-label"
+                                               Text="{Binding SettingsClipLimitLabel}" />
+                                    <TextBox Text="{Binding SettingsMaxClipSizeKilobytes}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <StackPanel Grid.Row="3"
+                                Orientation="Horizontal"
+                                Spacing="10"
+                                HorizontalAlignment="Right">
+                        <Button Classes="secondary compact"
+                                Command="{Binding CloseSettingsCommand}"
+                                Content="{Binding SettingsCancelButtonLabel}" />
+                        <Button Classes="primary compact"
+                                Command="{Binding SaveSettingsCommand}"
+                                Content="{Binding SettingsSaveButtonLabel}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
         </Border>
     </Grid>
 </Window>

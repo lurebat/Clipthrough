@@ -12,6 +12,8 @@ public sealed class ClipSearchFilters
 
     public bool UseRegex { get; init; }
 
+    public bool CaseSensitive { get; init; }
+
     public int Limit { get; init; } = 200;
 
     public int Offset { get; init; }

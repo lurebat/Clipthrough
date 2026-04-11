@@ -1,4 +1,6 @@
-﻿namespace Clipthrough.Models;
+﻿using Clipthrough.Localization;
+
+namespace Clipthrough.Models;
 
 public static class ContentTypeExtensions
 {
@@ -11,14 +13,7 @@ public static class ContentTypeExtensions
         _ => "text",
     };
 
-    public static string ToDisplayName(this ContentType contentType) => contentType switch
-    {
-        ContentType.Text => "Text",
-        ContentType.Image => "Image",
-        ContentType.RichText => "Rich text",
-        ContentType.Files => "Files",
-        _ => "Text",
-    };
+    public static string ToDisplayName(this ContentType contentType) => AppText.GetContentTypeLabel(contentType);
 
     public static ContentType FromStorageValue(string? value) => value?.ToLowerInvariant() switch
     {
@@ -30,14 +25,21 @@ public static class ContentTypeExtensions
 
     public static ContentType? FromFilter(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value) || string.Equals(value, "All", System.StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(value) || string.Equals(value, AppText.GetFilterContentTypeLabel(null), System.StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
 
-        return System.Enum.TryParse<ContentType>(value, ignoreCase: true, out var parsed)
-            ? parsed
-            : null;
+        foreach (var contentType in System.Enum.GetValues<ContentType>())
+        {
+            if (string.Equals(value, AppText.GetContentTypeLabel(contentType), System.StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, contentType.ToString(), System.StringComparison.OrdinalIgnoreCase))
+            {
+                return contentType;
+            }
+        }
+
+        return null;
     }
 }
 

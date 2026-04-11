@@ -2,6 +2,7 @@
 using System.IO;
 using System.Reactive;
 using System.Threading.Tasks;
+using Clipthrough.Localization;
 using Clipthrough.Services;
 using ReactiveUI;
 
@@ -33,7 +34,13 @@ public sealed class ClipFileItemViewModel : ViewModelBase
 
     public bool Exists => File.Exists(FilePath) || Directory.Exists(FilePath);
 
-    public string AvailabilityText => Exists ? "Available" : "Missing";
+    public string AvailabilityText => Exists ? AppText.AvailabilityAvailable : AppText.AvailabilityMissing;
+
+    public string CopyLabel => AppText.CopyButtonLabel;
+
+    public string OpenLabel => AppText.OpenButtonLabel;
+
+    public string FolderLabel => AppText.FolderButtonLabel;
 
     public ReactiveCommand<Unit, Unit> CopyPathCommand { get; }
 
@@ -46,11 +53,11 @@ public sealed class ClipFileItemViewModel : ViewModelBase
         try
         {
             await _systemInteractionService.CopyTextAsync(FilePath);
-            _statusSink($"Copied path: {FileName}.");
+            _statusSink(AppText.FormatCopiedPath(FileName));
         }
         catch (Exception ex)
         {
-            _statusSink($"Copy failed: {ex.Message}");
+            _statusSink(AppText.FormatCopyFailed(ex.Message));
         }
     }
 
@@ -59,11 +66,11 @@ public sealed class ClipFileItemViewModel : ViewModelBase
         try
         {
             await _systemInteractionService.OpenPathAsync(FilePath);
-            _statusSink($"Opened: {FileName}.");
+            _statusSink(AppText.FormatOpenedFile(FileName));
         }
         catch (Exception ex)
         {
-            _statusSink($"Open failed: {ex.Message}");
+            _statusSink(AppText.FormatOpenFailed(ex.Message));
         }
     }
 
@@ -72,11 +79,11 @@ public sealed class ClipFileItemViewModel : ViewModelBase
         try
         {
             await _systemInteractionService.OpenContainingDirectoryAsync(FilePath);
-            _statusSink($"Opened containing folder for {FileName}.");
+            _statusSink(AppText.FormatOpenedContainingFolder(FileName));
         }
         catch (Exception ex)
         {
-            _statusSink($"Folder open failed: {ex.Message}");
+            _statusSink(AppText.FormatFolderOpenFailed(ex.Message));
         }
     }
 
