@@ -2,9 +2,9 @@
 
 public sealed record AppSettings
 {
-    public const int DefaultMaxClipSizeBytes = 2 * 1024;
+    public const int DefaultMaxClipSizeBytes = 2_048 * 1_024;
     public const int MinMaxClipSizeBytes = 256;
-    public const int MaxMaxClipSizeBytes = 1_048_576;
+    public const int MaxMaxClipSizeBytes = 32 * 1_024 * 1_024;
 
     public string ToggleRegexHotkey { get; init; } = "Alt+R";
 

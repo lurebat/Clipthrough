@@ -268,7 +268,7 @@
                                      Text="{Binding SelectedClipRenderedText}" />
 
                             <controls:RichContentView IsVisible="{Binding ShowSelectedRichTextRenderer}"
-                                                      Markup="{Binding SelectedClipRawContent}"
+                                                      Markup="{Binding SelectedClipRenderedText}"
                                                       ContentFormat="{Binding SelectedClipContentFormat}" />
 
                             <Grid IsVisible="{Binding ShowSelectedFilesRenderer}"
@@ -536,25 +536,25 @@
                                 <StackPanel Spacing="6">
                                     <TextBlock Classes="detail-label"
                                                Text="{Binding SettingsRegexHotkeyLabel}" />
-                                    <TextBox Text="{Binding SettingsToggleRegexHotkey}" />
+                                     <TextBox Text="{Binding SettingsToggleRegexHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                 </StackPanel>
 
                                 <StackPanel Spacing="6">
                                     <TextBlock Classes="detail-label"
                                                Text="{Binding SettingsFavoritesHotkeyLabel}" />
-                                    <TextBox Text="{Binding SettingsToggleFavoritesHotkey}" />
+                                     <TextBox Text="{Binding SettingsToggleFavoritesHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                 </StackPanel>
 
                                 <StackPanel Spacing="6">
                                     <TextBlock Classes="detail-label"
                                                Text="{Binding SettingsSensitiveHotkeyLabel}" />
-                                    <TextBox Text="{Binding SettingsToggleSensitiveHotkey}" />
+                                     <TextBox Text="{Binding SettingsToggleSensitiveHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                 </StackPanel>
 
                                 <StackPanel Spacing="6">
                                     <TextBlock Classes="detail-label"
                                                Text="{Binding SettingsCaseSensitiveHotkeyLabel}" />
-                                    <TextBox Text="{Binding SettingsToggleCaseSensitiveHotkey}" />
+                                     <TextBox Text="{Binding SettingsToggleCaseSensitiveHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                 </StackPanel>
                             </StackPanel>
                         </Border>
@@ -569,13 +569,13 @@
                                 <StackPanel Spacing="6">
                                     <TextBlock Classes="detail-label"
                                                Text="{Binding SettingsToggleWindowHotkeyLabel}" />
-                                    <TextBox Text="{Binding SettingsToggleWindowHotkey}" />
+                                     <TextBox Text="{Binding SettingsToggleWindowHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                 </StackPanel>
 
                                 <StackPanel Spacing="6">
                                     <TextBlock Classes="detail-label"
                                                Text="{Binding SettingsClipLimitLabel}" />
-                                    <TextBox Text="{Binding SettingsMaxClipSizeKilobytes}" />
+                                     <TextBox Text="{Binding SettingsMaxClipSizeKilobytes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                 </StackPanel>
                             </StackPanel>
                         </Border>
@@ -590,13 +590,13 @@
                                 <StackPanel Spacing="6">
                                     <TextBlock Classes="detail-label"
                                                Text="{Binding SettingsDatabasePathLabel}" />
-                                    <TextBox Text="{Binding SettingsDatabasePath}" />
+                                    <TextBox Text="{Binding SettingsDatabasePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                 </StackPanel>
 
                                 <StackPanel Spacing="6">
                                     <TextBlock Classes="detail-label"
                                                Text="{Binding SettingsDatabasePasswordLabel}" />
-                                    <TextBox Text="{Binding SettingsDatabasePassword}" />
+                                    <TextBox Text="{Binding SettingsDatabasePassword, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                 </StackPanel>
 
                                 <TextBlock Classes="body-muted"

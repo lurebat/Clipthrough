@@ -21,7 +21,7 @@ public static class ClipDisplayFormatter
 
         if (clip.ContentType == ContentType.RichText)
         {
-            return BuildTitle(RenderRichContent(GetRawMarkup(clip) ?? clip.Content), ContentType.Text);
+            return BuildTitle(GetDisplayRichText(clip), ContentType.Text);
         }
 
         return BuildTitle(clip.Content, clip.ContentType);
@@ -50,7 +50,7 @@ public static class ClipDisplayFormatter
 
         if (clip.ContentType == ContentType.RichText)
         {
-            return BuildPreviewSnippet(RenderRichContent(GetRawMarkup(clip) ?? clip.Content), ContentType.Text);
+            return BuildPreviewSnippet(GetDisplayRichText(clip), ContentType.Text);
         }
 
         return BuildPreviewSnippet(clip.Content, clip.ContentType);
@@ -78,7 +78,7 @@ public static class ClipDisplayFormatter
 
         if (clip.ContentType == ContentType.RichText)
         {
-            return BuildSingleLinePreview(RenderRichContent(GetRawMarkup(clip) ?? clip.Content), ContentType.Text);
+            return BuildSingleLinePreview(GetDisplayRichText(clip), ContentType.Text);
         }
 
         return BuildSingleLinePreview(clip.Content, clip.ContentType);
@@ -117,7 +117,7 @@ public static class ClipDisplayFormatter
 
         return clip.ContentType switch
         {
-            ContentType.RichText => RenderRichContent(GetRawMarkup(clip) ?? clip.Content),
+            ContentType.RichText => GetDisplayRichText(clip),
             ContentType.Files => fileItems.Count == 0
                 ? NormalizePreviewText(clip.Content)
                 : AppText.FormatFileCount(fileItems.Count),
@@ -283,6 +283,11 @@ public static class ClipDisplayFormatter
 
     public static string RenderRichContent(string content)
     {
+        if (LooksLikeCfHtml(content))
+        {
+            content = ClipboardMarkupDecoder.ExtractHtmlFragment(content);
+        }
+
         if (LooksLikeHtml(content))
         {
             var withoutScripts = Regex.Replace(content, @"<(script|style)[^>]*>.*?</\1>", string.Empty, RegexOptions.IgnoreCase | RegexOptions.Singleline);
@@ -307,6 +312,26 @@ public static class ClipDisplayFormatter
 
     private static string CollapseWhitespace(string content) => string.Join(" ", content
         .Split(['\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+    private static string GetDisplayRichText(ClipEntry clip)
+    {
+        if (!string.IsNullOrWhiteSpace(clip.Content) && !LooksLikeRawRichText(clip.Content))
+        {
+            return NormalizePreviewText(clip.Content);
+        }
+
+        var rawMarkup = GetRawMarkup(clip);
+        if (!string.IsNullOrWhiteSpace(rawMarkup))
+        {
+            return RenderRichContent(rawMarkup);
+        }
+
+        return RenderRichContent(clip.Content);
+    }
+
+    private static bool LooksLikeRawRichText(string content) => LooksLikeCfHtml(content) || LooksLikeHtml(content) || LooksLikeRtf(content);
+
+    private static bool LooksLikeCfHtml(string content) => content.StartsWith("Version:", StringComparison.OrdinalIgnoreCase);
 
     private static bool LooksLikeHtml(string content) => Regex.IsMatch(content, @"<\s*([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>", RegexOptions.IgnoreCase);
 

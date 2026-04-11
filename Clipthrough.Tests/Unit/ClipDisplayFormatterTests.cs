@@ -42,4 +42,21 @@ public sealed class ClipDisplayFormatterTests
 
         Assert.Equal("Hello rich text", title);
     }
+
+    [Fact]
+    public void RenderRichContent_StripsCfHtmlHeaderBeforeRendering()
+    {
+        const string html = """
+            Version:0.9
+            StartHTML:0000000097
+            EndHTML:0000000175
+            StartFragment:0000000133
+            EndFragment:0000000138
+            <html><body><!--StartFragment--><p>Hello <strong>world</strong></p><!--EndFragment--></body></html>
+            """;
+
+        var result = ClipDisplayFormatter.RenderRichContent(html);
+
+        Assert.Equal("Hello world", result);
+    }
 }

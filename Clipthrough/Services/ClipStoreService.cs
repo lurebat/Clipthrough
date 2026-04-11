@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Diagnostics;
 using Clipthrough.Database;
 using Clipthrough.Localization;
 using Clipthrough.Models;
@@ -52,8 +53,15 @@ public sealed class ClipStoreService : IClipStoreService
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (request.ContentBytes.Length == 0 || request.ContentBytes.Length > _settingsService.Current.MaxClipSizeBytes)
+        if (request.ContentBytes.Length == 0)
         {
+            Trace.TraceWarning($"Skipped clipboard capture because payload was empty. type={request.ContentType} format={request.ContentFormat} source={request.SourceApp ?? "Unknown"}");
+            return null;
+        }
+
+        if (request.ContentBytes.Length > _settingsService.Current.MaxClipSizeBytes)
+        {
+            Trace.TraceWarning($"Skipped clipboard capture because payload exceeded limit. type={request.ContentType} format={request.ContentFormat} size={request.ContentBytes.Length} limit={_settingsService.Current.MaxClipSizeBytes} source={request.SourceApp ?? "Unknown"}");
             return null;
         }
 

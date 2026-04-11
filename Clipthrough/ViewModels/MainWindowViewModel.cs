@@ -963,7 +963,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var settings = new AppSettings
+        var settings = _settingsService.Current with
         {
             ToggleRegexHotkey = normalizedHotkeys[nameof(AppSettings.ToggleRegexHotkey)],
             ToggleFavoritesHotkey = normalizedHotkeys[nameof(AppSettings.ToggleFavoritesHotkey)],
@@ -974,7 +974,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
 
         await _storageOptionsService.SaveAsync(storageOptions);
-        await _databaseInitializer.InitializeAsync();
         await _settingsService.SaveAsync(settings);
         IsSettingsOpen = false;
         StatusText = AppText.SettingsSavedStatus;
