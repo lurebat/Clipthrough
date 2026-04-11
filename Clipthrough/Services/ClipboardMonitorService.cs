@@ -1,7 +1,9 @@
-﻿using System;
+using System;
+using System.Diagnostics;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -22,7 +24,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     private static extern bool RemoveClipboardFormatListener(IntPtr hwnd);
 
     private readonly IClipStoreService _clipStoreService;
-    private readonly ISettingsService _settingsService;
+    private readonly WindowsClipboardCaptureReader _clipboardCaptureReader;
     private readonly Subject<ClipEntry> _capturedClips = new();
 
     private Window? _window;
@@ -30,10 +32,10 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     private bool _isHookAttached;
     private bool _isDisposed;
 
-    public ClipboardMonitorService(IClipStoreService clipStoreService, ISettingsService settingsService)
+    public ClipboardMonitorService(IClipStoreService clipStoreService, WindowsClipboardCaptureReader clipboardCaptureReader)
     {
         _clipStoreService = clipStoreService;
-        _settingsService = settingsService;
+        _clipboardCaptureReader = clipboardCaptureReader;
     }
 
     public IObservable<ClipEntry> CapturedClips => _capturedClips.AsObservable();
@@ -75,33 +77,21 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
 
         try
         {
-            var clipboard = _window.Clipboard;
-            if (clipboard is null)
+            var captureRequest = await Task.Run(_clipboardCaptureReader.TryRead).ConfigureAwait(false);
+            if (captureRequest is null)
             {
                 return;
             }
 
-            using var clipboardData = await clipboard.TryGetDataAsync();
-            if (clipboardData is null)
-            {
-                return;
-            }
-
-            var text = await clipboardData.TryGetTextAsync();
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                return;
-            }
-
-            var capturedClip = await _clipStoreService.CaptureAsync(text, ContentType.Text, null).ConfigureAwait(false);
+            var capturedClip = await _clipStoreService.CaptureAsync(captureRequest).ConfigureAwait(false);
             if (capturedClip is not null)
             {
                 _capturedClips.OnNext(capturedClip);
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Silently handle errors
+            Trace.TraceError($"Clipboard capture failed: {ex}");
         }
     }
 
@@ -176,7 +166,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
             }
             catch
             {
-                // Silently handle removal failure
+                Trace.TraceWarning("Clipboard listener removal failed.");
             }
 
             try
@@ -185,7 +175,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
             }
             catch
             {
-                // Silently handle removal failure
+                Trace.TraceWarning("Clipboard hook removal failed.");
             }
 
             _isHookAttached = false;
@@ -217,7 +207,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
         }
         catch
         {
-            // Silently handle attachment failure
+            Trace.TraceWarning("Clipboard listener attachment failed.");
         }
     }
 

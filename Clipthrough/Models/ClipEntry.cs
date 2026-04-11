@@ -9,9 +9,15 @@ public sealed class ClipEntry
 
     public string Content { get; init; } = string.Empty;
 
+    public byte[]? ContentBytes { get; init; }
+
     public ContentType ContentType { get; init; } = ContentType.Text;
 
     public string? SourceApp { get; init; }
+
+    public string? SourceAppPath { get; init; }
+
+    public byte[]? SourceAppIconBytes { get; init; }
 
     public string Hash { get; init; } = string.Empty;
 
@@ -28,6 +34,10 @@ public sealed class ClipEntry
     public DateTimeOffset CapturedAt => LastCopiedAt;
 
     public long ByteSize { get; init; }
+
+    public int? ImageWidth { get; init; }
+
+    public int? ImageHeight { get; init; }
 
     public IReadOnlyList<SensitivityMatch> SensitivityMatches { get; set; } = Array.Empty<SensitivityMatch>();
 }

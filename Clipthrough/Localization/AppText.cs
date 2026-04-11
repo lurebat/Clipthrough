@@ -46,11 +46,12 @@ public static class AppText
         [nameof(EmptySelectionTitle)] = "Select a clip",
         [nameof(EmptySelectionDescription)] = "Choose a clip from the left to inspect its content, preview it in context, and review metadata below.",
         [nameof(ImageClipTitle)] = "Image clip",
-        [nameof(SourceLabel)] = "Source",
+        [nameof(AppLabel)] = "App",
         [nameof(CapturedLabel)] = "Last copied",
         [nameof(FirstCopiedLabel)] = "First copied",
         [nameof(CopiesLabel)] = "Copies",
         [nameof(SizeLabel)] = "Size",
+        [nameof(ResolutionLabel)] = "Resolution",
         [nameof(SensitivityLabel)] = "Sensitivity",
         [nameof(UnknownSource)] = "Unknown source",
         [nameof(NoClipSelected)] = "No clip selected",
@@ -84,6 +85,7 @@ public static class AppText
         [nameof(PreviewImageLoaded)] = "Image preview loaded from the stored clipboard payload.",
         [nameof(PreviewImageTooLarge)] = "Image preview skipped because the stored clip is larger than the current size limit.",
         [nameof(PreviewImageTextOnly)] = "This entry is marked as an image, but the stored payload is text only. Switch to raw mode to inspect the original data.",
+        [nameof(PreviewImageResolution)] = "Thumbnail preview · {0}",
         [nameof(PreviewEmptyImageData)] = "This image clip does not include previewable image data.",
         [nameof(PreviewEmptyFilesData)] = "This file clip does not include any stored paths.",
         [nameof(PreviewEmptyRichTextData)] = "This rich text clip is empty.",
@@ -121,6 +123,8 @@ public static class AppText
         ["Format.CopyCountSingular"] = "{0:N0} copy",
         ["Format.CopyCountPlural"] = "{0:N0} copies",
         ["Format.CopyCountCompact"] = "×{0:N0}",
+        ["Format.ImageDimensions"] = "{0:N0} × {1:N0}",
+        ["Format.ImageSummary"] = "Image · {0}",
         ["Format.CopiedClipStatus"] = "Copied {0} clip to the clipboard.",
         ["Format.CopiedFileListStatus"] = "Copied {0} file paths to the clipboard.",
         ["Format.CopiedImageStatus"] = "Copied image clip to the clipboard.",
@@ -188,11 +192,12 @@ public static class AppText
     public static string EmptySelectionTitle => Text(nameof(EmptySelectionTitle));
     public static string EmptySelectionDescription => Text(nameof(EmptySelectionDescription));
     public static string ImageClipTitle => Text(nameof(ImageClipTitle));
-    public static string SourceLabel => Text(nameof(SourceLabel));
+    public static string AppLabel => Text(nameof(AppLabel));
     public static string CapturedLabel => Text(nameof(CapturedLabel));
     public static string FirstCopiedLabel => Text(nameof(FirstCopiedLabel));
     public static string CopiesLabel => Text(nameof(CopiesLabel));
     public static string SizeLabel => Text(nameof(SizeLabel));
+    public static string ResolutionLabel => Text(nameof(ResolutionLabel));
     public static string SensitivityLabel => Text(nameof(SensitivityLabel));
     public static string UnknownSource => Text(nameof(UnknownSource));
     public static string NoClipSelected => Text(nameof(NoClipSelected));
@@ -226,6 +231,7 @@ public static class AppText
     public static string PreviewImageLoaded => Text(nameof(PreviewImageLoaded));
     public static string PreviewImageTooLarge => Text(nameof(PreviewImageTooLarge));
     public static string PreviewImageTextOnly => Text(nameof(PreviewImageTextOnly));
+    public static string PreviewImageResolution => Text(nameof(PreviewImageResolution));
     public static string PreviewEmptyImageData => Text(nameof(PreviewEmptyImageData));
     public static string PreviewEmptyFilesData => Text(nameof(PreviewEmptyFilesData));
     public static string PreviewEmptyRichTextData => Text(nameof(PreviewEmptyRichTextData));
@@ -310,6 +316,10 @@ public static class AppText
         : Format("Format.CopyCountPlural", count);
 
     public static string FormatCopyCountCompact(int count) => Format("Format.CopyCountCompact", count);
+
+    public static string FormatImageDimensions(int width, int height) => Format("Format.ImageDimensions", width, height);
+
+    public static string FormatImageSummary(string dimensions) => Format("Format.ImageSummary", dimensions);
 
     public static string FormatCopiedClip(string contentTypeDisplayName) => Format("Format.CopiedClipStatus", contentTypeDisplayName);
 

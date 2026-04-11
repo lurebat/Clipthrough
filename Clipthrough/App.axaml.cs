@@ -82,7 +82,9 @@ public partial class App : Application
         services.AddSingleton<ISettingsService, SettingsService>();
         services.AddSingleton<ISystemInteractionService, SystemInteractionService>();
         services.AddSingleton<DatabaseInitializer>();
+        services.AddSingleton<WindowsClipboardCaptureReader>();
         services.AddSingleton<IClipStoreService, ClipStoreService>();
+        services.AddSingleton<IClipSampleDataService, ClipSampleDataService>();
         services.AddSingleton<IClipboardMonitorService, ClipboardMonitorService>();
         services.AddSingleton<MainWindowViewModel>();
 

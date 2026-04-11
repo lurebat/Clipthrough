@@ -88,6 +88,7 @@
                             <ListBox.ItemTemplate>
                                 <DataTemplate x:DataType="vm:ClipItemViewModel">
                                     <Border Classes="clip-row-card"
+                                            Background="{Binding FrequencyBackground}"
                                             BorderBrush="{Binding RowBorderBrush}"
                                             BorderThickness="{Binding RowBorderThickness}"
                                             Padding="10,8">
@@ -96,16 +97,36 @@
                                             <Border Grid.Column="0"
                                                     Classes="clip-row-icon"
                                                     VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding TypeGlyph}"
-                                                           Foreground="{Binding StateAccentBrush}"
-                                                           VerticalAlignment="Center" />
+                                                <Grid>
+                                                    <Image Source="{Binding SourceAppIconImage}"
+                                                           Width="18"
+                                                           Height="18"
+                                                           Stretch="Uniform"
+                                                           IsVisible="{Binding HasSourceAppIcon}" />
+                                                    <TextBlock Text="{Binding TypeGlyph}"
+                                                               Foreground="{Binding StateAccentBrush}"
+                                                               VerticalAlignment="Center"
+                                                               IsVisible="{Binding ShowTypeGlyph}" />
+                                                </Grid>
                                             </Border>
 
-                                            <TextBlock Grid.Column="1"
-                                                       Classes="clip-row-preview"
-                                                       VerticalAlignment="Center"
-                                                       Text="{Binding SingleLinePreview}"
-                                                       TextTrimming="CharacterEllipsis" />
+                                            <StackPanel Grid.Column="1"
+                                                        VerticalAlignment="Center"
+                                                        Spacing="2">
+                                                <TextBlock Classes="clip-row-preview"
+                                                           Text="{Binding SingleLinePreview}"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <StackPanel Orientation="Horizontal"
+                                                            Spacing="6">
+                                                    <TextBlock Classes="clip-row-date"
+                                                               Text="{Binding FirstCopiedAtDisplay}"
+                                                               FontSize="10" />
+                                                    <TextBlock Classes="clip-row-date"
+                                                               Text="{Binding CopyCountCompact}"
+                                                               IsVisible="{Binding ShowCopyCountBadge}"
+                                                               FontSize="10" />
+                                                </StackPanel>
+                                            </StackPanel>
 
                                             <StackPanel Grid.Column="2"
                                                         Orientation="Horizontal"
@@ -328,32 +349,62 @@
                                     </StackPanel>
                                 </Border>
 
-                                <Border Classes="image-stage"
-                                        IsVisible="{Binding ShowSelectedImagePreview}">
-                                    <Image Source="{Binding SelectedClipImagePreview}"
-                                           Stretch="Uniform"
-                                           HorizontalAlignment="Center"
-                                           VerticalAlignment="Center" />
-                                </Border>
+                                <StackPanel IsVisible="{Binding ShowSelectedImagePreview}"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Spacing="10">
+                                    <Border Classes="image-stage"
+                                            Padding="12">
+                                        <Image Source="{Binding SelectedClipImagePreview}"
+                                               MaxWidth="320"
+                                               MaxHeight="220"
+                                               Stretch="Uniform"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center" />
+                                    </Border>
+                                    <TextBlock Classes="body-muted"
+                                               HorizontalAlignment="Center"
+                                               Text="{Binding SelectedClipImageResolutionText}" />
+                                </StackPanel>
                             </Grid>
                         </Grid>
                     </Border>
 
                     <Grid Grid.Row="2"
-                          ColumnDefinitions="1.3*,1.1*,0.9*,1.7*"
+                          ColumnDefinitions="1.2*,1.0*,1.0*,0.7*,0.7*,0.9*,1.3*"
                           ColumnSpacing="10">
                         <Border Classes="detail-stat-card"
                                 Padding="12,10">
                             <StackPanel Spacing="4">
                                 <TextBlock Classes="detail-label"
-                                           Text="{Binding SourceLabelText}" />
-                                <TextBlock Classes="detail-value"
-                                           Text="{Binding SelectedClipSourceText}"
-                                           TextTrimming="CharacterEllipsis" />
+                                           Text="{Binding AppLabelText}" />
+                                <StackPanel Orientation="Horizontal"
+                                            Spacing="8">
+                                    <Image Source="{Binding SelectedClipSourceAppIcon}"
+                                           Width="18"
+                                           Height="18"
+                                           Stretch="Uniform"
+                                           IsVisible="{Binding ShowSelectedClipSourceAppIcon}" />
+                                    <TextBlock Classes="detail-value"
+                                               Text="{Binding SelectedClipSourceText}"
+                                               TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
                             </StackPanel>
                         </Border>
 
                         <Border Grid.Column="1"
+                                Classes="detail-stat-card"
+                                Padding="12,10">
+                            <StackPanel Spacing="4">
+                                <TextBlock Classes="detail-label"
+                                           Text="{Binding FirstCopiedLabelText}" />
+                                <TextBlock Classes="detail-value"
+                                           Text="{Binding SelectedClipFirstCopiedAtText}"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="2"
                                 Classes="detail-stat-card"
                                 Padding="12,10">
                             <StackPanel Spacing="4">
@@ -365,7 +416,18 @@
                             </StackPanel>
                         </Border>
 
-                        <Border Grid.Column="2"
+                        <Border Grid.Column="3"
+                                Classes="detail-stat-card"
+                                Padding="12,10">
+                            <StackPanel Spacing="4">
+                                <TextBlock Classes="detail-label"
+                                           Text="{Binding CopiesLabelText}" />
+                                <TextBlock Classes="detail-value"
+                                           Text="{Binding SelectedClipCopyCountText}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="4"
                                 Classes="detail-stat-card"
                                 Padding="12,10">
                             <StackPanel Spacing="4">
@@ -376,7 +438,18 @@
                             </StackPanel>
                         </Border>
 
-                        <Border Grid.Column="3"
+                        <Border Grid.Column="5"
+                                Classes="detail-stat-card"
+                                Padding="12,10">
+                            <StackPanel Spacing="4">
+                                <TextBlock Classes="detail-label"
+                                           Text="{Binding ResolutionLabelText}" />
+                                <TextBlock Classes="detail-value"
+                                           Text="{Binding SelectedClipImageResolutionText}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="6"
                                 Classes="detail-stat-card"
                                 Padding="12,10">
                             <StackPanel Spacing="4">

@@ -36,6 +36,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private readonly IClipStoreService _clipStoreService;
     private readonly IClipboardMonitorService _clipboardMonitorService;
+    private readonly IClipSampleDataService _clipSampleDataService;
     private readonly ISettingsService _settingsService;
     private readonly ISystemInteractionService _systemInteractionService;
     private readonly DatabaseInitializer _databaseInitializer;
@@ -72,10 +73,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _settingsToggleWindowHotkey = AppSettings.Default.ToggleWindowHotkey;
     private string _settingsMaxClipSizeKilobytes = (AppSettings.Default.MaxClipSizeBytes / 1024d).ToString("0.##", CultureInfo.InvariantCulture);
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, DatabaseInitializer databaseInitializer)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, DatabaseInitializer databaseInitializer)
     {
         _clipStoreService = clipStoreService;
         _clipboardMonitorService = clipboardMonitorService;
+        _clipSampleDataService = clipSampleDataService;
         _settingsService = settingsService;
         _systemInteractionService = systemInteractionService;
         _databaseInitializer = databaseInitializer;
@@ -374,7 +376,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string SelectedImageTypeText => AppText.ImageClipTitle;
 
-    public string SourceLabelText => AppText.SourceLabel;
+    public string AppLabelText => AppText.AppLabel;
 
     public string FirstCopiedLabelText => AppText.FirstCopiedLabel;
 
@@ -383,6 +385,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string CopiesLabelText => AppText.CopiesLabel;
 
     public string SizeLabelText => AppText.SizeLabel;
+
+    public string ResolutionLabelText => AppText.ResolutionLabel;
 
     public string SensitivityLabelText => AppText.SensitivityLabel;
 
@@ -418,7 +422,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string SelectedClipRenderedText => _selectedClipRenderedText;
 
-    public string SelectedClipRawContent => SelectedClip?.FullContent ?? AppText.PreviewSelectRawContent;
+    public string SelectedClipRawContent => ClipDisplayFormatter.GetRawContentDisplay(SelectedClip?.Clip);
 
     public Bitmap? SelectedClipImagePreview => _selectedClipImagePreview;
 
@@ -430,6 +434,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string SelectedClipSourceText => SelectedClip?.SourceApp ?? AppText.UnknownSource;
 
+    public Bitmap? SelectedClipSourceAppIcon => SelectedClip?.SourceAppIconImage;
+
+    public bool ShowSelectedClipSourceAppIcon => SelectedClip?.HasSourceAppIcon == true;
+
     public string SelectedClipFirstCopiedAtText => SelectedClip?.FirstCopiedAtDisplay ?? AppText.NotAvailable;
 
     public string SelectedClipCapturedAtText => SelectedClip?.CapturedAtDisplay ?? AppText.NotAvailable;
@@ -437,6 +445,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string SelectedClipCopyCountText => SelectedClip?.CopyCountDisplay ?? AppText.NotAvailable;
 
     public string SelectedClipByteSizeText => SelectedClip?.ByteSizeDisplay ?? AppText.FormatByteCount(0);
+
+    public string SelectedClipImageResolutionText => SelectedClip?.ImageResolutionDisplay ?? AppText.NotAvailable;
 
     public string SelectedClipSensitivityText => SelectedClip?.SensitivitySummary ?? AppText.NoClipSelected;
 
@@ -571,6 +581,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _clipboardMonitorService.Stop();
         _settingsService.SettingsChanged -= OnSettingsChanged;
         SelectedClipFiles.Clear();
+        ClearClips();
         ReplaceSelectedClipImagePreview(null);
         _subscriptions.Dispose();
     }
@@ -595,7 +606,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _clipboardMonitorService.Start();
             await RefreshAsync();
 
-            await _clipStoreService.SeedSampleDataAsync();
+            await _clipSampleDataService.SeedAsync();
             await RefreshAsync();
 
             _isStarted = true;
@@ -677,7 +688,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         if (SelectedClip.Clip.ContentType == ContentType.Image)
         {
-            using var bitmap = TryLoadImage(SelectedClip.FullContent);
+            using var bitmap = TryLoadImage(SelectedClip.Clip, _settingsService.Current.MaxClipSizeBytes);
             if (bitmap is null)
             {
                 throw new InvalidOperationException("The selected image clip could not be decoded for copying.");
@@ -733,7 +744,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         var previousSelectionId = SelectedClip?.Id;
 
-        Clips.Clear();
+        ClearClips();
         foreach (var item in result.Items.Select(static clip => new ClipItemViewModel(clip)))
         {
             Clips.Add(item);
@@ -754,9 +765,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ReplaceSelectedClipFiles(ClipDisplayFormatter.BuildFileItems(SelectedClip?.FullContent));
         _selectedClipRenderedText = ClipDisplayFormatter.BuildRenderedText(SelectedClip?.Clip, SelectedClipFiles.Select(static file => file.FilePath).ToArray());
 
-        var imagePreview = TryLoadImage(SelectedClip?.FullContent, _settingsService.Current.MaxClipSizeBytes);
+        var imagePreview = TryLoadImage(SelectedClip?.Clip, _settingsService.Current.MaxClipSizeBytes);
         ReplaceSelectedClipImagePreview(imagePreview);
-        _selectedClipImageHint = ClipDisplayFormatter.BuildImageHint(SelectedClip?.Clip, imagePreview is not null);
+        _selectedClipImageHint = SelectedClip?.Clip.ContentType == ContentType.Image
+            && imagePreview is null
+            && SelectedClip.Clip.ContentBytes is { Length: > 0 } imageBytes
+            && imageBytes.Length > _settingsService.Current.MaxClipSizeBytes
+                ? AppText.PreviewImageTooLarge
+                : ClipDisplayFormatter.BuildImageHint(SelectedClip?.Clip, imagePreview is not null);
     }
 
     private void ReplaceSelectedClipFiles(IReadOnlyList<string> fileItems)
@@ -794,10 +810,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(SelectedClipContentTypeText));
         this.RaisePropertyChanged(nameof(SelectedClipTitleText));
         this.RaisePropertyChanged(nameof(SelectedClipSourceText));
+        this.RaisePropertyChanged(nameof(SelectedClipSourceAppIcon));
+        this.RaisePropertyChanged(nameof(ShowSelectedClipSourceAppIcon));
         this.RaisePropertyChanged(nameof(SelectedClipFirstCopiedAtText));
         this.RaisePropertyChanged(nameof(SelectedClipCapturedAtText));
         this.RaisePropertyChanged(nameof(SelectedClipCopyCountText));
         this.RaisePropertyChanged(nameof(SelectedClipByteSizeText));
+        this.RaisePropertyChanged(nameof(SelectedClipImageResolutionText));
         this.RaisePropertyChanged(nameof(SelectedClipSensitivityText));
         this.RaisePropertyChanged(nameof(SelectedClipAccentBrush));
         this.RaisePropertyChanged(nameof(SelectedClipAreaBorderBrush));
@@ -983,14 +1002,34 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         StatusText = AppText.FormatStatusSummary(result.TotalMatchingCount, result.TotalClipCount, result.SensitiveClipCount, lastCaptured);
     }
 
-    private static Bitmap? TryLoadImage(string? content, int? maxClipSizeBytes = null)
+    private void ClearClips()
     {
-        if (string.IsNullOrWhiteSpace(content))
+        foreach (var clip in Clips)
+        {
+            clip.Dispose();
+        }
+
+        Clips.Clear();
+    }
+
+    private static Bitmap? TryLoadImage(ClipEntry? clip, int? maxClipSizeBytes = null)
+    {
+        if (clip is null)
         {
             return null;
         }
 
-        var trimmed = content.Trim();
+        if (clip.ContentBytes is { Length: > 0 } bytes)
+        {
+            if (maxClipSizeBytes is { } limit && bytes.Length > limit)
+            {
+                return null;
+            }
+
+            return ClipBitmapFactory.TryLoad(bytes);
+        }
+
+        var trimmed = clip.Content.Trim();
 
         try
         {
@@ -1004,8 +1043,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         return null;
                     }
 
-                    var bytes = Convert.FromBase64String(trimmed[(commaIndex + 1)..]);
-                    using var stream = new MemoryStream(bytes);
+                    var bytes2 = Convert.FromBase64String(trimmed[(commaIndex + 1)..]);
+                    using var stream = new MemoryStream(bytes2);
                     return new Bitmap(stream);
                 }
             }
@@ -1021,7 +1060,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 return new Bitmap(unquotedPath);
             }
         }
-        catch
+        catch (ArgumentException)
+        {
+            return null;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+        catch (NotSupportedException)
         {
             return null;
         }

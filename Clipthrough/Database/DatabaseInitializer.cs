@@ -17,8 +17,11 @@ public sealed class DatabaseInitializer
         CREATE TABLE IF NOT EXISTS clips (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             content      TEXT,
+            content_bytes BLOB,
             content_type TEXT NOT NULL,
             source_app   TEXT,
+            source_app_path TEXT,
+            source_app_icon BLOB,
             hash         TEXT NOT NULL,
             is_favorite  INTEGER NOT NULL DEFAULT 0,
             is_sensitive INTEGER NOT NULL DEFAULT 0,
@@ -26,7 +29,9 @@ public sealed class DatabaseInitializer
             copy_count   INTEGER NOT NULL DEFAULT 1,
             first_copied_at TEXT NOT NULL,
             last_copied_at  TEXT NOT NULL,
-            byte_size    INTEGER NOT NULL DEFAULT 0
+            byte_size    INTEGER NOT NULL DEFAULT 0,
+            image_width  INTEGER,
+            image_height INTEGER
         );
 
         CREATE VIRTUAL TABLE IF NOT EXISTS clips_fts USING fts5(
@@ -103,6 +108,7 @@ public sealed class DatabaseInitializer
         }
 
         await EnsureClipAggregationColumnsAsync(connection, cancellationToken);
+        await EnsureClipPayloadColumnsAsync(connection, cancellationToken);
         await BackfillClipAggregationColumnsAsync(connection, cancellationToken);
         await DeduplicateClipsByHashAsync(connection, cancellationToken);
         await EnsureUniqueClipHashIndexAsync(connection, cancellationToken);
@@ -153,6 +159,46 @@ public sealed class DatabaseInitializer
         if (!existingColumns.Contains("last_copied_at"))
         {
             await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN last_copied_at TEXT;", cancellationToken);
+        }
+    }
+
+    private static async Task EnsureClipPayloadColumnsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var existingColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "PRAGMA table_info(clips);";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                existingColumns.Add(reader.GetString(1));
+            }
+        }
+
+        if (!existingColumns.Contains("content_bytes"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN content_bytes BLOB;", cancellationToken);
+        }
+
+        if (!existingColumns.Contains("source_app_path"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN source_app_path TEXT;", cancellationToken);
+        }
+
+        if (!existingColumns.Contains("source_app_icon"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN source_app_icon BLOB;", cancellationToken);
+        }
+
+        if (!existingColumns.Contains("image_width"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN image_width INTEGER;", cancellationToken);
+        }
+
+        if (!existingColumns.Contains("image_height"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN image_height INTEGER;", cancellationToken);
         }
     }
 

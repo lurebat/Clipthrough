@@ -1,7 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -9,27 +8,32 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Clipthrough.Database;
+using Clipthrough.Localization;
 using Clipthrough.Models;
+using Clipthrough.Presentation;
 using Microsoft.Data.Sqlite;
 
 namespace Clipthrough.Services;
 
 public sealed class ClipStoreService : IClipStoreService
 {
-    private const string SampleDataSeedMarkerKey = "seed:sample-data:v1";
-    private const int TargetSampleSeedCount = 250;
     private const string ClipSelectColumns = """
             c.id,
             c.content,
+            c.content_bytes,
             c.content_type,
             c.source_app,
+            c.source_app_path,
+            c.source_app_icon,
             c.hash,
             c.is_favorite,
             c.is_sensitive,
             c.copy_count,
             c.first_copied_at,
             c.last_copied_at,
-            c.byte_size
+            c.byte_size,
+            c.image_width,
+            c.image_height
         """;
 
     private readonly SqliteConnectionFactory _connectionFactory;
@@ -43,102 +47,16 @@ public sealed class ClipStoreService : IClipStoreService
         _settingsService = settingsService;
     }
 
-    public async Task SeedSampleDataAsync(CancellationToken cancellationToken = default)
+    public async Task<ClipEntry?> CaptureAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default)
     {
-        await EnsureFeaturedSamplesAsync(cancellationToken);
+        ArgumentNullException.ThrowIfNull(request);
 
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        if (await HasSeedMarkerAsync(connection, cancellationToken))
+        if (request.ContentBytes.Length == 0 || request.ContentBytes.Length > _settingsService.Current.MaxClipSizeBytes)
         {
-            return;
+            return null;
         }
 
-        await using var countCommand = connection.CreateCommand();
-        countCommand.CommandText = "SELECT COUNT(*) FROM clips;";
-        var existingCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
-        if (existingCount >= TargetSampleSeedCount)
-        {
-            await SetSeedMarkerAsync(connection, cancellationToken);
-            return;
-        }
-
-        var templates = new[]
-        {
-            new { Content = "SELECT * FROM users WHERE email LIKE '%@corp.com' ORDER BY created_at DESC LIMIT 100;", Source = "DBeaver", Type = ContentType.Text, Favorite = true },
-            new { Content = "server=prod-sql;user id=report_user;password=Sup3rSecret!;database=warehouse;", Source = "Azure Data Studio", Type = ContentType.Text, Favorite = false },
-            new { Content = "AKIA0EXAMPLEKEY123456", Source = "Visual Studio Code", Type = ContentType.Text, Favorite = false },
-            new { Content = "npm install AvaloniaUI.DiagnosticsSupport --prerelease", Source = "PowerShell", Type = ContentType.Text, Favorite = false },
-            new { Content = "https://github.com/AvaloniaUI/Avalonia", Source = "Chrome", Type = ContentType.Text, Favorite = true },
-            new { Content = "password = Tr0ub4dor&3", Source = "Rider", Type = ContentType.Text, Favorite = false },
-            new { Content = "Quarterly customer call notes and follow-up actions.", Source = "Notion", Type = ContentType.Text, Favorite = false },
-            new { Content = "Files copied: Budget.xlsx; Strategy.pptx; Notes.docx", Source = "Explorer", Type = ContentType.Files, Favorite = false },
-            new { Content = "RTF snippet copied from Outlook signature block", Source = "Outlook", Type = ContentType.RichText, Favorite = false },
-            new { Content = "Image placeholder: screenshot captured from design review", Source = "Snipping Tool", Type = ContentType.Image, Favorite = false },
-        };
-
-        var clipsToSeed = TargetSampleSeedCount - existingCount;
-        var seedRunTag = DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
-        using var transaction = connection.BeginTransaction();
-        var ruleIds = new Dictionary<string, long>(StringComparer.Ordinal);
-
-        await using var insertClipCommand = connection.CreateCommand();
-        insertClipCommand.Transaction = transaction;
-        insertClipCommand.CommandText = """
-            INSERT INTO clips (content, content_type, source_app, hash, is_favorite, is_sensitive, captured_at, copy_count, first_copied_at, last_copied_at, byte_size)
-            VALUES ($content, $contentType, $sourceApp, $hash, $isFavorite, $isSensitive, $capturedAt, 1, $capturedAt, $capturedAt, $byteSize);
-            SELECT last_insert_rowid();
-            """;
-
-        await using var insertMatchCommand = connection.CreateCommand();
-        insertMatchCommand.Transaction = transaction;
-        insertMatchCommand.CommandText = "INSERT OR IGNORE INTO clip_sensitivity_matches (clip_id, rule_id) VALUES ($clipId, $ruleId);";
-
-        for (var i = 0; i < clipsToSeed; i++)
-        {
-            if (i % 500 == 0)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-            }
-
-            var template = templates[(existingCount + i) % templates.Length];
-            var sequence = existingCount + i + 1;
-            var content = $"{template.Content} [seed:{seedRunTag}:{sequence:D6}]";
-            var hash = ComputeHash(template.Type, content);
-            var matches = _sensitivityService.Scan(content);
-            var capturedAt = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-            var byteSize = Encoding.UTF8.GetByteCount(content);
-
-            insertClipCommand.Parameters.Clear();
-            insertClipCommand.Parameters.AddWithValue("$content", content);
-            insertClipCommand.Parameters.AddWithValue("$contentType", template.Type.ToStorageValue());
-            insertClipCommand.Parameters.AddWithValue("$sourceApp", template.Source);
-            insertClipCommand.Parameters.AddWithValue("$hash", hash);
-            insertClipCommand.Parameters.AddWithValue("$isFavorite", template.Favorite ? 1 : 0);
-            insertClipCommand.Parameters.AddWithValue("$isSensitive", matches.Count > 0 ? 1 : 0);
-            insertClipCommand.Parameters.AddWithValue("$capturedAt", capturedAt);
-            insertClipCommand.Parameters.AddWithValue("$byteSize", byteSize);
-            var clipId = (long)(await insertClipCommand.ExecuteScalarAsync(cancellationToken) ?? 0L);
-
-            foreach (var match in matches)
-            {
-                if (!ruleIds.TryGetValue(match.RuleName, out var ruleId))
-                {
-                    ruleId = await EnsureRuleAsync(connection, transaction, match, cancellationToken);
-                    ruleIds[match.RuleName] = ruleId;
-                }
-
-                insertMatchCommand.Parameters.Clear();
-                insertMatchCommand.Parameters.AddWithValue("$clipId", clipId);
-                insertMatchCommand.Parameters.AddWithValue("$ruleId", ruleId);
-                await insertMatchCommand.ExecuteNonQueryAsync(cancellationToken);
-            }
-        }
-
-        await transaction.CommitAsync(cancellationToken);
-
-        await SetSeedMarkerAsync(connection, cancellationToken);
+        return await InsertClipAsync(request, cancellationToken);
     }
 
     public async Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default)
@@ -221,22 +139,13 @@ public sealed class ClipStoreService : IClipStoreService
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    public Task<ClipEntry?> CaptureAsync(string content, ContentType contentType, string? sourceApp = null, CancellationToken cancellationToken = default)
+    private async Task<ClipEntry?> InsertClipAsync(ClipCaptureRequest request, CancellationToken cancellationToken)
     {
-        if (Encoding.UTF8.GetByteCount(content) > _settingsService.Current.MaxClipSizeBytes)
-        {
-            return Task.FromResult<ClipEntry?>(null);
-        }
-
-        return InsertClipAsync(content, contentType, sourceApp, isFavorite: false, incrementExistingCopyCount: true, cancellationToken);
-    }
-
-    private async Task<ClipEntry?> InsertClipAsync(string content, ContentType contentType, string? sourceApp, bool isFavorite, bool incrementExistingCopyCount, CancellationToken cancellationToken)
-    {
-        var hash = ComputeHash(contentType, content);
-        var matches = _sensitivityService.Scan(content);
+        var contentText = BuildStoredContentText(request);
+        var hash = ComputeHash(request.ContentType, request.ContentBytes);
+        var matches = _sensitivityService.Scan(contentText);
         var capturedAt = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-        var byteSize = Encoding.UTF8.GetByteCount(content);
+        var byteSize = request.ContentBytes.LongLength;
 
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -255,28 +164,29 @@ public sealed class ClipStoreService : IClipStoreService
             {
                 clipId = (long)existingId;
 
-                if (incrementExistingCopyCount)
+                if (request.IncrementExistingCopyCount)
                 {
                     await using var updateCommand = connection.CreateCommand();
                     updateCommand.Transaction = transaction;
                     updateCommand.CommandText = """
                         UPDATE clips
-                        SET source_app = CASE WHEN $sourceApp IS NULL OR TRIM($sourceApp) = '' THEN source_app ELSE $sourceApp END,
+                        SET content = CASE WHEN $content IS NULL OR TRIM($content) = '' THEN content ELSE $content END,
+                            content_bytes = CASE WHEN $contentBytes IS NULL THEN content_bytes ELSE $contentBytes END,
+                            source_app = CASE WHEN $sourceApp IS NULL OR TRIM($sourceApp) = '' THEN source_app ELSE $sourceApp END,
+                            source_app_path = CASE WHEN $sourceAppPath IS NULL OR TRIM($sourceAppPath) = '' THEN source_app_path ELSE $sourceAppPath END,
+                            source_app_icon = CASE WHEN $sourceAppIcon IS NULL THEN source_app_icon ELSE $sourceAppIcon END,
                             is_favorite = CASE WHEN is_favorite = 1 OR $isFavorite = 1 THEN 1 ELSE 0 END,
                             is_sensitive = CASE WHEN is_sensitive = 1 OR $isSensitive = 1 THEN 1 ELSE 0 END,
                             captured_at = $lastCopiedAt,
                             first_copied_at = COALESCE(first_copied_at, captured_at, $lastCopiedAt),
                             last_copied_at = $lastCopiedAt,
                             copy_count = copy_count + 1,
-                            byte_size = $byteSize
+                            byte_size = $byteSize,
+                            image_width = COALESCE($imageWidth, image_width),
+                            image_height = COALESCE($imageHeight, image_height)
                         WHERE id = $id;
                         """;
-                    updateCommand.Parameters.AddWithValue("$id", clipId);
-                    updateCommand.Parameters.AddWithValue("$sourceApp", (object?)sourceApp ?? DBNull.Value);
-                    updateCommand.Parameters.AddWithValue("$isFavorite", isFavorite ? 1 : 0);
-                    updateCommand.Parameters.AddWithValue("$isSensitive", matches.Count > 0 ? 1 : 0);
-                    updateCommand.Parameters.AddWithValue("$lastCopiedAt", capturedAt);
-                    updateCommand.Parameters.AddWithValue("$byteSize", byteSize);
+                    AddUpsertParameters(updateCommand, request, contentText, hash, matches.Count > 0, capturedAt, byteSize, clipId);
                     await updateCommand.ExecuteNonQueryAsync(cancellationToken);
                 }
             }
@@ -285,18 +195,43 @@ public sealed class ClipStoreService : IClipStoreService
                 await using var insertCommand = connection.CreateCommand();
                 insertCommand.Transaction = transaction;
                 insertCommand.CommandText = """
-                    INSERT INTO clips (content, content_type, source_app, hash, is_favorite, is_sensitive, captured_at, copy_count, first_copied_at, last_copied_at, byte_size)
-                    VALUES ($content, $contentType, $sourceApp, $hash, $isFavorite, $isSensitive, $capturedAt, 1, $capturedAt, $capturedAt, $byteSize);
+                    INSERT INTO clips (
+                        content,
+                        content_bytes,
+                        content_type,
+                        source_app,
+                        source_app_path,
+                        source_app_icon,
+                        hash,
+                        is_favorite,
+                        is_sensitive,
+                        captured_at,
+                        copy_count,
+                        first_copied_at,
+                        last_copied_at,
+                        byte_size,
+                        image_width,
+                        image_height)
+                    VALUES (
+                        $content,
+                        $contentBytes,
+                        $contentType,
+                        $sourceApp,
+                        $sourceAppPath,
+                        $sourceAppIcon,
+                        $hash,
+                        $isFavorite,
+                        $isSensitive,
+                        $capturedAt,
+                        1,
+                        $capturedAt,
+                        $capturedAt,
+                        $byteSize,
+                        $imageWidth,
+                        $imageHeight);
                     SELECT last_insert_rowid();
                     """;
-                insertCommand.Parameters.AddWithValue("$content", content);
-                insertCommand.Parameters.AddWithValue("$contentType", contentType.ToStorageValue());
-                insertCommand.Parameters.AddWithValue("$sourceApp", (object?)sourceApp ?? DBNull.Value);
-                insertCommand.Parameters.AddWithValue("$hash", hash);
-                insertCommand.Parameters.AddWithValue("$isFavorite", isFavorite ? 1 : 0);
-                insertCommand.Parameters.AddWithValue("$isSensitive", matches.Count > 0 ? 1 : 0);
-                insertCommand.Parameters.AddWithValue("$capturedAt", capturedAt);
-                insertCommand.Parameters.AddWithValue("$byteSize", byteSize);
+                AddUpsertParameters(insertCommand, request, contentText, hash, matches.Count > 0, capturedAt, byteSize);
                 clipId = (long)(await insertCommand.ExecuteScalarAsync(cancellationToken) ?? 0L);
             }
         }
@@ -304,15 +239,7 @@ public sealed class ClipStoreService : IClipStoreService
         await AddSensitivityMatchesAsync(connection, transaction, clipId, matches, cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
-
         return await GetClipByIdAsync(connection, clipId, cancellationToken);
-    }
-
-    private async Task EnsureFeaturedSamplesAsync(CancellationToken cancellationToken)
-    {
-        await InsertClipAsync(BuildRichTextSampleContent(), ContentType.RichText, "Outlook", false, incrementExistingCopyCount: false, cancellationToken);
-        await InsertClipAsync(BuildImageSampleContent(), ContentType.Image, "Snipping Tool", false, incrementExistingCopyCount: false, cancellationToken);
-        await InsertClipAsync(await BuildFileSampleContentAsync(cancellationToken), ContentType.Files, "Explorer", false, incrementExistingCopyCount: false, cancellationToken);
     }
 
     private async Task<ClipSearchResult> SearchInMemoryAsync(SqliteConnection connection, ClipSearchFilters filters, CancellationToken cancellationToken)
@@ -321,7 +248,6 @@ public sealed class ClipStoreService : IClipStoreService
         var items = new List<ClipEntry>();
         var whereClauses = BuildWhereClauses(filters, hasSearch: false);
         var whereClause = whereClauses.Count > 0 ? $"WHERE {string.Join(" AND ", whereClauses)}" : string.Empty;
-
         var totalMatchingCount = 0;
 
         await using (var queryCommand = connection.CreateCommand())
@@ -449,24 +375,29 @@ public sealed class ClipStoreService : IClipStoreService
 
     private static ClipEntry ReadClip(SqliteDataReader reader)
     {
-        var lastCopiedAt = ParseTimestamp(reader.IsDBNull(9) ? null : reader.GetString(9))
+        var lastCopiedAt = ParseTimestamp(reader.IsDBNull(12) ? null : reader.GetString(12))
             ?? DateTimeOffset.UtcNow;
-        var firstCopiedAt = ParseTimestamp(reader.IsDBNull(8) ? null : reader.GetString(8))
+        var firstCopiedAt = ParseTimestamp(reader.IsDBNull(11) ? null : reader.GetString(11))
             ?? lastCopiedAt;
 
         return new ClipEntry
         {
             Id = reader.GetInt64(0),
             Content = reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
-            ContentType = ContentTypeExtensions.FromStorageValue(reader.GetString(2)),
-            SourceApp = reader.IsDBNull(3) ? null : reader.GetString(3),
-            Hash = reader.GetString(4),
-            IsFavorite = reader.GetInt64(5) == 1,
-            IsSensitive = reader.GetInt64(6) == 1,
-            CopyCount = reader.IsDBNull(7) ? 1 : Convert.ToInt32(reader.GetInt64(7), CultureInfo.InvariantCulture),
+            ContentBytes = ReadBytes(reader, 2),
+            ContentType = ContentTypeExtensions.FromStorageValue(reader.GetString(3)),
+            SourceApp = reader.IsDBNull(4) ? null : reader.GetString(4),
+            SourceAppPath = reader.IsDBNull(5) ? null : reader.GetString(5),
+            SourceAppIconBytes = ReadBytes(reader, 6),
+            Hash = reader.GetString(7),
+            IsFavorite = reader.GetInt64(8) == 1,
+            IsSensitive = reader.GetInt64(9) == 1,
+            CopyCount = reader.IsDBNull(10) ? 1 : Convert.ToInt32(reader.GetInt64(10), CultureInfo.InvariantCulture),
             FirstCopiedAt = firstCopiedAt,
             LastCopiedAt = lastCopiedAt,
-            ByteSize = reader.GetInt64(10),
+            ByteSize = reader.GetInt64(13),
+            ImageWidth = reader.IsDBNull(14) ? null : reader.GetInt32(14),
+            ImageHeight = reader.IsDBNull(15) ? null : reader.GetInt32(15),
         };
     }
 
@@ -585,6 +516,57 @@ public sealed class ClipStoreService : IClipStoreService
         return scalar is DBNull or null ? null : Convert.ToString(scalar, CultureInfo.InvariantCulture);
     }
 
+    private static void AddUpsertParameters(
+        SqliteCommand command,
+        ClipCaptureRequest request,
+        string contentText,
+        string hash,
+        bool isSensitive,
+        string capturedAt,
+        long byteSize,
+        long? clipId = null)
+    {
+        if (clipId is not null)
+        {
+            command.Parameters.AddWithValue("$id", clipId.Value);
+        }
+
+        command.Parameters.AddWithValue("$content", string.IsNullOrWhiteSpace(contentText) ? DBNull.Value : contentText);
+        command.Parameters.AddWithValue("$contentBytes", request.ContentBytes.Length == 0 ? DBNull.Value : request.ContentBytes);
+        command.Parameters.AddWithValue("$contentType", request.ContentType.ToStorageValue());
+        command.Parameters.AddWithValue("$sourceApp", string.IsNullOrWhiteSpace(request.SourceApp) ? DBNull.Value : request.SourceApp);
+        command.Parameters.AddWithValue("$sourceAppPath", string.IsNullOrWhiteSpace(request.SourceAppPath) ? DBNull.Value : request.SourceAppPath);
+        command.Parameters.AddWithValue("$sourceAppIcon", request.SourceAppIconBytes is { Length: > 0 } iconBytes ? iconBytes : DBNull.Value);
+        command.Parameters.AddWithValue("$hash", hash);
+        command.Parameters.AddWithValue("$isFavorite", request.IsFavorite ? 1 : 0);
+        command.Parameters.AddWithValue("$isSensitive", isSensitive ? 1 : 0);
+        command.Parameters.AddWithValue("$capturedAt", capturedAt);
+        command.Parameters.AddWithValue("$lastCopiedAt", capturedAt);
+        command.Parameters.AddWithValue("$byteSize", byteSize);
+        command.Parameters.AddWithValue("$imageWidth", request.ImageWidth is { } width ? width : DBNull.Value);
+        command.Parameters.AddWithValue("$imageHeight", request.ImageHeight is { } height ? height : DBNull.Value);
+    }
+
+    private static string BuildStoredContentText(ClipCaptureRequest request)
+    {
+        if (!string.IsNullOrWhiteSpace(request.ContentText))
+        {
+            return request.ContentText;
+        }
+
+        if (request.ContentType == ContentType.Image
+            && request.ImageWidth is { } width
+            && request.ImageHeight is { } height)
+        {
+            return AppText.FormatImageSummary(AppText.FormatImageDimensions(width, height));
+        }
+
+        return string.Empty;
+    }
+
+    private static byte[]? ReadBytes(SqliteDataReader reader, int index)
+        => reader.IsDBNull(index) ? null : reader.GetFieldValue<byte[]>(index);
+
     private static DateTimeOffset? ParseTimestamp(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -597,121 +579,22 @@ public sealed class ClipStoreService : IClipStoreService
             : null;
     }
 
-    private static string ComputeHash(ContentType contentType, string content)
+    private static string ComputeHash(ContentType contentType, byte[] contentBytes)
     {
-        var input = $"{contentType.ToStorageValue()}::{content}";
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(input));
+        var typeBytes = Encoding.UTF8.GetBytes(contentType.ToStorageValue());
+        var input = new byte[typeBytes.Length + 1 + contentBytes.Length];
+        Buffer.BlockCopy(typeBytes, 0, input, 0, typeBytes.Length);
+        Buffer.BlockCopy(contentBytes, 0, input, typeBytes.Length + 1, contentBytes.Length);
+        var bytes = SHA256.HashData(input);
         return Convert.ToHexString(bytes);
     }
 
     private static Regex BuildSearchRegex(string searchText, bool caseSensitive)
         => new(searchText, (caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase) | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
-    private static bool IsRegexMatch(ClipEntry clip, Regex regex) =>
-        regex.IsMatch(clip.Content) ||
-        (!string.IsNullOrWhiteSpace(clip.SourceApp) && regex.IsMatch(clip.SourceApp));
-
-    private static string BuildRichTextSampleContent() => """
-        <html>
-          <body>
-            <h2>Quarterly launch notes</h2>
-            <p>Prepared for <strong>Clipthrough</strong> design review.</p>
-            <ul>
-              <li>Hero layout simplified to a compact toolbar</li>
-              <li>Sensitive clips receive a high-contrast border</li>
-              <li>File previews now support copy and open actions</li>
-            </ul>
-            <p><em>Next step:</em> finalize the interaction polish.</p>
-          </body>
-        </html>
-        """;
-
-    private static string BuildImageSampleContent()
-    {
-        const int width = 32;
-        const int height = 32;
-        const int bytesPerPixel = 3;
-        var rowSize = ((width * bytesPerPixel + 3) / 4) * 4;
-        var pixelDataSize = rowSize * height;
-        var fileSize = 54 + pixelDataSize;
-        var bytes = new byte[fileSize];
-
-        bytes[0] = (byte)'B';
-        bytes[1] = (byte)'M';
-        BitConverter.GetBytes(fileSize).CopyTo(bytes, 2);
-        BitConverter.GetBytes(54).CopyTo(bytes, 10);
-        BitConverter.GetBytes(40).CopyTo(bytes, 14);
-        BitConverter.GetBytes(width).CopyTo(bytes, 18);
-        BitConverter.GetBytes(height).CopyTo(bytes, 22);
-        BitConverter.GetBytes((short)1).CopyTo(bytes, 26);
-        BitConverter.GetBytes((short)24).CopyTo(bytes, 28);
-        BitConverter.GetBytes(pixelDataSize).CopyTo(bytes, 34);
-
-        for (var y = 0; y < height; y++)
-        {
-            for (var x = 0; x < width; x++)
-            {
-                var pixelIndex = 54 + ((height - 1 - y) * rowSize) + (x * bytesPerPixel);
-                var isUpperHalf = y < height / 2;
-                var isLeftHalf = x < width / 2;
-
-                bytes[pixelIndex] = isUpperHalf ? (byte)0xA3 : (byte)0x33;
-                bytes[pixelIndex + 1] = isLeftHalf ? (byte)0x7C : (byte)0xD1;
-                bytes[pixelIndex + 2] = (byte)(0x40 + ((x + y) % 64));
-            }
-        }
-
-        return $"data:image/bmp;base64,{Convert.ToBase64String(bytes)}";
-    }
-
-    private static async Task<string> BuildFileSampleContentAsync(CancellationToken cancellationToken)
-    {
-        var sampleDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Clipthrough", "SampleFiles");
-        Directory.CreateDirectory(sampleDirectory);
-
-        var files = new[]
-        {
-            Path.Combine(sampleDirectory, "Budget.txt"),
-            Path.Combine(sampleDirectory, "Launch Notes.md"),
-            Path.Combine(sampleDirectory, "Action Items.csv"),
-        };
-
-        var contents = new[]
-        {
-            "Quarterly budget draft\nMarketing,25000\nEngineering,42000\nOps,18000\n",
-            "# Launch Notes\n\n- Toolbar condensed\n- Infinite scroll enabled\n- File actions added\n",
-            "Owner,Task,Status\nAlex,Review favorites,Done\nSam,Verify regex,In Progress\n",
-        };
-
-        for (var index = 0; index < files.Length; index++)
-        {
-            await File.WriteAllTextAsync(files[index], contents[index], cancellationToken);
-        }
-
-        return string.Join(Environment.NewLine, files);
-    }
-
-    private static async Task<bool> HasSeedMarkerAsync(SqliteConnection connection, CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT 1 FROM app_metadata WHERE key = $key LIMIT 1;";
-        command.Parameters.AddWithValue("$key", SampleDataSeedMarkerKey);
-        var result = await command.ExecuteScalarAsync(cancellationToken);
-        return result is not null && result != DBNull.Value;
-    }
-
-    private static async Task SetSeedMarkerAsync(SqliteConnection connection, CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            INSERT INTO app_metadata (key, value)
-            VALUES ($key, $value)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value;
-            """;
-        command.Parameters.AddWithValue("$key", SampleDataSeedMarkerKey);
-        command.Parameters.AddWithValue("$value", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
-        await command.ExecuteNonQueryAsync(cancellationToken);
-    }
+    private static bool IsRegexMatch(ClipEntry clip, Regex regex)
+        => regex.IsMatch(clip.Content) ||
+           (!string.IsNullOrWhiteSpace(clip.SourceApp) && regex.IsMatch(clip.SourceApp));
 
     private static async Task<long> EnsureRuleAsync(SqliteConnection connection, SqliteTransaction transaction, SensitivityMatch match, CancellationToken cancellationToken)
     {
@@ -736,4 +619,3 @@ public sealed class ClipStoreService : IClipStoreService
         return (long)(await idCommand.ExecuteScalarAsync(cancellationToken) ?? 0L);
     }
 }
-
