@@ -1,31 +1,34 @@
-﻿using System;
-using System.IO;
+using Clipthrough.Services;
 using Microsoft.Data.Sqlite;
 
 namespace Clipthrough.Database;
 
 public sealed class SqliteConnectionFactory
 {
-    private readonly string _connectionString;
+    private readonly IStorageOptionsService _storageOptionsService;
 
-    public SqliteConnectionFactory()
+    public SqliteConnectionFactory(IStorageOptionsService storageOptionsService)
     {
-        var appDataDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Clipthrough");
+        _storageOptionsService = storageOptionsService;
+    }
 
-        Directory.CreateDirectory(appDataDirectory);
-
-        var databasePath = Path.Combine(appDataDirectory, "clipthrough.db");
-        _connectionString = new SqliteConnectionStringBuilder
+    public SqliteConnection CreateConnection()
+    {
+        var options = _storageOptionsService.Current;
+        var builder = new SqliteConnectionStringBuilder
         {
-            DataSource = databasePath,
+            DataSource = options.DatabasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
             ForeignKeys = true,
             Cache = SqliteCacheMode.Shared,
-        }.ToString();
-    }
+        };
 
-    public SqliteConnection CreateConnection() => new(_connectionString);
+        if (!string.IsNullOrWhiteSpace(options.DatabasePassword))
+        {
+            builder.Password = options.DatabasePassword;
+        }
+
+        return new SqliteConnection(builder.ToString());
+    }
 }
 

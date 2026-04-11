@@ -30,8 +30,11 @@ public static class AppText
         [nameof(SettingsDescriptionText)] = "Adjust keyboard shortcuts, tray behavior, startup, and the maximum stored clip size.",
         [nameof(SettingsLocalHotkeysTitle)] = "Local shortcuts",
         [nameof(SettingsGlobalHotkeyTitle)] = "Global shortcut and capture limits",
+        [nameof(SettingsStorageTitle)] = "Database storage",
         [nameof(SettingsBehaviorTitle)] = "Window behavior",
         [nameof(SettingsClipLimitLabel)] = "Max clip size (KB)",
+        [nameof(SettingsDatabasePathLabel)] = "Database path",
+        [nameof(SettingsDatabasePasswordLabel)] = "Encryption password",
         [nameof(SettingsRegexHotkeyLabel)] = "Toggle regex",
         [nameof(SettingsFavoritesHotkeyLabel)] = "Toggle favorites",
         [nameof(SettingsSensitiveHotkeyLabel)] = "Toggle sensitive",
@@ -43,6 +46,7 @@ public static class AppText
         [nameof(SettingsSaveButtonLabel)] = "Save",
         [nameof(SettingsCancelButtonLabel)] = "Cancel",
         [nameof(SettingsHintText)] = "Enter shortcuts in forms like Alt+R, Ctrl+Shift+F, or F8. The default max clip size is 2 KB. Startup registration applies on Windows.",
+        [nameof(SettingsStorageHintText)] = "The path is stored outside the clip database so you can move or encrypt it. Leave the password empty to keep SQLite unencrypted.",
         [nameof(EmptySelectionTitle)] = "Select a clip",
         [nameof(EmptySelectionDescription)] = "Choose a clip from the left to inspect its content, preview it in context, and review metadata below.",
         [nameof(ImageClipTitle)] = "Image clip",
@@ -63,6 +67,7 @@ public static class AppText
         [nameof(SettingsSavedStatus)] = "Settings saved.",
         [nameof(SettingsInvalidHotkeyFallback)] = "Enter a valid hotkey such as Alt+R.",
         [nameof(SettingsInvalidClipSize)] = "Enter a clip size between 0.25 KB and 1024 KB.",
+        [nameof(SettingsInvalidDatabasePath)] = "Enter a valid absolute database path.",
         [nameof(SelectedClipStateTitle)] = "Selected clip",
         [nameof(EmptySelectionStateTitle)] = "Choose a clip from the list to preview its details.",
         [nameof(ClipboardRefreshingState)] = "Refreshing clipboard library…",
@@ -176,8 +181,11 @@ public static class AppText
     public static string SettingsDescriptionText => Text(nameof(SettingsDescriptionText));
     public static string SettingsLocalHotkeysTitle => Text(nameof(SettingsLocalHotkeysTitle));
     public static string SettingsGlobalHotkeyTitle => Text(nameof(SettingsGlobalHotkeyTitle));
+    public static string SettingsStorageTitle => Text(nameof(SettingsStorageTitle));
     public static string SettingsBehaviorTitle => Text(nameof(SettingsBehaviorTitle));
     public static string SettingsClipLimitLabel => Text(nameof(SettingsClipLimitLabel));
+    public static string SettingsDatabasePathLabel => Text(nameof(SettingsDatabasePathLabel));
+    public static string SettingsDatabasePasswordLabel => Text(nameof(SettingsDatabasePasswordLabel));
     public static string SettingsRegexHotkeyLabel => Text(nameof(SettingsRegexHotkeyLabel));
     public static string SettingsFavoritesHotkeyLabel => Text(nameof(SettingsFavoritesHotkeyLabel));
     public static string SettingsSensitiveHotkeyLabel => Text(nameof(SettingsSensitiveHotkeyLabel));
@@ -189,6 +197,7 @@ public static class AppText
     public static string SettingsSaveButtonLabel => Text(nameof(SettingsSaveButtonLabel));
     public static string SettingsCancelButtonLabel => Text(nameof(SettingsCancelButtonLabel));
     public static string SettingsHintText => Text(nameof(SettingsHintText));
+    public static string SettingsStorageHintText => Text(nameof(SettingsStorageHintText));
     public static string EmptySelectionTitle => Text(nameof(EmptySelectionTitle));
     public static string EmptySelectionDescription => Text(nameof(EmptySelectionDescription));
     public static string ImageClipTitle => Text(nameof(ImageClipTitle));
@@ -209,6 +218,7 @@ public static class AppText
     public static string SettingsSavedStatus => Text(nameof(SettingsSavedStatus));
     public static string SettingsInvalidHotkeyFallback => Text(nameof(SettingsInvalidHotkeyFallback));
     public static string SettingsInvalidClipSize => Text(nameof(SettingsInvalidClipSize));
+    public static string SettingsInvalidDatabasePath => Text(nameof(SettingsInvalidDatabasePath));
     public static string SelectedClipStateTitle => Text(nameof(SelectedClipStateTitle));
     public static string EmptySelectionStateTitle => Text(nameof(EmptySelectionStateTitle));
     public static string ClipboardRefreshingState => Text(nameof(ClipboardRefreshingState));

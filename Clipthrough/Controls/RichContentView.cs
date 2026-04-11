@@ -1,19 +1,21 @@
-﻿using System;
+using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Text.RegularExpressions;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Media;
 using AvRichTextBox;
 using Clipthrough.Localization;
+using Clipthrough.Models;
 
 namespace Clipthrough.Controls;
 
 public sealed class RichContentView : UserControl
 {
     public static readonly StyledProperty<string?> MarkupProperty = AvaloniaProperty.Register<RichContentView, string?>(nameof(Markup));
-
-    private static readonly Regex s_htmlRegex = new(@"<\s*([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    public static readonly StyledProperty<ClipContentFormat> ContentFormatProperty = AvaloniaProperty.Register<RichContentView, ClipContentFormat>(nameof(ContentFormat));
     private static readonly Regex s_cfHtmlHeaderRegex = new(@"(?<name>StartHTML|EndHTML|StartFragment|EndFragment):(?<value>\d{1,10})", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private readonly RichTextBox _richTextBox = new()
@@ -21,6 +23,8 @@ public sealed class RichContentView : UserControl
         IsReadOnly = true,
         ShowDebuggerPanelInDebugMode = false,
         FlowDocument = new FlowDocument(),
+        Background = new SolidColorBrush(Color.Parse("#0F172A")),
+        Foreground = new SolidColorBrush(Color.Parse("#E2E8F0")),
     };
 
     public RichContentView()
@@ -36,6 +40,12 @@ public sealed class RichContentView : UserControl
         set => SetValue(MarkupProperty, value);
     }
 
+    public ClipContentFormat ContentFormat
+    {
+        get => GetValue(ContentFormatProperty);
+        set => SetValue(ContentFormatProperty, value);
+    }
+
     private void RenderContent(string? content)
     {
         _richTextBox.CreateNewDocument();
@@ -48,21 +58,25 @@ public sealed class RichContentView : UserControl
 
         try
         {
-            if (LooksLikeHtml(content))
+            if (ContentFormat == ClipContentFormat.Html)
             {
                 _richTextBox.LoadHtml(NormalizeHtmlForDisplay(content));
                 return;
             }
 
-            if (LooksLikeRtf(content))
+            if (ContentFormat == ClipContentFormat.Rtf)
             {
                 _richTextBox.LoadRtf(content);
                 return;
             }
         }
-        catch
+        catch (InvalidOperationException ex)
         {
-            // Fall back to a simple HTML-encoded text rendering if the source markup is malformed.
+            Trace.TraceWarning($"Rich content render failed: {ex.Message}");
+        }
+        catch (ArgumentException ex)
+        {
+            Trace.TraceWarning($"Rich content render failed: {ex.Message}");
         }
 
         LoadPlainText(content);
@@ -75,14 +89,8 @@ public sealed class RichContentView : UserControl
             .Replace("\n", "<br/>", StringComparison.Ordinal)
             .Replace("\r", "<br/>", StringComparison.Ordinal);
 
-        _richTextBox.LoadHtml($"<html><body><p>{encoded}</p></body></html>");
+        _richTextBox.LoadHtml($"<html><body style=\"background:#0F172A;color:#E2E8F0;font-family:Inter,Segoe UI,sans-serif;\"><p>{encoded}</p></body></html>");
     }
-
-    private static bool LooksLikeHtml(string content)
-        => s_htmlRegex.IsMatch(content) || content.StartsWith("Version:", StringComparison.OrdinalIgnoreCase);
-
-    private static bool LooksLikeRtf(string content)
-        => content.TrimStart().StartsWith(@"{\rtf", StringComparison.OrdinalIgnoreCase);
 
     private void OnLoaded(object? sender, EventArgs e)
     {
@@ -93,7 +101,7 @@ public sealed class RichContentView : UserControl
     {
         if (!content.StartsWith("Version:", StringComparison.OrdinalIgnoreCase))
         {
-            return content;
+            return WrapInTheme(content);
         }
 
         var startFragmentMarker = "<!--StartFragment-->";
@@ -103,7 +111,7 @@ public sealed class RichContentView : UserControl
         if (markerStart >= 0 && markerEnd > markerStart)
         {
             var fragmentStart = markerStart + startFragmentMarker.Length;
-            return content[fragmentStart..markerEnd].Trim();
+            return WrapInTheme(content[fragmentStart..markerEnd].Trim());
         }
 
         var offsets = s_cfHtmlHeaderRegex.Matches(content)
@@ -115,11 +123,26 @@ public sealed class RichContentView : UserControl
             && endHtml > startHtml
             && endHtml <= content.Length)
         {
-            return content[startHtml..endHtml].Trim();
+            return WrapInTheme(content[startHtml..endHtml].Trim());
         }
 
         var htmlIndex = content.IndexOf('<');
-        return htmlIndex >= 0 ? content[htmlIndex..].Trim() : content;
+        return WrapInTheme(htmlIndex >= 0 ? content[htmlIndex..].Trim() : content);
+    }
+
+    private static string WrapInTheme(string html)
+    {
+        if (html.Contains("<body", StringComparison.OrdinalIgnoreCase))
+        {
+            return Regex.Replace(
+                html,
+                "<body([^>]*)>",
+                "<body$1 style=\"background:#0F172A;color:#E2E8F0;font-family:Inter,Segoe UI,sans-serif;\">",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                TimeSpan.FromMilliseconds(100));
+        }
+
+        return $"<html><body style=\"background:#0F172A;color:#E2E8F0;font-family:Inter,Segoe UI,sans-serif;\">{html}</body></html>";
     }
 }
 

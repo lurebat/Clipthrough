@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Clipthrough.Database;
 using Clipthrough.Models;
+using Clipthrough.Presentation;
 using Microsoft.Data.Sqlite;
 
 namespace Clipthrough.Services;
@@ -103,6 +104,7 @@ public sealed class ClipSampleDataService : IClipSampleDataService
         await _clipStoreService.CaptureAsync(new ClipCaptureRequest
         {
             ContentType = ContentType.Files,
+            ContentFormat = ClipContentFormat.FileList,
             ContentText = fileContent,
             ContentBytes = Encoding.UTF8.GetBytes(fileContent),
             SourceApp = "Explorer",
@@ -120,6 +122,7 @@ public sealed class ClipSampleDataService : IClipSampleDataService
             return new ClipCaptureRequest
             {
                 ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
                 ContentText = seededContent,
                 ContentBytes = Encoding.UTF8.GetBytes(seededContent),
                 SourceApp = sourceApp,
@@ -138,6 +141,7 @@ public sealed class ClipSampleDataService : IClipSampleDataService
             return new ClipCaptureRequest
             {
                 ContentType = ContentType.Files,
+                ContentFormat = ClipContentFormat.FileList,
                 ContentText = seededContent,
                 ContentBytes = Encoding.UTF8.GetBytes(seededContent),
                 SourceApp = sourceApp,
@@ -155,7 +159,8 @@ public sealed class ClipSampleDataService : IClipSampleDataService
             return new ClipCaptureRequest
             {
                 ContentType = ContentType.RichText,
-                ContentText = seededContent,
+                ContentFormat = ClipContentFormat.Html,
+                ContentText = ClipDisplayFormatter.RenderRichContent(seededContent),
                 ContentBytes = Encoding.UTF8.GetBytes(seededContent),
                 SourceApp = sourceApp,
                 IncrementExistingCopyCount = false,
@@ -199,6 +204,7 @@ public sealed class ClipSampleDataService : IClipSampleDataService
             return new ClipCaptureRequest
             {
                 ContentType = ContentType.Image,
+                ContentFormat = ClipContentFormat.Bitmap,
                 ContentBytes = bytes,
                 SourceApp = sourceApp,
                 ImageWidth = width,

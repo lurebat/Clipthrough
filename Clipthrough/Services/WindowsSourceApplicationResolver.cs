@@ -1,0 +1,133 @@
+using System;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
+using System.Runtime.InteropServices;
+
+namespace Clipthrough.Services;
+
+internal sealed class WindowsSourceApplicationResolver
+{
+    public ClipboardSourceApplicationInfo? TryResolve()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+
+        try
+        {
+            return ResolveCore();
+        }
+        catch (Win32Exception ex)
+        {
+            Trace.TraceWarning($"Source app lookup failed: {ex.Message}");
+            return null;
+        }
+        catch (InvalidOperationException ex)
+        {
+            Trace.TraceWarning($"Source app lookup failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static ClipboardSourceApplicationInfo? ResolveCore()
+    {
+        var owner = GetClipboardOwner();
+        if (owner == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        _ = GetWindowThreadProcessId(owner, out var processId);
+        if (processId == 0)
+        {
+            return null;
+        }
+
+        using var process = Process.GetProcessById((int)processId);
+        var processPath = TryGetProcessPath(process);
+        var name = TryGetProcessName(process, processPath);
+        var iconBytes = TryGetProcessIcon(processPath);
+
+        return string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(processPath) && iconBytes is null
+            ? null
+            : new ClipboardSourceApplicationInfo(name, processPath, iconBytes);
+    }
+
+    private static string? TryGetProcessPath(Process process)
+    {
+        try
+        {
+            return process.MainModule?.FileName;
+        }
+        catch (Win32Exception)
+        {
+            return null;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static string? TryGetProcessName(Process process, string? processPath)
+    {
+        if (!string.IsNullOrWhiteSpace(processPath))
+        {
+            try
+            {
+                var description = FileVersionInfo.GetVersionInfo(processPath).FileDescription;
+                if (!string.IsNullOrWhiteSpace(description))
+                {
+                    return description;
+                }
+            }
+            catch (FileNotFoundException)
+            {
+            }
+        }
+
+        return string.IsNullOrWhiteSpace(process.ProcessName) ? null : process.ProcessName;
+    }
+
+    private static byte[]? TryGetProcessIcon(string? processPath)
+    {
+        if (string.IsNullOrWhiteSpace(processPath) || !File.Exists(processPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var icon = Icon.ExtractAssociatedIcon(processPath);
+            if (icon is null)
+            {
+                return null;
+            }
+
+            using var bitmap = icon.ToBitmap();
+            using var stream = new MemoryStream();
+            bitmap.Save(stream, ImageFormat.Png);
+            return stream.ToArray();
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+        catch (ExternalException)
+        {
+            return null;
+        }
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetClipboardOwner();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+}
+
+internal sealed record ClipboardSourceApplicationInfo(string? Name, string? Path, byte[]? IconBytes);

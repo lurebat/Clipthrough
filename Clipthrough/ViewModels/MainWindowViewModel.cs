@@ -39,6 +39,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly IClipSampleDataService _clipSampleDataService;
     private readonly ISettingsService _settingsService;
     private readonly ISystemInteractionService _systemInteractionService;
+    private readonly IStorageOptionsService _storageOptionsService;
     private readonly DatabaseInitializer _databaseInitializer;
     private readonly CompositeDisposable _subscriptions = new();
 
@@ -72,14 +73,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _settingsToggleCaseSensitiveHotkey = AppSettings.Default.ToggleCaseSensitiveHotkey;
     private string _settingsToggleWindowHotkey = AppSettings.Default.ToggleWindowHotkey;
     private string _settingsMaxClipSizeKilobytes = (AppSettings.Default.MaxClipSizeBytes / 1024d).ToString("0.##", CultureInfo.InvariantCulture);
+    private string _settingsDatabasePath = StorageOptions.Default.DatabasePath;
+    private string _settingsDatabasePassword = StorageOptions.Default.DatabasePassword;
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, DatabaseInitializer databaseInitializer)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, DatabaseInitializer databaseInitializer)
     {
         _clipStoreService = clipStoreService;
         _clipboardMonitorService = clipboardMonitorService;
         _clipSampleDataService = clipSampleDataService;
         _settingsService = settingsService;
         _systemInteractionService = systemInteractionService;
+        _storageOptionsService = storageOptionsService;
         _databaseInitializer = databaseInitializer;
         ContentTypeOptions =
         [
@@ -352,7 +356,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string SettingsGlobalHotkeyTitle => AppText.SettingsGlobalHotkeyTitle;
 
+    public string SettingsStorageTitle => AppText.SettingsStorageTitle;
+
     public string SettingsClipLimitLabel => AppText.SettingsClipLimitLabel;
+
+    public string SettingsDatabasePathLabel => AppText.SettingsDatabasePathLabel;
+
+    public string SettingsDatabasePasswordLabel => AppText.SettingsDatabasePasswordLabel;
 
     public string SettingsRegexHotkeyLabel => AppText.SettingsRegexHotkeyLabel;
 
@@ -369,6 +379,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string SettingsCancelButtonLabel => AppText.SettingsCancelButtonLabel;
 
     public string SettingsHintText => AppText.SettingsHintText;
+
+    public string SettingsStorageHintText => AppText.SettingsStorageHintText;
 
     public string EmptySelectionTitleText => AppText.EmptySelectionTitle;
 
@@ -430,6 +442,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string SelectedClipContentTypeText => SelectedClip?.DisplayContentType ?? AppText.SelectClipTypeFallback;
 
+    public ClipContentFormat SelectedClipContentFormat => SelectedClip?.Clip.ContentFormat ?? ClipContentFormat.PlainText;
+
     public string SelectedClipTitleText => SelectedClip?.Title ?? AppText.SelectClipTitleFallback;
 
     public string SelectedClipSourceText => SelectedClip?.SourceApp ?? AppText.UnknownSource;
@@ -447,6 +461,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string SelectedClipByteSizeText => SelectedClip?.ByteSizeDisplay ?? AppText.FormatByteCount(0);
 
     public string SelectedClipImageResolutionText => SelectedClip?.ImageResolutionDisplay ?? AppText.NotAvailable;
+
+    public bool ShowSelectedImageResolutionCard => SelectedClip?.Clip.ContentType == ContentType.Image;
 
     public string SelectedClipSensitivityText => SelectedClip?.SensitivitySummary ?? AppText.NoClipSelected;
 
@@ -576,6 +592,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => this.RaiseAndSetIfChanged(ref _settingsMaxClipSizeKilobytes, value);
     }
 
+    public string SettingsDatabasePath
+    {
+        get => _settingsDatabasePath;
+        set => this.RaiseAndSetIfChanged(ref _settingsDatabasePath, value);
+    }
+
+    public string SettingsDatabasePassword
+    {
+        get => _settingsDatabasePassword;
+        set => this.RaiseAndSetIfChanged(ref _settingsDatabasePassword, value);
+    }
+
     public void Dispose()
     {
         _clipboardMonitorService.Stop();
@@ -701,7 +729,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         if (SelectedClip.Clip.ContentType == ContentType.RichText)
         {
-            await _systemInteractionService.CopyRichContentAsync(SelectedClip.FullContent, SelectedClipRenderedText);
+            await _systemInteractionService.CopyRichContentAsync(SelectedClip.FullContent, SelectedClipRenderedText, SelectedClip.Clip.ContentFormat);
             StatusText = AppText.FormatCopiedClip(SelectedClip.DisplayContentType.ToLower(AppText.CurrentCulture));
             return;
         }
@@ -808,6 +836,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(SelectedClipImagePreview));
         this.RaisePropertyChanged(nameof(SelectedClipImageHint));
         this.RaisePropertyChanged(nameof(SelectedClipContentTypeText));
+        this.RaisePropertyChanged(nameof(SelectedClipContentFormat));
         this.RaisePropertyChanged(nameof(SelectedClipTitleText));
         this.RaisePropertyChanged(nameof(SelectedClipSourceText));
         this.RaisePropertyChanged(nameof(SelectedClipSourceAppIcon));
@@ -817,6 +846,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(SelectedClipCopyCountText));
         this.RaisePropertyChanged(nameof(SelectedClipByteSizeText));
         this.RaisePropertyChanged(nameof(SelectedClipImageResolutionText));
+        this.RaisePropertyChanged(nameof(ShowSelectedImageResolutionCard));
         this.RaisePropertyChanged(nameof(SelectedClipSensitivityText));
         this.RaisePropertyChanged(nameof(SelectedClipAccentBrush));
         this.RaisePropertyChanged(nameof(SelectedClipAreaBorderBrush));
@@ -851,7 +881,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private bool TryHandleShortcut(KeyEventArgs e, string hotkeyText, Action action)
     {
-        if (!HotkeyGesture.TryParse(hotkeyText, out var hotkey, out _) || hotkey is null || !hotkey.Matches(e))
+        if (!TryParseAvaloniaGesture(hotkeyText, out var gesture)
+            || gesture is null
+            || NormalizeKey(e.Key, e.PhysicalKey) != gesture.Key
+            || (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Meta)) != gesture.KeyModifiers)
         {
             return false;
         }
@@ -874,28 +907,36 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task SaveSettingsAsync()
     {
-        var hotkeys = new Dictionary<string, string>(StringComparer.Ordinal)
+        var localHotkeys = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [nameof(AppSettings.ToggleRegexHotkey)] = SettingsToggleRegexHotkey,
             [nameof(AppSettings.ToggleFavoritesHotkey)] = SettingsToggleFavoritesHotkey,
             [nameof(AppSettings.ToggleSensitiveHotkey)] = SettingsToggleSensitiveHotkey,
             [nameof(AppSettings.ToggleCaseSensitiveHotkey)] = SettingsToggleCaseSensitiveHotkey,
-            [nameof(AppSettings.ToggleWindowHotkey)] = SettingsToggleWindowHotkey,
         };
 
         var normalizedHotkeys = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var pair in hotkeys)
+        foreach (var pair in localHotkeys)
         {
-            if (!HotkeyGesture.TryParse(pair.Value, out var gesture, out var error) || gesture is null)
+            if (!TryParseAvaloniaGesture(pair.Value, out var gesture) || gesture is null)
             {
-                StatusText = AppText.FormatSettingsValidationError(error ?? AppText.SettingsInvalidHotkeyFallback);
+                StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidHotkeyFallback);
                 return;
             }
 
             normalizedHotkeys[pair.Key] = gesture.ToString();
         }
 
+        if (!HotkeyGesture.TryParse(SettingsToggleWindowHotkey, out var globalHotkey, out var globalHotkeyError) || globalHotkey is null)
+        {
+            StatusText = AppText.FormatSettingsValidationError(globalHotkeyError ?? AppText.SettingsInvalidHotkeyFallback);
+            return;
+        }
+
+        var normalizedGlobalHotkey = globalHotkey.ToString();
+
         var duplicates = normalizedHotkeys.Values
+            .Append(normalizedGlobalHotkey)
             .GroupBy(static value => value, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault(static group => group.Count() > 1);
         if (duplicates is not null)
@@ -910,16 +951,33 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        StorageOptions storageOptions;
+        try
+        {
+            storageOptions = new StorageOptions
+            {
+                DatabasePath = SettingsDatabasePath,
+                DatabasePassword = SettingsDatabasePassword,
+            }.Normalize();
+        }
+        catch (Exception)
+        {
+            StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidDatabasePath);
+            return;
+        }
+
         var settings = new AppSettings
         {
             ToggleRegexHotkey = normalizedHotkeys[nameof(AppSettings.ToggleRegexHotkey)],
             ToggleFavoritesHotkey = normalizedHotkeys[nameof(AppSettings.ToggleFavoritesHotkey)],
             ToggleSensitiveHotkey = normalizedHotkeys[nameof(AppSettings.ToggleSensitiveHotkey)],
             ToggleCaseSensitiveHotkey = normalizedHotkeys[nameof(AppSettings.ToggleCaseSensitiveHotkey)],
-            ToggleWindowHotkey = normalizedHotkeys[nameof(AppSettings.ToggleWindowHotkey)],
+            ToggleWindowHotkey = normalizedGlobalHotkey,
             MaxClipSizeBytes = maxClipSizeBytes,
         };
 
+        await _storageOptionsService.SaveAsync(storageOptions);
+        await _databaseInitializer.InitializeAsync();
         await _settingsService.SaveAsync(settings);
         IsSettingsOpen = false;
         StatusText = AppText.SettingsSavedStatus;
@@ -935,6 +993,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsToggleCaseSensitiveHotkey = settings.ToggleCaseSensitiveHotkey;
         SettingsToggleWindowHotkey = settings.ToggleWindowHotkey;
         SettingsMaxClipSizeKilobytes = (settings.MaxClipSizeBytes / 1024d).ToString("0.##", CultureInfo.InvariantCulture);
+        SettingsDatabasePath = _storageOptionsService.Current.DatabasePath;
+        SettingsDatabasePassword = _storageOptionsService.Current.DatabasePassword;
     }
 
     private void OnSettingsChanged(object? sender, AppSettings settings)
@@ -972,6 +1032,71 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         maxClipSizeBytes = bytes;
         return true;
     }
+
+    private static bool TryParseAvaloniaGesture(string? value, out KeyGesture? gesture)
+    {
+        gesture = null;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        try
+        {
+            gesture = KeyGesture.Parse(value.Trim());
+            return true;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private static Key NormalizeKey(Key key, PhysicalKey physicalKey)
+        => key != Key.None ? key : physicalKey switch
+        {
+            PhysicalKey.A => Key.A,
+            PhysicalKey.B => Key.B,
+            PhysicalKey.C => Key.C,
+            PhysicalKey.D => Key.D,
+            PhysicalKey.E => Key.E,
+            PhysicalKey.F => Key.F,
+            PhysicalKey.G => Key.G,
+            PhysicalKey.H => Key.H,
+            PhysicalKey.I => Key.I,
+            PhysicalKey.J => Key.J,
+            PhysicalKey.K => Key.K,
+            PhysicalKey.L => Key.L,
+            PhysicalKey.M => Key.M,
+            PhysicalKey.N => Key.N,
+            PhysicalKey.O => Key.O,
+            PhysicalKey.P => Key.P,
+            PhysicalKey.Q => Key.Q,
+            PhysicalKey.R => Key.R,
+            PhysicalKey.S => Key.S,
+            PhysicalKey.T => Key.T,
+            PhysicalKey.U => Key.U,
+            PhysicalKey.V => Key.V,
+            PhysicalKey.W => Key.W,
+            PhysicalKey.X => Key.X,
+            PhysicalKey.Y => Key.Y,
+            PhysicalKey.Z => Key.Z,
+            PhysicalKey.Digit0 => Key.D0,
+            PhysicalKey.Digit1 => Key.D1,
+            PhysicalKey.Digit2 => Key.D2,
+            PhysicalKey.Digit3 => Key.D3,
+            PhysicalKey.Digit4 => Key.D4,
+            PhysicalKey.Digit5 => Key.D5,
+            PhysicalKey.Digit6 => Key.D6,
+            PhysicalKey.Digit7 => Key.D7,
+            PhysicalKey.Digit8 => Key.D8,
+            PhysicalKey.Digit9 => Key.D9,
+            _ => Key.None,
+        };
 
     private void RaiseRenderModeProperties()
     {

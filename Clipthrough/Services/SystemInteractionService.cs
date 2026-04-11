@@ -46,12 +46,12 @@ public sealed class SystemInteractionService : ISystemInteractionService
         await clipboard.FlushAsync();
     }
 
-    public async Task CopyRichContentAsync(string richContent, string plainText)
+    public async Task CopyRichContentAsync(string richContent, string plainText, ClipContentFormat contentFormat)
     {
         var effectivePlainText = string.IsNullOrWhiteSpace(plainText) ? ClipDisplayFormatter.RenderRichContent(richContent) : plainText;
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            if (TryCopyRichContentToWindowsClipboard(richContent, effectivePlainText, out var richCopyError))
+            if (TryCopyRichContentToWindowsClipboard(richContent, effectivePlainText, contentFormat, out var richCopyError))
             {
                 return;
             }
@@ -68,11 +68,12 @@ public sealed class SystemInteractionService : ISystemInteractionService
         var item = new DataTransferItem();
         item.Set(DataFormat.Text, effectivePlainText);
 
-        var formats = LooksLikeHtml(richContent)
-            ? HtmlFormats
-            : LooksLikeRtf(richContent)
-                ? RtfFormats
-                : [];
+        var formats = contentFormat switch
+        {
+            ClipContentFormat.Html => HtmlFormats,
+            ClipContentFormat.Rtf => RtfFormats,
+            _ => [],
+        };
 
         foreach (var format in formats)
         {
@@ -242,9 +243,13 @@ public sealed class SystemInteractionService : ISystemInteractionService
         {
             SyncStartWithWindowsCore(enabled);
         }
-        catch
+        catch (UnauthorizedAccessException ex)
         {
-            // Best-effort: the setting stays persisted even if the registry update fails.
+            Trace.TraceWarning($"Start-with-Windows registration failed: {ex.Message}");
+        }
+        catch (System.Security.SecurityException ex)
+        {
+            Trace.TraceWarning($"Start-with-Windows registration failed: {ex.Message}");
         }
     }
 
@@ -296,7 +301,7 @@ public sealed class SystemInteractionService : ISystemInteractionService
         => ClipboardAccess.GetClipboard();
 
     [SupportedOSPlatform("windows")]
-    private static bool TryCopyRichContentToWindowsClipboard(string richContent, string plainText, out string? error)
+    private static bool TryCopyRichContentToWindowsClipboard(string richContent, string plainText, ClipContentFormat contentFormat, out string? error)
     {
         error = null;
 
@@ -306,7 +311,7 @@ public sealed class SystemInteractionService : ISystemInteractionService
             {
                 SetClipboardDataOrThrow(CfUnicodeText, CreateGlobalTextHandle(plainText, Encoding.Unicode), static handle => _ = GlobalFree(handle));
 
-                if (LooksLikeRtf(richContent))
+                if (contentFormat == ClipContentFormat.Rtf)
                 {
                     var rtfFormat = RegisterClipboardFormat("Rich Text Format");
                     var normalizedRtf = NormalizeRtfForClipboard(richContent);
@@ -314,14 +319,22 @@ public sealed class SystemInteractionService : ISystemInteractionService
                     return;
                 }
 
-                var htmlFormat = RegisterClipboardFormat("HTML Format");
-                var cfHtml = LooksLikeCfHtml(richContent) ? richContent : BuildCfHtml(richContent);
-                SetClipboardDataOrThrow(htmlFormat, CreateGlobalTextHandle(cfHtml, Encoding.UTF8), static handle => _ = GlobalFree(handle));
+                if (contentFormat == ClipContentFormat.Html)
+                {
+                    var htmlFormat = RegisterClipboardFormat("HTML Format");
+                    var cfHtml = LooksLikeCfHtml(richContent) ? richContent : BuildCfHtml(richContent);
+                    SetClipboardDataOrThrow(htmlFormat, CreateGlobalTextHandle(cfHtml, Encoding.UTF8), static handle => _ = GlobalFree(handle));
+                }
             });
 
             return true;
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+        catch (OutOfMemoryException ex)
         {
             error = ex.Message;
             return false;
@@ -359,7 +372,12 @@ public sealed class SystemInteractionService : ISystemInteractionService
 
             return true;
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+        catch (OutOfMemoryException ex)
         {
             error = ex.Message;
             return false;

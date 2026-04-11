@@ -1,0 +1,197 @@
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Security.Cryptography;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using Clipthrough.Models;
+using Microsoft.Data.Sqlite;
+
+namespace Clipthrough.Services;
+
+public sealed class StorageOptionsService : IStorageOptionsService
+{
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly string _configPath;
+
+    public StorageOptionsService()
+    {
+        _configPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Clipthrough",
+            "storage.json");
+
+        Current = LoadFromDisk();
+    }
+
+    public StorageOptions Current { get; private set; }
+
+    public async Task SaveAsync(StorageOptions options, CancellationToken cancellationToken = default)
+    {
+        var normalized = options.Normalize();
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var previous = Current;
+            if (string.Equals(previous.DatabasePath, normalized.DatabasePath, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(previous.DatabasePassword, normalized.DatabasePassword, StringComparison.Ordinal))
+            {
+                await SaveToDiskAsync(normalized, cancellationToken);
+                Current = normalized;
+                return;
+            }
+
+            await ApplyStorageChangesAsync(previous, normalized, cancellationToken);
+            await SaveToDiskAsync(normalized, cancellationToken);
+            Current = normalized;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private async Task ApplyStorageChangesAsync(StorageOptions previous, StorageOptions next, CancellationToken cancellationToken)
+    {
+        var oldPath = previous.DatabasePath;
+        var newPath = next.DatabasePath;
+
+        if (!File.Exists(oldPath))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
+            return;
+        }
+
+        if (!string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
+            if (File.Exists(newPath))
+            {
+                File.Delete(newPath);
+            }
+
+            await using var sourceConnection = OpenConnection(previous);
+            await using var targetConnection = OpenConnection(next);
+            await sourceConnection.OpenAsync(cancellationToken);
+            await targetConnection.OpenAsync(cancellationToken);
+            sourceConnection.BackupDatabase(targetConnection);
+            return;
+        }
+
+        if (string.Equals(previous.DatabasePassword, next.DatabasePassword, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await using var connection = OpenConnection(previous);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA rekey = '{EscapeSqlLiteral(next.DatabasePassword)}';";
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private SqliteConnection OpenConnection(StorageOptions options)
+    {
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = options.DatabasePath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            ForeignKeys = true,
+            Cache = SqliteCacheMode.Shared,
+        };
+
+        if (!string.IsNullOrWhiteSpace(options.DatabasePassword))
+        {
+            builder.Password = options.DatabasePassword;
+        }
+
+        return new SqliteConnection(builder.ToString());
+    }
+
+    private StorageOptions LoadFromDisk()
+    {
+        try
+        {
+            if (!File.Exists(_configPath))
+            {
+                return StorageOptions.Default.Normalize();
+            }
+
+            var json = File.ReadAllText(_configPath);
+            var stored = JsonSerializer.Deserialize<StorageOptionsDocument>(json, JsonOptions);
+            if (stored is null)
+            {
+                return StorageOptions.Default.Normalize();
+            }
+
+            return new StorageOptions
+            {
+                DatabasePath = stored.DatabasePath ?? StorageOptions.GetDefaultDatabasePath(),
+                DatabasePassword = UnprotectPassword(stored.ProtectedDatabasePassword),
+            }.Normalize();
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or CryptographicException or UnauthorizedAccessException)
+        {
+            Trace.TraceWarning($"Storage settings load failed: {ex.Message}");
+            return StorageOptions.Default.Normalize();
+        }
+    }
+
+    private async Task SaveToDiskAsync(StorageOptions options, CancellationToken cancellationToken)
+    {
+        var directory = Path.GetDirectoryName(_configPath)!;
+        Directory.CreateDirectory(directory);
+
+        var document = new StorageOptionsDocument
+        {
+            DatabasePath = options.DatabasePath,
+            ProtectedDatabasePassword = ProtectPassword(options.DatabasePassword),
+        };
+
+        await File.WriteAllTextAsync(_configPath, JsonSerializer.Serialize(document, JsonOptions), cancellationToken);
+    }
+
+    private static string ProtectPassword(string password)
+    {
+        if (string.IsNullOrEmpty(password))
+        {
+            return string.Empty;
+        }
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(password);
+        if (OperatingSystem.IsWindows())
+        {
+            return Convert.ToBase64String(ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser));
+        }
+
+        return Convert.ToBase64String(bytes);
+    }
+
+    private static string UnprotectPassword(string? protectedPassword)
+    {
+        if (string.IsNullOrWhiteSpace(protectedPassword))
+        {
+            return string.Empty;
+        }
+
+        var bytes = Convert.FromBase64String(protectedPassword);
+        if (OperatingSystem.IsWindows())
+        {
+            return System.Text.Encoding.UTF8.GetString(ProtectedData.Unprotect(bytes, null, DataProtectionScope.CurrentUser));
+        }
+
+        return System.Text.Encoding.UTF8.GetString(bytes);
+    }
+
+    private static string EscapeSqlLiteral(string value) => value.Replace("'", "''", StringComparison.Ordinal);
+
+    private sealed class StorageOptionsDocument
+    {
+        public string? DatabasePath { get; init; }
+
+        public string? ProtectedDatabasePassword { get; init; }
+    }
+}

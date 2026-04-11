@@ -25,6 +25,7 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     {
         Clip = clip;
         SourceAppIconImage = ClipBitmapFactory.TryLoad(clip.SourceAppIconBytes);
+        PreviewThumbnailImage = clip.ContentType == ContentType.Image ? ClipBitmapFactory.TryLoad(clip.ContentBytes) : null;
     }
 
     public ClipEntry Clip { get; }
@@ -82,6 +83,12 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     public bool ShowTypeGlyph => !HasSourceAppIcon;
 
+    public Bitmap? PreviewThumbnailImage { get; }
+
+    public bool ShowPreviewThumbnail => PreviewThumbnailImage is not null;
+
+    public bool ShowTextPreview => !ShowPreviewThumbnail;
+
     public string ImageResolutionDisplay => ClipDisplayFormatter.TryGetImageDimensionsDisplay(Clip) ?? AppText.NotAvailable;
 
     public string SourceSummary => HasMultipleCopies
@@ -131,6 +138,7 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        PreviewThumbnailImage?.Dispose();
         SourceAppIconImage?.Dispose();
     }
 

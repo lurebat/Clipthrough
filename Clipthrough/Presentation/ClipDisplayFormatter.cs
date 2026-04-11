@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Net;
+using System.Text;
 using System.Text.RegularExpressions;
 using Clipthrough.Localization;
 using Clipthrough.Models;
@@ -16,6 +17,11 @@ public static class ClipDisplayFormatter
         if (clip.ContentType == ContentType.Image && TryGetImageDimensionsDisplay(clip) is { } dimensions)
         {
             return AppText.FormatImageSummary(dimensions);
+        }
+
+        if (clip.ContentType == ContentType.RichText)
+        {
+            return BuildTitle(RenderRichContent(GetRawMarkup(clip) ?? clip.Content), ContentType.Text);
         }
 
         return BuildTitle(clip.Content, clip.ContentType);
@@ -42,6 +48,11 @@ public static class ClipDisplayFormatter
             return AppText.FormatImageSummary(dimensions);
         }
 
+        if (clip.ContentType == ContentType.RichText)
+        {
+            return BuildPreviewSnippet(RenderRichContent(GetRawMarkup(clip) ?? clip.Content), ContentType.Text);
+        }
+
         return BuildPreviewSnippet(clip.Content, clip.ContentType);
     }
 
@@ -63,6 +74,11 @@ public static class ClipDisplayFormatter
         if (clip.ContentType == ContentType.Image && TryGetImageDimensionsDisplay(clip) is { } dimensions)
         {
             return AppText.FormatImageSummary(dimensions);
+        }
+
+        if (clip.ContentType == ContentType.RichText)
+        {
+            return BuildSingleLinePreview(RenderRichContent(GetRawMarkup(clip) ?? clip.Content), ContentType.Text);
         }
 
         return BuildSingleLinePreview(clip.Content, clip.ContentType);
@@ -101,7 +117,7 @@ public static class ClipDisplayFormatter
 
         return clip.ContentType switch
         {
-            ContentType.RichText => RenderRichContent(clip.Content),
+            ContentType.RichText => RenderRichContent(GetRawMarkup(clip) ?? clip.Content),
             ContentType.Files => fileItems.Count == 0
                 ? NormalizePreviewText(clip.Content)
                 : AppText.FormatFileCount(fileItems.Count),
@@ -114,6 +130,12 @@ public static class ClipDisplayFormatter
         if (clip is null)
         {
             return AppText.PreviewSelectRawContent;
+        }
+
+        var rawMarkup = GetRawMarkup(clip);
+        if (!string.IsNullOrWhiteSpace(rawMarkup))
+        {
+            return rawMarkup;
         }
 
         if (!string.IsNullOrWhiteSpace(clip.Content))
@@ -180,6 +202,20 @@ public static class ClipDisplayFormatter
         }
 
         return AppText.FormatImageDimensions(width, height);
+    }
+
+    public static string? GetRawMarkup(ClipEntry? clip)
+    {
+        if (clip is null || clip.ContentBytes is not { Length: > 0 } bytes)
+        {
+            return null;
+        }
+
+        return clip.ContentFormat switch
+        {
+            ClipContentFormat.Html or ClipContentFormat.Rtf => Encoding.UTF8.GetString(bytes),
+            _ => null,
+        };
     }
 
     public static string ToRelativeTime(DateTimeOffset timestamp)

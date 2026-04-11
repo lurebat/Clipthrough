@@ -113,9 +113,15 @@
                                             <StackPanel Grid.Column="1"
                                                         VerticalAlignment="Center"
                                                         Spacing="2">
+                                                <Image Source="{Binding PreviewThumbnailImage}"
+                                                       Width="84"
+                                                       Height="48"
+                                                       Stretch="UniformToFill"
+                                                       IsVisible="{Binding ShowPreviewThumbnail}" />
                                                 <TextBlock Classes="clip-row-preview"
                                                            Text="{Binding SingleLinePreview}"
-                                                           TextTrimming="CharacterEllipsis" />
+                                                           TextTrimming="CharacterEllipsis"
+                                                           IsVisible="{Binding ShowTextPreview}" />
                                                 <StackPanel Orientation="Horizontal"
                                                             Spacing="6">
                                                     <TextBlock Classes="clip-row-date"
@@ -262,7 +268,8 @@
                                      Text="{Binding SelectedClipRenderedText}" />
 
                             <controls:RichContentView IsVisible="{Binding ShowSelectedRichTextRenderer}"
-                                                      Markup="{Binding SelectedClipRawContent}" />
+                                                      Markup="{Binding SelectedClipRawContent}"
+                                                      ContentFormat="{Binding SelectedClipContentFormat}" />
 
                             <Grid IsVisible="{Binding ShowSelectedFilesRenderer}"
                                   Margin="14">
@@ -441,6 +448,9 @@
                         <Border Grid.Column="5"
                                 Classes="detail-stat-card"
                                 Padding="12,10">
+                            <Border.IsVisible>
+                                <Binding Path="ShowSelectedImageResolutionCard" />
+                            </Border.IsVisible>
                             <StackPanel Spacing="4">
                                 <TextBlock Classes="detail-label"
                                            Text="{Binding ResolutionLabelText}" />
@@ -493,10 +503,10 @@
                 Classes="settings-backdrop"
                 IsVisible="{Binding IsSettingsOpen}">
             <Border Classes="surface-panel settings-sheet"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    MaxWidth="720"
-                    Padding="18">
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center"
+                     MaxWidth="980"
+                     Padding="18">
                 <Grid RowDefinitions="Auto,Auto,*,Auto"
                       RowSpacing="12">
                     <StackPanel Spacing="4">
@@ -513,7 +523,7 @@
                                TextWrapping="Wrap" />
 
                     <Grid Grid.Row="2"
-                          ColumnDefinitions="*,*"
+                          ColumnDefinitions="*,*,*"
                           ColumnSpacing="18">
                         <Border Classes="inset-panel"
                                 Padding="14">
@@ -565,6 +575,31 @@
                                                Text="{Binding SettingsClipLimitLabel}" />
                                     <TextBox Text="{Binding SettingsMaxClipSizeKilobytes}" />
                                 </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="2"
+                                Classes="inset-panel"
+                                Padding="14">
+                            <StackPanel Spacing="12">
+                                <TextBlock Classes="panel-caption"
+                                           Text="{Binding SettingsStorageTitle}" />
+
+                                <StackPanel Spacing="6">
+                                    <TextBlock Classes="detail-label"
+                                               Text="{Binding SettingsDatabasePathLabel}" />
+                                    <TextBox Text="{Binding SettingsDatabasePath}" />
+                                </StackPanel>
+
+                                <StackPanel Spacing="6">
+                                    <TextBlock Classes="detail-label"
+                                               Text="{Binding SettingsDatabasePasswordLabel}" />
+                                    <TextBox Text="{Binding SettingsDatabasePassword}" />
+                                </StackPanel>
+
+                                <TextBlock Classes="body-muted"
+                                           Text="{Binding SettingsStorageHintText}"
+                                           TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
                     </Grid>

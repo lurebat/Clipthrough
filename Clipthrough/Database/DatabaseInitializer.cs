@@ -19,6 +19,7 @@ public sealed class DatabaseInitializer
             content      TEXT,
             content_bytes BLOB,
             content_type TEXT NOT NULL,
+            content_format TEXT NOT NULL DEFAULT 'text',
             source_app   TEXT,
             source_app_path TEXT,
             source_app_icon BLOB,
@@ -110,6 +111,7 @@ public sealed class DatabaseInitializer
         await EnsureClipAggregationColumnsAsync(connection, cancellationToken);
         await EnsureClipPayloadColumnsAsync(connection, cancellationToken);
         await BackfillClipAggregationColumnsAsync(connection, cancellationToken);
+        await BackfillClipPayloadColumnsAsync(connection, cancellationToken);
         await DeduplicateClipsByHashAsync(connection, cancellationToken);
         await EnsureUniqueClipHashIndexAsync(connection, cancellationToken);
         await RebuildClipSearchIndexAsync(connection, cancellationToken);
@@ -186,6 +188,11 @@ public sealed class DatabaseInitializer
             await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN source_app_path TEXT;", cancellationToken);
         }
 
+        if (!existingColumns.Contains("content_format"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN content_format TEXT NOT NULL DEFAULT 'text';", cancellationToken);
+        }
+
         if (!existingColumns.Contains("source_app_icon"))
         {
             await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN source_app_icon BLOB;", cancellationToken);
@@ -200,6 +207,21 @@ public sealed class DatabaseInitializer
         {
             await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN image_height INTEGER;", cancellationToken);
         }
+    }
+
+    private static async Task BackfillClipPayloadColumnsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await ExecuteNonQueryAsync(connection, """
+            UPDATE clips
+            SET content_format = CASE
+                WHEN content_type = 'image' THEN 'bitmap'
+                WHEN content_type = 'files' THEN 'files'
+                WHEN content_type = 'richtext' AND content LIKE '{\\rtf%' THEN 'rtf'
+                WHEN content_type = 'richtext' THEN 'html'
+                ELSE 'text'
+            END
+            WHERE content_format IS NULL OR TRIM(content_format) = '';
+            """, cancellationToken);
     }
 
     private static async Task BackfillClipAggregationColumnsAsync(SqliteConnection connection, CancellationToken cancellationToken)

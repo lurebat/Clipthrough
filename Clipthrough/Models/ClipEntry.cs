@@ -13,6 +13,8 @@ public sealed class ClipEntry
 
     public ContentType ContentType { get; init; } = ContentType.Text;
 
+    public ClipContentFormat ContentFormat { get; init; } = ClipContentFormat.PlainText;
+
     public string? SourceApp { get; init; }
 
     public string? SourceAppPath { get; init; }

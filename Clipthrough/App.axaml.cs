@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -69,6 +70,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
+            Trace.TraceError($"Application startup failed: {ex}");
             mainWindowViewModel.ReportStartupFailure(ex);
         }
     }
@@ -77,12 +79,13 @@ public partial class App : Application
     {
         var services = new ServiceCollection();
 
+        services.AddSingleton<IStorageOptionsService, StorageOptionsService>();
         services.AddSingleton<SqliteConnectionFactory>();
         services.AddSingleton<ISensitivityService, SensitivityService>();
         services.AddSingleton<ISettingsService, SettingsService>();
         services.AddSingleton<ISystemInteractionService, SystemInteractionService>();
         services.AddSingleton<DatabaseInitializer>();
-        services.AddSingleton<WindowsClipboardCaptureReader>();
+        services.AddSingleton<WindowsSourceApplicationResolver>();
         services.AddSingleton<IClipStoreService, ClipStoreService>();
         services.AddSingleton<IClipSampleDataService, ClipSampleDataService>();
         services.AddSingleton<IClipboardMonitorService, ClipboardMonitorService>();

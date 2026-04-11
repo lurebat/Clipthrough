@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using System.Diagnostics;
 using System.IO;
 using System.Reactive;
 using System.Threading.Tasks;
@@ -57,6 +58,7 @@ public sealed class ClipFileItemViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            Trace.TraceWarning($"Copy path failed for '{FilePath}': {ex}");
             _statusSink(AppText.FormatCopyFailed(ex.Message));
         }
     }
@@ -70,6 +72,7 @@ public sealed class ClipFileItemViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            Trace.TraceWarning($"Open path failed for '{FilePath}': {ex}");
             _statusSink(AppText.FormatOpenFailed(ex.Message));
         }
     }
@@ -83,6 +86,7 @@ public sealed class ClipFileItemViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            Trace.TraceWarning($"Open containing folder failed for '{FilePath}': {ex}");
             _statusSink(AppText.FormatFolderOpenFailed(ex.Message));
         }
     }

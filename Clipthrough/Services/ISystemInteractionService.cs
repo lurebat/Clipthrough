@@ -10,7 +10,7 @@ public interface ISystemInteractionService
 {
     Task CopyTextAsync(string text);
 
-    Task CopyRichContentAsync(string richContent, string plainText);
+    Task CopyRichContentAsync(string richContent, string plainText, ClipContentFormat contentFormat);
 
     Task CopyBitmapAsync(Bitmap bitmap);
 

@@ -22,6 +22,7 @@ public sealed class ClipStoreService : IClipStoreService
             c.content,
             c.content_bytes,
             c.content_type,
+            c.content_format,
             c.source_app,
             c.source_app_path,
             c.source_app_icon,
@@ -142,7 +143,7 @@ public sealed class ClipStoreService : IClipStoreService
     private async Task<ClipEntry?> InsertClipAsync(ClipCaptureRequest request, CancellationToken cancellationToken)
     {
         var contentText = BuildStoredContentText(request);
-        var hash = ComputeHash(request.ContentType, request.ContentBytes);
+        var hash = ComputeHash(request.ContentType, request.ContentFormat, request.ContentBytes);
         var matches = _sensitivityService.Scan(contentText);
         var capturedAt = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
         var byteSize = request.ContentBytes.LongLength;
@@ -172,6 +173,7 @@ public sealed class ClipStoreService : IClipStoreService
                         UPDATE clips
                         SET content = CASE WHEN $content IS NULL OR TRIM($content) = '' THEN content ELSE $content END,
                             content_bytes = CASE WHEN $contentBytes IS NULL THEN content_bytes ELSE $contentBytes END,
+                            content_format = $contentFormat,
                             source_app = CASE WHEN $sourceApp IS NULL OR TRIM($sourceApp) = '' THEN source_app ELSE $sourceApp END,
                             source_app_path = CASE WHEN $sourceAppPath IS NULL OR TRIM($sourceAppPath) = '' THEN source_app_path ELSE $sourceAppPath END,
                             source_app_icon = CASE WHEN $sourceAppIcon IS NULL THEN source_app_icon ELSE $sourceAppIcon END,
@@ -199,6 +201,7 @@ public sealed class ClipStoreService : IClipStoreService
                         content,
                         content_bytes,
                         content_type,
+                        content_format,
                         source_app,
                         source_app_path,
                         source_app_icon,
@@ -216,6 +219,7 @@ public sealed class ClipStoreService : IClipStoreService
                         $content,
                         $contentBytes,
                         $contentType,
+                        $contentFormat,
                         $sourceApp,
                         $sourceAppPath,
                         $sourceAppIcon,
@@ -375,9 +379,9 @@ public sealed class ClipStoreService : IClipStoreService
 
     private static ClipEntry ReadClip(SqliteDataReader reader)
     {
-        var lastCopiedAt = ParseTimestamp(reader.IsDBNull(12) ? null : reader.GetString(12))
+        var lastCopiedAt = ParseTimestamp(reader.IsDBNull(13) ? null : reader.GetString(13))
             ?? DateTimeOffset.UtcNow;
-        var firstCopiedAt = ParseTimestamp(reader.IsDBNull(11) ? null : reader.GetString(11))
+        var firstCopiedAt = ParseTimestamp(reader.IsDBNull(12) ? null : reader.GetString(12))
             ?? lastCopiedAt;
 
         return new ClipEntry
@@ -386,18 +390,19 @@ public sealed class ClipStoreService : IClipStoreService
             Content = reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
             ContentBytes = ReadBytes(reader, 2),
             ContentType = ContentTypeExtensions.FromStorageValue(reader.GetString(3)),
-            SourceApp = reader.IsDBNull(4) ? null : reader.GetString(4),
-            SourceAppPath = reader.IsDBNull(5) ? null : reader.GetString(5),
-            SourceAppIconBytes = ReadBytes(reader, 6),
-            Hash = reader.GetString(7),
-            IsFavorite = reader.GetInt64(8) == 1,
-            IsSensitive = reader.GetInt64(9) == 1,
-            CopyCount = reader.IsDBNull(10) ? 1 : Convert.ToInt32(reader.GetInt64(10), CultureInfo.InvariantCulture),
+            ContentFormat = ClipContentFormatExtensions.FromStorageValue(reader.GetString(4)),
+            SourceApp = reader.IsDBNull(5) ? null : reader.GetString(5),
+            SourceAppPath = reader.IsDBNull(6) ? null : reader.GetString(6),
+            SourceAppIconBytes = ReadBytes(reader, 7),
+            Hash = reader.GetString(8),
+            IsFavorite = reader.GetInt64(9) == 1,
+            IsSensitive = reader.GetInt64(10) == 1,
+            CopyCount = reader.IsDBNull(11) ? 1 : Convert.ToInt32(reader.GetInt64(11), CultureInfo.InvariantCulture),
             FirstCopiedAt = firstCopiedAt,
             LastCopiedAt = lastCopiedAt,
-            ByteSize = reader.GetInt64(13),
-            ImageWidth = reader.IsDBNull(14) ? null : reader.GetInt32(14),
-            ImageHeight = reader.IsDBNull(15) ? null : reader.GetInt32(15),
+            ByteSize = reader.GetInt64(14),
+            ImageWidth = reader.IsDBNull(15) ? null : reader.GetInt32(15),
+            ImageHeight = reader.IsDBNull(16) ? null : reader.GetInt32(16),
         };
     }
 
@@ -534,6 +539,7 @@ public sealed class ClipStoreService : IClipStoreService
         command.Parameters.AddWithValue("$content", string.IsNullOrWhiteSpace(contentText) ? DBNull.Value : contentText);
         command.Parameters.AddWithValue("$contentBytes", request.ContentBytes.Length == 0 ? DBNull.Value : request.ContentBytes);
         command.Parameters.AddWithValue("$contentType", request.ContentType.ToStorageValue());
+        command.Parameters.AddWithValue("$contentFormat", request.ContentFormat.ToStorageValue());
         command.Parameters.AddWithValue("$sourceApp", string.IsNullOrWhiteSpace(request.SourceApp) ? DBNull.Value : request.SourceApp);
         command.Parameters.AddWithValue("$sourceAppPath", string.IsNullOrWhiteSpace(request.SourceAppPath) ? DBNull.Value : request.SourceAppPath);
         command.Parameters.AddWithValue("$sourceAppIcon", request.SourceAppIconBytes is { Length: > 0 } iconBytes ? iconBytes : DBNull.Value);
@@ -552,6 +558,12 @@ public sealed class ClipStoreService : IClipStoreService
         if (!string.IsNullOrWhiteSpace(request.ContentText))
         {
             return request.ContentText;
+        }
+
+        if ((request.ContentFormat == ClipContentFormat.Html || request.ContentFormat == ClipContentFormat.Rtf)
+            && request.ContentBytes.Length > 0)
+        {
+            return ClipDisplayFormatter.RenderRichContent(Encoding.UTF8.GetString(request.ContentBytes));
         }
 
         if (request.ContentType == ContentType.Image
@@ -579,9 +591,9 @@ public sealed class ClipStoreService : IClipStoreService
             : null;
     }
 
-    private static string ComputeHash(ContentType contentType, byte[] contentBytes)
+    private static string ComputeHash(ContentType contentType, ClipContentFormat contentFormat, byte[] contentBytes)
     {
-        var typeBytes = Encoding.UTF8.GetBytes(contentType.ToStorageValue());
+        var typeBytes = Encoding.UTF8.GetBytes($"{contentType.ToStorageValue()}::{contentFormat.ToStorageValue()}");
         var input = new byte[typeBytes.Length + 1 + contentBytes.Length];
         Buffer.BlockCopy(typeBytes, 0, input, 0, typeBytes.Length);
         Buffer.BlockCopy(contentBytes, 0, input, typeBytes.Length + 1, contentBytes.Length);
