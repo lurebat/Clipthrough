@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
+using Clipthrough.Services;
 
 namespace Clipthrough.Diagnostics;
 
@@ -31,6 +32,7 @@ public static class TraceConfiguration
 
         var stream = new FileStream(LogFilePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
         var writer = new StreamWriter(stream) { AutoFlush = true };
+        Trace.Listeners.Add(SessionLogService.Instance);
         Trace.Listeners.Add(new TextWriterTraceListener(writer, "clipthrough-file"));
         Trace.AutoFlush = true;
 

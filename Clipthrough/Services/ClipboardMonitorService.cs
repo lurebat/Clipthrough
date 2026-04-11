@@ -14,6 +14,7 @@ using Avalonia.Input;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Clipthrough.Localization;
 using Clipthrough.Models;
 using Clipthrough.Presentation;
 
@@ -34,6 +35,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
 
     private readonly IClipStoreService _clipStoreService;
     private readonly WindowsSourceApplicationResolver _sourceApplicationResolver;
+    private readonly IAppNotificationService _notificationService;
     private readonly Subject<ClipEntry> _capturedClips = new();
 
     private Window? _window;
@@ -41,10 +43,11 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     private bool _isHookAttached;
     private bool _isDisposed;
 
-    public ClipboardMonitorService(IClipStoreService clipStoreService, WindowsSourceApplicationResolver sourceApplicationResolver)
+    public ClipboardMonitorService(IClipStoreService clipStoreService, WindowsSourceApplicationResolver sourceApplicationResolver, IAppNotificationService notificationService)
     {
         _clipStoreService = clipStoreService;
         _sourceApplicationResolver = sourceApplicationResolver;
+        _notificationService = notificationService;
     }
 
     public IObservable<ClipEntry> CapturedClips => _capturedClips.AsObservable();
@@ -129,6 +132,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
             if (captureRequest is null)
             {
                 Trace.TraceInformation($"Clipboard change ignored because no supported payload was found. Formats: {availableFormats}");
+                _notificationService.PublishWarning(AppText.ClipCaptureFailedTitle, AppText.ClipCaptureFailedUnsupportedPayload);
                 return;
             }
 
@@ -142,14 +146,17 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
         catch (InvalidOperationException ex)
         {
             Trace.TraceError($"Clipboard capture failed: {ex}");
+            _notificationService.PublishError(AppText.ClipCaptureFailedTitle, ex.Message);
         }
         catch (NotSupportedException ex)
         {
             Trace.TraceError($"Clipboard capture failed: {ex}");
+            _notificationService.PublishError(AppText.ClipCaptureFailedTitle, ex.Message);
         }
         catch (COMException ex)
         {
             Trace.TraceWarning($"Clipboard snapshot skipped because the platform data object could not be enumerated (HRESULT 0x{ex.HResult:X8}): {ex.Message}");
+            _notificationService.PublishWarning(AppText.ClipCaptureFailedTitle, AppText.FormatClipCaptureFailedComSnapshot(ex.HResult));
         }
     }
 

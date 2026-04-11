@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reactive.Subjects;
 using System.Reactive.Linq;
@@ -76,6 +77,58 @@ internal sealed class TestClipSampleDataService : IClipSampleDataService
     public Task SeedAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }
 
+internal sealed class TestNotificationService : IAppNotificationService
+{
+    private readonly Subject<AppNotification> _notifications = new();
+
+    public IObservable<AppNotification> Notifications => _notifications.AsObservable();
+
+    public AppNotification? LastNotification { get; private set; }
+
+    public void Publish(AppNotification notification)
+    {
+        LastNotification = notification;
+        _notifications.OnNext(notification);
+    }
+
+    public void PublishInfo(string title, string message) => Publish(new AppNotification
+    {
+        Title = title,
+        Message = message,
+        Level = AppNotificationLevel.Information,
+    });
+
+    public void PublishWarning(string title, string message) => Publish(new AppNotification
+    {
+        Title = title,
+        Message = message,
+        Level = AppNotificationLevel.Warning,
+    });
+
+    public void PublishError(string title, string message) => Publish(new AppNotification
+    {
+        Title = title,
+        Message = message,
+        Level = AppNotificationLevel.Error,
+    });
+}
+
+internal sealed class TestSessionLogService : ISessionLogService
+{
+    private readonly Subject<SessionLogEntry> _entries = new();
+    private readonly List<SessionLogEntry> _snapshot = [];
+
+    public IObservable<SessionLogEntry> Entries => _entries.AsObservable();
+
+    public IReadOnlyList<SessionLogEntry> Snapshot() => _snapshot.ToArray();
+
+    public void Emit(SessionLogEntry entry)
+    {
+        _snapshot.Insert(0, entry);
+        _entries.OnNext(entry);
+    }
+}
+
 internal sealed class TestSystemInteractionService : ISystemInteractionService
 {
     public string? LastCopiedText { get; private set; }
@@ -131,8 +184,9 @@ internal sealed class TemporaryDatabaseScope : IDisposable
         ConnectionFactory = new SqliteConnectionFactory(StorageOptionsService);
         SensitivityService = new SensitivityService();
         SettingsService = new TestSettingsService();
+        NotificationService = new TestNotificationService();
         DatabaseInitializer = new DatabaseInitializer(ConnectionFactory, SensitivityService);
-        ClipStoreService = new ClipStoreService(ConnectionFactory, SensitivityService, SettingsService);
+        ClipStoreService = new ClipStoreService(ConnectionFactory, SensitivityService, SettingsService, NotificationService);
     }
 
     public string DatabasePath { get; }
@@ -140,6 +194,8 @@ internal sealed class TemporaryDatabaseScope : IDisposable
     public TestStorageOptionsService StorageOptionsService { get; }
 
     public TestSettingsService SettingsService { get; }
+
+    public TestNotificationService NotificationService { get; }
 
     public SqliteConnectionFactory ConnectionFactory { get; }
 

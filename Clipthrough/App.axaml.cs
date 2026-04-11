@@ -7,6 +7,7 @@ using Avalonia.Markup.Xaml;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using Clipthrough.Database;
+using Clipthrough.Localization;
 using Clipthrough.Models;
 using Clipthrough.Services;
 using Clipthrough.ViewModels;
@@ -21,7 +22,9 @@ public partial class App : Application
     private TrayIcon? _trayIcon;
     private ISystemInteractionService? _systemInteractionService;
     private ISettingsService? _settingsService;
+    private IAppNotificationService? _notificationService;
     private bool _isExitRequested;
+    private bool _hasShownTrayNotification;
 
     public App()
     {
@@ -44,6 +47,7 @@ public partial class App : Application
             var mainWindowViewModel = Services.GetRequiredService<MainWindowViewModel>();
             _systemInteractionService = Services.GetRequiredService<ISystemInteractionService>();
             _settingsService = Services.GetRequiredService<ISettingsService>();
+            _notificationService = Services.GetRequiredService<IAppNotificationService>();
 
             _mainWindow = desktop.MainWindow = new MainWindow
             {
@@ -83,6 +87,8 @@ public partial class App : Application
         services.AddSingleton<SqliteConnectionFactory>();
         services.AddSingleton<ISensitivityService, SensitivityService>();
         services.AddSingleton<ISettingsService, SettingsService>();
+        services.AddSingleton<IAppNotificationService, AppNotificationService>();
+        services.AddSingleton<ISessionLogService>(_ => SessionLogService.Instance);
         services.AddSingleton<ISystemInteractionService, SystemInteractionService>();
         services.AddSingleton<DatabaseInitializer>();
         services.AddSingleton<WindowsSourceApplicationResolver>();
@@ -215,6 +221,13 @@ public partial class App : Application
         if (_mainWindow is null)
         {
             return;
+        }
+
+        if (!_hasShownTrayNotification)
+        {
+            _hasShownTrayNotification = true;
+            Trace.TraceInformation("Clipthrough moved to the tray for the first time this session.");
+            _notificationService?.PublishInfo(AppText.TrayNotificationTitle, AppText.TrayNotificationMessage);
         }
 
         Dispatcher.UIThread.Post(() =>

@@ -41,12 +41,14 @@ public sealed class ClipStoreService : IClipStoreService
     private readonly SqliteConnectionFactory _connectionFactory;
     private readonly ISensitivityService _sensitivityService;
     private readonly ISettingsService _settingsService;
+    private readonly IAppNotificationService _notificationService;
 
-    public ClipStoreService(SqliteConnectionFactory connectionFactory, ISensitivityService sensitivityService, ISettingsService settingsService)
+    public ClipStoreService(SqliteConnectionFactory connectionFactory, ISensitivityService sensitivityService, ISettingsService settingsService, IAppNotificationService notificationService)
     {
         _connectionFactory = connectionFactory;
         _sensitivityService = sensitivityService;
         _settingsService = settingsService;
+        _notificationService = notificationService;
     }
 
     public async Task<ClipEntry?> CaptureAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default)
@@ -55,13 +57,17 @@ public sealed class ClipStoreService : IClipStoreService
 
         if (request.ContentBytes.Length == 0)
         {
+            var reason = AppText.ClipCaptureFailedEmptyPayload;
             Trace.TraceWarning($"Skipped clipboard capture because payload was empty. type={request.ContentType} format={request.ContentFormat} source={request.SourceApp ?? "Unknown"}");
+            _notificationService.PublishWarning(AppText.ClipCaptureFailedTitle, reason);
             return null;
         }
 
         if (request.ContentBytes.Length > _settingsService.Current.MaxClipSizeBytes)
         {
+            var reason = AppText.FormatClipCaptureFailedTooLarge(request.ContentBytes.Length, _settingsService.Current.MaxClipSizeBytes);
             Trace.TraceWarning($"Skipped clipboard capture because payload exceeded limit. type={request.ContentType} format={request.ContentFormat} size={request.ContentBytes.Length} limit={_settingsService.Current.MaxClipSizeBytes} source={request.SourceApp ?? "Unknown"}");
+            _notificationService.PublishWarning(AppText.ClipCaptureFailedTitle, reason);
             return null;
         }
 

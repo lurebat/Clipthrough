@@ -525,7 +525,7 @@
         <Border Grid.Row="2"
                 Classes="inset-panel footer-panel"
                 Padding="12,8">
-            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto"
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto"
                   ColumnSpacing="14">
                 <TextBlock Classes="body-muted"
                            Text="{Binding ActiveFilterSummary}"
@@ -541,9 +541,47 @@
                            Text="{Binding LastCaptureSummary}" />
                 <Button Grid.Column="4"
                         Classes="secondary compact"
+                        Command="{Binding OpenLogsCommand}"
+                        Content="{Binding LogsButtonLabel}" />
+                <Button Grid.Column="5"
+                        Classes="secondary compact"
                         Command="{Binding OpenSettingsCommand}"
                         Content="{Binding SettingsButtonLabel}" />
             </Grid>
+        </Border>
+
+        <Border Grid.RowSpan="3"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                Margin="0,16,16,0"
+                IsHitTestVisible="False">
+            <ItemsControl ItemsSource="{Binding Notifications}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:AppNotificationViewModel">
+                        <Border Background="{Binding Background}"
+                                BorderBrush="{Binding BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="10"
+                                Padding="12"
+                                Margin="0,0,0,8"
+                                Width="360"
+                                IsHitTestVisible="False">
+                            <StackPanel Spacing="4">
+                                <Grid ColumnDefinitions="*,Auto"
+                                      ColumnSpacing="12">
+                                    <TextBlock Classes="detail-label"
+                                               Text="{Binding Title}" />
+                                    <TextBlock Grid.Column="1"
+                                               Classes="body-muted"
+                                               Text="{Binding TimestampText}" />
+                                </Grid>
+                                <TextBlock Text="{Binding Message}"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
         </Border>
 
         <Border Grid.RowSpan="3"
@@ -662,6 +700,103 @@
                                 Command="{Binding SaveSettingsCommand}"
                                 Content="{Binding SettingsSaveButtonLabel}" />
                     </StackPanel>
+                </Grid>
+            </Border>
+        </Border>
+
+        <Border Grid.RowSpan="3"
+                Classes="settings-backdrop"
+                IsVisible="{Binding IsLogsOpen}">
+            <Border Classes="surface-panel settings-sheet"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center"
+                     MaxWidth="1100"
+                     MinWidth="840"
+                     Padding="18">
+                <Grid RowDefinitions="Auto,Auto,Auto,*"
+                      RowSpacing="14">
+                    <StackPanel Spacing="4"
+                                HorizontalAlignment="Center">
+                        <TextBlock Classes="panel-title"
+                                   HorizontalAlignment="Center"
+                                   Text="{Binding LogsTitleText}" />
+                        <TextBlock Classes="body-muted"
+                                   HorizontalAlignment="Center"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   MaxWidth="760"
+                                   Text="{Binding LogsDescriptionText}" />
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="1"
+                               Classes="body-muted"
+                               HorizontalAlignment="Center"
+                               Text="{Binding SessionLogCountText}" />
+
+                    <StackPanel Grid.Row="2"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Center"
+                                Spacing="10">
+                        <TextBox Width="420"
+                                 Watermark="{Binding LogsSearchWatermark}"
+                                 Text="{Binding LogSearchText}" />
+                        <ComboBox Width="150"
+                                  ItemsSource="{Binding LogLevelOptions}"
+                                  SelectedItem="{Binding SelectedLogLevelOption}" />
+                        <Button Classes="secondary compact"
+                                Command="{Binding CloseLogsCommand}"
+                                Content="{Binding CloseButtonLabel}" />
+                    </StackPanel>
+
+                    <Border Grid.Row="3"
+                            Classes="inset-panel"
+                            Padding="14">
+                        <Grid>
+                            <TextBlock Classes="empty-state"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       IsVisible="{Binding ShowEmptySessionLogs}"
+                                       Text="{Binding EmptySessionLogsMessage}" />
+
+                            <ListBox ItemsSource="{Binding VisibleSessionLogs}"
+                                     IsVisible="{Binding HasSessionLogs}"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:SessionLogEntryViewModel">
+                                        <Border Background="{Binding LevelBackground}"
+                                                BorderBrush="{Binding LevelBorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="8"
+                                                Margin="0,0,0,8"
+                                                Padding="12">
+                                            <StackPanel Spacing="8"
+                                                        HorizontalAlignment="Center"
+                                                        MaxWidth="920">
+                                                <Grid ColumnDefinitions="Auto,Auto,*"
+                                                      HorizontalAlignment="Center"
+                                                      ColumnSpacing="10">
+                                                    <Border Background="{Binding LevelBackground}"
+                                                            BorderBrush="{Binding LevelBorderBrush}"
+                                                            BorderThickness="1"
+                                                            CornerRadius="999"
+                                                            Padding="8,2">
+                                                        <TextBlock Text="{Binding LevelText}" />
+                                                    </Border>
+                                                    <TextBlock Grid.Column="1"
+                                                               Classes="body-muted"
+                                                               VerticalAlignment="Center"
+                                                               Text="{Binding TimestampText}" />
+                                                </Grid>
+                                                <TextBlock Text="{Binding Message}"
+                                                           TextAlignment="Center"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </Border>
                 </Grid>
             </Border>
         </Border>

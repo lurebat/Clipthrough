@@ -20,7 +20,8 @@ public sealed class MainWindowViewModelHeadlessTests
         using var scope = new TemporaryDatabaseScope();
         var clipboardMonitor = new TestClipboardMonitorService();
         var systemInteraction = new TestSystemInteractionService();
-        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction);
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
         await viewModel.InitializeAsync();
 
@@ -41,7 +42,8 @@ public sealed class MainWindowViewModelHeadlessTests
         using var scope = new TemporaryDatabaseScope();
         var clipboardMonitor = new TestClipboardMonitorService();
         var systemInteraction = new TestSystemInteractionService();
-        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction);
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
         await viewModel.InitializeAsync();
 
@@ -67,7 +69,8 @@ public sealed class MainWindowViewModelHeadlessTests
         using var scope = new TemporaryDatabaseScope();
         var clipboardMonitor = new TestClipboardMonitorService();
         var systemInteraction = new TestSystemInteractionService();
-        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction);
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
         await viewModel.InitializeAsync();
 
@@ -85,10 +88,43 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.Equal(AppText.EditedClipCopiedStatus, viewModel.StatusText);
     }
 
+    [AvaloniaFact]
+    public async Task SessionLogs_FilterByLevelAndSearch()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+
+        await viewModel.InitializeAsync();
+
+        sessionLogService.Emit(new SessionLogEntry
+        {
+            Level = AppNotificationLevel.Information,
+            Message = "Clipboard monitor attached."
+        });
+        sessionLogService.Emit(new SessionLogEntry
+        {
+            Level = AppNotificationLevel.Warning,
+            Message = "Payload exceeded limit."
+        });
+        Dispatcher.UIThread.RunJobs();
+
+        await viewModel.OpenLogsCommand.Execute().ToTask();
+        viewModel.SelectedLogLevelOption = viewModel.LogLevelOptions[2];
+        viewModel.LogSearchText = "limit";
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Single(viewModel.VisibleSessionLogs);
+        Assert.Equal("Payload exceeded limit.", viewModel.VisibleSessionLogs[0].Message);
+    }
+
     private static MainWindowViewModel CreateViewModel(
         TemporaryDatabaseScope scope,
         TestClipboardMonitorService clipboardMonitor,
-        TestSystemInteractionService systemInteraction)
+        TestSystemInteractionService systemInteraction,
+        TestSessionLogService sessionLogService)
     {
         return new MainWindowViewModel(
             scope.ClipStoreService,
@@ -97,6 +133,8 @@ public sealed class MainWindowViewModelHeadlessTests
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
+            scope.NotificationService,
+            sessionLogService,
             scope.DatabaseInitializer);
     }
 

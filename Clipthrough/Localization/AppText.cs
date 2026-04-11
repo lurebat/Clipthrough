@@ -29,7 +29,9 @@ public static class AppText
         [nameof(FavoriteSelectedButtonLabel)] = "Favorite selected",
         [nameof(CopyAsNewButtonLabel)] = "Copy as new",
         [nameof(FavoriteBadgeLabel)] = "Favorite",
+        [nameof(LogsButtonLabel)] = "Logs",
         [nameof(SettingsButtonLabel)] = "Settings",
+        [nameof(CloseButtonLabel)] = "Close",
         [nameof(SettingsTitleText)] = "Settings",
         [nameof(SettingsDescriptionText)] = "Adjust keyboard shortcuts, tray behavior, startup, and the maximum stored clip size.",
         [nameof(SettingsLocalHotkeysTitle)] = "Local shortcuts",
@@ -108,6 +110,15 @@ public static class AppText
         [nameof(ContainingDirectoryNotFound)] = "The containing directory could not be found.",
         [nameof(PathRequired)] = "A path is required.",
         [nameof(JustNow)] = "just now",
+        [nameof(LogsTitleText)] = "Session logs",
+        [nameof(LogsDescriptionText)] = "Review events from the current app session. Filter by level, search by message, and inspect capture failures without leaving the window.",
+        [nameof(LogsSearchWatermark)] = "Search session logs",
+        [nameof(NoLogsMatchFilters)] = "No session logs match the current filters.",
+        [nameof(TrayNotificationTitle)] = "Clipthrough is running in the tray",
+        [nameof(TrayNotificationMessage)] = "The window is hidden, but clipboard capture is still active. Use the tray icon or your global hotkey to bring Clipthrough back.",
+        [nameof(ClipCaptureFailedTitle)] = "Clip capture failed",
+        [nameof(ClipCaptureFailedUnsupportedPayload)] = "The clipboard payload was not a supported text, rich text, image, or file format.",
+        [nameof(ClipCaptureFailedEmptyPayload)] = "The clipboard payload was empty.",
         ["ContentType.Text"] = "Text",
         ["ContentType.Image"] = "Image",
         ["ContentType.RichText"] = "Rich text",
@@ -155,6 +166,13 @@ public static class AppText
         ["Format.RelativeHours"] = "{0} hr ago",
         ["Format.RelativeDaysSingular"] = "{0} day ago",
         ["Format.RelativeDaysPlural"] = "{0} days ago",
+        ["Format.LogCount"] = "{0:N0} session logs",
+        ["Format.ClipCaptureFailedTooLarge"] = "The clipboard payload was too large to store ({0:N0} bytes, limit {1:N0} bytes).",
+        ["Format.ClipCaptureFailedComSnapshot"] = "Clipboard access failed while enumerating formats (HRESULT 0x{0:X8}).",
+        ["LogLevel.All"] = "All levels",
+        ["LogLevel.Information"] = "Info",
+        ["LogLevel.Warning"] = "Warning",
+        ["LogLevel.Error"] = "Error",
         ["Severity.info"] = "Sensitive",
         ["Severity.warning"] = "Warning",
         ["Severity.critical"] = "Critical",
@@ -188,7 +206,9 @@ public static class AppText
     public static string FavoriteSelectedButtonLabel => Text(nameof(FavoriteSelectedButtonLabel));
     public static string CopyAsNewButtonLabel => Text(nameof(CopyAsNewButtonLabel));
     public static string FavoriteBadgeLabel => Text(nameof(FavoriteBadgeLabel));
+    public static string LogsButtonLabel => Text(nameof(LogsButtonLabel));
     public static string SettingsButtonLabel => Text(nameof(SettingsButtonLabel));
+    public static string CloseButtonLabel => Text(nameof(CloseButtonLabel));
     public static string SettingsTitleText => Text(nameof(SettingsTitleText));
     public static string SettingsDescriptionText => Text(nameof(SettingsDescriptionText));
     public static string SettingsLocalHotkeysTitle => Text(nameof(SettingsLocalHotkeysTitle));
@@ -267,6 +287,15 @@ public static class AppText
     public static string ContainingDirectoryNotFound => Text(nameof(ContainingDirectoryNotFound));
     public static string PathRequired => Text(nameof(PathRequired));
     public static string JustNow => Text(nameof(JustNow));
+    public static string LogsTitleText => Text(nameof(LogsTitleText));
+    public static string LogsDescriptionText => Text(nameof(LogsDescriptionText));
+    public static string LogsSearchWatermark => Text(nameof(LogsSearchWatermark));
+    public static string NoLogsMatchFilters => Text(nameof(NoLogsMatchFilters));
+    public static string TrayNotificationTitle => Text(nameof(TrayNotificationTitle));
+    public static string TrayNotificationMessage => Text(nameof(TrayNotificationMessage));
+    public static string ClipCaptureFailedTitle => Text(nameof(ClipCaptureFailedTitle));
+    public static string ClipCaptureFailedUnsupportedPayload => Text(nameof(ClipCaptureFailedUnsupportedPayload));
+    public static string ClipCaptureFailedEmptyPayload => Text(nameof(ClipCaptureFailedEmptyPayload));
 
     public static void SetCulture(CultureInfo culture)
     {
@@ -357,6 +386,12 @@ public static class AppText
 
     public static string EditedClipCopiedStatus => Text("Format.EditedClipCopiedStatus");
 
+    public static string FormatLogCount(int count) => Format("Format.LogCount", count);
+
+    public static string FormatClipCaptureFailedTooLarge(long bytes, long limitBytes) => Format("Format.ClipCaptureFailedTooLarge", bytes, limitBytes);
+
+    public static string FormatClipCaptureFailedComSnapshot(int hresult) => Format("Format.ClipCaptureFailedComSnapshot", hresult);
+
     public static string FormatCopiedPath(string fileName) => Format("Format.CopiedPathStatus", fileName);
 
     public static string FormatOpenedFile(string fileName) => Format("Format.OpenedFileStatus", fileName);
@@ -394,6 +429,14 @@ public static class AppText
     };
 
     public static string GetSeverityBadgeLabel(string? severity) => Format("Format.SeverityBadge", GetSeverityLabel(severity));
+
+    public static string GetLogLevelLabel(AppNotificationLevel? level) => level switch
+    {
+        AppNotificationLevel.Information => Text("LogLevel.Information"),
+        AppNotificationLevel.Warning => Text("LogLevel.Warning"),
+        AppNotificationLevel.Error => Text("LogLevel.Error"),
+        _ => Text("LogLevel.All"),
+    };
 
     public static string FormatViewNotFound(string name) => Format("Format.ViewNotFound", name);
 

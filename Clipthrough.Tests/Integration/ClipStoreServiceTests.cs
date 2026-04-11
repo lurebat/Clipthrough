@@ -1,5 +1,6 @@
 using System.Threading.Tasks;
 using System.Text;
+using Clipthrough.Localization;
 using Clipthrough.Models;
 using Xunit;
 
@@ -78,5 +79,7 @@ public sealed class ClipStoreServiceTests
 
         Assert.Null(clip);
         Assert.Empty(results.Items);
+        Assert.Equal(AppText.ClipCaptureFailedTitle, scope.NotificationService.LastNotification?.Title);
+        Assert.Equal(AppNotificationLevel.Warning, scope.NotificationService.LastNotification?.Level);
     }
 }
