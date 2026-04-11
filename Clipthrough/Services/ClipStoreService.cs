@@ -119,6 +119,7 @@ public sealed class ClipStoreService : IClipStoreService
         var totalMatchingCount = await ExecuteCountAsync(connection, $"SELECT COUNT(*) {fromClause} {whereClause};", filters, hasSearch, cancellationToken);
         var totalClipCount = await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips;", cancellationToken);
         var sensitiveClipCount = await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips WHERE is_sensitive = 1;", cancellationToken);
+        var totalStoredBytes = await ExecuteScalarLongAsync(connection, "SELECT COALESCE(SUM(byte_size), 0) FROM clips;", cancellationToken);
         var lastCapturedAt = await ExecuteScalarStringAsync(connection, "SELECT MAX(COALESCE(last_copied_at, captured_at)) FROM clips;", cancellationToken);
 
         return new ClipSearchResult
@@ -127,6 +128,7 @@ public sealed class ClipStoreService : IClipStoreService
             TotalMatchingCount = totalMatchingCount,
             TotalClipCount = totalClipCount,
             SensitiveClipCount = sensitiveClipCount,
+            TotalStoredBytes = totalStoredBytes,
             LastCapturedAt = ParseTimestamp(lastCapturedAt),
         };
     }
@@ -152,6 +154,112 @@ public sealed class ClipStoreService : IClipStoreService
         command.CommandText = "DELETE FROM clips WHERE id = $id;";
         command.Parameters.AddWithValue("$id", clipId);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        using var transaction = connection.BeginTransaction();
+        var purgedClipCount = 0;
+        var settings = _settingsService.Current;
+        var now = DateTimeOffset.UtcNow;
+
+        if (settings.EnableSensitiveClipLifetime)
+        {
+            purgedClipCount += await DeleteOlderThanAsync(connection, transaction, isSensitive: true, now.AddMinutes(-settings.SensitiveClipLifetimeMinutes), cancellationToken);
+        }
+
+        if (settings.EnableNormalClipLifetime)
+        {
+            purgedClipCount += await DeleteOlderThanAsync(connection, transaction, isSensitive: false, now.AddDays(-settings.NormalClipLifetimeDays), cancellationToken);
+        }
+
+        if (settings.EnableMaxEntryCount)
+        {
+            var totalClipCount = await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips;", cancellationToken, transaction);
+            var overflowCount = totalClipCount - settings.MaxEntryCount;
+            if (overflowCount > 0)
+            {
+                purgedClipCount += await DeleteOldestAsync(connection, transaction, overflowCount, cancellationToken);
+            }
+        }
+
+        if (settings.EnableMaxLibrarySize)
+        {
+            var totalStoredBytes = await ExecuteScalarLongAsync(connection, "SELECT COALESCE(SUM(byte_size), 0) FROM clips;", cancellationToken, transaction);
+            var maxBytes = settings.MaxLibrarySizeMegabytes * 1024L * 1024L;
+            if (totalStoredBytes > maxBytes)
+            {
+                purgedClipCount += await DeleteUntilWithinSizeAsync(connection, transaction, totalStoredBytes, maxBytes, cancellationToken);
+            }
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+
+        return new ClipMaintenanceResult
+        {
+            PurgedClipCount = purgedClipCount,
+            TotalClipCount = await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips;", cancellationToken),
+            TotalStoredBytes = await ExecuteScalarLongAsync(connection, "SELECT COALESCE(SUM(byte_size), 0) FROM clips;", cancellationToken),
+        };
+    }
+
+    public async Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default)
+    {
+        await _sensitivityService.ReloadAsync(cancellationToken);
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        using var transaction = connection.BeginTransaction();
+
+        await using (var deleteMatchesCommand = connection.CreateCommand())
+        {
+            deleteMatchesCommand.Transaction = transaction;
+            deleteMatchesCommand.CommandText = "DELETE FROM clip_sensitivity_matches;";
+            await deleteMatchesCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var resetSensitiveCommand = connection.CreateCommand())
+        {
+            resetSensitiveCommand.Transaction = transaction;
+            resetSensitiveCommand.CommandText = "UPDATE clips SET is_sensitive = 0;";
+            await resetSensitiveCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        var clips = new List<(long Id, string Content)>();
+        await using (var clipsCommand = connection.CreateCommand())
+        {
+            clipsCommand.Transaction = transaction;
+            clipsCommand.CommandText = "SELECT id, content FROM clips;";
+            await using var reader = await clipsCommand.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                clips.Add((reader.GetInt64(0), reader.IsDBNull(1) ? string.Empty : reader.GetString(1)));
+            }
+        }
+
+        foreach (var clip in clips)
+        {
+            var matches = _sensitivityService.Scan(clip.Content);
+            if (matches.Count == 0)
+            {
+                continue;
+            }
+
+            await using (var updateCommand = connection.CreateCommand())
+            {
+                updateCommand.Transaction = transaction;
+                updateCommand.CommandText = "UPDATE clips SET is_sensitive = 1 WHERE id = $id;";
+                updateCommand.Parameters.AddWithValue("$id", clip.Id);
+                await updateCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await AddSensitivityMatchesAsync(connection, transaction, clip.Id, matches, cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private async Task<ClipEntry?> InsertClipAsync(ClipCaptureRequest request, CancellationToken cancellationToken)
@@ -257,6 +365,7 @@ public sealed class ClipStoreService : IClipStoreService
         await AddSensitivityMatchesAsync(connection, transaction, clipId, matches, cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
+        await ApplyMaintenanceAsync(cancellationToken);
         return await GetClipByIdAsync(connection, clipId, cancellationToken);
     }
 
@@ -304,6 +413,7 @@ public sealed class ClipStoreService : IClipStoreService
 
         var totalClipCount = await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips;", cancellationToken);
         var sensitiveClipCount = await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips WHERE is_sensitive = 1;", cancellationToken);
+        var totalStoredBytes = await ExecuteScalarLongAsync(connection, "SELECT COALESCE(SUM(byte_size), 0) FROM clips;", cancellationToken);
         var lastCapturedAt = await ExecuteScalarStringAsync(connection, "SELECT MAX(COALESCE(last_copied_at, captured_at)) FROM clips;", cancellationToken);
 
         return new ClipSearchResult
@@ -312,6 +422,7 @@ public sealed class ClipStoreService : IClipStoreService
             TotalMatchingCount = totalMatchingCount,
             TotalClipCount = totalClipCount,
             SensitiveClipCount = sensitiveClipCount,
+            TotalStoredBytes = totalStoredBytes,
             LastCapturedAt = ParseTimestamp(lastCapturedAt),
         };
     }
@@ -527,12 +638,122 @@ public sealed class ClipStoreService : IClipStoreService
         return Convert.ToInt32(scalar, CultureInfo.InvariantCulture);
     }
 
+    private static async Task<int> ExecuteScalarIntAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken, SqliteTransaction transaction)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+        var scalar = await command.ExecuteScalarAsync(cancellationToken);
+        return Convert.ToInt32(scalar, CultureInfo.InvariantCulture);
+    }
+
+    private static async Task<long> ExecuteScalarLongAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        var scalar = await command.ExecuteScalarAsync(cancellationToken);
+        return scalar is DBNull or null ? 0L : Convert.ToInt64(scalar, CultureInfo.InvariantCulture);
+    }
+
+    private static async Task<long> ExecuteScalarLongAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken, SqliteTransaction transaction)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+        var scalar = await command.ExecuteScalarAsync(cancellationToken);
+        return scalar is DBNull or null ? 0L : Convert.ToInt64(scalar, CultureInfo.InvariantCulture);
+    }
+
     private static async Task<string?> ExecuteScalarStringAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         var scalar = await command.ExecuteScalarAsync(cancellationToken);
         return scalar is DBNull or null ? null : Convert.ToString(scalar, CultureInfo.InvariantCulture);
+    }
+
+    private static async Task<int> DeleteOlderThanAsync(SqliteConnection connection, SqliteTransaction transaction, bool isSensitive, DateTimeOffset cutoff, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            DELETE FROM clips
+            WHERE is_sensitive = $isSensitive
+              AND COALESCE(last_copied_at, captured_at) < $cutoff;
+            SELECT changes();
+            """;
+        command.Parameters.AddWithValue("$isSensitive", isSensitive ? 1 : 0);
+        command.Parameters.AddWithValue("$cutoff", cutoff.ToString("O", CultureInfo.InvariantCulture));
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+    }
+
+    private static async Task<int> DeleteOldestAsync(SqliteConnection connection, SqliteTransaction transaction, int deleteCount, CancellationToken cancellationToken)
+    {
+        if (deleteCount <= 0)
+        {
+            return 0;
+        }
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            DELETE FROM clips
+            WHERE id IN (
+                SELECT id
+                FROM clips
+                ORDER BY COALESCE(last_copied_at, captured_at) ASC, id ASC
+                LIMIT $limit
+            );
+            SELECT changes();
+            """;
+        command.Parameters.AddWithValue("$limit", deleteCount);
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+    }
+
+    private static async Task<int> DeleteUntilWithinSizeAsync(SqliteConnection connection, SqliteTransaction transaction, long totalStoredBytes, long maxBytes, CancellationToken cancellationToken)
+    {
+        var rows = new List<(long Id, long ByteSize)>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = """
+                SELECT id, byte_size
+                FROM clips
+                ORDER BY COALESCE(last_copied_at, captured_at) ASC, id ASC;
+                """;
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                rows.Add((reader.GetInt64(0), reader.IsDBNull(1) ? 0L : reader.GetInt64(1)));
+            }
+        }
+
+        var idsToDelete = new List<long>();
+        foreach (var row in rows)
+        {
+            if (totalStoredBytes <= maxBytes)
+            {
+                break;
+            }
+
+            idsToDelete.Add(row.Id);
+            totalStoredBytes -= Math.Max(0L, row.ByteSize);
+        }
+
+        if (idsToDelete.Count == 0)
+        {
+            return 0;
+        }
+
+        await using var deleteCommand = connection.CreateCommand();
+        deleteCommand.Transaction = transaction;
+        for (var index = 0; index < idsToDelete.Count; index++)
+        {
+            deleteCommand.Parameters.AddWithValue($"$id{index}", idsToDelete[index]);
+        }
+
+        deleteCommand.CommandText = $"DELETE FROM clips WHERE id IN ({string.Join(", ", idsToDelete.Select((_, index) => $"$id{index}"))}); SELECT changes();";
+        return Convert.ToInt32(await deleteCommand.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
     }
 
     private static void AddUpsertParameters(
@@ -624,6 +845,11 @@ public sealed class ClipStoreService : IClipStoreService
 
     private static async Task<long> EnsureRuleAsync(SqliteConnection connection, SqliteTransaction transaction, SensitivityMatch match, CancellationToken cancellationToken)
     {
+        if (match.RuleId > 0)
+        {
+            return match.RuleId;
+        }
+
         await using (var insertCommand = connection.CreateCommand())
         {
             insertCommand.Transaction = transaction;

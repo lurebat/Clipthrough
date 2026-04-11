@@ -6,8 +6,11 @@ Clipthrough is an Avalonia desktop clipboard history app focused on rich clipboa
 
 - Clipboard history for text, rich text, images, and file lists
 - Source application name and icon capture
-- Search, favorites, sensitivity tagging, and copy-count metadata
+- Search, favorites, sensitivity tagging, copy-count metadata, and per-session logs
+- First-run welcome flow for storage path, password, and hotkey setup
 - Configurable SQLite database path with optional encryption password
+- Editable sensitivity rules plus optional retention and capacity limits
+- Clip export with original payload, rendered text, and metadata
 - Windows publish artifact via GitHub Actions
 
 ## Development

@@ -13,6 +13,8 @@ public sealed class ClipSearchResult
 
     public int SensitiveClipCount { get; init; }
 
+    public long TotalStoredBytes { get; init; }
+
     public DateTimeOffset? LastCapturedAt { get; init; }
 }
 

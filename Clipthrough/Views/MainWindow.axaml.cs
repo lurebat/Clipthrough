@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -13,6 +14,7 @@ public partial class MainWindow : Window
 {
     private ListBox? m_clipsListBox;
     private ScrollViewer? m_clipListScrollViewer;
+    private ListBox? m_sessionLogsListBox;
 
     public MainWindow()
     {
@@ -31,9 +33,15 @@ public partial class MainWindow : Window
         }
 
         m_clipsListBox = this.FindControl<ListBox>("ClipsListBox");
+        m_sessionLogsListBox = this.FindControl<ListBox>("SessionLogsListBox");
         if (m_clipsListBox is not null)
         {
             m_clipsListBox.AddHandler(InputElement.DoubleTappedEvent, OnClipsListDoubleTapped, RoutingStrategies.Bubble);
+        }
+
+        if (m_sessionLogsListBox is not null)
+        {
+            m_sessionLogsListBox.AddHandler(InputElement.DoubleTappedEvent, OnSessionLogsDoubleTapped, RoutingStrategies.Bubble);
         }
 
         m_clipListScrollViewer = m_clipsListBox?.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
@@ -55,6 +63,12 @@ public partial class MainWindow : Window
                 m_clipsListBox = null;
             }
 
+            if (m_sessionLogsListBox is not null)
+            {
+                m_sessionLogsListBox.RemoveHandler(InputElement.DoubleTappedEvent, OnSessionLogsDoubleTapped);
+                m_sessionLogsListBox = null;
+            }
+
             return;
         }
 
@@ -64,6 +78,12 @@ public partial class MainWindow : Window
         {
             m_clipsListBox.RemoveHandler(InputElement.DoubleTappedEvent, OnClipsListDoubleTapped);
             m_clipsListBox = null;
+        }
+
+        if (m_sessionLogsListBox is not null)
+        {
+            m_sessionLogsListBox.RemoveHandler(InputElement.DoubleTappedEvent, OnSessionLogsDoubleTapped);
+            m_sessionLogsListBox = null;
         }
     }
 
@@ -128,6 +148,25 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private void OnSessionLogsDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (e.Source is not Avalonia.Visual sourceVisual)
+        {
+            return;
+        }
+
+        var dataContextElement = sourceVisual.GetSelfAndVisualAncestors()
+            .OfType<StyledElement>()
+            .FirstOrDefault(current => current.DataContext is SessionLogEntryViewModel);
+        if (dataContextElement?.DataContext is not SessionLogEntryViewModel logEntry)
+        {
+            return;
+        }
+
+        logEntry.ToggleExpanded();
+        e.Handled = true;
+    }
+
     private bool TryHandleClipRecopyShortcut(MainWindowViewModel viewModel, KeyEventArgs e)
     {
         if (m_clipsListBox?.IsKeyboardFocusWithin != true || viewModel.SelectedClip is null)
@@ -160,6 +199,16 @@ public partial class MainWindow : Window
 
         viewModel.CopyEditedClipCommand.Execute().Subscribe();
         return true;
+    }
+
+    private async void OnEditableClipLostFocus(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        await viewModel.CommitEditedClipOnFocusLossAsync();
     }
 
     private void FocusSearchBox()

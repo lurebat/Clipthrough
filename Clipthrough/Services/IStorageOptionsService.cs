@@ -8,5 +8,9 @@ public interface IStorageOptionsService
 {
     StorageOptions Current { get; }
 
+    bool HasSavedConfig { get; }
+
+    bool DatabaseExists { get; }
+
     Task SaveAsync(StorageOptions options, CancellationToken cancellationToken = default);
 }

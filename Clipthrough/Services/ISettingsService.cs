@@ -9,6 +9,8 @@ public interface ISettingsService
 {
     AppSettings Current { get; }
 
+    bool HasSavedSettings { get; }
+
     event EventHandler<AppSettings>? SettingsChanged;
 
     Task InitializeAsync(CancellationToken cancellationToken = default);

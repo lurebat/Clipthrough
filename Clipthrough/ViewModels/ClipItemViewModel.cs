@@ -30,7 +30,8 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         ClipEntry clip,
         Func<ClipItemViewModel, Task>? copyHandler = null,
         Func<ClipItemViewModel, Task>? toggleFavoriteHandler = null,
-        Func<ClipItemViewModel, Task>? deleteHandler = null)
+        Func<ClipItemViewModel, Task>? deleteHandler = null,
+        Func<ClipItemViewModel, Task>? exportHandler = null)
     {
         Clip = clip;
         SourceAppIconImage = ClipBitmapFactory.TryLoad(clip.SourceAppIconBytes);
@@ -59,6 +60,14 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
                     await deleteHandler(this);
                 }
             });
+        ExportCommand = ReactiveCommand.CreateFromTask(
+            async () =>
+            {
+                if (exportHandler is not null)
+                {
+                    await exportHandler(this);
+                }
+            });
     }
 
     public ClipEntry Clip { get; }
@@ -70,6 +79,8 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> ToggleFavoriteCommand { get; }
 
     public ReactiveCommand<Unit, Unit> DeleteCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> ExportCommand { get; }
 
     public bool IsChecked
     {
@@ -180,6 +191,8 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     public string DeleteLabel => AppText.DeleteButtonLabel;
 
     public string FavoriteActionLabel => IsFavorite ? AppText.RemoveFavorite : AppText.AddFavorite;
+
+    public string ExportLabel => AppText.ExportButtonLabel;
 
     public IBrush FrequencyBackground => GetFrequencyBrush(Clip.CopyCount);
 

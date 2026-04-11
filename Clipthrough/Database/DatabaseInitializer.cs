@@ -123,8 +123,6 @@ public sealed class DatabaseInitializer
                 INSERT INTO sensitivity_rules (name, pattern, severity, is_enabled, is_builtin)
                 VALUES ($name, $pattern, $severity, 1, 1)
                 ON CONFLICT(name) DO UPDATE SET
-                    pattern = excluded.pattern,
-                    severity = excluded.severity,
                     is_builtin = 1;
                 """;
             ruleCommand.Parameters.AddWithValue("$name", rule.Name);
@@ -132,6 +130,8 @@ public sealed class DatabaseInitializer
             ruleCommand.Parameters.AddWithValue("$severity", rule.Severity);
             await ruleCommand.ExecuteNonQueryAsync(cancellationToken);
         }
+
+        await _sensitivityService.ReloadAsync(cancellationToken);
     }
 
     private static async Task EnsureClipAggregationColumnsAsync(SqliteConnection connection, CancellationToken cancellationToken)

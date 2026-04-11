@@ -92,6 +92,7 @@ public partial class App : Application
         services.AddSingleton<ISystemInteractionService, SystemInteractionService>();
         services.AddSingleton<DatabaseInitializer>();
         services.AddSingleton<WindowsSourceApplicationResolver>();
+        services.AddSingleton<IClipExportService, ClipExportService>();
         services.AddSingleton<IClipStoreService, ClipStoreService>();
         services.AddSingleton<IClipSampleDataService, ClipSampleDataService>();
         services.AddSingleton<IClipboardMonitorService, ClipboardMonitorService>();
@@ -171,7 +172,8 @@ public partial class App : Application
 
         _systemInteractionService.UnregisterGlobalHotKey();
 
-        if (!HotkeyGesture.TryParse(_settingsService.Current.ToggleWindowHotkey, out var hotkey, out _))
+        if (!_settingsService.Current.EnableToggleWindowHotkey
+            || !HotkeyGesture.TryParse(_settingsService.Current.ToggleWindowHotkey, out var hotkey, out _))
         {
             return;
         }

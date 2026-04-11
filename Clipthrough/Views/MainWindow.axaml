@@ -73,8 +73,10 @@
                 <Grid RowDefinitions="Auto,*,Auto"
                       RowSpacing="10"
                       Margin="12">
-                    <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*"
-                          ColumnSpacing="8">
+                    <Grid RowDefinitions="Auto,Auto"
+                          ColumnDefinitions="*,*,*,*"
+                          ColumnSpacing="8"
+                          RowSpacing="8">
                         <Button Classes="secondary compact"
                                 Command="{Binding SelectAllClipsCommand}"
                                 Content="{Binding SelectAllButtonLabel}" />
@@ -93,10 +95,11 @@
                                 IsEnabled="{Binding HasCheckedClips}"
                                 Content="{Binding DeleteButtonLabel}" />
                         <TextBlock Classes="body-muted"
-                                   Grid.Column="4"
+                                   Grid.Row="1"
+                                   Grid.ColumnSpan="4"
                                    VerticalAlignment="Center"
-                                   Margin="4,0,0,0"
-                                   Text="{Binding CheckedClipSummaryText}" />
+                                   TextAlignment="Center"
+                                    Text="{Binding CheckedClipSummaryText}" />
                     </Grid>
 
                     <Grid Grid.Row="1">
@@ -124,6 +127,8 @@
                                                           Command="{Binding CopyCommand}" />
                                                 <MenuItem Header="{Binding FavoriteActionLabel}"
                                                           Command="{Binding ToggleFavoriteCommand}" />
+                                                <MenuItem Header="{Binding ExportLabel}"
+                                                          Command="{Binding ExportCommand}" />
                                                 <MenuItem Header="{Binding DeleteLabel}"
                                                           Command="{Binding DeleteCommand}" />
                                             </ContextMenu>
@@ -258,6 +263,11 @@
                                     Content="{Binding CopyButtonLabel}" />
 
                             <Button Classes="secondary compact"
+                                    Command="{Binding ExportSelectedCommand}"
+                                    IsEnabled="{Binding HasSelectedClip}"
+                                    Content="{Binding ExportButtonLabel}" />
+
+                            <Button Classes="secondary compact"
                                     Command="{Binding CopyEditedClipCommand}"
                                     IsVisible="{Binding ShowCopyEditedClipButton}"
                                     Content="{Binding CopyAsNewButtonLabel}" />
@@ -303,6 +313,7 @@
                                       IsReadOnly="{Binding SelectedClipTextIsReadOnly}"
                                       AcceptsReturn="True"
                                       HorizontalContentAlignment="Stretch"
+                                      LostFocus="OnEditableClipLostFocus"
                                       Text="{Binding EditedClipText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                             <TextBox IsVisible="{Binding ShowSelectedTextRenderer}"
@@ -310,6 +321,7 @@
                                       IsReadOnly="{Binding SelectedClipTextIsReadOnly}"
                                       AcceptsReturn="True"
                                       HorizontalContentAlignment="Stretch"
+                                      LostFocus="OnEditableClipLostFocus"
                                       Text="{Binding EditedClipText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                             <controls:RichContentView IsVisible="{Binding ShowSelectedRichTextRenderer}"
@@ -423,30 +435,32 @@
                     </Border>
 
                     <Grid Grid.Row="2"
-                          ColumnDefinitions="1.2*,1.0*,1.0*,0.7*,0.7*,0.9*,1.3*"
-                          ColumnSpacing="10">
+                          RowDefinitions="Auto,Auto"
+                          ColumnDefinitions="1.4*,1*,1*,1*"
+                          ColumnSpacing="10"
+                          RowSpacing="10">
                         <Border Classes="detail-stat-card"
-                                Padding="12,10">
+                                Padding="12,10"
+                                Grid.ColumnSpan="2">
                             <StackPanel Spacing="4">
                                 <TextBlock Classes="detail-label"
                                            Text="{Binding AppLabelText}" />
                                 <Grid ColumnDefinitions="Auto,*"
                                       ColumnSpacing="8">
                                     <Image Source="{Binding SelectedClipSourceAppIcon}"
-                                            Width="18"
-                                            Height="18"
-                                            Stretch="Uniform"
-                                            IsVisible="{Binding ShowSelectedClipSourceAppIcon}" />
+                                           Width="18"
+                                           Height="18"
+                                           Stretch="Uniform"
+                                           IsVisible="{Binding ShowSelectedClipSourceAppIcon}" />
                                     <TextBlock Grid.Column="1"
                                                Classes="detail-value"
-                                                Text="{Binding SelectedClipSourceText}"
-                                                TextWrapping="NoWrap"
-                                                TextTrimming="CharacterEllipsis" />
+                                               Text="{Binding SelectedClipSourceText}"
+                                               TextWrapping="Wrap" />
                                 </Grid>
                             </StackPanel>
                         </Border>
 
-                        <Border Grid.Column="1"
+                        <Border Grid.Column="2"
                                 Classes="detail-stat-card"
                                 Padding="12,10">
                             <StackPanel Spacing="4">
@@ -458,7 +472,7 @@
                             </StackPanel>
                         </Border>
 
-                        <Border Grid.Column="2"
+                        <Border Grid.Column="3"
                                 Classes="detail-stat-card"
                                 Padding="12,10">
                             <StackPanel Spacing="4">
@@ -470,29 +484,33 @@
                             </StackPanel>
                         </Border>
 
-                        <Border Grid.Column="3"
+                        <Border Grid.Row="1"
                                 Classes="detail-stat-card"
                                 Padding="12,10">
                             <StackPanel Spacing="4">
                                 <TextBlock Classes="detail-label"
                                            Text="{Binding CopiesLabelText}" />
                                 <TextBlock Classes="detail-value"
-                                           Text="{Binding SelectedClipCopyCountText}" />
+                                           Text="{Binding SelectedClipCopyCountText}"
+                                           TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
 
-                        <Border Grid.Column="4"
+                        <Border Grid.Row="1"
+                                Grid.Column="1"
                                 Classes="detail-stat-card"
                                 Padding="12,10">
                             <StackPanel Spacing="4">
                                 <TextBlock Classes="detail-label"
                                            Text="{Binding SizeLabelText}" />
                                 <TextBlock Classes="detail-value"
-                                           Text="{Binding SelectedClipByteSizeText}" />
+                                           Text="{Binding SelectedClipByteSizeText}"
+                                           TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
 
-                        <Border Grid.Column="5"
+                        <Border Grid.Row="1"
+                                Grid.Column="2"
                                 Classes="detail-stat-card"
                                 Padding="12,10">
                             <Border.IsVisible>
@@ -502,11 +520,13 @@
                                 <TextBlock Classes="detail-label"
                                            Text="{Binding ResolutionLabelText}" />
                                 <TextBlock Classes="detail-value"
-                                           Text="{Binding SelectedClipImageResolutionText}" />
+                                           Text="{Binding SelectedClipImageResolutionText}"
+                                           TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
 
-                        <Border Grid.Column="6"
+                        <Border Grid.Row="1"
+                                Grid.Column="3"
                                 Classes="detail-stat-card"
                                 Padding="12,10">
                             <StackPanel Spacing="4">
@@ -525,28 +545,84 @@
         <Border Grid.Row="2"
                 Classes="inset-panel footer-panel"
                 Padding="12,8">
-            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto"
-                  ColumnSpacing="14">
-                <TextBlock Classes="body-muted"
-                           Text="{Binding ActiveFilterSummary}"
-                           TextTrimming="CharacterEllipsis" />
-                <TextBlock Grid.Column="1"
-                           Classes="footer-metric"
-                           Text="{Binding MatchingClipCountText}" />
-                <TextBlock Grid.Column="2"
-                           Classes="footer-metric"
-                           Text="{Binding SensitiveClipCountText}" />
-                <TextBlock Grid.Column="3"
-                           Classes="body-muted"
-                           Text="{Binding LastCaptureSummary}" />
-                <Button Grid.Column="4"
-                        Classes="secondary compact"
-                        Command="{Binding SessionLogs.OpenCommand}"
-                        Content="{Binding LogsButtonLabel}" />
-                <Button Grid.Column="5"
-                        Classes="secondary compact"
-                        Command="{Binding OpenSettingsCommand}"
-                        Content="{Binding SettingsButtonLabel}" />
+            <Grid RowDefinitions="Auto,Auto"
+                  RowSpacing="10">
+                <Grid ColumnDefinitions="*,Auto,Auto"
+                      ColumnSpacing="14"
+                      VerticalAlignment="Center">
+                    <StackPanel Spacing="2"
+                                VerticalAlignment="Center">
+                        <TextBlock Classes="body-muted"
+                                   Text="{Binding ActiveFilterSummary}"
+                                   TextWrapping="Wrap" />
+                        <TextBlock Classes="body-muted"
+                                   Text="{Binding LastCaptureSummary}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal"
+                                Spacing="12"
+                                VerticalAlignment="Center">
+                        <TextBlock Classes="footer-metric"
+                                   VerticalAlignment="Center"
+                                   Text="{Binding MatchingClipCountText}" />
+                        <TextBlock Classes="footer-metric"
+                                   VerticalAlignment="Center"
+                                   Text="{Binding SensitiveClipCountText}" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2"
+                                Orientation="Horizontal"
+                                Spacing="8"
+                                VerticalAlignment="Center">
+                        <Button Classes="secondary compact"
+                                Command="{Binding SessionLogs.OpenCommand}"
+                                Content="{Binding LogsButtonLabel}" />
+                        <Button Classes="secondary compact"
+                                Command="{Binding OpenSettingsCommand}"
+                                Content="{Binding SettingsButtonLabel}" />
+                    </StackPanel>
+                </Grid>
+
+                <Grid Grid.Row="1"
+                      ColumnDefinitions="*,*"
+                      ColumnSpacing="16">
+                    <Border Classes="detail-stat-card"
+                            Padding="10,8">
+                        <StackPanel Spacing="6">
+                            <Grid ColumnDefinitions="*,Auto"
+                                  ColumnSpacing="8">
+                                <TextBlock Classes="detail-label"
+                                           Text="{Binding StorageUsageText}" />
+                                <TextBlock Grid.Column="1"
+                                           Classes="body-muted"
+                                           Text="{Binding StorageCapacityText}" />
+                            </Grid>
+                            <ProgressBar Minimum="0"
+                                         Maximum="100"
+                                         Value="{Binding StorageUsagePercent}" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Column="1"
+                            Classes="detail-stat-card"
+                            Padding="10,8">
+                        <StackPanel Spacing="6">
+                            <Grid ColumnDefinitions="*,Auto"
+                                  ColumnSpacing="8">
+                                <TextBlock Classes="detail-label"
+                                           Text="{Binding EntryUsageText}" />
+                                <TextBlock Grid.Column="1"
+                                           Classes="body-muted"
+                                           Text="{Binding EntryCapacityText}" />
+                            </Grid>
+                            <ProgressBar Minimum="0"
+                                         Maximum="100"
+                                         Value="{Binding EntryUsagePercent}" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
             </Grid>
         </Border>
 
@@ -590,7 +666,7 @@
             <Border Classes="surface-panel settings-sheet"
                      HorizontalAlignment="Center"
                      VerticalAlignment="Center"
-                     MaxWidth="980"
+                     MaxWidth="1120"
                      Padding="18">
                 <Grid RowDefinitions="Auto,Auto,*,Auto"
                       RowSpacing="12">
@@ -607,87 +683,257 @@
                                Text="{Binding SettingsHintText}"
                                TextWrapping="Wrap" />
 
-                    <Grid Grid.Row="2"
-                          ColumnDefinitions="*,*,*"
-                          ColumnSpacing="18">
-                        <Border Classes="inset-panel"
-                                Padding="14">
-                            <StackPanel Spacing="12">
-                                <TextBlock Classes="panel-caption"
-                                           Text="{Binding SettingsLocalHotkeysTitle}" />
+                    <ScrollViewer Grid.Row="2"
+                                  MaxHeight="620">
+                        <StackPanel Spacing="14">
+                            <Grid ColumnDefinitions="*,*"
+                                  ColumnSpacing="18">
+                                <Border Classes="inset-panel"
+                                        Padding="14">
+                                    <StackPanel Spacing="12">
+                                        <TextBlock Classes="panel-caption"
+                                                   Text="{Binding SettingsLocalHotkeysTitle}" />
 
-                                <StackPanel Spacing="6">
-                                    <TextBlock Classes="detail-label"
-                                               Text="{Binding SettingsRegexHotkeyLabel}" />
-                                     <TextBox Text="{Binding SettingsToggleRegexHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        <Grid ColumnDefinitions="Auto,*,*"
+                                              ColumnSpacing="8"
+                                              RowSpacing="8">
+                                            <CheckBox Content="{Binding SettingsEnableShortcutLabel}"
+                                                      IsChecked="{Binding SettingsEnableToggleRegexHotkey}" />
+                                            <TextBlock Grid.Column="1"
+                                                       VerticalAlignment="Center"
+                                                       Text="{Binding SettingsRegexHotkeyLabel}" />
+                                            <TextBox Grid.Column="2"
+                                                     Text="{Binding SettingsToggleRegexHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                                            <CheckBox Grid.Row="1"
+                                                      Content="{Binding SettingsEnableShortcutLabel}"
+                                                      IsChecked="{Binding SettingsEnableToggleFavoritesHotkey}" />
+                                            <TextBlock Grid.Row="1"
+                                                       Grid.Column="1"
+                                                       VerticalAlignment="Center"
+                                                       Text="{Binding SettingsFavoritesHotkeyLabel}" />
+                                            <TextBox Grid.Row="1"
+                                                     Grid.Column="2"
+                                                     Text="{Binding SettingsToggleFavoritesHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                                            <CheckBox Grid.Row="2"
+                                                      Content="{Binding SettingsEnableShortcutLabel}"
+                                                      IsChecked="{Binding SettingsEnableToggleSensitiveHotkey}" />
+                                            <TextBlock Grid.Row="2"
+                                                       Grid.Column="1"
+                                                       VerticalAlignment="Center"
+                                                       Text="{Binding SettingsSensitiveHotkeyLabel}" />
+                                            <TextBox Grid.Row="2"
+                                                     Grid.Column="2"
+                                                     Text="{Binding SettingsToggleSensitiveHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                                            <CheckBox Grid.Row="3"
+                                                      Content="{Binding SettingsEnableShortcutLabel}"
+                                                      IsChecked="{Binding SettingsEnableToggleCaseSensitiveHotkey}" />
+                                            <TextBlock Grid.Row="3"
+                                                       Grid.Column="1"
+                                                       VerticalAlignment="Center"
+                                                       Text="{Binding SettingsCaseSensitiveHotkeyLabel}" />
+                                            <TextBox Grid.Row="3"
+                                                     Grid.Column="2"
+                                                     Text="{Binding SettingsToggleCaseSensitiveHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Grid.Column="1"
+                                        Classes="inset-panel"
+                                        Padding="14">
+                                    <StackPanel Spacing="12">
+                                        <TextBlock Classes="panel-caption"
+                                                   Text="{Binding SettingsGlobalHotkeyTitle}" />
+
+                                        <Grid ColumnDefinitions="Auto,*,*"
+                                              ColumnSpacing="8"
+                                              RowSpacing="8">
+                                            <CheckBox Content="{Binding SettingsEnableShortcutLabel}"
+                                                      IsChecked="{Binding SettingsEnableToggleWindowHotkey}" />
+                                            <TextBlock Grid.Column="1"
+                                                       VerticalAlignment="Center"
+                                                       Text="{Binding SettingsToggleWindowHotkeyLabel}" />
+                                            <TextBox Grid.Column="2"
+                                                     Text="{Binding SettingsToggleWindowHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                                            <TextBlock Grid.Row="1"
+                                                       Grid.Column="1"
+                                                       VerticalAlignment="Center"
+                                                       Text="{Binding SettingsClipLimitLabel}" />
+                                            <TextBox Grid.Row="1"
+                                                     Grid.Column="2"
+                                                     Text="{Binding SettingsMaxClipSizeKilobytes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                            <Grid ColumnDefinitions="*,*"
+                                  ColumnSpacing="18">
+                                <Border Classes="inset-panel"
+                                        Padding="14">
+                                    <StackPanel Spacing="12">
+                                        <TextBlock Classes="panel-caption"
+                                                   Text="{Binding SettingsStorageTitle}" />
+                                        <TextBlock Classes="detail-label"
+                                                   Text="{Binding SettingsDatabasePathLabel}" />
+                                        <TextBox Text="{Binding SettingsDatabasePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        <TextBlock Classes="detail-label"
+                                                   Text="{Binding SettingsDatabasePasswordLabel}" />
+                                        <TextBox Text="{Binding SettingsDatabasePassword, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        <TextBlock Classes="body-muted"
+                                                   Text="{Binding SettingsStorageHintText}"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Grid.Column="1"
+                                        Classes="inset-panel"
+                                        Padding="14">
+                                    <StackPanel Spacing="12">
+                                        <TextBlock Classes="panel-caption"
+                                                   Text="{Binding SettingsBehaviorTitle}" />
+                                        <CheckBox Content="{Binding SettingsCloseToTrayLabel}"
+                                                  IsChecked="{Binding SettingsCloseToTray}" />
+                                        <CheckBox Content="{Binding SettingsMinimizeToTrayLabel}"
+                                                  IsChecked="{Binding SettingsMinimizeToTray}" />
+                                        <CheckBox Content="{Binding SettingsStartWithWindowsLabel}"
+                                                  IsChecked="{Binding SettingsStartWithWindows}" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                            <Grid ColumnDefinitions="*,*"
+                                  ColumnSpacing="18">
+                                <Border Classes="inset-panel"
+                                        Padding="14">
+                                    <StackPanel Spacing="12">
+                                        <TextBlock Classes="panel-caption"
+                                                   Text="{Binding SettingsRetentionTitle}" />
+                                        <Grid ColumnDefinitions="Auto,*,*"
+                                              ColumnSpacing="8"
+                                              RowSpacing="8">
+                                            <CheckBox Content="{Binding SettingsEnableShortcutLabel}"
+                                                      IsChecked="{Binding SettingsEnableNormalClipLifetime}" />
+                                            <TextBlock Grid.Column="1"
+                                                       VerticalAlignment="Center"
+                                                       Text="{Binding SettingsNormalClipLifetimeLabel}" />
+                                            <TextBox Grid.Column="2"
+                                                     Text="{Binding SettingsNormalClipLifetimeDays, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                                            <CheckBox Grid.Row="1"
+                                                      Content="{Binding SettingsEnableShortcutLabel}"
+                                                      IsChecked="{Binding SettingsEnableSensitiveClipLifetime}" />
+                                            <TextBlock Grid.Row="1"
+                                                       Grid.Column="1"
+                                                       VerticalAlignment="Center"
+                                                       Text="{Binding SettingsSensitiveClipLifetimeLabel}" />
+                                            <TextBox Grid.Row="1"
+                                                     Grid.Column="2"
+                                                     Text="{Binding SettingsSensitiveClipLifetimeMinutes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Grid.Column="1"
+                                        Classes="inset-panel"
+                                        Padding="14">
+                                    <StackPanel Spacing="12">
+                                        <TextBlock Classes="panel-caption"
+                                                   Text="{Binding SettingsCapacityTitle}" />
+                                        <Grid ColumnDefinitions="Auto,*,*"
+                                              ColumnSpacing="8"
+                                              RowSpacing="8">
+                                            <CheckBox Content="{Binding SettingsEnableShortcutLabel}"
+                                                      IsChecked="{Binding SettingsEnableMaxLibrarySize}" />
+                                            <TextBlock Grid.Column="1"
+                                                       VerticalAlignment="Center"
+                                                       Text="{Binding SettingsMaxLibrarySizeLabel}" />
+                                            <TextBox Grid.Column="2"
+                                                     Text="{Binding SettingsMaxLibrarySizeMegabytes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                                            <CheckBox Grid.Row="1"
+                                                      Content="{Binding SettingsEnableShortcutLabel}"
+                                                      IsChecked="{Binding SettingsEnableMaxEntryCount}" />
+                                            <TextBlock Grid.Row="1"
+                                                       Grid.Column="1"
+                                                       VerticalAlignment="Center"
+                                                       Text="{Binding SettingsMaxEntryCountLabel}" />
+                                            <TextBox Grid.Row="1"
+                                                     Grid.Column="2"
+                                                     Text="{Binding SettingsMaxEntryCount, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                            <Border Classes="inset-panel"
+                                    Padding="14">
+                                <StackPanel Spacing="12">
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <TextBlock Classes="panel-caption"
+                                                   Text="{Binding SettingsSensitivityTitle}" />
+                                        <Button Grid.Column="1"
+                                                Classes="secondary compact"
+                                                Command="{Binding AddSensitivityRuleCommand}"
+                                                Content="{Binding SettingsAddRuleButtonLabel}" />
+                                    </Grid>
+
+                                    <ItemsControl ItemsSource="{Binding SensitivityRules}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:SensitivityRuleEditorViewModel">
+                                                <Expander IsExpanded="{Binding IsExpanded}">
+                                                    <Expander.Header>
+                                                        <Grid ColumnDefinitions="*,Auto,Auto"
+                                                              ColumnSpacing="8">
+                                                            <TextBlock Text="{Binding HeaderText}" />
+                                                            <TextBlock Grid.Column="1"
+                                                                       Classes="body-muted"
+                                                                       Text="{Binding SummaryText}" />
+                                                            <Button Grid.Column="2"
+                                                                    Classes="destructive compact"
+                                                                    IsVisible="{Binding CanRemove}"
+                                                                    Command="{Binding RemoveCommand}"
+                                                                    Content="{Binding $parent[Window].DataContext.DeleteButtonLabel}" />
+                                                        </Grid>
+                                                    </Expander.Header>
+                                                    <Grid ColumnDefinitions="*,*"
+                                                          ColumnSpacing="10"
+                                                          RowDefinitions="Auto,Auto,Auto">
+                                                        <StackPanel Spacing="4">
+                                                            <TextBlock Classes="detail-label"
+                                                                       Text="{Binding $parent[Window].DataContext.SettingsRuleNameLabel}" />
+                                                            <TextBox Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                                        </StackPanel>
+                                                        <StackPanel Grid.Column="1"
+                                                                    Spacing="4">
+                                                            <TextBlock Classes="detail-label"
+                                                                       Text="{Binding $parent[Window].DataContext.SettingsRuleSeverityLabel}" />
+                                                            <ComboBox ItemsSource="{Binding $parent[Window].DataContext.SensitivitySeverityOptions}"
+                                                                      SelectedItem="{Binding Severity}" />
+                                                        </StackPanel>
+                                                        <StackPanel Grid.Row="1"
+                                                                    Grid.ColumnSpan="2"
+                                                                    Spacing="4">
+                                                            <TextBlock Classes="detail-label"
+                                                                       Text="{Binding $parent[Window].DataContext.SettingsRulePatternLabel}" />
+                                                            <TextBox Text="{Binding Pattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                                        </StackPanel>
+                                                        <CheckBox Grid.Row="2"
+                                                                  Content="{Binding $parent[Window].DataContext.SettingsRuleEnabledLabel}"
+                                                                  IsChecked="{Binding IsEnabled}" />
+                                                    </Grid>
+                                                </Expander>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
                                 </StackPanel>
-
-                                <StackPanel Spacing="6">
-                                    <TextBlock Classes="detail-label"
-                                               Text="{Binding SettingsFavoritesHotkeyLabel}" />
-                                     <TextBox Text="{Binding SettingsToggleFavoritesHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                </StackPanel>
-
-                                <StackPanel Spacing="6">
-                                    <TextBlock Classes="detail-label"
-                                               Text="{Binding SettingsSensitiveHotkeyLabel}" />
-                                     <TextBox Text="{Binding SettingsToggleSensitiveHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                </StackPanel>
-
-                                <StackPanel Spacing="6">
-                                    <TextBlock Classes="detail-label"
-                                               Text="{Binding SettingsCaseSensitiveHotkeyLabel}" />
-                                     <TextBox Text="{Binding SettingsToggleCaseSensitiveHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                </StackPanel>
-                            </StackPanel>
-                        </Border>
-
-                        <Border Grid.Column="1"
-                                Classes="inset-panel"
-                                Padding="14">
-                            <StackPanel Spacing="12">
-                                <TextBlock Classes="panel-caption"
-                                           Text="{Binding SettingsGlobalHotkeyTitle}" />
-
-                                <StackPanel Spacing="6">
-                                    <TextBlock Classes="detail-label"
-                                               Text="{Binding SettingsToggleWindowHotkeyLabel}" />
-                                     <TextBox Text="{Binding SettingsToggleWindowHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                </StackPanel>
-
-                                <StackPanel Spacing="6">
-                                    <TextBlock Classes="detail-label"
-                                               Text="{Binding SettingsClipLimitLabel}" />
-                                     <TextBox Text="{Binding SettingsMaxClipSizeKilobytes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                </StackPanel>
-                            </StackPanel>
-                        </Border>
-
-                        <Border Grid.Column="2"
-                                Classes="inset-panel"
-                                Padding="14">
-                            <StackPanel Spacing="12">
-                                <TextBlock Classes="panel-caption"
-                                           Text="{Binding SettingsStorageTitle}" />
-
-                                <StackPanel Spacing="6">
-                                    <TextBlock Classes="detail-label"
-                                               Text="{Binding SettingsDatabasePathLabel}" />
-                                    <TextBox Text="{Binding SettingsDatabasePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                </StackPanel>
-
-                                <StackPanel Spacing="6">
-                                    <TextBlock Classes="detail-label"
-                                               Text="{Binding SettingsDatabasePasswordLabel}" />
-                                    <TextBox Text="{Binding SettingsDatabasePassword, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                </StackPanel>
-
-                                <TextBlock Classes="body-muted"
-                                           Text="{Binding SettingsStorageHintText}"
-                                           TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-                    </Grid>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
 
                     <StackPanel Grid.Row="3"
                                 Orientation="Horizontal"
@@ -706,12 +952,119 @@
 
         <Border Grid.RowSpan="3"
                 Classes="settings-backdrop"
+                IsVisible="{Binding IsWelcomeOpen}">
+            <Border Classes="surface-panel settings-sheet"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center"
+                     MaxWidth="920"
+                     Padding="18">
+                <Grid RowDefinitions="Auto,*,Auto"
+                      RowSpacing="12">
+                    <StackPanel Spacing="4">
+                        <TextBlock Classes="panel-title"
+                                   Text="{Binding WelcomeTitleText}" />
+                        <TextBlock Classes="body-muted"
+                                   Text="{Binding WelcomeDescriptionText}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="1"
+                                Spacing="14">
+                        <Border Classes="inset-panel"
+                                Padding="14">
+                            <StackPanel Spacing="12">
+                                <TextBlock Classes="panel-caption"
+                                           Text="{Binding SettingsStorageTitle}" />
+                                <TextBlock Classes="detail-label"
+                                           Text="{Binding SettingsDatabasePathLabel}" />
+                                <TextBox Text="{Binding SettingsDatabasePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock Classes="detail-label"
+                                           Text="{Binding SettingsDatabasePasswordLabel}" />
+                                <TextBox Text="{Binding SettingsDatabasePassword, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Classes="inset-panel"
+                                Padding="14">
+                            <StackPanel Spacing="12">
+                                <TextBlock Classes="panel-caption"
+                                           Text="{Binding SettingsGlobalHotkeyTitle}" />
+                                <Grid ColumnDefinitions="Auto,*,*"
+                                      ColumnSpacing="8"
+                                      RowSpacing="8">
+                                    <CheckBox Content="{Binding SettingsEnableShortcutLabel}"
+                                              IsChecked="{Binding SettingsEnableToggleWindowHotkey}" />
+                                    <TextBlock Grid.Column="1"
+                                               VerticalAlignment="Center"
+                                               Text="{Binding SettingsToggleWindowHotkeyLabel}" />
+                                    <TextBox Grid.Column="2"
+                                             Text="{Binding SettingsToggleWindowHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                                    <CheckBox Grid.Row="1"
+                                              Content="{Binding SettingsEnableShortcutLabel}"
+                                              IsChecked="{Binding SettingsEnableToggleRegexHotkey}" />
+                                    <TextBlock Grid.Row="1"
+                                               Grid.Column="1"
+                                               VerticalAlignment="Center"
+                                               Text="{Binding SettingsRegexHotkeyLabel}" />
+                                    <TextBox Grid.Row="1"
+                                             Grid.Column="2"
+                                             Text="{Binding SettingsToggleRegexHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                                    <CheckBox Grid.Row="2"
+                                              Content="{Binding SettingsEnableShortcutLabel}"
+                                              IsChecked="{Binding SettingsEnableToggleFavoritesHotkey}" />
+                                    <TextBlock Grid.Row="2"
+                                               Grid.Column="1"
+                                               VerticalAlignment="Center"
+                                               Text="{Binding SettingsFavoritesHotkeyLabel}" />
+                                    <TextBox Grid.Row="2"
+                                             Grid.Column="2"
+                                             Text="{Binding SettingsToggleFavoritesHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                                    <CheckBox Grid.Row="3"
+                                              Content="{Binding SettingsEnableShortcutLabel}"
+                                              IsChecked="{Binding SettingsEnableToggleSensitiveHotkey}" />
+                                    <TextBlock Grid.Row="3"
+                                               Grid.Column="1"
+                                               VerticalAlignment="Center"
+                                               Text="{Binding SettingsSensitiveHotkeyLabel}" />
+                                    <TextBox Grid.Row="3"
+                                             Grid.Column="2"
+                                             Text="{Binding SettingsToggleSensitiveHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                                    <CheckBox Grid.Row="4"
+                                              Content="{Binding SettingsEnableShortcutLabel}"
+                                              IsChecked="{Binding SettingsEnableToggleCaseSensitiveHotkey}" />
+                                    <TextBlock Grid.Row="4"
+                                               Grid.Column="1"
+                                               VerticalAlignment="Center"
+                                               Text="{Binding SettingsCaseSensitiveHotkeyLabel}" />
+                                    <TextBox Grid.Row="4"
+                                             Grid.Column="2"
+                                             Text="{Binding SettingsToggleCaseSensitiveHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <Button Grid.Row="2"
+                            Classes="primary compact"
+                            HorizontalAlignment="Right"
+                            Command="{Binding SaveSettingsCommand}"
+                            Content="{Binding WelcomeSaveButtonLabel}" />
+                </Grid>
+            </Border>
+        </Border>
+
+        <Border Grid.RowSpan="3"
+                Classes="settings-backdrop"
                 IsVisible="{Binding SessionLogs.IsOpen}">
             <Border Classes="surface-panel settings-sheet"
                      HorizontalAlignment="Center"
                      VerticalAlignment="Center"
                      MaxWidth="1100"
-                     MinWidth="840"
+                     MinWidth="980"
                      Padding="18">
                 <Grid RowDefinitions="Auto,Auto,Auto,*"
                       RowSpacing="14">
@@ -758,7 +1111,8 @@
                                        IsVisible="{Binding SessionLogs.ShowEmptyState}"
                                        Text="{Binding SessionLogs.EmptyMessage}" />
 
-                            <ListBox ItemsSource="{Binding SessionLogs.VisibleSessionLogs}"
+                            <ListBox x:Name="SessionLogsListBox"
+                                     ItemsSource="{Binding SessionLogs.VisibleSessionLogs}"
                                      IsVisible="{Binding SessionLogs.HasLogs}"
                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                                 <ListBox.ItemTemplate>
@@ -787,9 +1141,15 @@
                                                                VerticalAlignment="Center"
                                                                Text="{Binding TimestampText}" />
                                                 </Grid>
-                                                <TextBlock Text="{Binding Message}"
-                                                           TextAlignment="Center"
-                                                           TextWrapping="Wrap" />
+                                                <StackPanel Spacing="6">
+                                                    <TextBlock Text="{Binding DisplayMessage}"
+                                                               TextAlignment="Center"
+                                                               TextWrapping="Wrap" />
+                                                    <TextBlock Classes="body-muted"
+                                                               HorizontalAlignment="Center"
+                                                               IsVisible="{Binding CanExpand}"
+                                                               Text="Double-click to expand" />
+                                                </StackPanel>
                                             </StackPanel>
                                         </Border>
                                     </DataTemplate>

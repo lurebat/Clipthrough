@@ -28,6 +28,10 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
     public StorageOptions Current { get; private set; }
 
+    public bool HasSavedConfig => File.Exists(_configPath);
+
+    public bool DatabaseExists => File.Exists(Current.DatabasePath);
+
     public async Task SaveAsync(StorageOptions options, CancellationToken cancellationToken = default)
     {
         var normalized = options.Normalize();

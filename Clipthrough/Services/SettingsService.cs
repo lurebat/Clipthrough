@@ -32,6 +32,8 @@ public sealed class SettingsService : ISettingsService
 
     public AppSettings Current => _current;
 
+    public bool HasSavedSettings => File.Exists(_settingsPath);
+
     public event EventHandler<AppSettings>? SettingsChanged;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)

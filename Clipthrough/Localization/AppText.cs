@@ -22,22 +22,26 @@ public static class AppText
         [nameof(RawToggleLabel)] = "Raw",
         [nameof(CopyButtonLabel)] = "Copy",
         [nameof(DeleteButtonLabel)] = "Delete",
+        [nameof(ExportButtonLabel)] = "Export",
         [nameof(FolderButtonLabel)] = "Folder",
         [nameof(FavoriteButtonLabel)] = "Favorite",
-        [nameof(SelectAllButtonLabel)] = "Select all",
-        [nameof(SelectNoneButtonLabel)] = "Select none",
-        [nameof(FavoriteSelectedButtonLabel)] = "Favorite selected",
+        [nameof(SelectAllButtonLabel)] = "All",
+        [nameof(SelectNoneButtonLabel)] = "None",
+        [nameof(FavoriteSelectedButtonLabel)] = "Favorite",
         [nameof(CopyAsNewButtonLabel)] = "Copy as new",
         [nameof(FavoriteBadgeLabel)] = "Favorite",
         [nameof(LogsButtonLabel)] = "Logs",
         [nameof(SettingsButtonLabel)] = "Settings",
         [nameof(CloseButtonLabel)] = "Close",
         [nameof(SettingsTitleText)] = "Settings",
-        [nameof(SettingsDescriptionText)] = "Adjust keyboard shortcuts, tray behavior, startup, and the maximum stored clip size.",
+        [nameof(SettingsDescriptionText)] = "Adjust shortcuts, tray behavior, storage, sensitivity rules, retention, and archive capacity.",
         [nameof(SettingsLocalHotkeysTitle)] = "Local shortcuts",
         [nameof(SettingsGlobalHotkeyTitle)] = "Global shortcut and capture limits",
         [nameof(SettingsStorageTitle)] = "Database storage",
         [nameof(SettingsBehaviorTitle)] = "Window behavior",
+        [nameof(SettingsRetentionTitle)] = "Retention",
+        [nameof(SettingsCapacityTitle)] = "Archive capacity",
+        [nameof(SettingsSensitivityTitle)] = "Sensitivity patterns",
         [nameof(SettingsClipLimitLabel)] = "Max clip size (KB)",
         [nameof(SettingsDatabasePathLabel)] = "Database path",
         [nameof(SettingsDatabasePasswordLabel)] = "Encryption password",
@@ -46,13 +50,27 @@ public static class AppText
         [nameof(SettingsSensitiveHotkeyLabel)] = "Toggle sensitive",
         [nameof(SettingsCaseSensitiveHotkeyLabel)] = "Toggle case sensitivity",
         [nameof(SettingsToggleWindowHotkeyLabel)] = "Toggle window",
+        [nameof(SettingsEnableShortcutLabel)] = "Enable",
         [nameof(SettingsCloseToTrayLabel)] = "Close to tray",
         [nameof(SettingsMinimizeToTrayLabel)] = "Minimize to tray",
         [nameof(SettingsStartWithWindowsLabel)] = "Start with Windows",
+        [nameof(SettingsNormalClipLifetimeLabel)] = "Normal clip lifetime (days)",
+        [nameof(SettingsSensitiveClipLifetimeLabel)] = "Sensitive clip lifetime (minutes)",
+        [nameof(SettingsMaxLibrarySizeLabel)] = "Max archive size (MB)",
+        [nameof(SettingsMaxEntryCountLabel)] = "Max entries",
+        [nameof(SettingsRuleNameLabel)] = "Rule name",
+        [nameof(SettingsRulePatternLabel)] = "Regex pattern",
+        [nameof(SettingsRuleSeverityLabel)] = "Severity",
+        [nameof(SettingsRuleEnabledLabel)] = "Enabled",
+        [nameof(SettingsAddRuleButtonLabel)] = "Add rule",
         [nameof(SettingsSaveButtonLabel)] = "Save",
         [nameof(SettingsCancelButtonLabel)] = "Cancel",
-        [nameof(SettingsHintText)] = "Enter shortcuts in forms like Alt+R, Ctrl+Shift+F, or F8. The default max clip size is 2048 KB. Startup registration applies on Windows.",
+        [nameof(SettingsHintText)] = "Enter shortcuts in forms like Alt+R, Ctrl+Shift+F, or F8. Disable any shortcut you do not want active. Startup registration applies on Windows.",
         [nameof(SettingsStorageHintText)] = "The path is stored outside the clip database so you can move or encrypt it. Leave the password empty to keep SQLite unencrypted.",
+        [nameof(WelcomeTitleText)] = "Welcome to Clipthrough",
+        [nameof(WelcomeDescriptionText)] = "Set up your clipboard library before the app starts capturing. You can change these options later in Settings.",
+        [nameof(WelcomeSaveButtonLabel)] = "Create library",
+        [nameof(WelcomeStatusText)] = "Finish setup to start capturing clips.",
         [nameof(EmptySelectionTitle)] = "Select a clip",
         [nameof(EmptySelectionDescription)] = "Choose a clip from the left to inspect its content, preview it in context, and review metadata below.",
         [nameof(ImageClipTitle)] = "Image clip",
@@ -72,8 +90,15 @@ public static class AppText
         [nameof(AddFavorite)] = "Add Favorite",
         [nameof(SettingsSavedStatus)] = "Settings saved.",
         [nameof(SettingsInvalidHotkeyFallback)] = "Enter a valid hotkey such as Alt+R.",
-        [nameof(SettingsInvalidClipSize)] = "Enter a clip size between 0.25 KB and 1024 KB.",
+        [nameof(SettingsInvalidClipSize)] = "Enter a clip size between 0.25 KB and 32768 KB.",
         [nameof(SettingsInvalidDatabasePath)] = "Enter a valid absolute database path.",
+        [nameof(SettingsInvalidNormalLifetime)] = "Enter a normal clip lifetime between 1 and 3650 days.",
+        [nameof(SettingsInvalidSensitiveLifetime)] = "Enter a sensitive clip lifetime between 1 and 525600 minutes.",
+        [nameof(SettingsInvalidMaxLibrarySize)] = "Enter an archive size between 1 and 1048576 MB.",
+        [nameof(SettingsInvalidMaxEntryCount)] = "Enter a max entry count between 1 and 5000000.",
+        [nameof(SettingsInvalidRuleName)] = "Each sensitivity rule needs a name.",
+        [nameof(SettingsInvalidRulePattern)] = "Each sensitivity rule needs a regex pattern.",
+        [nameof(UnlimitedCapacityText)] = "Unlimited",
         [nameof(SelectedClipStateTitle)] = "Selected clip",
         [nameof(EmptySelectionStateTitle)] = "Choose a clip from the list to preview its details.",
         [nameof(ClipboardRefreshingState)] = "Refreshing clipboard library…",
@@ -155,6 +180,7 @@ public static class AppText
         ["Format.CopiedPathStatus"] = "Copied path: {0}.",
         ["Format.OpenedFileStatus"] = "Opened: {0}.",
         ["Format.OpenedContainingFolderStatus"] = "Opened containing folder for {0}.",
+        ["Format.ExportedClipStatus"] = "Exported clip to {0}.",
         ["Format.CopyFailed"] = "Copy failed: {0}",
         ["Format.OpenFailed"] = "Open failed: {0}",
         ["Format.FolderOpenFailed"] = "Folder open failed: {0}",
@@ -162,11 +188,17 @@ public static class AppText
         ["Format.SettingsValidationError"] = "Settings error: {0}",
         ["Format.PathNotFound"] = "The requested file or directory could not be found: {0}",
         ["Format.DuplicateHotkey"] = "The hotkey {0} is assigned more than once.",
+        ["Format.DuplicateSensitivityRule"] = "The sensitivity rule {0} is defined more than once.",
+        ["Format.InvalidSensitivityRule"] = "The sensitivity rule {0} is invalid: {1}",
         ["Format.RelativeMinutes"] = "{0} min ago",
         ["Format.RelativeHours"] = "{0} hr ago",
         ["Format.RelativeDaysSingular"] = "{0} day ago",
         ["Format.RelativeDaysPlural"] = "{0} days ago",
         ["Format.LogCount"] = "{0:N0} session logs",
+        ["Format.StorageUsage"] = "{0}",
+        ["Format.EntryUsage"] = "{0:N0} clips",
+        ["Format.StorageCapacity"] = "Cap {0:N0} MB",
+        ["Format.EntryCapacity"] = "Cap {0:N0} clips",
         ["Format.ClipCaptureFailedTooLarge"] = "The clipboard payload was too large to store ({0:N0} bytes, limit {1:N0} bytes).",
         ["Format.ClipCaptureFailedComSnapshot"] = "Clipboard access failed while enumerating formats (HRESULT 0x{0:X8}).",
         ["LogLevel.All"] = "All levels",
@@ -199,6 +231,7 @@ public static class AppText
     public static string RawToggleLabel => Text(nameof(RawToggleLabel));
     public static string CopyButtonLabel => Text(nameof(CopyButtonLabel));
     public static string DeleteButtonLabel => Text(nameof(DeleteButtonLabel));
+    public static string ExportButtonLabel => Text(nameof(ExportButtonLabel));
     public static string FolderButtonLabel => Text(nameof(FolderButtonLabel));
     public static string FavoriteButtonLabel => Text(nameof(FavoriteButtonLabel));
     public static string SelectAllButtonLabel => Text(nameof(SelectAllButtonLabel));
@@ -215,6 +248,9 @@ public static class AppText
     public static string SettingsGlobalHotkeyTitle => Text(nameof(SettingsGlobalHotkeyTitle));
     public static string SettingsStorageTitle => Text(nameof(SettingsStorageTitle));
     public static string SettingsBehaviorTitle => Text(nameof(SettingsBehaviorTitle));
+    public static string SettingsRetentionTitle => Text(nameof(SettingsRetentionTitle));
+    public static string SettingsCapacityTitle => Text(nameof(SettingsCapacityTitle));
+    public static string SettingsSensitivityTitle => Text(nameof(SettingsSensitivityTitle));
     public static string SettingsClipLimitLabel => Text(nameof(SettingsClipLimitLabel));
     public static string SettingsDatabasePathLabel => Text(nameof(SettingsDatabasePathLabel));
     public static string SettingsDatabasePasswordLabel => Text(nameof(SettingsDatabasePasswordLabel));
@@ -223,13 +259,27 @@ public static class AppText
     public static string SettingsSensitiveHotkeyLabel => Text(nameof(SettingsSensitiveHotkeyLabel));
     public static string SettingsCaseSensitiveHotkeyLabel => Text(nameof(SettingsCaseSensitiveHotkeyLabel));
     public static string SettingsToggleWindowHotkeyLabel => Text(nameof(SettingsToggleWindowHotkeyLabel));
+    public static string SettingsEnableShortcutLabel => Text(nameof(SettingsEnableShortcutLabel));
     public static string SettingsCloseToTrayLabel => Text(nameof(SettingsCloseToTrayLabel));
     public static string SettingsMinimizeToTrayLabel => Text(nameof(SettingsMinimizeToTrayLabel));
     public static string SettingsStartWithWindowsLabel => Text(nameof(SettingsStartWithWindowsLabel));
+    public static string SettingsNormalClipLifetimeLabel => Text(nameof(SettingsNormalClipLifetimeLabel));
+    public static string SettingsSensitiveClipLifetimeLabel => Text(nameof(SettingsSensitiveClipLifetimeLabel));
+    public static string SettingsMaxLibrarySizeLabel => Text(nameof(SettingsMaxLibrarySizeLabel));
+    public static string SettingsMaxEntryCountLabel => Text(nameof(SettingsMaxEntryCountLabel));
+    public static string SettingsRuleNameLabel => Text(nameof(SettingsRuleNameLabel));
+    public static string SettingsRulePatternLabel => Text(nameof(SettingsRulePatternLabel));
+    public static string SettingsRuleSeverityLabel => Text(nameof(SettingsRuleSeverityLabel));
+    public static string SettingsRuleEnabledLabel => Text(nameof(SettingsRuleEnabledLabel));
+    public static string SettingsAddRuleButtonLabel => Text(nameof(SettingsAddRuleButtonLabel));
     public static string SettingsSaveButtonLabel => Text(nameof(SettingsSaveButtonLabel));
     public static string SettingsCancelButtonLabel => Text(nameof(SettingsCancelButtonLabel));
     public static string SettingsHintText => Text(nameof(SettingsHintText));
     public static string SettingsStorageHintText => Text(nameof(SettingsStorageHintText));
+    public static string WelcomeTitleText => Text(nameof(WelcomeTitleText));
+    public static string WelcomeDescriptionText => Text(nameof(WelcomeDescriptionText));
+    public static string WelcomeSaveButtonLabel => Text(nameof(WelcomeSaveButtonLabel));
+    public static string WelcomeStatusText => Text(nameof(WelcomeStatusText));
     public static string EmptySelectionTitle => Text(nameof(EmptySelectionTitle));
     public static string EmptySelectionDescription => Text(nameof(EmptySelectionDescription));
     public static string ImageClipTitle => Text(nameof(ImageClipTitle));
@@ -251,6 +301,13 @@ public static class AppText
     public static string SettingsInvalidHotkeyFallback => Text(nameof(SettingsInvalidHotkeyFallback));
     public static string SettingsInvalidClipSize => Text(nameof(SettingsInvalidClipSize));
     public static string SettingsInvalidDatabasePath => Text(nameof(SettingsInvalidDatabasePath));
+    public static string SettingsInvalidNormalLifetime => Text(nameof(SettingsInvalidNormalLifetime));
+    public static string SettingsInvalidSensitiveLifetime => Text(nameof(SettingsInvalidSensitiveLifetime));
+    public static string SettingsInvalidMaxLibrarySize => Text(nameof(SettingsInvalidMaxLibrarySize));
+    public static string SettingsInvalidMaxEntryCount => Text(nameof(SettingsInvalidMaxEntryCount));
+    public static string SettingsInvalidRuleName => Text(nameof(SettingsInvalidRuleName));
+    public static string SettingsInvalidRulePattern => Text(nameof(SettingsInvalidRulePattern));
+    public static string UnlimitedCapacityText => Text(nameof(UnlimitedCapacityText));
     public static string SelectedClipStateTitle => Text(nameof(SelectedClipStateTitle));
     public static string EmptySelectionStateTitle => Text(nameof(EmptySelectionStateTitle));
     public static string ClipboardRefreshingState => Text(nameof(ClipboardRefreshingState));
@@ -388,6 +445,14 @@ public static class AppText
 
     public static string FormatLogCount(int count) => Format("Format.LogCount", count);
 
+    public static string FormatStorageUsage(long bytes) => Format("Format.StorageUsage", FormatByteCount(bytes));
+
+    public static string FormatEntryUsage(int count) => Format("Format.EntryUsage", count);
+
+    public static string FormatStorageCapacity(int megabytes) => Format("Format.StorageCapacity", megabytes);
+
+    public static string FormatEntryCapacity(int count) => Format("Format.EntryCapacity", count);
+
     public static string FormatClipCaptureFailedTooLarge(long bytes, long limitBytes) => Format("Format.ClipCaptureFailedTooLarge", bytes, limitBytes);
 
     public static string FormatClipCaptureFailedComSnapshot(int hresult) => Format("Format.ClipCaptureFailedComSnapshot", hresult);
@@ -397,6 +462,8 @@ public static class AppText
     public static string FormatOpenedFile(string fileName) => Format("Format.OpenedFileStatus", fileName);
 
     public static string FormatOpenedContainingFolder(string fileName) => Format("Format.OpenedContainingFolderStatus", fileName);
+
+    public static string FormatExportedClipStatus(string path) => Format("Format.ExportedClipStatus", path);
 
     public static string FormatCopyFailed(string message) => Format("Format.CopyFailed", message);
 
@@ -411,6 +478,10 @@ public static class AppText
     public static string FormatMissingPath(string path) => Format("Format.PathNotFound", path);
 
     public static string FormatDuplicateHotkey(string hotkey) => Format("Format.DuplicateHotkey", hotkey);
+
+    public static string FormatDuplicateSensitivityRule(string name) => Format("Format.DuplicateSensitivityRule", name);
+
+    public static string FormatInvalidSensitivityRule(string name, string message) => Format("Format.InvalidSensitivityRule", name, message);
 
     public static string FormatRelativeMinutes(int minutes) => Format("Format.RelativeMinutes", minutes);
 

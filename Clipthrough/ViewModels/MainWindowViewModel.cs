@@ -42,7 +42,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly ISettingsService _settingsService;
     private readonly ISystemInteractionService _systemInteractionService;
     private readonly IStorageOptionsService _storageOptionsService;
+    private readonly ISensitivityService _sensitivityService;
     private readonly IAppNotificationService _notificationService;
+    private readonly IClipExportService _clipExportService;
     private readonly DatabaseInitializer _databaseInitializer;
     private readonly CompositeDisposable _subscriptions = new();
 
@@ -61,6 +63,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _matchingClipCount;
     private int _totalClipCount;
     private int _sensitiveClipCount;
+    private long _totalStoredBytes;
     private string _lastCaptureSummary = AppText.WaitingForFirstCapture;
     private bool _showRawContent;
     private string _selectedClipRenderedText = AppText.PreviewSelectContent;
@@ -70,17 +73,35 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isDatabaseReady;
     private bool _isStarted;
     private bool _isSettingsOpen;
+    private bool _isWelcomeOpen;
     private string _settingsToggleRegexHotkey = AppSettings.Default.ToggleRegexHotkey;
+    private bool _settingsEnableToggleRegexHotkey = AppSettings.Default.EnableToggleRegexHotkey;
     private string _settingsToggleFavoritesHotkey = AppSettings.Default.ToggleFavoritesHotkey;
+    private bool _settingsEnableToggleFavoritesHotkey = AppSettings.Default.EnableToggleFavoritesHotkey;
     private string _settingsToggleSensitiveHotkey = AppSettings.Default.ToggleSensitiveHotkey;
+    private bool _settingsEnableToggleSensitiveHotkey = AppSettings.Default.EnableToggleSensitiveHotkey;
     private string _settingsToggleCaseSensitiveHotkey = AppSettings.Default.ToggleCaseSensitiveHotkey;
+    private bool _settingsEnableToggleCaseSensitiveHotkey = AppSettings.Default.EnableToggleCaseSensitiveHotkey;
     private string _settingsToggleWindowHotkey = AppSettings.Default.ToggleWindowHotkey;
+    private bool _settingsEnableToggleWindowHotkey = AppSettings.Default.EnableToggleWindowHotkey;
     private string _settingsMaxClipSizeKilobytes = (AppSettings.Default.MaxClipSizeBytes / 1024d).ToString("0.##", CultureInfo.InvariantCulture);
     private string _settingsDatabasePath = StorageOptions.Default.DatabasePath;
     private string _settingsDatabasePassword = StorageOptions.Default.DatabasePassword;
+    private bool _settingsCloseToTray = AppSettings.Default.CloseToTray;
+    private bool _settingsMinimizeToTray = AppSettings.Default.MinimizeToTray;
+    private bool _settingsStartWithWindows = AppSettings.Default.StartWithWindows;
+    private bool _settingsEnableNormalClipLifetime = AppSettings.Default.EnableNormalClipLifetime;
+    private string _settingsNormalClipLifetimeDays = AppSettings.Default.NormalClipLifetimeDays.ToString(CultureInfo.InvariantCulture);
+    private bool _settingsEnableSensitiveClipLifetime = AppSettings.Default.EnableSensitiveClipLifetime;
+    private string _settingsSensitiveClipLifetimeMinutes = AppSettings.Default.SensitiveClipLifetimeMinutes.ToString(CultureInfo.InvariantCulture);
+    private bool _settingsEnableMaxLibrarySize = AppSettings.Default.EnableMaxLibrarySize;
+    private string _settingsMaxLibrarySizeMegabytes = AppSettings.Default.MaxLibrarySizeMegabytes.ToString(CultureInfo.InvariantCulture);
+    private bool _settingsEnableMaxEntryCount = AppSettings.Default.EnableMaxEntryCount;
+    private string _settingsMaxEntryCount = AppSettings.Default.MaxEntryCount.ToString(CultureInfo.InvariantCulture);
     private string _editedClipText = string.Empty;
+    private string _editedClipBaseline = string.Empty;
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, IAppNotificationService notificationService, ISessionLogService sessionLogService, DatabaseInitializer databaseInitializer)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, DatabaseInitializer databaseInitializer)
     {
         _clipStoreService = clipStoreService;
         _clipboardMonitorService = clipboardMonitorService;
@@ -88,7 +109,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _settingsService = settingsService;
         _systemInteractionService = systemInteractionService;
         _storageOptionsService = storageOptionsService;
+        _sensitivityService = sensitivityService;
         _notificationService = notificationService;
+        _clipExportService = clipExportService;
         _databaseInitializer = databaseInitializer;
         SessionLogs = new SessionLogsViewModel(sessionLogService);
         ContentTypeOptions =
@@ -107,11 +130,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ToggleFavoriteCommand = ReactiveCommand.CreateFromTask(ToggleFavoriteAsync, hasSelection);
         DeleteSelectedCommand = ReactiveCommand.CreateFromTask(DeleteSelectedAsync, hasSelection);
         CopySelectedCommand = ReactiveCommand.CreateFromTask(CopySelectedAsync, hasSelection);
+        ExportSelectedCommand = ReactiveCommand.CreateFromTask(ExportSelectedAsync, hasSelection);
         SelectAllClipsCommand = ReactiveCommand.Create(SelectAllClips);
         SelectNoClipsCommand = ReactiveCommand.Create(SelectNoClips);
         FavoriteCheckedClipsCommand = ReactiveCommand.CreateFromTask(FavoriteCheckedClipsAsync);
         DeleteCheckedClipsCommand = ReactiveCommand.CreateFromTask(DeleteCheckedClipsAsync);
         CopyEditedClipCommand = ReactiveCommand.CreateFromTask(CopyEditedClipAsync);
+        AddSensitivityRuleCommand = ReactiveCommand.Create(AddSensitivityRule);
         OpenSettingsCommand = ReactiveCommand.Create(OpenSettings);
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
         SaveSettingsCommand = ReactiveCommand.CreateFromTask(SaveSettingsAsync);
@@ -147,6 +172,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .Merge(LoadMoreCommand.ThrownExceptions)
                 .Merge(ToggleFavoriteCommand.ThrownExceptions)
                 .Merge(CopySelectedCommand.ThrownExceptions)
+                .Merge(ExportSelectedCommand.ThrownExceptions)
                 .Merge(DeleteSelectedCommand.ThrownExceptions)
                 .Merge(FavoriteCheckedClipsCommand.ThrownExceptions)
                 .Merge(DeleteCheckedClipsCommand.ThrownExceptions)
@@ -162,7 +188,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ObservableCollection<AppNotificationViewModel> Notifications { get; } = [];
 
+    public ObservableCollection<SensitivityRuleEditorViewModel> SensitivityRules { get; } = [];
+
     public IReadOnlyList<ContentTypeOption> ContentTypeOptions { get; }
+
+    public IReadOnlyList<string> SensitivitySeverityOptions { get; } = ["info", "warning", "critical"];
 
     public SessionLogsViewModel SessionLogs { get; }
 
@@ -173,6 +203,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> ToggleFavoriteCommand { get; }
 
     public ReactiveCommand<Unit, Unit> CopySelectedCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> ExportSelectedCommand { get; }
 
     public ReactiveCommand<Unit, Unit> DeleteSelectedCommand { get; }
 
@@ -185,6 +217,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> DeleteCheckedClipsCommand { get; }
 
     public ReactiveCommand<Unit, Unit> CopyEditedClipCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> AddSensitivityRuleCommand { get; }
 
     public ReactiveCommand<Unit, Unit> OpenSettingsCommand { get; }
 
@@ -330,7 +364,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public int TotalClipCount
     {
         get => _totalClipCount;
-        private set => this.RaiseAndSetIfChanged(ref _totalClipCount, value);
+        private set
+        {
+            this.RaiseAndSetIfChanged(ref _totalClipCount, value);
+            this.RaisePropertyChanged(nameof(EntryUsageText));
+            this.RaisePropertyChanged(nameof(EntryCapacityText));
+            this.RaisePropertyChanged(nameof(EntryUsagePercent));
+        }
     }
 
     public int SensitiveClipCount
@@ -340,6 +380,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             this.RaiseAndSetIfChanged(ref _sensitiveClipCount, value);
             this.RaisePropertyChanged(nameof(SensitiveClipCountText));
+        }
+    }
+
+    public long TotalStoredBytes
+    {
+        get => _totalStoredBytes;
+        private set
+        {
+            this.RaiseAndSetIfChanged(ref _totalStoredBytes, value);
+            this.RaisePropertyChanged(nameof(StorageUsageText));
+            this.RaisePropertyChanged(nameof(StorageCapacityText));
+            this.RaisePropertyChanged(nameof(StorageUsagePercent));
         }
     }
 
@@ -373,6 +425,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string DeleteButtonLabel => AppText.DeleteButtonLabel;
 
+    public string ExportButtonLabel => AppText.ExportButtonLabel;
+
     public string FavoriteBadgeLabel => AppText.FavoriteBadgeLabel;
 
     public string FavoriteButtonLabel => AppText.FavoriteButtonLabel;
@@ -403,6 +457,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string SettingsStorageTitle => AppText.SettingsStorageTitle;
 
+    public string SettingsBehaviorTitle => AppText.SettingsBehaviorTitle;
+
+    public string SettingsRetentionTitle => AppText.SettingsRetentionTitle;
+
+    public string SettingsCapacityTitle => AppText.SettingsCapacityTitle;
+
+    public string SettingsSensitivityTitle => AppText.SettingsSensitivityTitle;
+
     public string SettingsClipLimitLabel => AppText.SettingsClipLimitLabel;
 
     public string SettingsDatabasePathLabel => AppText.SettingsDatabasePathLabel;
@@ -418,6 +480,38 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string SettingsCaseSensitiveHotkeyLabel => AppText.SettingsCaseSensitiveHotkeyLabel;
 
     public string SettingsToggleWindowHotkeyLabel => AppText.SettingsToggleWindowHotkeyLabel;
+
+    public string SettingsEnableShortcutLabel => AppText.SettingsEnableShortcutLabel;
+
+    public string SettingsCloseToTrayLabel => AppText.SettingsCloseToTrayLabel;
+
+    public string SettingsMinimizeToTrayLabel => AppText.SettingsMinimizeToTrayLabel;
+
+    public string SettingsStartWithWindowsLabel => AppText.SettingsStartWithWindowsLabel;
+
+    public string SettingsNormalClipLifetimeLabel => AppText.SettingsNormalClipLifetimeLabel;
+
+    public string SettingsSensitiveClipLifetimeLabel => AppText.SettingsSensitiveClipLifetimeLabel;
+
+    public string SettingsMaxLibrarySizeLabel => AppText.SettingsMaxLibrarySizeLabel;
+
+    public string SettingsMaxEntryCountLabel => AppText.SettingsMaxEntryCountLabel;
+
+    public string SettingsRuleNameLabel => AppText.SettingsRuleNameLabel;
+
+    public string SettingsRulePatternLabel => AppText.SettingsRulePatternLabel;
+
+    public string SettingsRuleSeverityLabel => AppText.SettingsRuleSeverityLabel;
+
+    public string SettingsRuleEnabledLabel => AppText.SettingsRuleEnabledLabel;
+
+    public string SettingsAddRuleButtonLabel => AppText.SettingsAddRuleButtonLabel;
+
+    public string WelcomeTitleText => AppText.WelcomeTitleText;
+
+    public string WelcomeDescriptionText => AppText.WelcomeDescriptionText;
+
+    public string WelcomeSaveButtonLabel => AppText.WelcomeSaveButtonLabel;
 
     public string SettingsSaveButtonLabel => AppText.SettingsSaveButtonLabel;
 
@@ -450,6 +544,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string MatchingClipCountText => AppText.FormatMatchingCount(MatchingClipCount);
 
     public string SensitiveClipCountText => AppText.FormatSensitiveCount(SensitiveClipCount);
+
+    public string StorageUsageText => AppText.FormatStorageUsage(TotalStoredBytes);
+
+    public string EntryUsageText => AppText.FormatEntryUsage(TotalClipCount);
+
+    public string StorageCapacityText => BuildStorageCapacityText();
+
+    public string EntryCapacityText => BuildEntryCapacityText();
+
+    public double StorageUsagePercent => BuildUsagePercent(
+        TotalStoredBytes,
+        SettingsEnableMaxLibrarySize ? ParseIntOrDefault(SettingsMaxLibrarySizeMegabytes, AppSettings.DefaultMaxLibrarySizeMegabytes) * 1024d * 1024d : 0d);
+
+    public double EntryUsagePercent => BuildUsagePercent(
+        TotalClipCount,
+        SettingsEnableMaxEntryCount ? ParseIntOrDefault(SettingsMaxEntryCount, AppSettings.DefaultMaxEntryCount) : 0d);
 
     public bool IsSelectedClipFavorite => SelectedClip?.IsFavorite == true;
 
@@ -493,7 +603,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         && HasEditedClipChanges;
 
     public bool HasEditedClipChanges => IsSelectedClipTextEditable
-        && !string.Equals(EditedClipText, GetEditedClipBaseline(), StringComparison.Ordinal);
+        && !string.Equals(EditedClipText, _editedClipBaseline, StringComparison.Ordinal);
 
     public string SelectedClipRenderedText => _selectedClipRenderedText;
 
@@ -636,10 +746,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         private set => this.RaiseAndSetIfChanged(ref _isSettingsOpen, value);
     }
 
+    public bool IsWelcomeOpen
+    {
+        get => _isWelcomeOpen;
+        private set => this.RaiseAndSetIfChanged(ref _isWelcomeOpen, value);
+    }
+
     public string SettingsToggleRegexHotkey
     {
         get => _settingsToggleRegexHotkey;
         set => this.RaiseAndSetIfChanged(ref _settingsToggleRegexHotkey, value);
+    }
+
+    public bool SettingsEnableToggleRegexHotkey
+    {
+        get => _settingsEnableToggleRegexHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnableToggleRegexHotkey, value);
     }
 
     public string SettingsToggleFavoritesHotkey
@@ -648,10 +770,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => this.RaiseAndSetIfChanged(ref _settingsToggleFavoritesHotkey, value);
     }
 
+    public bool SettingsEnableToggleFavoritesHotkey
+    {
+        get => _settingsEnableToggleFavoritesHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnableToggleFavoritesHotkey, value);
+    }
+
     public string SettingsToggleSensitiveHotkey
     {
         get => _settingsToggleSensitiveHotkey;
         set => this.RaiseAndSetIfChanged(ref _settingsToggleSensitiveHotkey, value);
+    }
+
+    public bool SettingsEnableToggleSensitiveHotkey
+    {
+        get => _settingsEnableToggleSensitiveHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnableToggleSensitiveHotkey, value);
     }
 
     public string SettingsToggleCaseSensitiveHotkey
@@ -660,10 +794,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => this.RaiseAndSetIfChanged(ref _settingsToggleCaseSensitiveHotkey, value);
     }
 
+    public bool SettingsEnableToggleCaseSensitiveHotkey
+    {
+        get => _settingsEnableToggleCaseSensitiveHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnableToggleCaseSensitiveHotkey, value);
+    }
+
     public string SettingsToggleWindowHotkey
     {
         get => _settingsToggleWindowHotkey;
         set => this.RaiseAndSetIfChanged(ref _settingsToggleWindowHotkey, value);
+    }
+
+    public bool SettingsEnableToggleWindowHotkey
+    {
+        get => _settingsEnableToggleWindowHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnableToggleWindowHotkey, value);
     }
 
     public string SettingsMaxClipSizeKilobytes
@@ -682,6 +828,92 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get => _settingsDatabasePassword;
         set => this.RaiseAndSetIfChanged(ref _settingsDatabasePassword, value);
+    }
+
+    public bool SettingsCloseToTray
+    {
+        get => _settingsCloseToTray;
+        set => this.RaiseAndSetIfChanged(ref _settingsCloseToTray, value);
+    }
+
+    public bool SettingsMinimizeToTray
+    {
+        get => _settingsMinimizeToTray;
+        set => this.RaiseAndSetIfChanged(ref _settingsMinimizeToTray, value);
+    }
+
+    public bool SettingsStartWithWindows
+    {
+        get => _settingsStartWithWindows;
+        set => this.RaiseAndSetIfChanged(ref _settingsStartWithWindows, value);
+    }
+
+    public bool SettingsEnableNormalClipLifetime
+    {
+        get => _settingsEnableNormalClipLifetime;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnableNormalClipLifetime, value);
+    }
+
+    public string SettingsNormalClipLifetimeDays
+    {
+        get => _settingsNormalClipLifetimeDays;
+        set => this.RaiseAndSetIfChanged(ref _settingsNormalClipLifetimeDays, value);
+    }
+
+    public bool SettingsEnableSensitiveClipLifetime
+    {
+        get => _settingsEnableSensitiveClipLifetime;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnableSensitiveClipLifetime, value);
+    }
+
+    public string SettingsSensitiveClipLifetimeMinutes
+    {
+        get => _settingsSensitiveClipLifetimeMinutes;
+        set => this.RaiseAndSetIfChanged(ref _settingsSensitiveClipLifetimeMinutes, value);
+    }
+
+    public bool SettingsEnableMaxLibrarySize
+    {
+        get => _settingsEnableMaxLibrarySize;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _settingsEnableMaxLibrarySize, value);
+            this.RaisePropertyChanged(nameof(StorageCapacityText));
+            this.RaisePropertyChanged(nameof(StorageUsagePercent));
+        }
+    }
+
+    public string SettingsMaxLibrarySizeMegabytes
+    {
+        get => _settingsMaxLibrarySizeMegabytes;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _settingsMaxLibrarySizeMegabytes, value);
+            this.RaisePropertyChanged(nameof(StorageCapacityText));
+            this.RaisePropertyChanged(nameof(StorageUsagePercent));
+        }
+    }
+
+    public bool SettingsEnableMaxEntryCount
+    {
+        get => _settingsEnableMaxEntryCount;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _settingsEnableMaxEntryCount, value);
+            this.RaisePropertyChanged(nameof(EntryCapacityText));
+            this.RaisePropertyChanged(nameof(EntryUsagePercent));
+        }
+    }
+
+    public string SettingsMaxEntryCount
+    {
+        get => _settingsMaxEntryCount;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _settingsMaxEntryCount, value);
+            this.RaisePropertyChanged(nameof(EntryCapacityText));
+            this.RaisePropertyChanged(nameof(EntryUsagePercent));
+        }
     }
 
     public void Dispose()
@@ -707,13 +939,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         try
         {
-            await _databaseInitializer.InitializeAsync();
-            await _settingsService.InitializeAsync();
-            LoadSettingsDraft(_settingsService.Current);
-            _isDatabaseReady = true;
+            if (_settingsService.HasSavedSettings)
+            {
+                await _settingsService.InitializeAsync();
+            }
 
-            _clipboardMonitorService.Start();
-            await RefreshAsync();
+            var draftSettings = _settingsService.HasSavedSettings ? _settingsService.Current : AppSettings.Default;
+            LoadSettingsDraft(draftSettings);
+
+            if (!_storageOptionsService.HasSavedConfig || !_storageOptionsService.DatabaseExists || !_settingsService.HasSavedSettings)
+            {
+                ReplaceSensitivityRules(_sensitivityService.GetDefaultRules());
+                IsWelcomeOpen = true;
+                StatusText = AppText.WelcomeStatusText;
+                _isStarted = true;
+                return;
+            }
+
+            await StartDatabaseAsync();
+            await ApplyMaintenanceAndRefreshAsync();
 
             _isStarted = true;
         }
@@ -826,6 +1070,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             : AppText.FormatCopiedClip(SelectedClip.DisplayContentType.ToLower(AppText.CurrentCulture));
     }
 
+    private async Task ExportSelectedAsync()
+    {
+        if (SelectedClip is null)
+        {
+            return;
+        }
+
+        var exportDirectory = await _clipExportService.ExportAsync(SelectedClip.Clip);
+        await _systemInteractionService.CopyTextAsync(exportDirectory);
+        await _systemInteractionService.OpenPathAsync(exportDirectory);
+        StatusText = AppText.FormatExportedClipStatus(exportDirectory);
+    }
+
     private void SelectAllClips()
     {
         foreach (var clip in Clips)
@@ -900,13 +1157,31 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             await _systemInteractionService.CopyTextAsync(EditedClipText);
         }
 
+        _editedClipBaseline = EditedClipText;
+        RaiseEditedClipProperties();
         StatusText = AppText.EditedClipCopiedStatus;
+    }
+
+    public async Task CommitEditedClipOnFocusLossAsync()
+    {
+        if (!ShowCopyEditedClipButton)
+        {
+            return;
+        }
+
+        await CopyEditedClipAsync();
     }
 
     private async Task CopyClipAsync(ClipItemViewModel clip)
     {
         SelectedClip = clip;
         await CopySelectedAsync();
+    }
+
+    private async Task ExportClipAsync(ClipItemViewModel clip)
+    {
+        SelectedClip = clip;
+        await ExportSelectedAsync();
     }
 
     private async Task ToggleFavoriteClipAsync(ClipItemViewModel clip)
@@ -1055,20 +1330,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool TryHandleShortcut(KeyEventArgs e)
     {
-        if (IsSettingsOpen || SessionLogs.IsOpen)
+        if (IsSettingsOpen || IsWelcomeOpen || SessionLogs.IsOpen)
         {
             return false;
         }
 
-        return TryHandleShortcut(e, _settingsService.Current.ToggleRegexHotkey, () => UseRegexSearch = !UseRegexSearch)
-            || TryHandleShortcut(e, _settingsService.Current.ToggleFavoritesHotkey, () => ShowFavoritesOnly = !ShowFavoritesOnly)
-            || TryHandleShortcut(e, _settingsService.Current.ToggleSensitiveHotkey, () => ShowSensitiveOnly = !ShowSensitiveOnly)
-            || TryHandleShortcut(e, _settingsService.Current.ToggleCaseSensitiveHotkey, () => CaseSensitiveSearch = !CaseSensitiveSearch);
+        return TryHandleShortcut(e, _settingsService.Current.EnableToggleRegexHotkey, _settingsService.Current.ToggleRegexHotkey, () => UseRegexSearch = !UseRegexSearch)
+            || TryHandleShortcut(e, _settingsService.Current.EnableToggleFavoritesHotkey, _settingsService.Current.ToggleFavoritesHotkey, () => ShowFavoritesOnly = !ShowFavoritesOnly)
+            || TryHandleShortcut(e, _settingsService.Current.EnableToggleSensitiveHotkey, _settingsService.Current.ToggleSensitiveHotkey, () => ShowSensitiveOnly = !ShowSensitiveOnly)
+            || TryHandleShortcut(e, _settingsService.Current.EnableToggleCaseSensitiveHotkey, _settingsService.Current.ToggleCaseSensitiveHotkey, () => CaseSensitiveSearch = !CaseSensitiveSearch);
     }
 
-    private bool TryHandleShortcut(KeyEventArgs e, string hotkeyText, Action action)
+    private bool TryHandleShortcut(KeyEventArgs e, bool isEnabled, string hotkeyText, Action action)
     {
-        if (!TryParseAvaloniaGesture(hotkeyText, out var gesture)
+        if (!isEnabled
+            || !TryParseAvaloniaGesture(hotkeyText, out var gesture)
             || gesture is null
             || NormalizeKey(e.Key, e.PhysicalKey) != gesture.Key
             || (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Meta)) != gesture.KeyModifiers)
@@ -1095,36 +1371,51 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task SaveSettingsAsync()
     {
-        var localHotkeys = new Dictionary<string, string>(StringComparer.Ordinal)
+        var localHotkeys = new[]
         {
-            [nameof(AppSettings.ToggleRegexHotkey)] = SettingsToggleRegexHotkey,
-            [nameof(AppSettings.ToggleFavoritesHotkey)] = SettingsToggleFavoritesHotkey,
-            [nameof(AppSettings.ToggleSensitiveHotkey)] = SettingsToggleSensitiveHotkey,
-            [nameof(AppSettings.ToggleCaseSensitiveHotkey)] = SettingsToggleCaseSensitiveHotkey,
+            new HotkeyDraft(nameof(AppSettings.ToggleRegexHotkey), SettingsEnableToggleRegexHotkey, SettingsToggleRegexHotkey),
+            new HotkeyDraft(nameof(AppSettings.ToggleFavoritesHotkey), SettingsEnableToggleFavoritesHotkey, SettingsToggleFavoritesHotkey),
+            new HotkeyDraft(nameof(AppSettings.ToggleSensitiveHotkey), SettingsEnableToggleSensitiveHotkey, SettingsToggleSensitiveHotkey),
+            new HotkeyDraft(nameof(AppSettings.ToggleCaseSensitiveHotkey), SettingsEnableToggleCaseSensitiveHotkey, SettingsToggleCaseSensitiveHotkey),
         };
 
         var normalizedHotkeys = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var pair in localHotkeys)
         {
-            if (!TryParseAvaloniaGesture(pair.Value, out var gesture) || gesture is null)
+            if (!pair.IsEnabled)
+            {
+                normalizedHotkeys[pair.Name] = pair.HotkeyText.Trim();
+                continue;
+            }
+
+            if (!TryParseAvaloniaGesture(pair.HotkeyText, out var gesture) || gesture is null)
             {
                 StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidHotkeyFallback);
                 return;
             }
 
-            normalizedHotkeys[pair.Key] = gesture.ToString();
+            normalizedHotkeys[pair.Name] = gesture.ToString();
         }
 
-        if (!HotkeyGesture.TryParse(SettingsToggleWindowHotkey, out var globalHotkey, out var globalHotkeyError) || globalHotkey is null)
+        var normalizedGlobalHotkey = SettingsToggleWindowHotkey.Trim();
+        HotkeyGesture? parsedGlobalHotkey = null;
+        string? globalHotkeyError = null;
+        if (SettingsEnableToggleWindowHotkey
+            && (!HotkeyGesture.TryParse(SettingsToggleWindowHotkey, out parsedGlobalHotkey, out globalHotkeyError) || parsedGlobalHotkey is null))
         {
             StatusText = AppText.FormatSettingsValidationError(globalHotkeyError ?? AppText.SettingsInvalidHotkeyFallback);
             return;
         }
+        else if (SettingsEnableToggleWindowHotkey)
+        {
+            normalizedGlobalHotkey = parsedGlobalHotkey!.ToString();
+        }
 
-        var normalizedGlobalHotkey = globalHotkey.ToString();
-
-        var duplicates = normalizedHotkeys.Values
-            .Append(normalizedGlobalHotkey)
+        var duplicates = localHotkeys
+            .Where(static draft => draft.IsEnabled)
+            .Select(draft => normalizedHotkeys[draft.Name])
+            .Append(SettingsEnableToggleWindowHotkey ? normalizedGlobalHotkey : string.Empty)
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
             .GroupBy(static value => value, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault(static group => group.Count() > 1);
         if (duplicates is not null)
@@ -1136,6 +1427,30 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (!TryParseMaxClipSizeBytes(SettingsMaxClipSizeKilobytes, out var maxClipSizeBytes))
         {
             StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidClipSize);
+            return;
+        }
+
+        if (!TryParseOptionalPositiveInt(SettingsEnableNormalClipLifetime, SettingsNormalClipLifetimeDays, AppSettings.MinNormalClipLifetimeDays, AppSettings.MaxNormalClipLifetimeDays, out var normalClipLifetimeDays))
+        {
+            StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidNormalLifetime);
+            return;
+        }
+
+        if (!TryParseOptionalPositiveInt(SettingsEnableSensitiveClipLifetime, SettingsSensitiveClipLifetimeMinutes, AppSettings.MinSensitiveClipLifetimeMinutes, AppSettings.MaxSensitiveClipLifetimeMinutes, out var sensitiveClipLifetimeMinutes))
+        {
+            StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidSensitiveLifetime);
+            return;
+        }
+
+        if (!TryParseOptionalPositiveInt(SettingsEnableMaxLibrarySize, SettingsMaxLibrarySizeMegabytes, AppSettings.MinMaxLibrarySizeMegabytes, AppSettings.MaxMaxLibrarySizeMegabytes, out var maxLibrarySizeMegabytes))
+        {
+            StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidMaxLibrarySize);
+            return;
+        }
+
+        if (!TryParseOptionalPositiveInt(SettingsEnableMaxEntryCount, SettingsMaxEntryCount, AppSettings.MinMaxEntryCount, AppSettings.MaxMaxEntryCount, out var maxEntryCount))
+        {
+            StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidMaxEntryCount);
             return;
         }
 
@@ -1155,18 +1470,55 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        SensitivityRule[] sensitivityRules;
+        try
+        {
+            sensitivityRules = BuildSensitivityRules();
+        }
+        catch (ArgumentException ex)
+        {
+            StatusText = AppText.FormatSettingsValidationError(ex.Message);
+            return;
+        }
+
         var settings = _settingsService.Current with
         {
+            EnableToggleRegexHotkey = SettingsEnableToggleRegexHotkey,
             ToggleRegexHotkey = normalizedHotkeys[nameof(AppSettings.ToggleRegexHotkey)],
+            EnableToggleFavoritesHotkey = SettingsEnableToggleFavoritesHotkey,
             ToggleFavoritesHotkey = normalizedHotkeys[nameof(AppSettings.ToggleFavoritesHotkey)],
+            EnableToggleSensitiveHotkey = SettingsEnableToggleSensitiveHotkey,
             ToggleSensitiveHotkey = normalizedHotkeys[nameof(AppSettings.ToggleSensitiveHotkey)],
+            EnableToggleCaseSensitiveHotkey = SettingsEnableToggleCaseSensitiveHotkey,
             ToggleCaseSensitiveHotkey = normalizedHotkeys[nameof(AppSettings.ToggleCaseSensitiveHotkey)],
+            EnableToggleWindowHotkey = SettingsEnableToggleWindowHotkey,
             ToggleWindowHotkey = normalizedGlobalHotkey,
             MaxClipSizeBytes = maxClipSizeBytes,
+            CloseToTray = SettingsCloseToTray,
+            MinimizeToTray = SettingsMinimizeToTray,
+            StartWithWindows = SettingsStartWithWindows,
+            EnableNormalClipLifetime = SettingsEnableNormalClipLifetime,
+            NormalClipLifetimeDays = normalClipLifetimeDays,
+            EnableSensitiveClipLifetime = SettingsEnableSensitiveClipLifetime,
+            SensitiveClipLifetimeMinutes = sensitiveClipLifetimeMinutes,
+            EnableMaxLibrarySize = SettingsEnableMaxLibrarySize,
+            MaxLibrarySizeMegabytes = maxLibrarySizeMegabytes,
+            EnableMaxEntryCount = SettingsEnableMaxEntryCount,
+            MaxEntryCount = maxEntryCount,
         };
 
         await _storageOptionsService.SaveAsync(storageOptions);
         await _settingsService.SaveAsync(settings);
+        if (!_isDatabaseReady)
+        {
+            await StartDatabaseAsync();
+        }
+
+        await _sensitivityService.SaveRulesAsync(sensitivityRules);
+        await _clipStoreService.RebuildSensitivityMatchesAsync();
+        await ApplyMaintenanceAndRefreshAsync();
+
+        IsWelcomeOpen = false;
         IsSettingsOpen = false;
         StatusText = AppText.SettingsSavedStatus;
         UpdateSelectedClipPresentation();
@@ -1175,14 +1527,30 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void LoadSettingsDraft(AppSettings settings)
     {
+        SettingsEnableToggleRegexHotkey = settings.EnableToggleRegexHotkey;
         SettingsToggleRegexHotkey = settings.ToggleRegexHotkey;
+        SettingsEnableToggleFavoritesHotkey = settings.EnableToggleFavoritesHotkey;
         SettingsToggleFavoritesHotkey = settings.ToggleFavoritesHotkey;
+        SettingsEnableToggleSensitiveHotkey = settings.EnableToggleSensitiveHotkey;
         SettingsToggleSensitiveHotkey = settings.ToggleSensitiveHotkey;
+        SettingsEnableToggleCaseSensitiveHotkey = settings.EnableToggleCaseSensitiveHotkey;
         SettingsToggleCaseSensitiveHotkey = settings.ToggleCaseSensitiveHotkey;
+        SettingsEnableToggleWindowHotkey = settings.EnableToggleWindowHotkey;
         SettingsToggleWindowHotkey = settings.ToggleWindowHotkey;
         SettingsMaxClipSizeKilobytes = (settings.MaxClipSizeBytes / 1024d).ToString("0.##", CultureInfo.InvariantCulture);
         SettingsDatabasePath = _storageOptionsService.Current.DatabasePath;
         SettingsDatabasePassword = _storageOptionsService.Current.DatabasePassword;
+        SettingsCloseToTray = settings.CloseToTray;
+        SettingsMinimizeToTray = settings.MinimizeToTray;
+        SettingsStartWithWindows = settings.StartWithWindows;
+        SettingsEnableNormalClipLifetime = settings.EnableNormalClipLifetime;
+        SettingsNormalClipLifetimeDays = settings.NormalClipLifetimeDays.ToString(CultureInfo.InvariantCulture);
+        SettingsEnableSensitiveClipLifetime = settings.EnableSensitiveClipLifetime;
+        SettingsSensitiveClipLifetimeMinutes = settings.SensitiveClipLifetimeMinutes.ToString(CultureInfo.InvariantCulture);
+        SettingsEnableMaxLibrarySize = settings.EnableMaxLibrarySize;
+        SettingsMaxLibrarySizeMegabytes = settings.MaxLibrarySizeMegabytes.ToString(CultureInfo.InvariantCulture);
+        SettingsEnableMaxEntryCount = settings.EnableMaxEntryCount;
+        SettingsMaxEntryCount = settings.MaxEntryCount.ToString(CultureInfo.InvariantCulture);
     }
 
     private void OnSettingsChanged(object? sender, AppSettings settings)
@@ -1194,6 +1562,186 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         UpdateSelectedClipPresentation();
         RaiseSelectionStateProperties();
+    }
+
+    private async Task StartDatabaseAsync()
+    {
+        await _databaseInitializer.InitializeAsync();
+        if (!_settingsService.HasSavedSettings)
+        {
+            await _settingsService.InitializeAsync();
+        }
+
+        await LoadSensitivityRulesAsync();
+        _isDatabaseReady = true;
+        _clipboardMonitorService.Start();
+        StartMaintenanceLoop();
+    }
+
+    private async Task LoadSensitivityRulesAsync()
+    {
+        var rules = _isDatabaseReady
+            ? await _sensitivityService.GetRulesAsync()
+            : _sensitivityService.GetDefaultRules();
+        ReplaceSensitivityRules(rules);
+    }
+
+    private void ReplaceSensitivityRules(IReadOnlyList<SensitivityRule> rules)
+    {
+        SensitivityRules.Clear();
+        foreach (var rule in rules)
+        {
+            SensitivityRules.Add(CreateSensitivityRuleEditor(rule));
+        }
+    }
+
+    private SensitivityRuleEditorViewModel CreateSensitivityRuleEditor(SensitivityRule rule)
+    {
+        return new SensitivityRuleEditorViewModel(RemoveSensitivityRule)
+        {
+            Id = rule.Id,
+            Name = rule.Name,
+            Pattern = rule.Pattern,
+            Severity = rule.Severity,
+            IsEnabled = rule.IsEnabled,
+            IsBuiltIn = rule.IsBuiltIn,
+        };
+    }
+
+    private void AddSensitivityRule()
+    {
+        SensitivityRules.Add(new SensitivityRuleEditorViewModel(RemoveSensitivityRule)
+        {
+            IsBuiltIn = false,
+            IsEnabled = true,
+            IsExpanded = true,
+        });
+    }
+
+    private void RemoveSensitivityRule(SensitivityRuleEditorViewModel rule)
+    {
+        SensitivityRules.Remove(rule);
+    }
+
+    private SensitivityRule[] BuildSensitivityRules()
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var rules = new List<SensitivityRule>();
+        foreach (var rule in SensitivityRules)
+        {
+            var name = rule.Name.Trim();
+            var pattern = rule.Pattern.Trim();
+            if (name.Length == 0)
+            {
+                throw new ArgumentException(AppText.SettingsInvalidRuleName);
+            }
+
+            if (pattern.Length == 0)
+            {
+                throw new ArgumentException(AppText.SettingsInvalidRulePattern);
+            }
+
+            if (!names.Add(name))
+            {
+                throw new ArgumentException(AppText.FormatDuplicateSensitivityRule(name));
+            }
+
+            try
+            {
+                _ = new System.Text.RegularExpressions.Regex(pattern, System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new ArgumentException(AppText.FormatInvalidSensitivityRule(name, ex.Message), ex);
+            }
+
+            rules.Add(new SensitivityRule
+            {
+                Id = rule.Id,
+                Name = name,
+                Pattern = pattern,
+                Severity = string.IsNullOrWhiteSpace(rule.Severity) ? "warning" : rule.Severity.Trim().ToLowerInvariant(),
+                IsEnabled = rule.IsEnabled,
+                IsBuiltIn = rule.IsBuiltIn,
+            });
+        }
+
+        return rules.ToArray();
+    }
+
+    private async Task ApplyMaintenanceAndRefreshAsync()
+    {
+        if (!_isDatabaseReady)
+        {
+            return;
+        }
+
+        await _clipStoreService.ApplyMaintenanceAsync();
+        await LoadSensitivityRulesAsync();
+        await RefreshAsync();
+    }
+
+    private void StartMaintenanceLoop()
+    {
+        if (_subscriptions.OfType<SerialDisposable>().Any())
+        {
+            return;
+        }
+
+        var maintenanceSubscription = new SerialDisposable();
+        maintenanceSubscription.Disposable = Observable.Interval(TimeSpan.FromMinutes(1), RxApp.TaskpoolScheduler)
+            .SelectMany(_ => Observable.FromAsync(ApplyMaintenanceAndRefreshAsync))
+            .ObserveOn(RxApp.MainThreadScheduler)
+            .Subscribe(_ => { }, ex => StatusText = AppText.FormatErrorStatus(ex.Message));
+        _subscriptions.Add(maintenanceSubscription);
+    }
+
+    private static bool TryParseOptionalPositiveInt(bool isEnabled, string? value, int min, int max, out int parsed)
+    {
+        parsed = min;
+        if (!isEnabled)
+        {
+            return true;
+        }
+
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed)
+               && parsed >= min
+               && parsed <= max;
+    }
+
+    private static int ParseIntOrDefault(string? value, int fallback)
+        => int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : fallback;
+
+    private string BuildStorageCapacityText()
+    {
+        if (!SettingsEnableMaxLibrarySize)
+        {
+            return AppText.UnlimitedCapacityText;
+        }
+
+        var megabytes = ParseIntOrDefault(SettingsMaxLibrarySizeMegabytes, AppSettings.DefaultMaxLibrarySizeMegabytes);
+        return AppText.FormatStorageCapacity(megabytes);
+    }
+
+    private string BuildEntryCapacityText()
+    {
+        if (!SettingsEnableMaxEntryCount)
+        {
+            return AppText.UnlimitedCapacityText;
+        }
+
+        var maxEntries = ParseIntOrDefault(SettingsMaxEntryCount, AppSettings.DefaultMaxEntryCount);
+        return AppText.FormatEntryCapacity(maxEntries);
+    }
+
+    private static double BuildUsagePercent(double current, double max)
+    {
+        if (max <= 0d)
+        {
+            return 0d;
+        }
+
+        return Math.Clamp(current / max * 100d, 0d, 100d);
     }
 
     private static bool TryParseMaxClipSizeBytes(string? value, out int maxClipSizeBytes)
@@ -1309,6 +1857,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         MatchingClipCount = result.TotalMatchingCount;
         TotalClipCount = result.TotalClipCount;
         SensitiveClipCount = result.SensitiveClipCount;
+        TotalStoredBytes = result.TotalStoredBytes;
         LastCaptureSummary = result.LastCapturedAt is null
             ? AppText.NoCapturesYet
             : AppText.FormatLastCapture(lastCaptured);
@@ -1329,7 +1878,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private ClipItemViewModel CreateClipItemViewModel(ClipEntry clip, ISet<long>? checkedIds = null)
     {
-        var item = new ClipItemViewModel(clip, CopyClipAsync, ToggleFavoriteClipAsync, DeleteClipAsync)
+        var item = new ClipItemViewModel(clip, CopyClipAsync, ToggleFavoriteClipAsync, DeleteClipAsync, ExportClipAsync)
         {
             IsChecked = checkedIds?.Contains(clip.Id) == true
         };
@@ -1360,7 +1909,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void SyncEditedClipText()
     {
-        EditedClipText = GetEditedClipBaseline();
+        _editedClipBaseline = GetEditedClipBaseline();
+        EditedClipText = _editedClipBaseline;
     }
 
     private string GetEditedClipBaseline() => ShowRawContent ? SelectedClipRawContent : SelectedClipRenderedText;
@@ -1446,5 +1996,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         return null;
     }
+
+    private readonly record struct HotkeyDraft(string Name, bool IsEnabled, string HotkeyText);
 
 }

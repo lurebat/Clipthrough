@@ -13,5 +13,9 @@ public interface IClipStoreService
     Task SetFavoriteAsync(long clipId, bool isFavorite, CancellationToken cancellationToken = default);
 
     Task DeleteAsync(long clipId, CancellationToken cancellationToken = default);
+
+    Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default);
+
+    Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default);
 }
 

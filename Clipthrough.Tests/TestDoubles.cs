@@ -15,6 +15,8 @@ namespace Clipthrough.Tests;
 
 internal sealed class TestStorageOptionsService : IStorageOptionsService
 {
+    private bool _hasSavedConfig;
+
     public TestStorageOptionsService(string databasePath)
     {
         Current = new StorageOptions
@@ -26,16 +28,25 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
 
     public StorageOptions Current { get; private set; }
 
+    public bool HasSavedConfig => _hasSavedConfig;
+
+    public bool DatabaseExists => File.Exists(Current.DatabasePath);
+
     public Task SaveAsync(StorageOptions options, CancellationToken cancellationToken = default)
     {
         Current = options.Normalize();
+        _hasSavedConfig = true;
         return Task.CompletedTask;
     }
+
+    public void SetHasSavedConfig(bool value) => _hasSavedConfig = value;
 }
 
 internal sealed class TestSettingsService : ISettingsService
 {
     public AppSettings Current { get; private set; } = AppSettings.Default;
+
+    public bool HasSavedSettings { get; private set; }
 
     public event EventHandler<AppSettings>? SettingsChanged;
 
@@ -44,6 +55,7 @@ internal sealed class TestSettingsService : ISettingsService
     public Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
     {
         Current = settings.Normalize();
+        HasSavedSettings = true;
         SettingsChanged?.Invoke(this, Current);
         return Task.CompletedTask;
     }
@@ -53,6 +65,8 @@ internal sealed class TestSettingsService : ISettingsService
         Current = settings.Normalize();
         SettingsChanged?.Invoke(this, Current);
     }
+
+    public void SetHasSavedSettings(bool value) => HasSavedSettings = value;
 }
 
 internal sealed class TestClipboardMonitorService : IClipboardMonitorService
@@ -113,6 +127,17 @@ internal sealed class TestNotificationService : IAppNotificationService
     });
 }
 
+internal sealed class TestClipExportService : IClipExportService
+{
+    public string? LastExportPath { get; private set; }
+
+    public Task<string> ExportAsync(ClipEntry clip, CancellationToken cancellationToken = default)
+    {
+        LastExportPath = Path.Combine(Path.GetTempPath(), $"clip-export-{clip.Id}");
+        return Task.FromResult(LastExportPath);
+    }
+}
+
 internal sealed class TestSessionLogService : ISessionLogService
 {
     private readonly Subject<SessionLogEntry> _entries = new();
@@ -139,6 +164,8 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
 
     public ClipContentFormat? LastCopiedRichContentFormat { get; private set; }
 
+    public string? LastOpenedPath { get; private set; }
+
     public Task CopyTextAsync(string text)
     {
         LastCopiedText = text;
@@ -155,7 +182,11 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
 
     public Task CopyBitmapAsync(Bitmap bitmap) => Task.CompletedTask;
 
-    public Task OpenPathAsync(string path) => Task.CompletedTask;
+    public Task OpenPathAsync(string path)
+    {
+        LastOpenedPath = path;
+        return Task.CompletedTask;
+    }
 
     public Task OpenContainingDirectoryAsync(string path) => Task.CompletedTask;
 
@@ -182,9 +213,10 @@ internal sealed class TemporaryDatabaseScope : IDisposable
 
         StorageOptionsService = new TestStorageOptionsService(DatabasePath);
         ConnectionFactory = new SqliteConnectionFactory(StorageOptionsService);
-        SensitivityService = new SensitivityService();
+        SensitivityService = new SensitivityService(ConnectionFactory);
         SettingsService = new TestSettingsService();
         NotificationService = new TestNotificationService();
+        ClipExportService = new TestClipExportService();
         DatabaseInitializer = new DatabaseInitializer(ConnectionFactory, SensitivityService);
         ClipStoreService = new ClipStoreService(ConnectionFactory, SensitivityService, SettingsService, NotificationService);
     }
@@ -196,6 +228,8 @@ internal sealed class TemporaryDatabaseScope : IDisposable
     public TestSettingsService SettingsService { get; }
 
     public TestNotificationService NotificationService { get; }
+
+    public TestClipExportService ClipExportService { get; }
 
     public SqliteConnectionFactory ConnectionFactory { get; }
 

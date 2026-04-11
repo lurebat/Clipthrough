@@ -18,6 +18,7 @@ public sealed class MainWindowViewModelHeadlessTests
     public async Task CapturedClipRefresh_SelectsNewestClip()
     {
         using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
         var clipboardMonitor = new TestClipboardMonitorService();
         var systemInteraction = new TestSystemInteractionService();
         var sessionLogService = new TestSessionLogService();
@@ -40,6 +41,7 @@ public sealed class MainWindowViewModelHeadlessTests
     public async Task SelectAllAndFavoriteSelected_UpdateAllCheckedClips()
     {
         using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
         var clipboardMonitor = new TestClipboardMonitorService();
         var systemInteraction = new TestSystemInteractionService();
         var sessionLogService = new TestSessionLogService();
@@ -67,6 +69,7 @@ public sealed class MainWindowViewModelHeadlessTests
     public async Task CopyEditedClip_CopiesModifiedText()
     {
         using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
         var clipboardMonitor = new TestClipboardMonitorService();
         var systemInteraction = new TestSystemInteractionService();
         var sessionLogService = new TestSessionLogService();
@@ -92,6 +95,7 @@ public sealed class MainWindowViewModelHeadlessTests
     public async Task SessionLogs_FilterByLevelAndSearch()
     {
         using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
         var clipboardMonitor = new TestClipboardMonitorService();
         var systemInteraction = new TestSystemInteractionService();
         var sessionLogService = new TestSessionLogService();
@@ -120,6 +124,61 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.Equal("Payload exceeded limit.", viewModel.SessionLogs.VisibleSessionLogs[0].Message);
     }
 
+    [AvaloniaFact]
+    public async Task InitializeAsync_WhenSetupIsMissing_OpensWelcome()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+
+        await viewModel.InitializeAsync();
+
+        Assert.True(viewModel.IsWelcomeOpen);
+        Assert.Equal(AppText.WelcomeStatusText, viewModel.StatusText);
+    }
+
+    [AvaloniaFact]
+    public async Task SaveSettings_FromWelcome_ClosesWelcomeAndStartsApp()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+
+        await viewModel.InitializeAsync();
+        await viewModel.SaveSettingsCommand.Execute().ToTask();
+
+        Assert.False(viewModel.IsWelcomeOpen);
+        Assert.True(scope.SettingsService.HasSavedSettings);
+        Assert.True(scope.StorageOptionsService.HasSavedConfig);
+        Assert.True(scope.StorageOptionsService.DatabaseExists);
+    }
+
+    [AvaloniaFact]
+    public async Task ExportSelected_CopiesAndOpensExportPath()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+
+        await viewModel.InitializeAsync();
+
+        var clip = await CaptureTextClipAsync(scope.ClipStoreService, "export me");
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        await viewModel.ExportSelectedCommand.Execute().ToTask();
+
+        Assert.Equal(scope.ClipExportService.LastExportPath, systemInteraction.LastCopiedText);
+        Assert.Equal(scope.ClipExportService.LastExportPath, systemInteraction.LastOpenedPath);
+    }
+
     private static MainWindowViewModel CreateViewModel(
         TemporaryDatabaseScope scope,
         TestClipboardMonitorService clipboardMonitor,
@@ -133,9 +192,18 @@ public sealed class MainWindowViewModelHeadlessTests
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
+            scope.SensitivityService,
             scope.NotificationService,
             sessionLogService,
+            scope.ClipExportService,
             scope.DatabaseInitializer);
+    }
+
+    private static async Task PrepareInitializedScopeAsync(TemporaryDatabaseScope scope)
+    {
+        scope.SettingsService.SetHasSavedSettings(true);
+        scope.StorageOptionsService.SetHasSavedConfig(true);
+        await scope.DatabaseInitializer.InitializeAsync();
     }
 
     private static async Task<ClipEntry> CaptureTextClipAsync(IClipStoreService clipStoreService, string text)
