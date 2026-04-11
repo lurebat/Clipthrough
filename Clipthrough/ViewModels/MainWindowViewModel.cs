@@ -634,9 +634,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _clipboardMonitorService.Start();
             await RefreshAsync();
 
-            await _clipSampleDataService.SeedAsync();
-            await RefreshAsync();
-
             _isStarted = true;
         }
         finally

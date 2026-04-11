@@ -1,6 +1,7 @@
-﻿using Avalonia;
+using Avalonia;
 using ReactiveUI.Avalonia;
 using System;
+using Clipthrough.Diagnostics;
 
 namespace Clipthrough;
 
@@ -13,6 +14,7 @@ sealed class Program
     public static void Main(string[] args)
     {
         SQLitePCL.Batteries_V2.Init();
+        TraceConfiguration.Initialize();
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 

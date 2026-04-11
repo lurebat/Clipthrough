@@ -11,6 +11,7 @@ namespace Clipthrough.Views;
 
 public partial class MainWindow : Window
 {
+    private ListBox? m_clipsListBox;
     private ScrollViewer? m_clipListScrollViewer;
 
     public MainWindow()
@@ -29,8 +30,13 @@ public partial class MainWindow : Window
             return;
         }
 
-        var clipsListBox = this.FindControl<ListBox>("ClipsListBox");
-        m_clipListScrollViewer = clipsListBox?.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+        m_clipsListBox = this.FindControl<ListBox>("ClipsListBox");
+        if (m_clipsListBox is not null)
+        {
+            m_clipsListBox.AddHandler(InputElement.DoubleTappedEvent, OnClipsListDoubleTapped, RoutingStrategies.Bubble);
+        }
+
+        m_clipListScrollViewer = m_clipsListBox?.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
         if (m_clipListScrollViewer is not null)
         {
             m_clipListScrollViewer.ScrollChanged += OnClipListScrollChanged;
@@ -43,11 +49,22 @@ public partial class MainWindow : Window
     {
         if (m_clipListScrollViewer is null)
         {
+            if (m_clipsListBox is not null)
+            {
+                m_clipsListBox.RemoveHandler(InputElement.DoubleTappedEvent, OnClipsListDoubleTapped);
+                m_clipsListBox = null;
+            }
+
             return;
         }
 
         m_clipListScrollViewer.ScrollChanged -= OnClipListScrollChanged;
         m_clipListScrollViewer = null;
+        if (m_clipsListBox is not null)
+        {
+            m_clipsListBox.RemoveHandler(InputElement.DoubleTappedEvent, OnClipsListDoubleTapped);
+            m_clipsListBox = null;
+        }
     }
 
     private void OnClipListScrollChanged(object? sender, ScrollChangedEventArgs e)
@@ -78,12 +95,48 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (TryHandleClipRecopyShortcut(viewModel, e))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (!viewModel.TryHandleShortcut(e))
         {
             return;
         }
 
         e.Handled = true;
+    }
+
+    private void OnClipsListDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel
+            || m_clipsListBox is null
+            || viewModel.SelectedClip is null)
+        {
+            return;
+        }
+
+        viewModel.CopySelectedCommand.Execute().Subscribe();
+        e.Handled = true;
+    }
+
+    private bool TryHandleClipRecopyShortcut(MainWindowViewModel viewModel, KeyEventArgs e)
+    {
+        if (m_clipsListBox?.IsKeyboardFocusWithin != true || viewModel.SelectedClip is null)
+        {
+            return false;
+        }
+
+        var relevantModifiers = e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Meta);
+        if (e.Key != Key.C || relevantModifiers != KeyModifiers.Control)
+        {
+            return false;
+        }
+
+        viewModel.CopySelectedCommand.Execute().Subscribe();
+        return true;
     }
 
     private void FocusSearchBox()
