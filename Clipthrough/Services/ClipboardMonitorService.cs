@@ -39,7 +39,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     private bool _isHookAttached;
     private bool _isDisposed;
 
-    internal ClipboardMonitorService(IClipStoreService clipStoreService, WindowsSourceApplicationResolver sourceApplicationResolver)
+    public ClipboardMonitorService(IClipStoreService clipStoreService, WindowsSourceApplicationResolver sourceApplicationResolver)
     {
         _clipStoreService = clipStoreService;
         _sourceApplicationResolver = sourceApplicationResolver;

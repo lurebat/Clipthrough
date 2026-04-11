@@ -8,7 +8,7 @@ using System.Runtime.InteropServices;
 
 namespace Clipthrough.Services;
 
-internal sealed class WindowsSourceApplicationResolver
+public sealed class WindowsSourceApplicationResolver
 {
     public ClipboardSourceApplicationInfo? TryResolve()
     {
@@ -130,4 +130,4 @@ internal sealed class WindowsSourceApplicationResolver
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 }
 
-internal sealed record ClipboardSourceApplicationInfo(string? Name, string? Path, byte[]? IconBytes);
+public sealed record ClipboardSourceApplicationInfo(string? Name, string? Path, byte[]? IconBytes);
