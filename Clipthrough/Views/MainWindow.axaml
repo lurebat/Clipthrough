@@ -541,7 +541,7 @@
                            Text="{Binding LastCaptureSummary}" />
                 <Button Grid.Column="4"
                         Classes="secondary compact"
-                        Command="{Binding OpenLogsCommand}"
+                        Command="{Binding SessionLogs.OpenCommand}"
                         Content="{Binding LogsButtonLabel}" />
                 <Button Grid.Column="5"
                         Classes="secondary compact"
@@ -706,7 +706,7 @@
 
         <Border Grid.RowSpan="3"
                 Classes="settings-backdrop"
-                IsVisible="{Binding IsLogsOpen}">
+                IsVisible="{Binding SessionLogs.IsOpen}">
             <Border Classes="surface-panel settings-sheet"
                      HorizontalAlignment="Center"
                      VerticalAlignment="Center"
@@ -719,33 +719,33 @@
                                 HorizontalAlignment="Center">
                         <TextBlock Classes="panel-title"
                                    HorizontalAlignment="Center"
-                                   Text="{Binding LogsTitleText}" />
+                                   Text="{Binding SessionLogs.TitleText}" />
                         <TextBlock Classes="body-muted"
                                    HorizontalAlignment="Center"
                                    TextAlignment="Center"
                                    TextWrapping="Wrap"
                                    MaxWidth="760"
-                                   Text="{Binding LogsDescriptionText}" />
+                                   Text="{Binding SessionLogs.DescriptionText}" />
                     </StackPanel>
 
                     <TextBlock Grid.Row="1"
                                Classes="body-muted"
                                HorizontalAlignment="Center"
-                               Text="{Binding SessionLogCountText}" />
+                               Text="{Binding SessionLogs.CountText}" />
 
                     <StackPanel Grid.Row="2"
                                 Orientation="Horizontal"
                                 HorizontalAlignment="Center"
                                 Spacing="10">
                         <TextBox Width="420"
-                                 Watermark="{Binding LogsSearchWatermark}"
-                                 Text="{Binding LogSearchText}" />
+                                 Watermark="{Binding SessionLogs.SearchWatermark}"
+                                 Text="{Binding SessionLogs.SearchText}" />
                         <ComboBox Width="150"
-                                  ItemsSource="{Binding LogLevelOptions}"
-                                  SelectedItem="{Binding SelectedLogLevelOption}" />
+                                  ItemsSource="{Binding SessionLogs.LogLevelOptions}"
+                                  SelectedItem="{Binding SessionLogs.SelectedLogLevelOption}" />
                         <Button Classes="secondary compact"
-                                Command="{Binding CloseLogsCommand}"
-                                Content="{Binding CloseButtonLabel}" />
+                                Command="{Binding SessionLogs.CloseCommand}"
+                                Content="{Binding SessionLogs.CloseButtonLabel}" />
                     </StackPanel>
 
                     <Border Grid.Row="3"
@@ -755,11 +755,11 @@
                             <TextBlock Classes="empty-state"
                                        HorizontalAlignment="Center"
                                        VerticalAlignment="Center"
-                                       IsVisible="{Binding ShowEmptySessionLogs}"
-                                       Text="{Binding EmptySessionLogsMessage}" />
+                                       IsVisible="{Binding SessionLogs.ShowEmptyState}"
+                                       Text="{Binding SessionLogs.EmptyMessage}" />
 
-                            <ListBox ItemsSource="{Binding VisibleSessionLogs}"
-                                     IsVisible="{Binding HasSessionLogs}"
+                            <ListBox ItemsSource="{Binding SessionLogs.VisibleSessionLogs}"
+                                     IsVisible="{Binding SessionLogs.HasLogs}"
                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate x:DataType="vm:SessionLogEntryViewModel">

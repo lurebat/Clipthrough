@@ -204,15 +204,7 @@ public partial class App : Application
                 window.Show();
             }
 
-            if (window.WindowState == WindowState.Minimized)
-            {
-                window.WindowState = WindowState.Normal;
-            }
-
-            window.Activate();
-            window.Topmost = true;
-            window.Topmost = false;
-            window.Focus();
+            RestoreAndActivateWindow(window);
         });
     }
 
@@ -232,11 +224,7 @@ public partial class App : Application
 
         Dispatcher.UIThread.Post(() =>
         {
-            if (_mainWindow.WindowState == WindowState.Minimized)
-            {
-                _mainWindow.WindowState = WindowState.Normal;
-            }
-
+            RestoreWindowState(_mainWindow);
             _mainWindow.Hide();
         });
     }
@@ -255,16 +243,25 @@ public partial class App : Application
                 _mainWindow.Show();
             }
 
-            if (_mainWindow.WindowState == WindowState.Minimized)
-            {
-                _mainWindow.WindowState = WindowState.Normal;
-            }
-
-            _mainWindow.Activate();
-            _mainWindow.Topmost = true;
-            _mainWindow.Topmost = false;
-            _mainWindow.Focus();
+            RestoreAndActivateWindow(_mainWindow);
         });
+    }
+
+    private static void RestoreAndActivateWindow(Window window)
+    {
+        RestoreWindowState(window);
+        window.Activate();
+        window.Topmost = true;
+        window.Topmost = false;
+        window.Focus();
+    }
+
+    private static void RestoreWindowState(Window window)
+    {
+        if (window.WindowState == WindowState.Minimized)
+        {
+            window.WindowState = WindowState.Normal;
+        }
     }
 
     private void OnTrayIconClicked(object? sender, EventArgs e)

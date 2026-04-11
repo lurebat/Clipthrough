@@ -63,12 +63,14 @@ public sealed class WindowsSourceApplicationResolver
         {
             return process.MainModule?.FileName;
         }
-        catch (Win32Exception)
+        catch (Win32Exception ex)
         {
+            Trace.TraceInformation($"Source app process path unavailable for pid {process.Id}: {ex.Message}");
             return null;
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException ex)
         {
+            Trace.TraceInformation($"Source app process path unavailable for pid {process.Id}: {ex.Message}");
             return null;
         }
     }
@@ -85,8 +87,9 @@ public sealed class WindowsSourceApplicationResolver
                     return description;
                 }
             }
-            catch (FileNotFoundException)
+            catch (FileNotFoundException ex)
             {
+                Trace.TraceInformation($"Source app description unavailable for '{processPath}': {ex.Message}");
             }
         }
 
@@ -113,12 +116,14 @@ public sealed class WindowsSourceApplicationResolver
             bitmap.Save(stream, ImageFormat.Png);
             return stream.ToArray();
         }
-        catch (ArgumentException)
+        catch (ArgumentException ex)
         {
+            Trace.TraceInformation($"Source app icon unavailable for '{processPath}': {ex.Message}");
             return null;
         }
-        catch (ExternalException)
+        catch (ExternalException ex)
         {
+            Trace.TraceInformation($"Source app icon unavailable for '{processPath}': {ex.Message}");
             return null;
         }
     }

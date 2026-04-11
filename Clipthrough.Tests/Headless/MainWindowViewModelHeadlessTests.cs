@@ -111,13 +111,13 @@ public sealed class MainWindowViewModelHeadlessTests
         });
         Dispatcher.UIThread.RunJobs();
 
-        await viewModel.OpenLogsCommand.Execute().ToTask();
-        viewModel.SelectedLogLevelOption = viewModel.LogLevelOptions[2];
-        viewModel.LogSearchText = "limit";
+        await viewModel.SessionLogs.OpenCommand.Execute().ToTask();
+        viewModel.SessionLogs.SelectedLogLevelOption = viewModel.SessionLogs.LogLevelOptions[2];
+        viewModel.SessionLogs.SearchText = "limit";
         Dispatcher.UIThread.RunJobs();
 
-        Assert.Single(viewModel.VisibleSessionLogs);
-        Assert.Equal("Payload exceeded limit.", viewModel.VisibleSessionLogs[0].Message);
+        Assert.Single(viewModel.SessionLogs.VisibleSessionLogs);
+        Assert.Equal("Payload exceeded limit.", viewModel.SessionLogs.VisibleSessionLogs[0].Message);
     }
 
     private static MainWindowViewModel CreateViewModel(

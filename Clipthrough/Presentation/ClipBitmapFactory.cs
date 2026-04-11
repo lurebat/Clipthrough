@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using Avalonia.Media.Imaging;
 
@@ -18,16 +19,19 @@ public static class ClipBitmapFactory
             using var stream = new MemoryStream(bytes, writable: false);
             return new Bitmap(stream);
         }
-        catch (ArgumentException)
+        catch (ArgumentException ex)
         {
+            Trace.TraceWarning($"Bitmap decode failed: {ex.Message}");
             return null;
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException ex)
         {
+            Trace.TraceWarning($"Bitmap decode failed: {ex.Message}");
             return null;
         }
-        catch (NotSupportedException)
+        catch (NotSupportedException ex)
         {
+            Trace.TraceWarning($"Bitmap decode failed: {ex.Message}");
             return null;
         }
     }

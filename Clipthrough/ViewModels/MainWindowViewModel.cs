@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -42,10 +43,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly ISystemInteractionService _systemInteractionService;
     private readonly IStorageOptionsService _storageOptionsService;
     private readonly IAppNotificationService _notificationService;
-    private readonly ISessionLogService _sessionLogService;
     private readonly DatabaseInitializer _databaseInitializer;
     private readonly CompositeDisposable _subscriptions = new();
-    private readonly List<SessionLogEntryViewModel> _allSessionLogs = [];
 
     private string _searchText = string.Empty;
     private ContentTypeOption _selectedContentTypeOption = new(null);
@@ -80,9 +79,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _settingsDatabasePath = StorageOptions.Default.DatabasePath;
     private string _settingsDatabasePassword = StorageOptions.Default.DatabasePassword;
     private string _editedClipText = string.Empty;
-    private bool _isLogsOpen;
-    private string _logSearchText = string.Empty;
-    private LogLevelOption _selectedLogLevelOption = new(null);
 
     public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, IAppNotificationService notificationService, ISessionLogService sessionLogService, DatabaseInitializer databaseInitializer)
     {
@@ -93,8 +89,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _systemInteractionService = systemInteractionService;
         _storageOptionsService = storageOptionsService;
         _notificationService = notificationService;
-        _sessionLogService = sessionLogService;
         _databaseInitializer = databaseInitializer;
+        SessionLogs = new SessionLogsViewModel(sessionLogService);
         ContentTypeOptions =
         [
             new ContentTypeOption(null),
@@ -104,15 +100,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new ContentTypeOption(ContentType.Files),
         ];
         _selectedContentTypeOption = ContentTypeOptions[0];
-        LogLevelOptions =
-        [
-            new LogLevelOption(null),
-            new LogLevelOption(AppNotificationLevel.Information),
-            new LogLevelOption(AppNotificationLevel.Warning),
-            new LogLevelOption(AppNotificationLevel.Error),
-        ];
-        _selectedLogLevelOption = LogLevelOptions[0];
-
         RefreshCommand = ReactiveCommand.CreateFromTask(RefreshAsync);
         LoadMoreCommand = ReactiveCommand.CreateFromTask(LoadMoreAsync, this.WhenAnyValue(x => x.HasMoreResults, x => x.IsBusy, static (hasMore, isBusy) => hasMore && !isBusy));
 
@@ -125,8 +112,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         FavoriteCheckedClipsCommand = ReactiveCommand.CreateFromTask(FavoriteCheckedClipsAsync);
         DeleteCheckedClipsCommand = ReactiveCommand.CreateFromTask(DeleteCheckedClipsAsync);
         CopyEditedClipCommand = ReactiveCommand.CreateFromTask(CopyEditedClipAsync);
-        OpenLogsCommand = ReactiveCommand.Create(OpenLogs);
-        CloseLogsCommand = ReactiveCommand.Create(CloseLogs);
         OpenSettingsCommand = ReactiveCommand.Create(OpenSettings);
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
         SaveSettingsCommand = ReactiveCommand.CreateFromTask(SaveSettingsAsync);
@@ -147,12 +132,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .InvokeCommand(RefreshCommand));
 
         _subscriptions.Add(
-            this.WhenAnyValue(x => x.LogSearchText, x => x.SelectedLogLevelOption)
-                .Skip(1)
-                .ObserveOn(RxApp.MainThreadScheduler)
-                .Subscribe(_ => RefreshVisibleSessionLogs()));
-
-        _subscriptions.Add(
             _clipboardMonitorService.CapturedClips
                 .ObserveOn(RxApp.MainThreadScheduler)
                 .SelectMany(clip => Observable.FromAsync(() => RefreshAsync(clip.Id)))
@@ -164,11 +143,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .Subscribe(ShowNotification));
 
         _subscriptions.Add(
-            _sessionLogService.Entries
-                .ObserveOn(RxApp.MainThreadScheduler)
-                .Subscribe(AddSessionLog));
-
-        _subscriptions.Add(
             RefreshCommand.ThrownExceptions
                 .Merge(LoadMoreCommand.ThrownExceptions)
                 .Merge(ToggleFavoriteCommand.ThrownExceptions)
@@ -177,16 +151,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .Merge(FavoriteCheckedClipsCommand.ThrownExceptions)
                 .Merge(DeleteCheckedClipsCommand.ThrownExceptions)
                 .Merge(CopyEditedClipCommand.ThrownExceptions)
-                .Merge(OpenLogsCommand.ThrownExceptions)
-                .Merge(CloseLogsCommand.ThrownExceptions)
                 .Merge(SaveSettingsCommand.ThrownExceptions)
                 .ObserveOn(RxApp.MainThreadScheduler)
                 .Subscribe(ex => StatusText = AppText.FormatErrorStatus(ex.Message)));
-
-        foreach (var entry in _sessionLogService.Snapshot())
-        {
-            AddSessionLog(entry);
-        }
     }
 
     public ObservableCollection<ClipItemViewModel> Clips { get; } = [];
@@ -195,11 +162,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ObservableCollection<AppNotificationViewModel> Notifications { get; } = [];
 
-    public ObservableCollection<SessionLogEntryViewModel> VisibleSessionLogs { get; } = [];
-
     public IReadOnlyList<ContentTypeOption> ContentTypeOptions { get; }
 
-    public IReadOnlyList<LogLevelOption> LogLevelOptions { get; }
+    public SessionLogsViewModel SessionLogs { get; }
 
     public ReactiveCommand<Unit, Unit> RefreshCommand { get; }
 
@@ -220,10 +185,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> DeleteCheckedClipsCommand { get; }
 
     public ReactiveCommand<Unit, Unit> CopyEditedClipCommand { get; }
-
-    public ReactiveCommand<Unit, Unit> OpenLogsCommand { get; }
-
-    public ReactiveCommand<Unit, Unit> CloseLogsCommand { get; }
 
     public ReactiveCommand<Unit, Unit> OpenSettingsCommand { get; }
 
@@ -466,12 +427,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string SettingsStorageHintText => AppText.SettingsStorageHintText;
 
-    public string LogsTitleText => AppText.LogsTitleText;
-
-    public string LogsDescriptionText => AppText.LogsDescriptionText;
-
-    public string LogsSearchWatermark => AppText.LogsSearchWatermark;
-
     public string EmptySelectionTitleText => AppText.EmptySelectionTitle;
 
     public string EmptySelectionDescriptionText => AppText.EmptySelectionDescription;
@@ -539,12 +494,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool HasEditedClipChanges => IsSelectedClipTextEditable
         && !string.Equals(EditedClipText, GetEditedClipBaseline(), StringComparison.Ordinal);
-
-    public bool HasSessionLogs => VisibleSessionLogs.Count > 0;
-
-    public bool ShowEmptySessionLogs => !HasSessionLogs;
-
-    public string SessionLogCountText => AppText.FormatLogCount(_allSessionLogs.Count);
 
     public string SelectedClipRenderedText => _selectedClipRenderedText;
 
@@ -735,24 +684,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => this.RaiseAndSetIfChanged(ref _settingsDatabasePassword, value);
     }
 
-    public string LogSearchText
-    {
-        get => _logSearchText;
-        set => this.RaiseAndSetIfChanged(ref _logSearchText, value);
-    }
-
-    public LogLevelOption SelectedLogLevelOption
-    {
-        get => _selectedLogLevelOption;
-        set => this.RaiseAndSetIfChanged(ref _selectedLogLevelOption, value);
-    }
-
-    public bool IsLogsOpen
-    {
-        get => _isLogsOpen;
-        private set => this.RaiseAndSetIfChanged(ref _isLogsOpen, value);
-    }
-
     public void Dispose()
     {
         _clipboardMonitorService.Stop();
@@ -760,6 +691,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedClipFiles.Clear();
         ClearClips();
         ReplaceSelectedClipImagePreview(null);
+        SessionLogs.Dispose();
         _subscriptions.Dispose();
     }
 
@@ -1123,7 +1055,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool TryHandleShortcut(KeyEventArgs e)
     {
-        if (IsSettingsOpen || IsLogsOpen)
+        if (IsSettingsOpen || SessionLogs.IsOpen)
         {
             return false;
         }
@@ -1150,7 +1082,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void OpenSettings()
     {
-        IsLogsOpen = false;
+        SessionLogs.Close();
         LoadSettingsDraft(_settingsService.Current);
         IsSettingsOpen = true;
     }
@@ -1159,18 +1091,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         LoadSettingsDraft(_settingsService.Current);
         IsSettingsOpen = false;
-    }
-
-    private void OpenLogs()
-    {
-        IsSettingsOpen = false;
-        IsLogsOpen = true;
-        RefreshVisibleSessionLogs();
-    }
-
-    private void CloseLogs()
-    {
-        IsLogsOpen = false;
     }
 
     private async Task SaveSettingsAsync()
@@ -1228,8 +1148,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 DatabasePassword = SettingsDatabasePassword,
             }.Normalize();
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Trace.TraceWarning($"Storage settings validation failed: {ex.Message}");
             StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidDatabasePath);
             return;
         }
@@ -1459,33 +1380,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _subscriptions.Add(removal);
     }
 
-    private void AddSessionLog(SessionLogEntry entry)
-    {
-        _allSessionLogs.Insert(0, new SessionLogEntryViewModel(entry));
-        RefreshVisibleSessionLogs();
-    }
-
-    private void RefreshVisibleSessionLogs()
-    {
-        var searchText = LogSearchText.Trim();
-        var selectedLevel = SelectedLogLevelOption.Value;
-
-        var filtered = _allSessionLogs
-            .Where(log => selectedLevel is null || log.Entry.Level == selectedLevel.Value)
-            .Where(log => searchText.Length == 0 || log.Message.Contains(searchText, StringComparison.OrdinalIgnoreCase))
-            .ToArray();
-
-        VisibleSessionLogs.Clear();
-        foreach (var log in filtered)
-        {
-            VisibleSessionLogs.Add(log);
-        }
-
-        this.RaisePropertyChanged(nameof(HasSessionLogs));
-        this.RaisePropertyChanged(nameof(ShowEmptySessionLogs));
-        this.RaisePropertyChanged(nameof(SessionLogCountText));
-    }
-
     private static Bitmap? TryLoadImage(ClipEntry? clip, int? maxClipSizeBytes = null)
     {
         if (clip is null)
@@ -1534,16 +1428,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 return new Bitmap(unquotedPath);
             }
         }
-        catch (ArgumentException)
+        catch (ArgumentException ex)
         {
+            Trace.TraceWarning($"Image preview loading failed for clip {clip.Id}: {ex.Message}");
             return null;
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException ex)
         {
+            Trace.TraceWarning($"Image preview loading failed for clip {clip.Id}: {ex.Message}");
             return null;
         }
-        catch (NotSupportedException)
+        catch (NotSupportedException ex)
         {
+            Trace.TraceWarning($"Image preview loading failed for clip {clip.Id}: {ex.Message}");
             return null;
         }
 
