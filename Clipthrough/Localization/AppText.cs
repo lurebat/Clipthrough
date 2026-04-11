@@ -24,6 +24,10 @@ public static class AppText
         [nameof(DeleteButtonLabel)] = "Delete",
         [nameof(FolderButtonLabel)] = "Folder",
         [nameof(FavoriteButtonLabel)] = "Favorite",
+        [nameof(SelectAllButtonLabel)] = "Select all",
+        [nameof(SelectNoneButtonLabel)] = "Select none",
+        [nameof(FavoriteSelectedButtonLabel)] = "Favorite selected",
+        [nameof(CopyAsNewButtonLabel)] = "Copy as new",
         [nameof(FavoriteBadgeLabel)] = "Favorite",
         [nameof(SettingsButtonLabel)] = "Settings",
         [nameof(SettingsTitleText)] = "Settings",
@@ -45,7 +49,7 @@ public static class AppText
         [nameof(SettingsStartWithWindowsLabel)] = "Start with Windows",
         [nameof(SettingsSaveButtonLabel)] = "Save",
         [nameof(SettingsCancelButtonLabel)] = "Cancel",
-        [nameof(SettingsHintText)] = "Enter shortcuts in forms like Alt+R, Ctrl+Shift+F, or F8. The default max clip size is 2 KB. Startup registration applies on Windows.",
+        [nameof(SettingsHintText)] = "Enter shortcuts in forms like Alt+R, Ctrl+Shift+F, or F8. The default max clip size is 2048 KB. Startup registration applies on Windows.",
         [nameof(SettingsStorageHintText)] = "The path is stored outside the clip database so you can move or encrypt it. Leave the password empty to keep SQLite unencrypted.",
         [nameof(EmptySelectionTitle)] = "Select a clip",
         [nameof(EmptySelectionDescription)] = "Choose a clip from the left to inspect its content, preview it in context, and review metadata below.",
@@ -133,6 +137,10 @@ public static class AppText
         ["Format.CopiedClipStatus"] = "Copied {0} clip to the clipboard.",
         ["Format.CopiedFileListStatus"] = "Copied {0} file paths to the clipboard.",
         ["Format.CopiedImageStatus"] = "Copied image clip to the clipboard.",
+        ["Format.CheckedClipCount"] = "{0:N0} selected",
+        ["Format.FavoritedClipCount"] = "Favorited {0:N0} selected clips.",
+        ["Format.DeletedClipCount"] = "Deleted {0:N0} selected clips.",
+        ["Format.EditedClipCopiedStatus"] = "Copied the edited content as a new clip.",
         ["Format.CopiedPathStatus"] = "Copied path: {0}.",
         ["Format.OpenedFileStatus"] = "Opened: {0}.",
         ["Format.OpenedContainingFolderStatus"] = "Opened containing folder for {0}.",
@@ -175,6 +183,10 @@ public static class AppText
     public static string DeleteButtonLabel => Text(nameof(DeleteButtonLabel));
     public static string FolderButtonLabel => Text(nameof(FolderButtonLabel));
     public static string FavoriteButtonLabel => Text(nameof(FavoriteButtonLabel));
+    public static string SelectAllButtonLabel => Text(nameof(SelectAllButtonLabel));
+    public static string SelectNoneButtonLabel => Text(nameof(SelectNoneButtonLabel));
+    public static string FavoriteSelectedButtonLabel => Text(nameof(FavoriteSelectedButtonLabel));
+    public static string CopyAsNewButtonLabel => Text(nameof(CopyAsNewButtonLabel));
     public static string FavoriteBadgeLabel => Text(nameof(FavoriteBadgeLabel));
     public static string SettingsButtonLabel => Text(nameof(SettingsButtonLabel));
     public static string SettingsTitleText => Text(nameof(SettingsTitleText));
@@ -336,6 +348,14 @@ public static class AppText
     public static string FormatCopiedFileList(int count) => Format("Format.CopiedFileListStatus", count);
 
     public static string CopiedImageStatus => Text("Format.CopiedImageStatus");
+
+    public static string FormatCheckedClipCount(int count) => Format("Format.CheckedClipCount", count);
+
+    public static string FormatFavoritedClipCount(int count) => Format("Format.FavoritedClipCount", count);
+
+    public static string FormatDeletedClipCount(int count) => Format("Format.DeletedClipCount", count);
+
+    public static string EditedClipCopiedStatus => Text("Format.EditedClipCopiedStatus");
 
     public static string FormatCopiedPath(string fileName) => Format("Format.CopiedPathStatus", fileName);
 

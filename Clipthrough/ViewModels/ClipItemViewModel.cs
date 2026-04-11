@@ -1,11 +1,14 @@
 using System;
 using System.Linq;
+using System.Reactive;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Clipthrough.Localization;
 using Clipthrough.Models;
 using Clipthrough.Presentation;
+using ReactiveUI;
 
 namespace Clipthrough.ViewModels;
 
@@ -21,16 +24,58 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     private static readonly IBrush s_frequencyMediumBrush = new SolidColorBrush(Color.Parse("#1A22C55E"));
     private static readonly IBrush s_frequencyHighBrush = new SolidColorBrush(Color.Parse("#1AF59E0B"));
 
-    public ClipItemViewModel(ClipEntry clip)
+    private bool _isChecked;
+
+    public ClipItemViewModel(
+        ClipEntry clip,
+        Func<ClipItemViewModel, Task>? copyHandler = null,
+        Func<ClipItemViewModel, Task>? toggleFavoriteHandler = null,
+        Func<ClipItemViewModel, Task>? deleteHandler = null)
     {
         Clip = clip;
         SourceAppIconImage = ClipBitmapFactory.TryLoad(clip.SourceAppIconBytes);
         PreviewThumbnailImage = clip.ContentType == ContentType.Image ? ClipBitmapFactory.TryLoad(clip.ContentBytes) : null;
+        CopyCommand = ReactiveCommand.CreateFromTask(
+            async () =>
+            {
+                if (copyHandler is not null)
+                {
+                    await copyHandler(this);
+                }
+            });
+        ToggleFavoriteCommand = ReactiveCommand.CreateFromTask(
+            async () =>
+            {
+                if (toggleFavoriteHandler is not null)
+                {
+                    await toggleFavoriteHandler(this);
+                }
+            });
+        DeleteCommand = ReactiveCommand.CreateFromTask(
+            async () =>
+            {
+                if (deleteHandler is not null)
+                {
+                    await deleteHandler(this);
+                }
+            });
     }
 
     public ClipEntry Clip { get; }
 
     public long Id => Clip.Id;
+
+    public ReactiveCommand<Unit, Unit> CopyCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> ToggleFavoriteCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> DeleteCommand { get; }
+
+    public bool IsChecked
+    {
+        get => _isChecked;
+        set => this.RaiseAndSetIfChanged(ref _isChecked, value);
+    }
 
     public string Title => ClipDisplayFormatter.BuildTitle(Clip);
 
@@ -129,6 +174,12 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         : string.Join(", ", Clip.SensitivityMatches.Select(static match => $"{match.RuleName} ({match.Severity})"));
 
     public string FavoriteMarker => IsFavorite ? "★" : string.Empty;
+
+    public string CopyLabel => AppText.CopyButtonLabel;
+
+    public string DeleteLabel => AppText.DeleteButtonLabel;
+
+    public string FavoriteActionLabel => IsFavorite ? AppText.RemoveFavorite : AppText.AddFavorite;
 
     public IBrush FrequencyBackground => GetFrequencyBrush(Clip.CopyCount);
 

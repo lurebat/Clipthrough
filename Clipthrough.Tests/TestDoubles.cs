@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Reactive.Subjects;
 using System.Reactive.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -55,7 +56,9 @@ internal sealed class TestSettingsService : ISettingsService
 
 internal sealed class TestClipboardMonitorService : IClipboardMonitorService
 {
-    public IObservable<ClipEntry> CapturedClips { get; } = Observable.Never<ClipEntry>();
+    private readonly Subject<ClipEntry> _capturedClips = new();
+
+    public IObservable<ClipEntry> CapturedClips => _capturedClips.AsObservable();
 
     public void Start()
     {
@@ -64,6 +67,8 @@ internal sealed class TestClipboardMonitorService : IClipboardMonitorService
     public void Stop()
     {
     }
+
+    public void Emit(ClipEntry clip) => _capturedClips.OnNext(clip);
 }
 
 internal sealed class TestClipSampleDataService : IClipSampleDataService
@@ -73,9 +78,27 @@ internal sealed class TestClipSampleDataService : IClipSampleDataService
 
 internal sealed class TestSystemInteractionService : ISystemInteractionService
 {
-    public Task CopyTextAsync(string text) => Task.CompletedTask;
+    public string? LastCopiedText { get; private set; }
 
-    public Task CopyRichContentAsync(string richContent, string plainText, ClipContentFormat contentFormat) => Task.CompletedTask;
+    public string? LastCopiedRichContent { get; private set; }
+
+    public string? LastCopiedRichPlainText { get; private set; }
+
+    public ClipContentFormat? LastCopiedRichContentFormat { get; private set; }
+
+    public Task CopyTextAsync(string text)
+    {
+        LastCopiedText = text;
+        return Task.CompletedTask;
+    }
+
+    public Task CopyRichContentAsync(string richContent, string plainText, ClipContentFormat contentFormat)
+    {
+        LastCopiedRichContent = richContent;
+        LastCopiedRichPlainText = plainText;
+        LastCopiedRichContentFormat = contentFormat;
+        return Task.CompletedTask;
+    }
 
     public Task CopyBitmapAsync(Bitmap bitmap) => Task.CompletedTask;
 

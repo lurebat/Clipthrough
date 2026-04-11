@@ -95,6 +95,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (TryHandleEditedClipShortcut(viewModel, e))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (TryHandleClipRecopyShortcut(viewModel, e))
         {
             e.Handled = true;
@@ -136,6 +142,23 @@ public partial class MainWindow : Window
         }
 
         viewModel.CopySelectedCommand.Execute().Subscribe();
+        return true;
+    }
+
+    private static bool TryHandleEditedClipShortcut(MainWindowViewModel viewModel, KeyEventArgs e)
+    {
+        if (e.Source is not TextBox)
+        {
+            return false;
+        }
+
+        var relevantModifiers = e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Meta);
+        if (e.Key != Key.Enter || relevantModifiers != KeyModifiers.Control || !viewModel.ShowCopyEditedClipButton)
+        {
+            return false;
+        }
+
+        viewModel.CopyEditedClipCommand.Execute().Subscribe();
         return true;
     }
 
