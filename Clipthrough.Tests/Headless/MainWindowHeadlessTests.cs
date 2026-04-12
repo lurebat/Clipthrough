@@ -99,7 +99,9 @@ public sealed class MainWindowHeadlessTests
         Assert.NotNull(view.Content);
         var typeName = view.Content!.GetType().FullName;
         Assert.True(
-            typeName == "AvRichTextBox.RichTextBox" || typeName == "Avalonia.Controls.TextBox",
+            typeName == "AvRichTextBox.RichTextBox"
+            || typeName == "Clipthrough.Controls.SafeRichTextBox"
+            || typeName == "Avalonia.Controls.TextBox",
             $"Expected rich editor or fallback TextBox, got: {typeName}");
     }
 }

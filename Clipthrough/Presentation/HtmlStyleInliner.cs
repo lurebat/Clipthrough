@@ -421,7 +421,7 @@ public static partial class HtmlStyleInliner
     /// Converts all rgb(R, G, B) color values to #RRGGBB hex format.
     /// AvRichTextBox's HTML parser does not support rgb() CSS color values.
     /// </summary>
-    private static string NormalizeRgbColors(string html)
+    public static string NormalizeRgbColors(string html)
     {
         return RgbColorValueRegex().Replace(html, match =>
         {

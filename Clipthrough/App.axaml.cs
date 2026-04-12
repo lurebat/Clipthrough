@@ -44,6 +44,8 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+        Dispatcher.UIThread.UnhandledException += OnDispatcherUnhandledException;
+
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             InitializeTrayIcon();
@@ -84,6 +86,19 @@ public partial class App : Application
             Trace.TraceError($"Application startup failed: {ex}");
             mainWindowViewModel.ReportStartupFailure(ex);
         }
+    }
+
+    /// <summary>
+    /// Global safety net for unhandled dispatcher exceptions.
+    /// AvRichTextBox's FlowDocument.InitializeDocument() is async void and crashes
+    /// via AllParagraphs[0] when 0 paragraphs exist after a 70ms delay.
+    /// Marking as Handled prevents app termination.
+    /// </summary>
+    private static void OnDispatcherUnhandledException(
+        object sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        Trace.TraceError($"Dispatcher unhandled exception (handled): {e.Exception}");
+        e.Handled = true;
     }
 
     private static ServiceProvider ConfigureServices()

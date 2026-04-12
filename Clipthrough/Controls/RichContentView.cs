@@ -8,7 +8,6 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
-using AvRichTextBoxControl = AvRichTextBox.RichTextBox;
 using Clipthrough.Localization;
 using Clipthrough.Models;
 using Clipthrough.Presentation;
@@ -20,7 +19,7 @@ public sealed class RichContentView : UserControl
     public static readonly StyledProperty<string?> MarkupProperty = AvaloniaProperty.Register<RichContentView, string?>(nameof(Markup));
     public static readonly StyledProperty<ClipContentFormat> ContentFormatProperty = AvaloniaProperty.Register<RichContentView, ClipContentFormat>(nameof(ContentFormat));
     public static readonly StyledProperty<bool> IsReadOnlyProperty = AvaloniaProperty.Register<RichContentView, bool>(nameof(IsReadOnly), true);
-    private readonly AvRichTextBoxControl _htmlView = new()
+    private readonly SafeRichTextBox _htmlView = new()
     {
         IsReadOnly = true,
     };
@@ -168,6 +167,17 @@ public sealed class RichContentView : UserControl
             var safeHtml = PrepareHtmlForRichTextBox(html);
             _htmlView.LoadHtml(safeHtml);
             EnsureFlowDocHasParagraph();
+
+            // If no explicit background was set by the caller, infer from loaded runs
+            if (_htmlView.Background is SolidColorBrush { Color.R: 255, Color.G: 255, Color.B: 255 })
+            {
+                var inferred = InferBackgroundFromFlowDoc(_htmlView.FlowDocument);
+                if (inferred is not null)
+                {
+                    ApplyBackground(inferred);
+                }
+            }
+
             ApplyReadOnlyState(IsReadOnly);
             Content = _htmlView;
         }
@@ -188,14 +198,28 @@ public sealed class RichContentView : UserControl
         try
         {
             _isSyncingEditor = true;
-            var html = RtfToHtmlConverter.Convert(rtf);
-            Trace.TraceInformation($"RTF→HTML conversion produced {html.Length} chars");
-            var bgColor = HtmlStyleInliner.ExtractBackgroundColor(html);
-            bgColor ??= HtmlStyleInliner.InferBackgroundFromTextColors(html);
-            ApplyBackground(bgColor);
-            var safeHtml = PrepareHtmlForRichTextBox(html);
-            _htmlView.LoadHtml(safeHtml);
+
+            // Use native RTF loading — AvRichTextBox's RtfConversions sets
+            // Foreground/Background on each EditableRun from the RTF color table.
+            _htmlView.LoadRtf(rtf);
+
+            // LoadRtf silently swallows all exceptions. If it produced 0 blocks,
+            // fall back to our RTF→HTML converter.
+            if (_htmlView.FlowDocument?.Blocks.Count == 0)
+            {
+                Trace.TraceWarning("LoadRtf produced 0 blocks, trying HTML fallback");
+                var html = RtfToHtmlConverter.Convert(rtf);
+                html = HtmlStyleInliner.NormalizeRgbColors(html);
+                var safeHtml = PrepareHtmlForRichTextBox(html);
+                _htmlView.LoadHtml(safeHtml);
+            }
+
             EnsureFlowDocHasParagraph();
+
+            // Infer background from the parsed FlowDocument's actual text colors
+            var bgColor = InferBackgroundFromFlowDoc(_htmlView.FlowDocument);
+            ApplyBackground(bgColor);
+
             ApplyReadOnlyState(IsReadOnly);
             Content = _htmlView;
         }
@@ -251,6 +275,54 @@ public sealed class RichContentView : UserControl
         }
 
         return Color.Parse(cssColor);
+    }
+
+    /// <summary>
+    /// Infers an appropriate background color by analyzing text foreground colors
+    /// in the parsed FlowDocument. If text colors are predominantly light (designed
+    /// for dark backgrounds), returns a dark background color string.
+    /// </summary>
+    private static string? InferBackgroundFromFlowDoc(AvRichTextBox.FlowDocument? flowDoc)
+    {
+        if (flowDoc is null)
+        {
+            return null;
+        }
+
+        var totalLuminance = 0.0;
+        var count = 0;
+
+        foreach (var block in flowDoc.Blocks)
+        {
+            if (block is not AvRichTextBox.Paragraph para)
+            {
+                continue;
+            }
+
+            foreach (var inline in para.Inlines)
+            {
+                if (inline is not AvRichTextBox.EditableRun run)
+                {
+                    continue;
+                }
+
+                if (run.Foreground is not SolidColorBrush brush)
+                {
+                    continue;
+                }
+
+                var c = brush.Color;
+                totalLuminance += (0.299 * c.R + 0.587 * c.G + 0.114 * c.B) / 255.0;
+                count++;
+            }
+        }
+
+        if (count == 0)
+        {
+            return null;
+        }
+
+        return totalLuminance / count > 0.65 ? "#1E1E1E" : null;
     }
 
     private void SyncMarkupFromEditor()
