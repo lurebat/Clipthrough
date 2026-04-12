@@ -164,8 +164,9 @@ public sealed class RichContentView : UserControl
         try
         {
             _isSyncingEditor = true;
-            var safeHtml = PrepareHtmlForRichTextBox(html);
-            _htmlView.LoadHtml(safeHtml);
+            var flatHtml = HtmlFlattener.Flatten(html);
+            flatHtml = HtmlStyleInliner.NormalizeRgbColors(flatHtml);
+            _htmlView.LoadHtml(flatHtml);
             EnsureFlowDocHasParagraph();
 
             // If no explicit background was set by the caller, infer from loaded runs
@@ -210,8 +211,8 @@ public sealed class RichContentView : UserControl
                 Trace.TraceWarning("LoadRtf produced 0 blocks, trying HTML fallback");
                 var html = RtfToHtmlConverter.Convert(rtf);
                 html = HtmlStyleInliner.NormalizeRgbColors(html);
-                var safeHtml = PrepareHtmlForRichTextBox(html);
-                _htmlView.LoadHtml(safeHtml);
+                var flatHtml = HtmlFlattener.Flatten(html);
+                _htmlView.LoadHtml(flatHtml);
             }
 
             EnsureFlowDocHasParagraph();
@@ -353,44 +354,6 @@ public sealed class RichContentView : UserControl
         {
             _isSyncingMarkup = false;
         }
-    }
-
-    /// <summary>
-    /// AvRichTextBox's HTML parser only processes &lt;p&gt; and &lt;table&gt; tags that are
-    /// direct children of &lt;body&gt;. This ensures the HTML has a proper structure:
-    /// content wrapped in &lt;p&gt; inside &lt;body&gt;.
-    /// </summary>
-    private static string PrepareHtmlForRichTextBox(string html)
-    {
-        var hasBody = html.Contains("<body", StringComparison.OrdinalIgnoreCase);
-        var hasBlock = html.Contains("<p", StringComparison.OrdinalIgnoreCase)
-                    || html.Contains("<table", StringComparison.OrdinalIgnoreCase);
-
-        if (!hasBlock && hasBody)
-        {
-            // Body exists but no block-level children — inject <p> inside body
-            var bodyOpenIdx = html.IndexOf("<body", StringComparison.OrdinalIgnoreCase);
-            var bodyOpenEnd = html.IndexOf('>', bodyOpenIdx);
-            if (bodyOpenEnd >= 0)
-            {
-                bodyOpenEnd++;
-                var bodyCloseIdx = html.LastIndexOf("</body", StringComparison.OrdinalIgnoreCase);
-                if (bodyCloseIdx > bodyOpenEnd)
-                {
-                    html = html[..bodyOpenEnd] + "<p>" + html[bodyOpenEnd..bodyCloseIdx] + "</p>" + html[bodyCloseIdx..];
-                }
-            }
-        }
-        else if (!hasBlock)
-        {
-            html = $"<body><p>{html}</p></body>";
-        }
-        else if (!hasBody)
-        {
-            html = $"<body>{html}</body>";
-        }
-
-        return html;
     }
 
     /// <summary>
