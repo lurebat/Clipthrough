@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using Clipthrough.Controls;
 using Clipthrough.ViewModels;
 
 namespace Clipthrough.Views;
@@ -37,6 +38,7 @@ public partial class MainWindow : Window
         if (m_clipsListBox is not null)
         {
             m_clipsListBox.AddHandler(InputElement.DoubleTappedEvent, OnClipsListDoubleTapped, RoutingStrategies.Bubble);
+            m_clipsListBox.AddHandler(InputElement.PointerPressedEvent, OnClipsListPointerPressed, RoutingStrategies.Tunnel);
         }
 
         if (m_sessionLogsListBox is not null)
@@ -77,6 +79,7 @@ public partial class MainWindow : Window
         if (m_clipsListBox is not null)
         {
             m_clipsListBox.RemoveHandler(InputElement.DoubleTappedEvent, OnClipsListDoubleTapped);
+            m_clipsListBox.RemoveHandler(InputElement.PointerPressedEvent, OnClipsListPointerPressed);
             m_clipsListBox = null;
         }
 
@@ -148,6 +151,38 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private void OnClipsListPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel
+            || e.GetCurrentPoint(this).Properties.PointerUpdateKind != PointerUpdateKind.LeftButtonPressed
+            || e.Source is not Avalonia.Visual sourceVisual)
+        {
+            return;
+        }
+
+        var clipElement = sourceVisual.GetSelfAndVisualAncestors()
+            .OfType<StyledElement>()
+            .FirstOrDefault(current => current.DataContext is ClipItemViewModel);
+        if (clipElement?.DataContext is not ClipItemViewModel clip)
+        {
+            return;
+        }
+
+        var modifiers = e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Shift);
+        if ((modifiers & KeyModifiers.Shift) == KeyModifiers.Shift)
+        {
+            viewModel.ExtendClipCheckedSelection(clip, (modifiers & KeyModifiers.Control) == KeyModifiers.Control);
+            e.Handled = true;
+            return;
+        }
+
+        if ((modifiers & KeyModifiers.Control) == KeyModifiers.Control)
+        {
+            viewModel.ToggleClipCheckedSelection(clip);
+            e.Handled = true;
+        }
+    }
+
     private void OnSessionLogsDoubleTapped(object? sender, TappedEventArgs e)
     {
         if (e.Source is not Avalonia.Visual sourceVisual)
@@ -209,6 +244,31 @@ public partial class MainWindow : Window
         }
 
         await viewModel.CommitEditedClipOnFocusLossAsync();
+    }
+
+    private async void OnCopyEditedImageClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        var imageEditor = this.FindControl<EmbeddedImageEditorView>("SelectedImageEditor");
+        var editedBytes = imageEditor?.GetEditedImageBytes();
+        if (editedBytes is not { Length: > 0 })
+        {
+            return;
+        }
+
+        await viewModel.CopyEditedImageAsync(editedBytes);
+        e.Handled = true;
+    }
+
+    private void OnResetEditedImageClick(object? sender, RoutedEventArgs e)
+    {
+        var imageEditor = this.FindControl<EmbeddedImageEditorView>("SelectedImageEditor");
+        imageEditor?.Reset();
+        e.Handled = true;
     }
 
     private void FocusSearchBox()

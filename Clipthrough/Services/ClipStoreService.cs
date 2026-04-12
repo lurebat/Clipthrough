@@ -156,6 +156,31 @@ public sealed class ClipStoreService : IClipStoreService
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    public async Task ClearSensitivityAsync(long clipId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        using var transaction = connection.BeginTransaction();
+
+        await using (var clearMatchesCommand = connection.CreateCommand())
+        {
+            clearMatchesCommand.Transaction = transaction;
+            clearMatchesCommand.CommandText = "DELETE FROM clip_sensitivity_matches WHERE clip_id = $id;";
+            clearMatchesCommand.Parameters.AddWithValue("$id", clipId);
+            await clearMatchesCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var updateClipCommand = connection.CreateCommand())
+        {
+            updateClipCommand.Transaction = transaction;
+            updateClipCommand.CommandText = "UPDATE clips SET is_sensitive = 0 WHERE id = $id;";
+            updateClipCommand.Parameters.AddWithValue("$id", clipId);
+            await updateClipCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+    }
+
     public async Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = _connectionFactory.CreateConnection();

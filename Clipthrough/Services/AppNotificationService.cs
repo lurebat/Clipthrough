@@ -1,6 +1,7 @@
 using System;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
+using Avalonia.Threading;
 using Clipthrough.Models;
 
 namespace Clipthrough.Services;
@@ -21,7 +22,21 @@ public sealed class AppNotificationService : IAppNotificationService, IDisposabl
             return;
         }
 
-        _notifications.OnNext(notification);
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            _notifications.OnNext(notification);
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            _notifications.OnNext(notification);
+        });
     }
 
     public void PublishInfo(string title, string message) => Publish(new AppNotification

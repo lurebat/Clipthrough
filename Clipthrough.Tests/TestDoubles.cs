@@ -129,12 +129,31 @@ internal sealed class TestNotificationService : IAppNotificationService
 
 internal sealed class TestClipExportService : IClipExportService
 {
-    public string? LastExportPath { get; private set; }
+    public string? LastExportDirectory { get; private set; }
 
-    public Task<string> ExportAsync(ClipEntry clip, CancellationToken cancellationToken = default)
+    public string? LastPrimaryPath { get; private set; }
+
+    public Task<ClipExportResult> ExportAsync(ClipEntry clip, CancellationToken cancellationToken = default)
     {
-        LastExportPath = Path.Combine(Path.GetTempPath(), $"clip-export-{clip.Id}");
-        return Task.FromResult(LastExportPath);
+        LastExportDirectory = Path.Combine(Path.GetTempPath(), $"clip-export-{clip.Id}");
+        LastPrimaryPath = Path.Combine(LastExportDirectory, "rendered.txt");
+        return Task.FromResult(new ClipExportResult(LastExportDirectory, LastPrimaryPath));
+    }
+}
+
+internal sealed class TestImageEditorService : IImageEditorService
+{
+    public byte[]? LastEditedInputBytes { get; private set; }
+
+    public string? LastImageFilePath { get; private set; }
+
+    public byte[]? ResultBytes { get; set; }
+
+    public Task<byte[]?> EditImageAsync(byte[] imageBytes, string? imageFilePath = null, CancellationToken cancellationToken = default)
+    {
+        LastEditedInputBytes = imageBytes;
+        LastImageFilePath = imageFilePath;
+        return Task.FromResult(ResultBytes);
     }
 }
 
@@ -166,6 +185,10 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
 
     public string? LastOpenedPath { get; private set; }
 
+    public AppNotification? LastSystemNotification { get; private set; }
+
+    public int BitmapCopyCount { get; private set; }
+
     public Task CopyTextAsync(string text)
     {
         LastCopiedText = text;
@@ -180,7 +203,11 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
         return Task.CompletedTask;
     }
 
-    public Task CopyBitmapAsync(Bitmap bitmap) => Task.CompletedTask;
+    public Task CopyBitmapAsync(Bitmap bitmap)
+    {
+        BitmapCopyCount++;
+        return Task.CompletedTask;
+    }
 
     public Task OpenPathAsync(string path)
     {
@@ -189,6 +216,11 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
     }
 
     public Task OpenContainingDirectoryAsync(string path) => Task.CompletedTask;
+
+    public void ShowNotification(AppNotification notification)
+    {
+        LastSystemNotification = notification;
+    }
 
     public bool TryRegisterGlobalHotKey(Window window, HotkeyGesture hotkey, Action callback) => true;
 

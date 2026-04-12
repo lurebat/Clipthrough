@@ -73,9 +73,15 @@ public static class ClipboardMarkupDecoder
 
     public static string ExtractHtmlFragment(string html)
     {
-        if (string.IsNullOrWhiteSpace(html) || !html.StartsWith("Version:", StringComparison.OrdinalIgnoreCase))
+        if (!LooksLikeClipboardHtml(html))
         {
             return html;
+        }
+
+        var headerFragment = GetHeaderRegion(html, "StartFragment", "EndFragment");
+        if (!string.IsNullOrWhiteSpace(headerFragment))
+        {
+            return headerFragment.Trim();
         }
 
         const string startFragmentMarker = "<!--StartFragment-->";
@@ -99,6 +105,37 @@ public static class ClipboardMarkupDecoder
         return htmlIndex >= 0 ? html[htmlIndex..].Trim() : html;
     }
 
+    public static string ExtractHtmlDocument(string html)
+    {
+        if (!LooksLikeClipboardHtml(html))
+        {
+            return html;
+        }
+
+        var document = GetHeaderRegion(html, "StartHTML", "EndHTML");
+        if (!string.IsNullOrWhiteSpace(document))
+        {
+            return document.Trim();
+        }
+
+        var htmlIndex = html.IndexOf('<');
+        return htmlIndex >= 0 ? html[htmlIndex..].Trim() : html;
+    }
+
+    public static string BuildHtmlRenderDocument(string html)
+    {
+        var document = ExtractHtmlDocument(html);
+        if (string.IsNullOrWhiteSpace(document))
+        {
+            return document;
+        }
+
+        return document
+            .Replace("<!--StartFragment-->", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Replace("<!--EndFragment-->", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Trim();
+    }
+
     private static int? GetHeaderOffset(MatchCollection matches, string headerName)
     {
         foreach (Match match in matches)
@@ -113,6 +150,25 @@ public static class ClipboardMarkupDecoder
 
         return null;
     }
+
+    private static string? GetHeaderRegion(string html, string startHeaderName, string endHeaderName)
+    {
+        var offsets = s_cfHtmlHeaderRegex.Matches(html);
+        var startOffset = GetHeaderOffset(offsets, startHeaderName);
+        var endOffset = GetHeaderOffset(offsets, endHeaderName);
+        if (startOffset is >= 0 && endOffset > startOffset && endOffset <= html.Length)
+        {
+            return html[startOffset.Value..endOffset.Value];
+        }
+
+        return null;
+    }
+
+    private static bool LooksLikeClipboardHtml(string? value)
+        => !string.IsNullOrWhiteSpace(value)
+           && (value.StartsWith("Version:", StringComparison.OrdinalIgnoreCase)
+               || value.StartsWith("Format:HTML Format", StringComparison.OrdinalIgnoreCase)
+               || s_cfHtmlHeaderRegex.IsMatch(value));
 
     private static string RecoverBytePairedString(string value)
     {
@@ -134,6 +190,7 @@ public static class ClipboardMarkupDecoder
                                       || value.Contains("<body", StringComparison.OrdinalIgnoreCase)
                                       || value.Contains("<!--StartFragment-->", StringComparison.OrdinalIgnoreCase)
                                       || value.Contains("<img", StringComparison.OrdinalIgnoreCase)
+                                      || value.StartsWith("Format:HTML Format", StringComparison.OrdinalIgnoreCase)
                                       || value.StartsWith("Version:", StringComparison.OrdinalIgnoreCase)
                                       || Regex.IsMatch(value, @"<\s*[a-zA-Z][^>]*>", RegexOptions.CultureInvariant),
             ClipContentFormat.Rtf => value.TrimStart().StartsWith(@"{\rtf", StringComparison.OrdinalIgnoreCase),

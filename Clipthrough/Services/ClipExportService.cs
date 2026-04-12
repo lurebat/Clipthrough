@@ -13,42 +13,44 @@ public sealed class ClipExportService : IClipExportService
 {
     private static readonly JsonSerializerOptions s_jsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
-    public async Task<string> ExportAsync(ClipEntry clip, CancellationToken cancellationToken = default)
+    public async Task<ClipExportResult> ExportAsync(ClipEntry clip, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(clip);
 
         var exportRoot = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
             "Clipthrough Exports");
-        var folderName = $"{SanitizePathSegment(clip.SourceApp ?? "clip")}-{clip.Id}-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}";
+        var clipName = BuildClipFileName(clip);
+        var folderName = $"{SanitizePathSegment(clipName)}-{clip.Id}-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}";
         var exportDirectory = Path.Combine(exportRoot, folderName);
         Directory.CreateDirectory(exportDirectory);
 
-        await ExportOriginalPayloadAsync(exportDirectory, clip, cancellationToken);
-        await ExportRenderedTextAsync(exportDirectory, clip, cancellationToken);
+        var originalPath = await ExportOriginalPayloadAsync(exportDirectory, clip, clipName, cancellationToken);
+        var renderedPath = await ExportRenderedTextAsync(exportDirectory, clip, clipName, cancellationToken);
         await ExportMetadataAsync(exportDirectory, clip, cancellationToken);
 
-        return exportDirectory;
+        return new ClipExportResult(exportDirectory, renderedPath ?? originalPath);
     }
 
-    private static async Task ExportOriginalPayloadAsync(string exportDirectory, ClipEntry clip, CancellationToken cancellationToken)
+    private static async Task<string> ExportOriginalPayloadAsync(string exportDirectory, ClipEntry clip, string clipName, CancellationToken cancellationToken)
     {
         var extension = GetOriginalFileExtension(clip);
-        var path = Path.Combine(exportDirectory, $"original{extension}");
+        var path = Path.Combine(exportDirectory, $"{SanitizePathSegment(clipName)}{extension}");
 
         if (clip.ContentBytes is { Length: > 0 } bytes)
         {
             await File.WriteAllBytesAsync(path, bytes, cancellationToken);
-            return;
+            return path;
         }
 
         var content = clip.ContentType == ContentType.Image
             ? ClipDisplayFormatter.GetRawContentDisplay(clip)
             : clip.Content;
         await File.WriteAllTextAsync(path, content, Encoding.UTF8, cancellationToken);
+        return path;
     }
 
-    private static async Task ExportRenderedTextAsync(string exportDirectory, ClipEntry clip, CancellationToken cancellationToken)
+    private static async Task<string?> ExportRenderedTextAsync(string exportDirectory, ClipEntry clip, string clipName, CancellationToken cancellationToken)
     {
         var text = clip.ContentType switch
         {
@@ -60,10 +62,12 @@ public sealed class ClipExportService : IClipExportService
 
         if (string.IsNullOrWhiteSpace(text))
         {
-            return;
+            return null;
         }
 
-        await File.WriteAllTextAsync(Path.Combine(exportDirectory, "rendered.txt"), text, Encoding.UTF8, cancellationToken);
+        var path = Path.Combine(exportDirectory, $"{SanitizePathSegment(clipName)}-rendered.txt");
+        await File.WriteAllTextAsync(path, text, Encoding.UTF8, cancellationToken);
+        return path;
     }
 
     private static async Task ExportMetadataAsync(string exportDirectory, ClipEntry clip, CancellationToken cancellationToken)
@@ -103,6 +107,26 @@ public sealed class ClipExportService : IClipExportService
         ClipContentFormat.FileList => ".txt",
         _ => ".txt",
     };
+
+    private static string BuildClipFileName(ClipEntry clip)
+    {
+        if (clip.ContentType == ContentType.Image && ClipDisplayFormatter.TryGetPreferredImageLabel(clip) is { } imageLabel)
+        {
+            return imageLabel;
+        }
+
+        if (ClipDisplayFormatter.BuildFileItems(clip.Content) is { Count: > 0 } fileItems)
+        {
+            return Path.GetFileNameWithoutExtension(fileItems[0].TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        }
+
+        if (!string.IsNullOrWhiteSpace(clip.Content))
+        {
+            return ClipDisplayFormatter.BuildTitle(clip.Content, clip.ContentType);
+        }
+
+        return clip.SourceApp ?? "clip";
+    }
 
     private static string SanitizePathSegment(string value)
     {

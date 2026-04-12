@@ -6,5 +6,5 @@ namespace Clipthrough.Services;
 
 public interface IClipExportService
 {
-    Task<string> ExportAsync(ClipEntry clip, CancellationToken cancellationToken = default);
+    Task<ClipExportResult> ExportAsync(ClipEntry clip, CancellationToken cancellationToken = default);
 }

@@ -14,8 +14,9 @@ public interface IClipStoreService
 
     Task DeleteAsync(long clipId, CancellationToken cancellationToken = default);
 
+    Task ClearSensitivityAsync(long clipId, CancellationToken cancellationToken = default);
+
     Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default);
 
     Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default);
 }
-

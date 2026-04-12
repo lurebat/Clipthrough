@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing.Imaging;
 using System.IO;
@@ -21,7 +22,7 @@ using Microsoft.Win32;
 
 namespace Clipthrough.Services;
 
-public sealed class SystemInteractionService : ISystemInteractionService
+public sealed class SystemInteractionService : ISystemInteractionService, IDisposable
 {
     private const uint CfBitmap = 2;
     private const uint CfDib = 8;
@@ -33,6 +34,7 @@ public sealed class SystemInteractionService : ISystemInteractionService
     private static readonly string[] HtmlFormats = ["HTML Format", "text/html", "public.html"];
     private static readonly string[] RtfFormats = ["Rich Text Format", "text/rtf", "public.rtf"];
     private WindowsGlobalHotKeyRegistration? _globalHotKeyRegistration;
+    private WindowsBalloonNotificationHost? _notificationHost;
 
     public async Task CopyTextAsync(string text)
     {
@@ -200,6 +202,36 @@ public sealed class SystemInteractionService : ISystemInteractionService
         }
 
         return Task.CompletedTask;
+    }
+
+    public void ShowNotification(AppNotification notification)
+    {
+        ArgumentNullException.ThrowIfNull(notification);
+
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        _notificationHost ??= WindowsBalloonNotificationHost.TryCreate();
+        if (_notificationHost is null)
+        {
+            Trace.TraceWarning("System notification failed: Unable to initialize the notification host.");
+            return;
+        }
+
+        if (!_notificationHost.TryShow(notification, out var error))
+        {
+            Trace.TraceWarning($"System notification failed: {error}");
+        }
+    }
+
+    public void Dispose()
+    {
+        _globalHotKeyRegistration?.Dispose();
+        _globalHotKeyRegistration = null;
+        _notificationHost?.Dispose();
+        _notificationHost = null;
     }
 
     public bool TryRegisterGlobalHotKey(Window window, HotkeyGesture hotkey, Action callback)
@@ -587,9 +619,253 @@ public sealed class SystemInteractionService : ISystemInteractionService
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern nint GlobalFree(nint hMem);
 
-    [DllImport("gdi32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool DeleteObject(nint hObject);
+    private sealed class WindowsBalloonNotificationHost : IDisposable
+    {
+        private const int GwlWndProc = -4;
+        private const uint NimAdd = 0x00000000;
+        private const uint NimModify = 0x00000001;
+        private const uint NimDelete = 0x00000002;
+        private const uint NimSetVersion = 0x00000004;
+        private const uint NotifyIconVersion4 = 4;
+        private const uint WmApp = 0x8000;
+        private const uint WmTrayIcon = WmApp + 1;
+        private const uint WmLButtonUp = 0x0202;
+        private const uint NinBalloonUserClick = 0x0405;
+        private const uint NifIcon = 0x00000002;
+        private const uint NifState = 0x00000008;
+        private const uint NifTip = 0x00000004;
+        private const uint NifMessage = 0x00000001;
+        private const uint NifInfo = 0x00000010;
+        private const uint NisHidden = 0x00000001;
+        private const uint NiifInfo = 0x00000001;
+        private const uint NiifWarning = 0x00000002;
+        private const uint NiifError = 0x00000003;
+        private const int IdiApplication = 32512;
+        private const int IdiError = 32513;
+        private const int IdiWarning = 32515;
+        private const int IdiInformation = 32516;
+        private static readonly nint HwndMessage = new(-3);
+
+        private readonly nint _windowHandle;
+        private readonly nint _iconHandle;
+        private readonly WndProc _wndProcDelegate;
+        private readonly nint _previousWndProc;
+        private Action? _activationCallback;
+        private bool _isDisposed;
+
+        private WindowsBalloonNotificationHost(nint windowHandle, nint iconHandle)
+        {
+            _windowHandle = windowHandle;
+            _iconHandle = iconHandle;
+            _wndProcDelegate = WindowProc;
+            _previousWndProc = SetWindowLongPtr(_windowHandle, GwlWndProc, Marshal.GetFunctionPointerForDelegate(_wndProcDelegate));
+        }
+
+        public static WindowsBalloonNotificationHost? TryCreate()
+        {
+            var windowHandle = CreateWindowEx(0, "STATIC", "Clipthrough.NotificationHost", 0, 0, 0, 0, 0, HwndMessage, IntPtr.Zero, GetModuleHandle(null), IntPtr.Zero);
+            if (windowHandle == IntPtr.Zero)
+            {
+                Trace.TraceWarning($"System notification host initialization failed: {GetLastErrorMessage("Unable to create the notification host window.")}");
+                return null;
+            }
+
+            var iconHandle = LoadIcon(IntPtr.Zero, new nint(IdiInformation));
+            if (iconHandle == IntPtr.Zero)
+            {
+                Trace.TraceWarning($"System notification host initialization failed: {GetLastErrorMessage("Unable to load the notification icon.")}");
+                _ = DestroyWindow(windowHandle);
+                return null;
+            }
+
+            var host = new WindowsBalloonNotificationHost(windowHandle, iconHandle);
+            if (!host.TryRegisterIcon(out var error))
+            {
+                Trace.TraceWarning($"System notification host initialization failed: {error}");
+                host.Dispose();
+                return null;
+            }
+
+            return host;
+        }
+
+        public void Dispose()
+        {
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            _isDisposed = true;
+
+            var data = CreateNotificationData();
+            _ = Shell_NotifyIcon(NimDelete, ref data);
+            _ = SetWindowLongPtr(_windowHandle, GwlWndProc, _previousWndProc);
+            _ = DestroyWindow(_windowHandle);
+        }
+
+        public bool TryShow(AppNotification notification, out string? error)
+        {
+            if (_isDisposed)
+            {
+                error = "The notification host has been disposed.";
+                return false;
+            }
+
+            _activationCallback = notification.Activated;
+            var data = CreateNotificationData();
+            data.uFlags = NifInfo;
+            data.szInfoTitle = notification.Title;
+            data.szInfo = notification.Message;
+            data.dwInfoFlags = GetInfoFlags(notification.Level);
+            data.uTimeoutOrVersion = 10000;
+
+            if (!Shell_NotifyIcon(NimModify, ref data))
+            {
+                error = GetLastErrorMessage("Unable to display the system notification.");
+                return false;
+            }
+
+            error = null;
+            return true;
+        }
+
+        private bool TryRegisterIcon(out string? error)
+        {
+            var data = CreateNotificationData();
+            data.uFlags = NifIcon | NifTip | NifState | NifMessage;
+            data.hIcon = _iconHandle;
+            data.szTip = "Clipthrough";
+            data.dwState = NisHidden;
+            data.dwStateMask = NisHidden;
+            data.uCallbackMessage = WmTrayIcon;
+
+            if (!Shell_NotifyIcon(NimAdd, ref data))
+            {
+                error = GetLastErrorMessage("Unable to register the system notification icon.");
+                return false;
+            }
+
+            data.uVersion = NotifyIconVersion4;
+            _ = Shell_NotifyIcon(NimSetVersion, ref data);
+            error = null;
+            return true;
+        }
+
+        private NotifyIconData CreateNotificationData() => new()
+        {
+            cbSize = (uint)Marshal.SizeOf<NotifyIconData>(),
+            hWnd = _windowHandle,
+            uID = 1,
+        };
+
+        private static uint GetInfoFlags(AppNotificationLevel level)
+            => level switch
+            {
+                AppNotificationLevel.Error => NiifError,
+                AppNotificationLevel.Warning => NiifWarning,
+                _ => NiifInfo,
+            };
+
+        private static string GetLastErrorMessage(string fallback)
+        {
+            var errorCode = Marshal.GetLastWin32Error();
+            return errorCode == 0
+                ? fallback
+                : new Win32Exception(errorCode).Message;
+        }
+
+        private nint WindowProc(nint hWnd, uint msg, nint wParam, nint lParam)
+        {
+            if (msg == WmTrayIcon)
+            {
+                var notificationMessage = unchecked((uint)lParam.ToInt64());
+                if (notificationMessage == NinBalloonUserClick || notificationMessage == WmLButtonUp)
+                {
+                    var callback = _activationCallback;
+                    if (callback is not null)
+                    {
+                        Dispatcher.UIThread.Post(callback);
+                        return 0;
+                    }
+                }
+            }
+
+            return CallWindowProc(_previousWndProc, hWnd, msg, wParam, lParam);
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct NotifyIconData
+        {
+            public uint cbSize;
+            public nint hWnd;
+            public uint uID;
+            public uint uFlags;
+            public uint uCallbackMessage;
+            public nint hIcon;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+            public string szTip;
+            public uint dwState;
+            public uint dwStateMask;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
+            public string szInfo;
+            public uint uTimeoutOrVersion;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
+            public string szInfoTitle;
+            public uint dwInfoFlags;
+            public Guid guidItem;
+            public nint hBalloonIcon;
+            public uint uVersion
+            {
+                set => uTimeoutOrVersion = value;
+            }
+        }
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool Shell_NotifyIcon(uint dwMessage, ref NotifyIconData lpData);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern nint CreateWindowEx(
+            int exStyle,
+            string className,
+            string? windowName,
+            int style,
+            int x,
+            int y,
+            int width,
+            int height,
+            nint parentHandle,
+            nint menuHandle,
+            nint instanceHandle,
+            nint param);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool DestroyWindow(nint hWnd);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern nint LoadIcon(nint instanceHandle, nint iconName);
+
+        [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
+        private static extern nint SetWindowLongPtr64(nint hWnd, int nIndex, nint dwNewLong);
+
+        [DllImport("user32.dll", EntryPoint = "SetWindowLongW", SetLastError = true)]
+        private static extern int SetWindowLong32(nint hWnd, int nIndex, int dwNewLong);
+
+        [DllImport("user32.dll", EntryPoint = "CallWindowProcW")]
+        private static extern nint CallWindowProc(nint lpPrevWndFunc, nint hWnd, uint msg, nint wParam, nint lParam);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern nint GetModuleHandle(string? moduleName);
+
+        private static nint SetWindowLongPtr(nint hWnd, int nIndex, nint newProc)
+            => IntPtr.Size == 8
+                ? SetWindowLongPtr64(hWnd, nIndex, newProc)
+                : SetWindowLong32(hWnd, nIndex, newProc.ToInt32());
+
+        private delegate nint WndProc(nint hWnd, uint msg, nint wParam, nint lParam);
+    }
 
     private sealed class WindowsGlobalHotKeyRegistration : IDisposable
     {
@@ -678,4 +954,3 @@ public sealed class SystemInteractionService : ISystemInteractionService
                 : SetWindowLong32(hWnd, nIndex, newProc.ToInt32());
     }
 }
-

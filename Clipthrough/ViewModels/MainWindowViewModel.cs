@@ -12,9 +12,11 @@ using System.Reactive.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Platform.Storage;
 using Clipthrough.Database;
 using Clipthrough.Localization;
 using Clipthrough.Models;
@@ -35,6 +37,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private static readonly IBrush s_criticalBadgeBackgroundBrush = new SolidColorBrush(Color.Parse("#3B0D18"));
     private static readonly IBrush s_criticalBadgeBorderBrush = new SolidColorBrush(Color.Parse("#BE123C"));
     private static readonly IBrush s_criticalBadgeForegroundBrush = new SolidColorBrush(Color.Parse("#FDA4AF"));
+    private static readonly FilePickerFileType s_databaseFileType = new("SQLite database")
+    {
+        Patterns = ["*.db", "*.sqlite", "*.sqlite3"],
+    };
 
     private readonly IClipStoreService _clipStoreService;
     private readonly IClipboardMonitorService _clipboardMonitorService;
@@ -45,6 +51,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly ISensitivityService _sensitivityService;
     private readonly IAppNotificationService _notificationService;
     private readonly IClipExportService _clipExportService;
+    private readonly IImageEditorService _imageEditorService;
     private readonly DatabaseInitializer _databaseInitializer;
     private readonly CompositeDisposable _subscriptions = new();
 
@@ -67,13 +74,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _lastCaptureSummary = AppText.WaitingForFirstCapture;
     private bool _showRawContent;
     private string _selectedClipRenderedText = AppText.PreviewSelectContent;
-    private Bitmap? _selectedClipImagePreview;
     private string _selectedClipImageHint = AppText.PreviewSelectImage;
     private bool _isStartupInProgress;
     private bool _isDatabaseReady;
     private bool _isStarted;
     private bool _isSettingsOpen;
     private bool _isWelcomeOpen;
+    private bool _isDatabasePasswordVisible;
     private string _settingsToggleRegexHotkey = AppSettings.Default.ToggleRegexHotkey;
     private bool _settingsEnableToggleRegexHotkey = AppSettings.Default.EnableToggleRegexHotkey;
     private string _settingsToggleFavoritesHotkey = AppSettings.Default.ToggleFavoritesHotkey;
@@ -100,8 +107,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _settingsMaxEntryCount = AppSettings.Default.MaxEntryCount.ToString(CultureInfo.InvariantCulture);
     private string _editedClipText = string.Empty;
     private string _editedClipBaseline = string.Empty;
+    private long? _checkedSelectionAnchorId;
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, DatabaseInitializer databaseInitializer)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, DatabaseInitializer databaseInitializer)
     {
         _clipStoreService = clipStoreService;
         _clipboardMonitorService = clipboardMonitorService;
@@ -112,6 +120,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _sensitivityService = sensitivityService;
         _notificationService = notificationService;
         _clipExportService = clipExportService;
+        _imageEditorService = imageEditorService;
         _databaseInitializer = databaseInitializer;
         SessionLogs = new SessionLogsViewModel(sessionLogService);
         ContentTypeOptions =
@@ -131,6 +140,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         DeleteSelectedCommand = ReactiveCommand.CreateFromTask(DeleteSelectedAsync, hasSelection);
         CopySelectedCommand = ReactiveCommand.CreateFromTask(CopySelectedAsync, hasSelection);
         ExportSelectedCommand = ReactiveCommand.CreateFromTask(ExportSelectedAsync, hasSelection);
+        EditSelectedImageCommand = ReactiveCommand.CreateFromTask(EditSelectedImageAsync);
         SelectAllClipsCommand = ReactiveCommand.Create(SelectAllClips);
         SelectNoClipsCommand = ReactiveCommand.Create(SelectNoClips);
         FavoriteCheckedClipsCommand = ReactiveCommand.CreateFromTask(FavoriteCheckedClipsAsync);
@@ -140,6 +150,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OpenSettingsCommand = ReactiveCommand.Create(OpenSettings);
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
         SaveSettingsCommand = ReactiveCommand.CreateFromTask(SaveSettingsAsync);
+        BrowseDatabasePathCommand = ReactiveCommand.CreateFromTask<Window?>(BrowseDatabasePathAsync);
 
         _settingsService.SettingsChanged += OnSettingsChanged;
 
@@ -173,11 +184,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .Merge(ToggleFavoriteCommand.ThrownExceptions)
                 .Merge(CopySelectedCommand.ThrownExceptions)
                 .Merge(ExportSelectedCommand.ThrownExceptions)
+                .Merge(EditSelectedImageCommand.ThrownExceptions)
                 .Merge(DeleteSelectedCommand.ThrownExceptions)
                 .Merge(FavoriteCheckedClipsCommand.ThrownExceptions)
                 .Merge(DeleteCheckedClipsCommand.ThrownExceptions)
                 .Merge(CopyEditedClipCommand.ThrownExceptions)
                 .Merge(SaveSettingsCommand.ThrownExceptions)
+                .Merge(BrowseDatabasePathCommand.ThrownExceptions)
                 .ObserveOn(RxApp.MainThreadScheduler)
                 .Subscribe(ex => StatusText = AppText.FormatErrorStatus(ex.Message)));
     }
@@ -206,6 +219,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ReactiveCommand<Unit, Unit> ExportSelectedCommand { get; }
 
+    public ReactiveCommand<Unit, Unit> EditSelectedImageCommand { get; }
+
     public ReactiveCommand<Unit, Unit> DeleteSelectedCommand { get; }
 
     public ReactiveCommand<Unit, Unit> SelectAllClipsCommand { get; }
@@ -225,6 +240,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> CloseSettingsCommand { get; }
 
     public ReactiveCommand<Unit, Unit> SaveSettingsCommand { get; }
+
+    public ReactiveCommand<Window?, Unit> BrowseDatabasePathCommand { get; }
 
     public string SearchText
     {
@@ -313,6 +330,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
 
             this.RaiseAndSetIfChanged(ref _selectedClip, value);
+            if (value is not null)
+            {
+                _checkedSelectionAnchorId = value.Id;
+            }
             UpdateSelectedClipPresentation();
             RaiseSelectionStateProperties();
         }
@@ -431,6 +452,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string FavoriteButtonLabel => AppText.FavoriteButtonLabel;
 
+    public string SelectedClipFavoriteButtonLabel => AppText.FavoriteButtonLabel;
+
     public string SelectAllButtonLabel => AppText.SelectAllButtonLabel;
 
     public string SelectNoneButtonLabel => AppText.SelectNoneButtonLabel;
@@ -438,6 +461,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string FavoriteSelectedButtonLabel => AppText.FavoriteSelectedButtonLabel;
 
     public string CopyAsNewButtonLabel => AppText.CopyAsNewButtonLabel;
+
+    public string EditImageButtonLabel => AppText.EditImageButtonLabel;
+
+    public string ResetImageEditsButtonLabel => AppText.ResetImageEditsButtonLabel;
 
     public string LogsButtonLabel => AppText.LogsButtonLabel;
 
@@ -470,6 +497,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string SettingsDatabasePathLabel => AppText.SettingsDatabasePathLabel;
 
     public string SettingsDatabasePasswordLabel => AppText.SettingsDatabasePasswordLabel;
+
+    public string SettingsBrowseDatabasePathButtonLabel => AppText.SettingsBrowseDatabasePathButtonLabel;
+
+    public string SettingsShowPasswordLabel => AppText.SettingsShowPasswordLabel;
 
     public string SettingsRegexHotkeyLabel => AppText.SettingsRegexHotkeyLabel;
 
@@ -533,6 +564,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string CapturedLabelText => AppText.CapturedLabel;
 
+    public string ExpiresLabelText => AppText.ExpiresLabel;
+
     public string CopiesLabelText => AppText.CopiesLabel;
 
     public string SizeLabelText => AppText.SizeLabel;
@@ -581,9 +614,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool ShowSelectedImageRenderer => ShowRenderedContent && SelectedClip?.Clip.ContentType == ContentType.Image;
 
-    public bool ShowSelectedImagePreview => ShowSelectedImageRenderer && SelectedClipImagePreview is not null;
+    public bool ShowSelectedImageEditor => ShowSelectedImageRenderer && SelectedClip?.Clip.ContentBytes is { Length: > 0 };
 
-    public bool ShowSelectedImagePlaceholder => ShowSelectedImageRenderer && SelectedClipImagePreview is null;
+    public bool ShowSelectedImagePlaceholder => ShowSelectedImageRenderer && !ShowSelectedImageEditor;
 
     public bool HasSelectedClipFileItems => SelectedClipFiles.Count > 0;
 
@@ -599,11 +632,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool SelectedClipTextIsReadOnly => !IsSelectedClipTextEditable;
 
     public bool ShowCopyEditedClipButton => IsSelectedClipTextEditable
-        && (ShowSelectedTextRenderer || ShowRawTextContent)
-        && HasEditedClipChanges;
-
-    public bool HasEditedClipChanges => IsSelectedClipTextEditable
-        && !string.Equals(EditedClipText, _editedClipBaseline, StringComparison.Ordinal);
+        && (ShowSelectedTextRenderer || ShowSelectedRichTextRenderer || ShowRawTextContent);
 
     public string SelectedClipRenderedText => _selectedClipRenderedText;
 
@@ -624,7 +653,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public Bitmap? SelectedClipImagePreview => _selectedClipImagePreview;
+    public byte[]? SelectedClipImageBytes => SelectedClip?.Clip.ContentType == ContentType.Image ? SelectedClip.Clip.ContentBytes : null;
 
     public string SelectedClipImageHint => _selectedClipImageHint;
 
@@ -648,6 +677,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string SelectedClipByteSizeText => SelectedClip?.ByteSizeDisplay ?? AppText.FormatByteCount(0);
 
+    public string SelectedClipExpiresAtText => BuildSelectedClipExpirationText();
+
     public string SelectedClipImageResolutionText => SelectedClip?.ImageResolutionDisplay ?? AppText.NotAvailable;
 
     public bool ShowSelectedImageResolutionCard => SelectedClip?.Clip.ContentType == ContentType.Image;
@@ -659,8 +690,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public IBrush SelectedClipAreaBorderBrush => SelectedClip?.RowBorderBrush ?? s_defaultDetailBorderBrush;
 
     public Thickness SelectedClipAreaBorderThickness => SelectedClip?.RowBorderThickness ?? new Thickness(1);
-
-    public bool ShowSelectedClipFavoriteIndicator => SelectedClip?.IsFavorite == true;
 
     public bool ShowSelectedClipSeverityIndicator => SelectedClip?.IsSensitive == true;
 
@@ -749,8 +778,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsWelcomeOpen
     {
         get => _isWelcomeOpen;
-        private set => this.RaiseAndSetIfChanged(ref _isWelcomeOpen, value);
+        private set
+        {
+            if (!this.RaiseAndSetIfChanged(ref _isWelcomeOpen, value))
+            {
+                return;
+            }
+
+            this.RaisePropertyChanged(nameof(IsMainWorkspaceVisible));
+        }
     }
+
+    public bool IsMainWorkspaceVisible => !IsWelcomeOpen;
 
     public string SettingsToggleRegexHotkey
     {
@@ -828,6 +867,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get => _settingsDatabasePassword;
         set => this.RaiseAndSetIfChanged(ref _settingsDatabasePassword, value);
+    }
+
+    public bool IsDatabasePasswordVisible
+    {
+        get => _isDatabasePasswordVisible;
+        set => this.RaiseAndSetIfChanged(ref _isDatabasePasswordVisible, value);
     }
 
     public bool SettingsCloseToTray
@@ -922,7 +967,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _settingsService.SettingsChanged -= OnSettingsChanged;
         SelectedClipFiles.Clear();
         ClearClips();
-        ReplaceSelectedClipImagePreview(null);
         SessionLogs.Dispose();
         _subscriptions.Dispose();
     }
@@ -947,7 +991,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var draftSettings = _settingsService.HasSavedSettings ? _settingsService.Current : AppSettings.Default;
             LoadSettingsDraft(draftSettings);
 
-            if (!_storageOptionsService.HasSavedConfig || !_storageOptionsService.DatabaseExists || !_settingsService.HasSavedSettings)
+            if (!_storageOptionsService.HasSavedConfig || !_storageOptionsService.DatabaseExists)
             {
                 ReplaceSensitivityRules(_sensitivityService.GetDefaultRules());
                 IsWelcomeOpen = true;
@@ -1023,25 +1067,31 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task ToggleFavoriteAsync()
     {
-        if (SelectedClip is null)
+        var clip = GetEffectiveSelectedClip();
+        if (clip is null)
         {
             return;
         }
 
-        await _clipStoreService.SetFavoriteAsync(SelectedClip.Id, !SelectedClip.IsFavorite);
-        await RefreshAsync(SelectedClip.Id);
+        await ToggleFavoriteStateAsync(clip);
     }
 
     private async Task CopySelectedAsync()
     {
-        if (SelectedClip is null)
+        var clip = GetEffectiveSelectedClip();
+        if (clip is null)
         {
             return;
         }
 
-        if (SelectedClip.Clip.ContentType == ContentType.Image)
+        if (!ReferenceEquals(SelectedClip, clip))
         {
-            using var bitmap = TryLoadImage(SelectedClip.Clip, _settingsService.Current.MaxClipSizeBytes);
+            SelectedClip = clip;
+        }
+
+        if (clip.Clip.ContentType == ContentType.Image)
+        {
+            using var bitmap = TryLoadImage(clip.Clip, _settingsService.Current.MaxClipSizeBytes);
             if (bitmap is null)
             {
                 throw new InvalidOperationException("The selected image clip could not be decoded for copying.");
@@ -1049,25 +1099,28 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             await _systemInteractionService.CopyBitmapAsync(bitmap);
             StatusText = AppText.CopiedImageStatus;
+            PublishSensitiveCopyNotificationIfNeeded(clip);
             return;
         }
 
-        if (SelectedClip.Clip.ContentType == ContentType.RichText)
+        if (clip.Clip.ContentType == ContentType.RichText)
         {
-            await _systemInteractionService.CopyRichContentAsync(SelectedClip.FullContent, SelectedClipRenderedText, SelectedClip.Clip.ContentFormat);
-            StatusText = AppText.FormatCopiedClip(SelectedClip.DisplayContentType.ToLower(AppText.CurrentCulture));
+            await _systemInteractionService.CopyRichContentAsync(clip.FullContent, SelectedClipRenderedText, clip.Clip.ContentFormat);
+            StatusText = AppText.FormatCopiedClip(clip.DisplayContentType.ToLower(AppText.CurrentCulture));
+            PublishSensitiveCopyNotificationIfNeeded(clip);
             return;
         }
 
-        var isFileList = SelectedClip.Clip.ContentType == ContentType.Files && SelectedClipFiles.Count > 0;
+        var isFileList = clip.Clip.ContentType == ContentType.Files && SelectedClipFiles.Count > 0;
         var contentToCopy = isFileList
             ? string.Join(Environment.NewLine, SelectedClipFiles.Select(static file => file.FilePath))
-            : SelectedClip.FullContent;
+            : clip.FullContent;
 
         await _systemInteractionService.CopyTextAsync(contentToCopy);
         StatusText = isFileList
             ? AppText.FormatCopiedFileList(SelectedClipFiles.Count)
-            : AppText.FormatCopiedClip(SelectedClip.DisplayContentType.ToLower(AppText.CurrentCulture));
+            : AppText.FormatCopiedClip(clip.DisplayContentType.ToLower(AppText.CurrentCulture));
+        PublishSensitiveCopyNotificationIfNeeded(clip);
     }
 
     private async Task ExportSelectedAsync()
@@ -1077,10 +1130,73 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var exportDirectory = await _clipExportService.ExportAsync(SelectedClip.Clip);
-        await _systemInteractionService.CopyTextAsync(exportDirectory);
-        await _systemInteractionService.OpenPathAsync(exportDirectory);
-        StatusText = AppText.FormatExportedClipStatus(exportDirectory);
+        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);
+        await _systemInteractionService.CopyTextAsync(exportResult.PrimaryPath);
+        await _systemInteractionService.OpenPathAsync(exportResult.PrimaryPath);
+        StatusText = AppText.FormatExportedClipStatus(exportResult.PrimaryPath);
+    }
+
+    private async Task EditSelectedImageAsync()
+    {
+        var clip = GetEffectiveSelectedClip();
+        if (clip?.Clip.ContentType != ContentType.Image || clip.Clip.ContentBytes is not { Length: > 0 } imageBytes)
+        {
+            return;
+        }
+
+        if (!ReferenceEquals(SelectedClip, clip))
+        {
+            SelectedClip = clip;
+        }
+
+        var editedBytes = await _imageEditorService.EditImageAsync(imageBytes, clip.Clip.SourceAppPath);
+        if (editedBytes is not { Length: > 0 })
+        {
+            return;
+        }
+
+        await CopyEditedImageAsync(editedBytes);
+    }
+
+    public async Task CopyEditedImageAsync(byte[] editedBytes)
+    {
+        var clip = GetEffectiveSelectedClip();
+        if (clip?.Clip.ContentType != ContentType.Image || editedBytes is not { Length: > 0 })
+        {
+            return;
+        }
+
+        if (!ReferenceEquals(SelectedClip, clip))
+        {
+            SelectedClip = clip;
+        }
+
+        using var bitmapStream = new MemoryStream(editedBytes, writable: false);
+        using var bitmap = new Bitmap(bitmapStream);
+
+        var capturedClip = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentBytes = editedBytes,
+            ContentText = string.IsNullOrWhiteSpace(clip.FullContent) ? null : clip.FullContent,
+            ContentType = ContentType.Image,
+            ContentFormat = ClipContentFormat.Bitmap,
+            SourceApp = AppText.WindowTitle,
+            SourceAppPath = Environment.ProcessPath,
+            ImageWidth = bitmap.PixelSize.Width,
+            ImageHeight = bitmap.PixelSize.Height,
+        });
+
+        await _systemInteractionService.CopyBitmapAsync(bitmap);
+
+        if (capturedClip is not null)
+        {
+            await RefreshAsync(capturedClip.Id);
+            PublishSensitiveCopyNotificationIfNeeded(Clips.FirstOrDefault(current => current.Id == capturedClip.Id));
+            StatusText = AppText.EditedImageCopiedStatus;
+            return;
+        }
+
+        StatusText = AppText.CopiedImageStatus;
     }
 
     private void SelectAllClips()
@@ -1105,49 +1221,57 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task FavoriteCheckedClipsAsync()
     {
-        var checkedClips = Clips.Where(static clip => clip.IsChecked).ToArray();
-        if (checkedClips.Length == 0)
+        var targetClips = GetCheckedOrSelectedClips();
+        if (targetClips.Length == 0)
         {
             return;
         }
 
-        foreach (var clip in checkedClips)
+        var nextIsFavorite = targetClips.Any(static clip => !clip.IsFavorite);
+        foreach (var clip in targetClips)
         {
-            await _clipStoreService.SetFavoriteAsync(clip.Id, true);
+            await _clipStoreService.SetFavoriteAsync(clip.Id, nextIsFavorite);
+            clip.SetFavoriteState(nextIsFavorite);
         }
 
-        StatusText = AppText.FormatFavoritedClipCount(checkedClips.Length);
-        await RefreshAsync(SelectedClip?.Id ?? checkedClips[0].Id);
+        if (ShowFavoritesOnly && !nextIsFavorite)
+        {
+            await RefreshAsync(SelectedClip?.Id ?? targetClips[0].Id);
+        }
+        else
+        {
+            RaiseSelectionStateProperties();
+            RaiseBulkSelectionProperties();
+        }
+
+        StatusText = AppText.FormatFavoritedClipCount(targetClips.Length);
     }
 
     private async Task DeleteCheckedClipsAsync()
     {
-        var checkedClipIds = Clips
-            .Where(static clip => clip.IsChecked)
-            .Select(static clip => clip.Id)
-            .ToArray();
-        if (checkedClipIds.Length == 0)
+        var targetClips = GetCheckedOrSelectedClips();
+        if (targetClips.Length == 0)
         {
             return;
         }
 
-        foreach (var clipId in checkedClipIds)
+        foreach (var clipId in targetClips.Select(static clip => clip.Id))
         {
             await _clipStoreService.DeleteAsync(clipId);
         }
 
-        StatusText = AppText.FormatDeletedClipCount(checkedClipIds.Length);
+        StatusText = AppText.FormatDeletedClipCount(targetClips.Length);
         await RefreshAsync();
     }
 
     private async Task CopyEditedClipAsync()
     {
-        if (SelectedClip is null || !ShowCopyEditedClipButton)
+        if (SelectedClip is null || !IsSelectedClipTextEditable)
         {
             return;
         }
 
-        if (SelectedClip.Clip.ContentType == ContentType.RichText && ShowRawTextContent)
+        if (SelectedClip.Clip.ContentType == ContentType.RichText)
         {
             var renderedText = ClipDisplayFormatter.RenderRichContent(EditedClipText);
             await _systemInteractionService.CopyRichContentAsync(EditedClipText, renderedText, SelectedClip.Clip.ContentFormat);
@@ -1160,17 +1284,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _editedClipBaseline = EditedClipText;
         RaiseEditedClipProperties();
         StatusText = AppText.EditedClipCopiedStatus;
+        PublishSensitiveCopyNotificationIfNeeded(SelectedClip);
     }
 
-    public async Task CommitEditedClipOnFocusLossAsync()
-    {
-        if (!ShowCopyEditedClipButton)
-        {
-            return;
-        }
-
-        await CopyEditedClipAsync();
-    }
+    public Task CommitEditedClipOnFocusLossAsync() => Task.CompletedTask;
 
     private async Task CopyClipAsync(ClipItemViewModel clip)
     {
@@ -1187,8 +1304,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private async Task ToggleFavoriteClipAsync(ClipItemViewModel clip)
     {
         SelectedClip = clip;
-        await _clipStoreService.SetFavoriteAsync(clip.Id, !clip.IsFavorite);
-        await RefreshAsync(clip.Id);
+        await ToggleFavoriteStateAsync(clip);
+    }
+
+    private async Task ToggleFavoriteStateAsync(ClipItemViewModel clip)
+    {
+        var nextIsFavorite = !clip.IsFavorite;
+        await _clipStoreService.SetFavoriteAsync(clip.Id, nextIsFavorite);
+        clip.SetFavoriteState(nextIsFavorite);
+
+        if (ReferenceEquals(SelectedClip, clip))
+        {
+            RaiseSelectionStateProperties();
+        }
+
+        if (ShowFavoritesOnly && !nextIsFavorite)
+        {
+            await RefreshAsync();
+        }
     }
 
     private async Task DeleteClipAsync(ClipItemViewModel clip)
@@ -1221,6 +1354,73 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Offset = offset,
     };
 
+    public void ToggleClipCheckedSelection(ClipItemViewModel clip)
+    {
+        var index = Clips.IndexOf(clip);
+        if (index < 0)
+        {
+            return;
+        }
+
+        clip.IsChecked = !clip.IsChecked;
+        SelectedClip = clip;
+        _checkedSelectionAnchorId = clip.Id;
+        RaiseBulkSelectionProperties();
+    }
+
+    public void ExtendClipCheckedSelection(ClipItemViewModel clip, bool preserveExistingSelection)
+    {
+        var targetIndex = Clips.IndexOf(clip);
+        if (targetIndex < 0)
+        {
+            return;
+        }
+
+        var anchorIndex = _checkedSelectionAnchorId is long anchorId
+            ? IndexOfClip(anchorId)
+            : -1;
+        if (anchorIndex < 0)
+        {
+            anchorIndex = SelectedClip is null ? targetIndex : Clips.IndexOf(SelectedClip);
+        }
+
+        if (anchorIndex < 0)
+        {
+            anchorIndex = targetIndex;
+        }
+
+        if (!preserveExistingSelection)
+        {
+            foreach (var current in Clips)
+            {
+                current.IsChecked = false;
+            }
+        }
+
+        var start = Math.Min(anchorIndex, targetIndex);
+        var end = Math.Max(anchorIndex, targetIndex);
+        for (var index = start; index <= end; index++)
+        {
+            Clips[index].IsChecked = true;
+        }
+
+        SelectedClip = clip;
+        RaiseBulkSelectionProperties();
+    }
+
+    private int IndexOfClip(long clipId)
+    {
+        for (var index = 0; index < Clips.Count; index++)
+        {
+            if (Clips[index].Id == clipId)
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
     private void ApplyRefreshResult(ClipSearchResult result, long? preferredSelectionId = null)
     {
         var previousSelectionId = preferredSelectionId ?? SelectedClip?.Id;
@@ -1252,14 +1452,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedClipRenderedText = ClipDisplayFormatter.BuildRenderedText(SelectedClip?.Clip, SelectedClipFiles.Select(static file => file.FilePath).ToArray());
         SyncEditedClipText();
 
-        var imagePreview = TryLoadImage(SelectedClip?.Clip, _settingsService.Current.MaxClipSizeBytes);
-        ReplaceSelectedClipImagePreview(imagePreview);
-        _selectedClipImageHint = SelectedClip?.Clip.ContentType == ContentType.Image
-            && imagePreview is null
-            && SelectedClip.Clip.ContentBytes is { Length: > 0 } imageBytes
-            && imageBytes.Length > _settingsService.Current.MaxClipSizeBytes
-                ? AppText.PreviewImageTooLarge
-                : ClipDisplayFormatter.BuildImageHint(SelectedClip?.Clip, imagePreview is not null);
+        var hasImageBytes = SelectedClip?.Clip.ContentType == ContentType.Image
+            && SelectedClip.Clip.ContentBytes is { Length: > 0 };
+        var imageTooLarge = hasImageBytes
+            && SelectedClip!.Clip.ContentBytes!.Length > _settingsService.Current.MaxClipSizeBytes;
+        _selectedClipImageHint = imageTooLarge
+            ? AppText.PreviewImageTooLarge
+            : ClipDisplayFormatter.BuildImageHint(SelectedClip?.Clip, hasImageBytes);
+        this.RaisePropertyChanged(nameof(ShowSelectedImagePlaceholder));
     }
 
     private void ReplaceSelectedClipFiles(IReadOnlyList<string> fileItems)
@@ -1275,16 +1475,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedFileItem = SelectedClipFiles.FirstOrDefault();
     }
 
-    private void ReplaceSelectedClipImagePreview(Bitmap? image)
-    {
-        var previousImage = _selectedClipImagePreview;
-        _selectedClipImagePreview = image;
-        previousImage?.Dispose();
-    }
-
     private void RaiseSelectionStateProperties()
     {
         this.RaisePropertyChanged(nameof(IsSelectedClipFavorite));
+        this.RaisePropertyChanged(nameof(SelectedClipFavoriteButtonLabel));
         this.RaisePropertyChanged(nameof(HasSelectedClip));
         this.RaisePropertyChanged(nameof(SelectionStateTitle));
         this.RaisePropertyChanged(nameof(ShowEmptySelectionState));
@@ -1292,7 +1486,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(HasSelectedClipFileItems));
         this.RaisePropertyChanged(nameof(SelectedClipRenderedText));
         this.RaisePropertyChanged(nameof(SelectedClipRawContent));
-        this.RaisePropertyChanged(nameof(SelectedClipImagePreview));
+        this.RaisePropertyChanged(nameof(SelectedClipImageBytes));
         this.RaisePropertyChanged(nameof(SelectedClipImageHint));
         this.RaisePropertyChanged(nameof(SelectedClipContentTypeText));
         this.RaisePropertyChanged(nameof(SelectedClipContentFormat));
@@ -1302,6 +1496,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(ShowSelectedClipSourceAppIcon));
         this.RaisePropertyChanged(nameof(SelectedClipFirstCopiedAtText));
         this.RaisePropertyChanged(nameof(SelectedClipCapturedAtText));
+        this.RaisePropertyChanged(nameof(SelectedClipExpiresAtText));
         this.RaisePropertyChanged(nameof(SelectedClipCopyCountText));
         this.RaisePropertyChanged(nameof(SelectedClipByteSizeText));
         this.RaisePropertyChanged(nameof(SelectedClipImageResolutionText));
@@ -1310,7 +1505,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(SelectedClipAccentBrush));
         this.RaisePropertyChanged(nameof(SelectedClipAreaBorderBrush));
         this.RaisePropertyChanged(nameof(SelectedClipAreaBorderThickness));
-        this.RaisePropertyChanged(nameof(ShowSelectedClipFavoriteIndicator));
         this.RaisePropertyChanged(nameof(ShowSelectedClipSeverityIndicator));
         this.RaisePropertyChanged(nameof(SelectedClipSeverityIndicatorText));
         this.RaisePropertyChanged(nameof(SelectedClipSeverityBadgeBackground));
@@ -1367,6 +1561,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         LoadSettingsDraft(_settingsService.Current);
         IsSettingsOpen = false;
+    }
+
+    private async Task BrowseDatabasePathAsync(Window? window)
+    {
+        if (window?.StorageProvider is null)
+        {
+            return;
+        }
+
+        var selectedPath = await PickDatabasePathAsync(window.StorageProvider, SettingsDatabasePath);
+        if (!string.IsNullOrWhiteSpace(selectedPath))
+        {
+            SettingsDatabasePath = selectedPath;
+        }
     }
 
     private async Task SaveSettingsAsync()
@@ -1551,6 +1759,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsMaxLibrarySizeMegabytes = settings.MaxLibrarySizeMegabytes.ToString(CultureInfo.InvariantCulture);
         SettingsEnableMaxEntryCount = settings.EnableMaxEntryCount;
         SettingsMaxEntryCount = settings.MaxEntryCount.ToString(CultureInfo.InvariantCulture);
+        IsDatabasePasswordVisible = false;
     }
 
     private void OnSettingsChanged(object? sender, AppSettings settings)
@@ -1576,6 +1785,46 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _isDatabaseReady = true;
         _clipboardMonitorService.Start();
         StartMaintenanceLoop();
+    }
+
+    private static async Task<string?> PickDatabasePathAsync(IStorageProvider storageProvider, string currentPath)
+    {
+        var suggestedPath = GetSuggestedDatabasePath(currentPath);
+        var suggestedDirectoryPath = Path.GetDirectoryName(suggestedPath);
+        IStorageFolder? suggestedFolder = null;
+        if (!string.IsNullOrWhiteSpace(suggestedDirectoryPath) && Directory.Exists(suggestedDirectoryPath))
+        {
+            suggestedFolder = await storageProvider.TryGetFolderFromPathAsync(suggestedDirectoryPath);
+        }
+
+        var result = await storageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = AppText.SettingsBrowseDatabasePathTitle,
+            SuggestedFileName = Path.GetFileName(suggestedPath),
+            DefaultExtension = "db",
+            SuggestedStartLocation = suggestedFolder,
+            SuggestedFileType = s_databaseFileType,
+            FileTypeChoices = [s_databaseFileType],
+        });
+
+        return result?.TryGetLocalPath();
+    }
+
+    private static string GetSuggestedDatabasePath(string currentPath)
+    {
+        if (string.IsNullOrWhiteSpace(currentPath))
+        {
+            return StorageOptions.GetDefaultDatabasePath();
+        }
+
+        try
+        {
+            return Path.GetFullPath(Environment.ExpandEnvironmentVariables(currentPath.Trim()));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return StorageOptions.GetDefaultDatabasePath();
+        }
     }
 
     private async Task LoadSensitivityRulesAsync()
@@ -1669,14 +1918,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return rules.ToArray();
     }
 
-    private async Task ApplyMaintenanceAndRefreshAsync()
+    private async Task ApplyMaintenanceAndRefreshAsync(bool forceRefresh = true)
     {
         if (!_isDatabaseReady)
         {
             return;
         }
 
-        await _clipStoreService.ApplyMaintenanceAsync();
+        var maintenanceResult = await _clipStoreService.ApplyMaintenanceAsync();
+        if (!forceRefresh && maintenanceResult.PurgedClipCount == 0)
+        {
+            return;
+        }
+
         await LoadSensitivityRulesAsync();
         await RefreshAsync();
     }
@@ -1690,7 +1944,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         var maintenanceSubscription = new SerialDisposable();
         maintenanceSubscription.Disposable = Observable.Interval(TimeSpan.FromMinutes(1), RxApp.TaskpoolScheduler)
-            .SelectMany(_ => Observable.FromAsync(ApplyMaintenanceAndRefreshAsync))
+            .SelectMany(_ => Observable.FromAsync(() => ApplyMaintenanceAndRefreshAsync(false)))
             .ObserveOn(RxApp.MainThreadScheduler)
             .Subscribe(_ => { }, ex => StatusText = AppText.FormatErrorStatus(ex.Message));
         _subscriptions.Add(maintenanceSubscription);
@@ -1843,7 +2097,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(ShowSelectedFilesRenderer));
         this.RaisePropertyChanged(nameof(ShowSelectedFilesFallback));
         this.RaisePropertyChanged(nameof(ShowSelectedImageRenderer));
-        this.RaisePropertyChanged(nameof(ShowSelectedImagePreview));
+        this.RaisePropertyChanged(nameof(ShowSelectedImageEditor));
         this.RaisePropertyChanged(nameof(ShowSelectedImagePlaceholder));
         this.RaisePropertyChanged(nameof(ShowCopyEditedClipButton));
     }
@@ -1903,7 +2157,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void RaiseEditedClipProperties()
     {
-        this.RaisePropertyChanged(nameof(HasEditedClipChanges));
         this.RaisePropertyChanged(nameof(ShowCopyEditedClipButton));
     }
 
@@ -1913,21 +2166,116 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         EditedClipText = _editedClipBaseline;
     }
 
-    private string GetEditedClipBaseline() => ShowRawContent ? SelectedClipRawContent : SelectedClipRenderedText;
+    private string GetEditedClipBaseline() => SelectedClip?.Clip.ContentType == ContentType.RichText
+        ? SelectedClipRawContent
+        : ShowRawContent
+            ? SelectedClipRawContent
+            : SelectedClipRenderedText;
+
+    private ClipItemViewModel? GetEffectiveSelectedClip() => SelectedClip ?? Clips.FirstOrDefault(static clip => clip.IsChecked) ?? Clips.FirstOrDefault();
+
+    private ClipItemViewModel[] GetCheckedOrSelectedClips()
+    {
+        var checkedClips = Clips.Where(static clip => clip.IsChecked).ToArray();
+        return checkedClips.Length > 0
+            ? checkedClips
+            : GetEffectiveSelectedClip() is { } selected
+                ? [selected]
+                : [];
+    }
+
+    private string BuildSelectedClipExpirationText()
+    {
+        if (SelectedClip is null)
+        {
+            return AppText.UnlimitedCapacityText;
+        }
+
+        DateTimeOffset? expiresAt = null;
+        if (SelectedClip.Clip.IsSensitive && _settingsService.Current.EnableSensitiveClipLifetime)
+        {
+            expiresAt = SelectedClip.Clip.LastCopiedAt.AddMinutes(_settingsService.Current.SensitiveClipLifetimeMinutes);
+        }
+        else if (!SelectedClip.Clip.IsSensitive && _settingsService.Current.EnableNormalClipLifetime)
+        {
+            expiresAt = SelectedClip.Clip.LastCopiedAt.AddDays(_settingsService.Current.NormalClipLifetimeDays);
+        }
+
+        return expiresAt is null
+            ? AppText.UnlimitedCapacityText
+            : AppText.FormatExpiresAt(expiresAt.Value.ToLocalTime().ToString("g", AppText.CurrentCulture));
+    }
+
+    private void PublishSensitiveCopyNotificationIfNeeded(ClipItemViewModel? clip)
+    {
+        if (clip?.Clip.IsSensitive != true)
+        {
+            return;
+        }
+
+        _notificationService.Publish(new AppNotification
+        {
+            Title = AppText.SensitiveClipCopiedTitle,
+            Message = AppText.SensitiveClipCopiedMessage,
+            Level = clip.HasCriticalSeverity ? AppNotificationLevel.Error : AppNotificationLevel.Warning,
+            IsPersistent = true,
+            Actions =
+            [
+                new AppNotificationAction
+                {
+                    Label = AppText.OpenButtonLabel,
+                    ExecuteAsync = () =>
+                    {
+                        SelectedClip = Clips.FirstOrDefault(current => current.Id == clip.Id) ?? clip;
+                        return Task.CompletedTask;
+                    }
+                },
+                new AppNotificationAction
+                {
+                    Label = AppText.DeleteButtonLabel,
+                    ExecuteAsync = async () =>
+                    {
+                        await _clipStoreService.DeleteAsync(clip.Id);
+                        await RefreshAsync();
+                    }
+                },
+                new AppNotificationAction
+                {
+                    Label = AppText.UnmarkSensitiveButtonLabel,
+                    ExecuteAsync = async () =>
+                    {
+                        await _clipStoreService.ClearSensitivityAsync(clip.Id);
+                        await RefreshAsync(clip.Id);
+                    }
+                }
+            ]
+        });
+    }
 
     private void ShowNotification(AppNotification notification)
     {
-        var item = new AppNotificationViewModel(notification);
+        var item = new AppNotificationViewModel(notification, RemoveNotification);
         Notifications.Insert(0, item);
         while (Notifications.Count > 4)
         {
             Notifications.RemoveAt(Notifications.Count - 1);
         }
 
-        var removal = Observable.Timer(TimeSpan.FromSeconds(6), RxApp.MainThreadScheduler)
-            .ObserveOn(RxApp.MainThreadScheduler)
-            .Subscribe(_ => Notifications.Remove(item));
-        _subscriptions.Add(removal);
+        if (!notification.IsPersistent)
+        {
+            var removal = Observable.Timer(TimeSpan.FromSeconds(6), RxApp.MainThreadScheduler)
+                .ObserveOn(RxApp.MainThreadScheduler)
+                .Subscribe(_ => RemoveNotification(item));
+            _subscriptions.Add(removal);
+        }
+    }
+
+    private void RemoveNotification(AppNotificationViewModel item)
+    {
+        if (Notifications.Contains(item))
+        {
+            Notifications.Remove(item);
+        }
     }
 
     private static Bitmap? TryLoadImage(ClipEntry? clip, int? maxClipSizeBytes = null)

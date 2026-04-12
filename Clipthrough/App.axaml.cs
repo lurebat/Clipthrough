@@ -10,9 +10,12 @@ using Clipthrough.Database;
 using Clipthrough.Localization;
 using Clipthrough.Models;
 using Clipthrough.Services;
+using Clipthrough.Services.Platform;
 using Clipthrough.ViewModels;
 using Clipthrough.Views;
 using Microsoft.Extensions.DependencyInjection;
+using System.Reactive.Linq;
+using ReactiveUI;
 
 namespace Clipthrough;
 
@@ -23,6 +26,7 @@ public partial class App : Application
     private ISystemInteractionService? _systemInteractionService;
     private ISettingsService? _settingsService;
     private IAppNotificationService? _notificationService;
+    private IDisposable? _notificationSubscription;
     private bool _isExitRequested;
     private bool _hasShownTrayNotification;
 
@@ -59,6 +63,9 @@ public partial class App : Application
             desktop.MainWindow.Closed += OnMainWindowClosed;
             desktop.MainWindow.PropertyChanged += OnMainWindowPropertyChanged;
             _settingsService.SettingsChanged += OnSettingsChanged;
+            _notificationSubscription = _notificationService.Notifications
+                .ObserveOn(RxApp.MainThreadScheduler)
+                .Subscribe(OnNotificationPublished);
 
             StartApplicationAsync(mainWindowViewModel);
         }
@@ -83,6 +90,18 @@ public partial class App : Application
     {
         var services = new ServiceCollection();
 
+        // Platform-specific services
+        if (OperatingSystem.IsWindows())
+        {
+            services.AddSingleton<IDataProtectionService, WindowsDataProtectionService>();
+            services.AddSingleton<ISourceApplicationResolver, WindowsSourceApplicationResolver>();
+        }
+        else
+        {
+            services.AddSingleton<IDataProtectionService, NoOpDataProtectionService>();
+            services.AddSingleton<ISourceApplicationResolver, NullSourceApplicationResolver>();
+        }
+
         services.AddSingleton<IStorageOptionsService, StorageOptionsService>();
         services.AddSingleton<SqliteConnectionFactory>();
         services.AddSingleton<ISensitivityService, SensitivityService>();
@@ -91,8 +110,8 @@ public partial class App : Application
         services.AddSingleton<ISessionLogService>(_ => SessionLogService.Instance);
         services.AddSingleton<ISystemInteractionService, SystemInteractionService>();
         services.AddSingleton<DatabaseInitializer>();
-        services.AddSingleton<WindowsSourceApplicationResolver>();
         services.AddSingleton<IClipExportService, ClipExportService>();
+        services.AddSingleton<IImageEditorService, ShareXImageEditorService>();
         services.AddSingleton<IClipStoreService, ClipStoreService>();
         services.AddSingleton<IClipSampleDataService, ClipSampleDataService>();
         services.AddSingleton<IClipboardMonitorService, ClipboardMonitorService>();
@@ -118,6 +137,8 @@ public partial class App : Application
             _settingsService.SettingsChanged -= OnSettingsChanged;
         }
 
+        _notificationSubscription?.Dispose();
+        _notificationSubscription = null;
         _systemInteractionService?.UnregisterGlobalHotKey();
         _trayIcon?.Dispose();
         _trayIcon = null;
@@ -217,17 +238,38 @@ public partial class App : Application
             return;
         }
 
-        if (!_hasShownTrayNotification)
-        {
-            _hasShownTrayNotification = true;
-            Trace.TraceInformation("Clipthrough moved to the tray for the first time this session.");
-            _notificationService?.PublishInfo(AppText.TrayNotificationTitle, AppText.TrayNotificationMessage);
-        }
-
         Dispatcher.UIThread.Post(() =>
         {
             RestoreWindowState(_mainWindow);
             _mainWindow.Hide();
+
+            if (_hasShownTrayNotification)
+            {
+                return;
+            }
+
+            _hasShownTrayNotification = true;
+            Trace.TraceInformation("Clipthrough moved to the tray for the first time this session.");
+            _notificationService?.Publish(new AppNotification
+            {
+                Title = AppText.TrayNotificationTitle,
+                Message = AppText.TrayNotificationMessage,
+                Level = AppNotificationLevel.Information,
+                Activated = ShowMainWindowFromTray,
+            });
+        });
+    }
+
+    private void OnNotificationPublished(AppNotification notification)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_mainWindow is null || _mainWindow.IsVisible)
+            {
+                return;
+            }
+
+            _systemInteractionService?.ShowNotification(notification);
         });
     }
 

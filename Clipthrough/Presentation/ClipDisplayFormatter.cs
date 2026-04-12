@@ -14,6 +14,11 @@ public static class ClipDisplayFormatter
 {
     public static string BuildTitle(ClipEntry clip)
     {
+        if (clip.ContentType == ContentType.Image && TryGetPreferredImageLabel(clip) is { } imageLabel)
+        {
+            return BuildTitle(imageLabel, ContentType.Text);
+        }
+
         if (clip.ContentType == ContentType.Image && TryGetImageDimensionsDisplay(clip) is { } dimensions)
         {
             return AppText.FormatImageSummary(dimensions);
@@ -43,6 +48,11 @@ public static class ClipDisplayFormatter
 
     public static string BuildPreviewSnippet(ClipEntry clip)
     {
+        if (clip.ContentType == ContentType.Image && TryGetPreferredImageLabel(clip) is { } imageLabel)
+        {
+            return BuildPreviewSnippet(imageLabel, ContentType.Text);
+        }
+
         if (clip.ContentType == ContentType.Image && TryGetImageDimensionsDisplay(clip) is { } dimensions)
         {
             return AppText.FormatImageSummary(dimensions);
@@ -71,6 +81,11 @@ public static class ClipDisplayFormatter
 
     public static string BuildSingleLinePreview(ClipEntry clip)
     {
+        if (clip.ContentType == ContentType.Image && TryGetPreferredImageLabel(clip) is { } imageLabel)
+        {
+            return BuildSingleLinePreview(imageLabel, ContentType.Text);
+        }
+
         if (clip.ContentType == ContentType.Image && TryGetImageDimensionsDisplay(clip) is { } dimensions)
         {
             return AppText.FormatImageSummary(dimensions);
@@ -204,6 +219,27 @@ public static class ClipDisplayFormatter
         return AppText.FormatImageDimensions(width, height);
     }
 
+    public static string? TryGetPreferredImageLabel(ClipEntry? clip)
+    {
+        if (clip?.ContentType != ContentType.Image || string.IsNullOrWhiteSpace(clip.Content))
+        {
+            return null;
+        }
+
+        var normalized = NormalizePreviewText(clip.Content);
+        if (string.IsNullOrWhiteSpace(normalized) || normalized == AppText.PreviewTextUnavailable)
+        {
+            return null;
+        }
+
+        var defaultImageSummary = TryGetImageDimensionsDisplay(clip) is { } dimensions
+            ? AppText.FormatImageSummary(dimensions)
+            : null;
+        return string.Equals(normalized, defaultImageSummary, StringComparison.Ordinal)
+            ? null
+            : normalized;
+    }
+
     public static string? GetRawMarkup(ClipEntry? clip)
     {
         if (clip is null || clip.ContentBytes is not { Length: > 0 } bytes)
@@ -213,7 +249,9 @@ public static class ClipDisplayFormatter
 
         return clip.ContentFormat switch
         {
-            ClipContentFormat.Html or ClipContentFormat.Rtf => Encoding.UTF8.GetString(bytes),
+            ClipContentFormat.Html or ClipContentFormat.Rtf => ClipboardMarkupDecoder.NormalizePlatformMarkupString(
+                ClipboardMarkupDecoder.DecodeMarkupBytes(bytes),
+                clip.ContentFormat),
             _ => null,
         };
     }
@@ -241,8 +279,6 @@ public static class ClipDisplayFormatter
     }
 
     public static string ToCapturedAtDisplay(DateTimeOffset timestamp) => timestamp.ToLocalTime().ToString("g", AppText.CurrentCulture);
-
-    public static string ToCapturedAtCompact(DateTimeOffset timestamp) => timestamp.ToLocalTime().ToString("g", AppText.CurrentCulture);
 
     public static string NormalizePreviewText(string content)
     {
@@ -331,7 +367,11 @@ public static class ClipDisplayFormatter
 
     private static bool LooksLikeRawRichText(string content) => LooksLikeCfHtml(content) || LooksLikeHtml(content) || LooksLikeRtf(content);
 
-    private static bool LooksLikeCfHtml(string content) => content.StartsWith("Version:", StringComparison.OrdinalIgnoreCase);
+    private static bool LooksLikeCfHtml(string content)
+        => content.StartsWith("Version:", StringComparison.OrdinalIgnoreCase)
+           || content.StartsWith("Format:HTML Format", StringComparison.OrdinalIgnoreCase)
+           || (content.Contains("StartHTML:", StringComparison.OrdinalIgnoreCase)
+               && content.Contains("EndHTML:", StringComparison.OrdinalIgnoreCase));
 
     private static bool LooksLikeHtml(string content) => Regex.IsMatch(content, @"<\s*([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>", RegexOptions.IgnoreCase);
 

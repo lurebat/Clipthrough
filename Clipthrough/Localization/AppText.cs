@@ -29,6 +29,8 @@ public static class AppText
         [nameof(SelectNoneButtonLabel)] = "None",
         [nameof(FavoriteSelectedButtonLabel)] = "Favorite",
         [nameof(CopyAsNewButtonLabel)] = "Copy as new",
+        [nameof(EditImageButtonLabel)] = "Edit image",
+        [nameof(ResetImageEditsButtonLabel)] = "Reset",
         [nameof(FavoriteBadgeLabel)] = "Favorite",
         [nameof(LogsButtonLabel)] = "Logs",
         [nameof(SettingsButtonLabel)] = "Settings",
@@ -45,12 +47,15 @@ public static class AppText
         [nameof(SettingsClipLimitLabel)] = "Max clip size (KB)",
         [nameof(SettingsDatabasePathLabel)] = "Database path",
         [nameof(SettingsDatabasePasswordLabel)] = "Encryption password",
+        [nameof(SettingsBrowseDatabasePathButtonLabel)] = "Browse",
+        [nameof(SettingsBrowseDatabasePathTitle)] = "Choose database file",
         [nameof(SettingsRegexHotkeyLabel)] = "Toggle regex",
         [nameof(SettingsFavoritesHotkeyLabel)] = "Toggle favorites",
         [nameof(SettingsSensitiveHotkeyLabel)] = "Toggle sensitive",
         [nameof(SettingsCaseSensitiveHotkeyLabel)] = "Toggle case sensitivity",
         [nameof(SettingsToggleWindowHotkeyLabel)] = "Toggle window",
         [nameof(SettingsEnableShortcutLabel)] = "Enable",
+        [nameof(SettingsShowPasswordLabel)] = "Show password",
         [nameof(SettingsCloseToTrayLabel)] = "Close to tray",
         [nameof(SettingsMinimizeToTrayLabel)] = "Minimize to tray",
         [nameof(SettingsStartWithWindowsLabel)] = "Start with Windows",
@@ -77,6 +82,7 @@ public static class AppText
         [nameof(AppLabel)] = "App",
         [nameof(CapturedLabel)] = "Last copied",
         [nameof(FirstCopiedLabel)] = "First copied",
+        [nameof(ExpiresLabel)] = "Expires",
         [nameof(CopiesLabel)] = "Copies",
         [nameof(SizeLabel)] = "Size",
         [nameof(ResolutionLabel)] = "Resolution",
@@ -88,6 +94,9 @@ public static class AppText
         [nameof(WaitingForFirstCapture)] = "Waiting for first capture",
         [nameof(RemoveFavorite)] = "Remove Favorite",
         [nameof(AddFavorite)] = "Add Favorite",
+        [nameof(SensitiveClipCopiedTitle)] = "Sensitive clip copied",
+        [nameof(SensitiveClipCopiedMessage)] = "This clip matched one or more sensitivity rules. Review it before sharing.",
+        [nameof(UnmarkSensitiveButtonLabel)] = "Unsevere",
         [nameof(SettingsSavedStatus)] = "Settings saved.",
         [nameof(SettingsInvalidHotkeyFallback)] = "Enter a valid hotkey such as Alt+R.",
         [nameof(SettingsInvalidClipSize)] = "Enter a clip size between 0.25 KB and 32768 KB.",
@@ -173,6 +182,8 @@ public static class AppText
         ["Format.CopiedClipStatus"] = "Copied {0} clip to the clipboard.",
         ["Format.CopiedFileListStatus"] = "Copied {0} file paths to the clipboard.",
         ["Format.CopiedImageStatus"] = "Copied image clip to the clipboard.",
+        ["Format.EditedImageCopiedStatus"] = "Copied the edited image as a new clip.",
+        ["Format.ExpiresAt"] = "Expires {0}",
         ["Format.CheckedClipCount"] = "{0:N0} selected",
         ["Format.FavoritedClipCount"] = "Favorited {0:N0} selected clips.",
         ["Format.DeletedClipCount"] = "Deleted {0:N0} selected clips.",
@@ -238,6 +249,8 @@ public static class AppText
     public static string SelectNoneButtonLabel => Text(nameof(SelectNoneButtonLabel));
     public static string FavoriteSelectedButtonLabel => Text(nameof(FavoriteSelectedButtonLabel));
     public static string CopyAsNewButtonLabel => Text(nameof(CopyAsNewButtonLabel));
+    public static string EditImageButtonLabel => Text(nameof(EditImageButtonLabel));
+    public static string ResetImageEditsButtonLabel => Text(nameof(ResetImageEditsButtonLabel));
     public static string FavoriteBadgeLabel => Text(nameof(FavoriteBadgeLabel));
     public static string LogsButtonLabel => Text(nameof(LogsButtonLabel));
     public static string SettingsButtonLabel => Text(nameof(SettingsButtonLabel));
@@ -254,12 +267,15 @@ public static class AppText
     public static string SettingsClipLimitLabel => Text(nameof(SettingsClipLimitLabel));
     public static string SettingsDatabasePathLabel => Text(nameof(SettingsDatabasePathLabel));
     public static string SettingsDatabasePasswordLabel => Text(nameof(SettingsDatabasePasswordLabel));
+    public static string SettingsBrowseDatabasePathButtonLabel => Text(nameof(SettingsBrowseDatabasePathButtonLabel));
+    public static string SettingsBrowseDatabasePathTitle => Text(nameof(SettingsBrowseDatabasePathTitle));
     public static string SettingsRegexHotkeyLabel => Text(nameof(SettingsRegexHotkeyLabel));
     public static string SettingsFavoritesHotkeyLabel => Text(nameof(SettingsFavoritesHotkeyLabel));
     public static string SettingsSensitiveHotkeyLabel => Text(nameof(SettingsSensitiveHotkeyLabel));
     public static string SettingsCaseSensitiveHotkeyLabel => Text(nameof(SettingsCaseSensitiveHotkeyLabel));
     public static string SettingsToggleWindowHotkeyLabel => Text(nameof(SettingsToggleWindowHotkeyLabel));
     public static string SettingsEnableShortcutLabel => Text(nameof(SettingsEnableShortcutLabel));
+    public static string SettingsShowPasswordLabel => Text(nameof(SettingsShowPasswordLabel));
     public static string SettingsCloseToTrayLabel => Text(nameof(SettingsCloseToTrayLabel));
     public static string SettingsMinimizeToTrayLabel => Text(nameof(SettingsMinimizeToTrayLabel));
     public static string SettingsStartWithWindowsLabel => Text(nameof(SettingsStartWithWindowsLabel));
@@ -286,6 +302,7 @@ public static class AppText
     public static string AppLabel => Text(nameof(AppLabel));
     public static string CapturedLabel => Text(nameof(CapturedLabel));
     public static string FirstCopiedLabel => Text(nameof(FirstCopiedLabel));
+    public static string ExpiresLabel => Text(nameof(ExpiresLabel));
     public static string CopiesLabel => Text(nameof(CopiesLabel));
     public static string SizeLabel => Text(nameof(SizeLabel));
     public static string ResolutionLabel => Text(nameof(ResolutionLabel));
@@ -297,6 +314,9 @@ public static class AppText
     public static string WaitingForFirstCapture => Text(nameof(WaitingForFirstCapture));
     public static string RemoveFavorite => Text(nameof(RemoveFavorite));
     public static string AddFavorite => Text(nameof(AddFavorite));
+    public static string SensitiveClipCopiedTitle => Text(nameof(SensitiveClipCopiedTitle));
+    public static string SensitiveClipCopiedMessage => Text(nameof(SensitiveClipCopiedMessage));
+    public static string UnmarkSensitiveButtonLabel => Text(nameof(UnmarkSensitiveButtonLabel));
     public static string SettingsSavedStatus => Text(nameof(SettingsSavedStatus));
     public static string SettingsInvalidHotkeyFallback => Text(nameof(SettingsInvalidHotkeyFallback));
     public static string SettingsInvalidClipSize => Text(nameof(SettingsInvalidClipSize));
@@ -434,6 +454,9 @@ public static class AppText
     public static string FormatCopiedFileList(int count) => Format("Format.CopiedFileListStatus", count);
 
     public static string CopiedImageStatus => Text("Format.CopiedImageStatus");
+    public static string EditedImageCopiedStatus => Text("Format.EditedImageCopiedStatus");
+
+    public static string FormatExpiresAt(string value) => Format("Format.ExpiresAt", value);
 
     public static string FormatCheckedClipCount(int count) => Format("Format.CheckedClipCount", count);
 
@@ -525,4 +548,3 @@ public static class AppText
         _ => s_en,
     };
 }
-

@@ -15,9 +15,11 @@ public sealed class StorageOptionsService : IStorageOptionsService
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _configPath;
+    private readonly IDataProtectionService _dataProtection;
 
-    public StorageOptionsService()
+    public StorageOptionsService(IDataProtectionService dataProtection)
     {
+        _dataProtection = dataProtection;
         _configPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Clipthrough",
@@ -158,7 +160,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
         await File.WriteAllTextAsync(_configPath, JsonSerializer.Serialize(document, JsonOptions), cancellationToken);
     }
 
-    private static string ProtectPassword(string password)
+    private string ProtectPassword(string password)
     {
         if (string.IsNullOrEmpty(password))
         {
@@ -166,15 +168,10 @@ public sealed class StorageOptionsService : IStorageOptionsService
         }
 
         var bytes = System.Text.Encoding.UTF8.GetBytes(password);
-        if (OperatingSystem.IsWindows())
-        {
-            return Convert.ToBase64String(ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser));
-        }
-
-        return Convert.ToBase64String(bytes);
+        return Convert.ToBase64String(_dataProtection.Protect(bytes));
     }
 
-    private static string UnprotectPassword(string? protectedPassword)
+    private string UnprotectPassword(string? protectedPassword)
     {
         if (string.IsNullOrWhiteSpace(protectedPassword))
         {
@@ -182,12 +179,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
         }
 
         var bytes = Convert.FromBase64String(protectedPassword);
-        if (OperatingSystem.IsWindows())
-        {
-            return System.Text.Encoding.UTF8.GetString(ProtectedData.Unprotect(bytes, null, DataProtectionScope.CurrentUser));
-        }
-
-        return System.Text.Encoding.UTF8.GetString(bytes);
+        return System.Text.Encoding.UTF8.GetString(_dataProtection.Unprotect(bytes));
     }
 
     private static string EscapeSqlLiteral(string value) => value.Replace("'", "''", StringComparison.Ordinal);

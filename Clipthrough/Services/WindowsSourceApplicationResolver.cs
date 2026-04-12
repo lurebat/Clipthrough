@@ -5,10 +5,12 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 
 namespace Clipthrough.Services;
 
-public sealed class WindowsSourceApplicationResolver
+[SupportedOSPlatform("windows")]
+public sealed class WindowsSourceApplicationResolver : ISourceApplicationResolver
 {
     public ClipboardSourceApplicationInfo? TryResolve()
     {
@@ -31,6 +33,11 @@ public sealed class WindowsSourceApplicationResolver
             Trace.TraceWarning($"Source app lookup failed: {ex.Message}");
             return null;
         }
+        catch (ArgumentException ex)
+        {
+            Trace.TraceWarning($"Source app lookup failed (process exited): {ex.Message}");
+            return null;
+        }
     }
 
     private static ClipboardSourceApplicationInfo? ResolveCore()
@@ -51,10 +58,11 @@ public sealed class WindowsSourceApplicationResolver
         var processPath = TryGetProcessPath(process);
         var name = TryGetProcessName(process, processPath);
         var iconBytes = TryGetProcessIcon(processPath);
+        var windowTitle = TryGetWindowTitle(owner);
 
         return string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(processPath) && iconBytes is null
             ? null
-            : new ClipboardSourceApplicationInfo(name, processPath, iconBytes);
+            : new ClipboardSourceApplicationInfo(name, processPath, iconBytes, windowTitle);
     }
 
     private static string? TryGetProcessPath(Process process)
@@ -128,11 +136,38 @@ public sealed class WindowsSourceApplicationResolver
         }
     }
 
+    private static string? TryGetWindowTitle(IntPtr hWnd)
+    {
+        try
+        {
+            var length = GetWindowTextLength(hWnd);
+            if (length <= 0)
+            {
+                return null;
+            }
+
+            var sb = new System.Text.StringBuilder(length + 1);
+            _ = GetWindowText(hWnd, sb, sb.Capacity);
+            var title = sb.ToString();
+            return string.IsNullOrWhiteSpace(title) ? null : title;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     [DllImport("user32.dll")]
     private static extern IntPtr GetClipboardOwner();
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    private static extern int GetWindowTextLength(IntPtr hWnd);
 }
 
-public sealed record ClipboardSourceApplicationInfo(string? Name, string? Path, byte[]? IconBytes);
+public sealed record ClipboardSourceApplicationInfo(string? Name, string? Path, byte[]? IconBytes, string? WindowTitle = null);

@@ -18,10 +18,11 @@ public interface ISystemInteractionService
 
     Task OpenContainingDirectoryAsync(string path);
 
+    void ShowNotification(AppNotification notification);
+
     bool TryRegisterGlobalHotKey(Window window, HotkeyGesture hotkey, Action callback);
 
     void UnregisterGlobalHotKey();
 
     void SyncStartWithWindows(bool enabled);
 }
-

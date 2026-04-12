@@ -1,7 +1,9 @@
 using System;
+using System.Collections.ObjectModel;
 using Avalonia.Media;
 using Clipthrough.Localization;
 using Clipthrough.Models;
+using ReactiveUI;
 
 namespace Clipthrough.ViewModels;
 
@@ -14,9 +16,16 @@ public sealed class AppNotificationViewModel : ViewModelBase
     private static readonly IBrush s_errorBackground = new SolidColorBrush(Color.Parse("#3B0D18"));
     private static readonly IBrush s_errorBorder = new SolidColorBrush(Color.Parse("#E11D48"));
 
-    public AppNotificationViewModel(AppNotification notification)
+    public AppNotificationViewModel(AppNotification notification, Action<AppNotificationViewModel>? dismiss = null)
     {
         Notification = notification;
+        if (notification.Actions.Count > 0)
+        {
+            foreach (var action in notification.Actions)
+            {
+                Actions.Add(new AppNotificationActionViewModel(action, () => dismiss?.Invoke(this)));
+            }
+        }
     }
 
     public AppNotification Notification { get; }
@@ -42,4 +51,8 @@ public sealed class AppNotificationViewModel : ViewModelBase
         AppNotificationLevel.Error => s_errorBorder,
         _ => s_infoBorder,
     };
+
+    public bool HasActions => Actions.Count > 0;
+
+    public ObservableCollection<AppNotificationActionViewModel> Actions { get; } = [];
 }

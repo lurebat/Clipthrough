@@ -190,7 +190,7 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     public string DeleteLabel => AppText.DeleteButtonLabel;
 
-    public string FavoriteActionLabel => IsFavorite ? AppText.RemoveFavorite : AppText.AddFavorite;
+    public string FavoriteActionLabel => AppText.FavoriteButtonLabel;
 
     public string ExportLabel => AppText.ExportButtonLabel;
 
@@ -199,6 +199,22 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     public string CopyCountBadge => Clip.CopyCount > 1 ? $"×{Clip.CopyCount}" : string.Empty;
 
     public bool ShowCopyCountBadge => Clip.CopyCount > 1;
+
+    public void SetFavoriteState(bool isFavorite)
+    {
+        if (Clip.IsFavorite == isFavorite)
+        {
+            return;
+        }
+
+        Clip.IsFavorite = isFavorite;
+        this.RaisePropertyChanged(nameof(IsFavorite));
+        this.RaisePropertyChanged(nameof(StateAccentBrush));
+        this.RaisePropertyChanged(nameof(RowBorderBrush));
+        this.RaisePropertyChanged(nameof(RowBorderThickness));
+        this.RaisePropertyChanged(nameof(FavoriteMarker));
+        this.RaisePropertyChanged(nameof(FavoriteActionLabel));
+    }
 
     public void Dispose()
     {
@@ -242,4 +258,3 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         return s_defaultAccentBrush;
     }
 }
-
