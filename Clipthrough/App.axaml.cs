@@ -90,9 +90,7 @@ public partial class App : Application
 
     /// <summary>
     /// Global safety net for unhandled dispatcher exceptions.
-    /// AvRichTextBox's FlowDocument.InitializeDocument() is async void and crashes
-    /// via AllParagraphs[0] when 0 paragraphs exist after a 70ms delay.
-    /// Marking as Handled prevents app termination.
+    /// Logs the error and marks it as handled to prevent app termination.
     /// </summary>
     private static void OnDispatcherUnhandledException(
         object sender, DispatcherUnhandledExceptionEventArgs e)

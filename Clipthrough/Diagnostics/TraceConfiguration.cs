@@ -46,7 +46,10 @@ public static class TraceConfiguration
         => Trace.TraceError($"Unhandled exception: {e.ExceptionObject}");
 
     private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
-        => Trace.TraceError($"Unobserved task exception: {e.Exception}");
+    {
+        Trace.TraceError($"Unobserved task exception: {e.Exception}");
+        e.SetObserved();
+    }
 
     private static void RotateLogIfNeeded(string logFilePath)
     {

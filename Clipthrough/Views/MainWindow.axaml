@@ -336,8 +336,7 @@
                                       Text="{Binding EditedClipText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                             <controls:RichContentView IsVisible="{Binding ShowSelectedRichTextRenderer}"
-                                                       IsReadOnly="{Binding SelectedClipTextIsReadOnly}"
-                                                       Markup="{Binding EditedClipText, Mode=TwoWay}"
+                                                       Markup="{Binding EditedClipText, Mode=OneWay}"
                                                        ContentFormat="{Binding SelectedClipContentFormat}" />
 
                             <Grid IsVisible="{Binding ShowSelectedFilesRenderer}"

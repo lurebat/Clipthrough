@@ -626,8 +626,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string CheckedClipSummaryText => AppText.FormatCheckedClipCount(CheckedClipCount);
 
-    public bool IsSelectedClipTextEditable => SelectedClip?.Clip.ContentType is ContentType.Text
-        or ContentType.RichText;
+    public bool IsSelectedClipTextEditable => SelectedClip?.Clip.ContentType is ContentType.Text;
 
     public bool SelectedClipTextIsReadOnly => !IsSelectedClipTextEditable;
 

@@ -11,7 +11,6 @@ public class RtfToHtmlConverterTests
         var rtf = @"{\rtf1\ansi{\colortbl ;\red255\green0\blue0;}\cf1 hello}";
         var html = RtfToHtmlConverter.Convert(rtf);
 
-        Assert.Contains("<html>", html);
         Assert.Contains("hello", html);
         Assert.Contains("color:#FF0000", html, System.StringComparison.OrdinalIgnoreCase);
     }
@@ -22,8 +21,8 @@ public class RtfToHtmlConverterTests
         var rtf = @"{\rtf1\ansi\b\i bold italic text}";
         var html = RtfToHtmlConverter.Convert(rtf);
 
-        Assert.Contains("font-weight:bold", html);
-        Assert.Contains("font-style:italic", html);
+        Assert.Contains("<strong>", html);
+        Assert.Contains("<em>", html);
         Assert.Contains("bold italic text", html);
     }
 
@@ -45,8 +44,8 @@ public class RtfToHtmlConverterTests
         var rtf = @"{\rtf1\ansi\pard hello world\par}";
         var html = RtfToHtmlConverter.Convert(rtf);
 
-        Assert.Contains("<html>", html);
-        Assert.Contains("</html>", html);
+        Assert.Contains("<div", html);
+        Assert.Contains("</div>", html);
         Assert.Contains("hello world", html);
     }
 

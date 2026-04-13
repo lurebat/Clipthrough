@@ -1,6 +1,7 @@
 using Avalonia;
 using ReactiveUI.Avalonia;
 using System;
+using System.Diagnostics;
 using Clipthrough.Diagnostics;
 
 namespace Clipthrough;
@@ -15,7 +16,15 @@ sealed class Program
     {
         SQLitePCL.Batteries_V2.Init();
         TraceConfiguration.Initialize();
-        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+
+        try
+        {
+            BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceError($"Application terminated unexpectedly: {ex}");
+        }
     }
 
     // Avalonia configuration, don't remove; also used by visual designer.
@@ -25,7 +34,11 @@ sealed class Program
             .UsePlatformDetect()
             .WithInterFont()
             .LogToTrace()
-            .UseReactiveUI();
+            .UseReactiveUI()
+            .With(new SkiaOptions
+            {
+                MaxGpuResourceSizeBytes = 256 * 1024 * 1024,
+            });
 #if DEBUG
         builder = builder.WithDeveloperTools();
 #endif

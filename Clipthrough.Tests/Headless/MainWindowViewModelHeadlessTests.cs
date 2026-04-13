@@ -121,7 +121,7 @@ public sealed class MainWindowViewModelHeadlessTests
     }
 
     [AvaloniaFact]
-    public async Task CopyEditedClip_CopiesModifiedRichMarkup()
+    public async Task RichContent_IsViewOnlyForHtml()
     {
         using var scope = new TemporaryDatabaseScope();
         await PrepareInitializedScopeAsync(scope);
@@ -137,21 +137,13 @@ public sealed class MainWindowViewModelHeadlessTests
         clipboardMonitor.Emit(clip);
         Dispatcher.UIThread.RunJobs();
 
-        const string editedMarkup = "<p><span style=\"color:#00ff00\">edited</span></p>";
-        viewModel.EditedClipText = editedMarkup;
-
         Assert.True(viewModel.ShowSelectedRichTextRenderer);
-        Assert.True(viewModel.ShowCopyEditedClipButton);
-
-        await viewModel.CopyEditedClipCommand.Execute().ToTask();
-
-        Assert.Equal(editedMarkup, systemInteraction.LastCopiedRichContent);
-        Assert.Equal("edited", systemInteraction.LastCopiedRichPlainText);
-        Assert.Equal(ClipContentFormat.Html, systemInteraction.LastCopiedRichContentFormat);
+        Assert.False(viewModel.IsSelectedClipTextEditable);
+        Assert.False(viewModel.ShowCopyEditedClipButton);
     }
 
     [AvaloniaFact]
-    public async Task CopyEditedClipButton_ShowsForSelectedRtfClip()
+    public async Task RichContent_IsViewOnlyForRtf()
     {
         using var scope = new TemporaryDatabaseScope();
         await PrepareInitializedScopeAsync(scope);
@@ -168,9 +160,8 @@ public sealed class MainWindowViewModelHeadlessTests
         Dispatcher.UIThread.RunJobs();
 
         Assert.True(viewModel.ShowSelectedRichTextRenderer);
-        Assert.True(viewModel.ShowCopyEditedClipButton);
-        Assert.Contains(@"\colortbl", viewModel.EditedClipText, StringComparison.Ordinal);
-        Assert.Contains(@"\cf1", viewModel.EditedClipText, StringComparison.Ordinal);
+        Assert.False(viewModel.IsSelectedClipTextEditable);
+        Assert.False(viewModel.ShowCopyEditedClipButton);
     }
 
     [AvaloniaFact]
