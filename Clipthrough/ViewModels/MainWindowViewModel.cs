@@ -673,7 +673,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string CheckedClipSummaryText => AppText.FormatCheckedClipCount(CheckedClipCount);
 
-    public bool IsSelectedClipTextEditable => SelectedClip?.Clip.ContentType is ContentType.Text;
+    public bool IsSelectedClipTextEditable =>
+        SelectedClip?.Clip.ContentType is ContentType.Text
+        || (SelectedClip?.Clip.ContentType is ContentType.RichText
+            && _contentDisplayMode is ContentDisplayMode.Textual or ContentDisplayMode.Raw);
 
     public bool SelectedClipTextIsReadOnly => !IsSelectedClipTextEditable;
 
@@ -1339,7 +1342,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         _clipboardMonitorService.SuppressNext();
-        if (SelectedClip.Clip.ContentType == ContentType.RichText)
+        if (SelectedClip.Clip.ContentType == ContentType.RichText && _contentDisplayMode == ContentDisplayMode.Raw)
         {
             var renderedText = ClipDisplayFormatter.RenderRichContent(EditedClipText);
             await _systemInteractionService.CopyRichContentAsync(EditedClipText, renderedText, SelectedClip.Clip.ContentFormat);
@@ -2171,6 +2174,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(ShowSelectedImageEditor));
         this.RaisePropertyChanged(nameof(ShowSelectedImagePlaceholder));
         this.RaisePropertyChanged(nameof(ShowCopyEditedClipButton));
+        this.RaisePropertyChanged(nameof(IsSelectedClipTextEditable));
+        this.RaisePropertyChanged(nameof(SelectedClipTextIsReadOnly));
         this.RaisePropertyChanged(nameof(RawContentSyntaxHint));
         this.RaisePropertyChanged(nameof(IsRenderedMode));
         this.RaisePropertyChanged(nameof(IsTextualMode));

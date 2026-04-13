@@ -33,6 +33,7 @@ public sealed class RichContentView : UserControl
     private readonly HtmlPanel _htmlPanel = new()
     {
         IsSelectionEnabled = true,
+        Focusable = true,
     };
 
     private readonly ScrollViewer _htmlScroll;
