@@ -1,10 +1,12 @@
 using System;
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Styling;
 using AvaloniaEdit;
@@ -28,7 +30,10 @@ public sealed class RichContentView : UserControl
     public static readonly StyledProperty<bool> IsReadOnlyProperty =
         AvaloniaProperty.Register<RichContentView, bool>(nameof(IsReadOnly), true);
 
-    private readonly HtmlLabel _htmlLabel = new();
+    private readonly HtmlPanel _htmlPanel = new()
+    {
+        IsSelectionEnabled = true,
+    };
 
     private readonly ScrollViewer _htmlScroll;
 
@@ -39,6 +44,8 @@ public sealed class RichContentView : UserControl
 
     public RichContentView()
     {
+        Focusable = true;
+
         _textEditor = new TextEditor
         {
             IsReadOnly = true,
@@ -50,12 +57,15 @@ public sealed class RichContentView : UserControl
 
         _htmlScroll = new ScrollViewer
         {
-            Content = _htmlLabel,
+            Content = _htmlPanel,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
         };
 
         Content = _textEditor;
+
+        // Use tunnel strategy so we intercept Ctrl+C before HtmlPanel can swallow it
+        AddHandler(KeyDownEvent, OnCopyKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
 
         this.GetObservable(MarkupProperty).Subscribe(RenderContent);
         this.GetObservable(ContentFormatProperty).Subscribe(_ => RenderContent(Markup));
@@ -86,6 +96,21 @@ public sealed class RichContentView : UserControl
         ApplyThemeColors();
     }
 
+    private void OnCopyKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.C
+            && (e.KeyModifiers & KeyModifiers.Control) == KeyModifiers.Control
+            && Content == _htmlScroll)
+        {
+            var selectedText = _htmlPanel.SelectedText;
+            if (!string.IsNullOrEmpty(selectedText))
+            {
+                _ = TopLevel.GetTopLevel(this)?.Clipboard?.SetTextAsync(selectedText);
+                e.Handled = true;
+            }
+        }
+    }
+
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
@@ -100,7 +125,7 @@ public sealed class RichContentView : UserControl
     {
         var isDark = ActualThemeVariant != ThemeVariant.Light;
 
-        _htmlLabel.Background = isDark
+        _htmlPanel.Background = isDark
             ? new SolidColorBrush(Color.Parse("#1E293B"))
             : Brushes.White;
 
@@ -165,7 +190,7 @@ public sealed class RichContentView : UserControl
             }
 
             var fullHtml = WrapInDocument(document);
-            _htmlLabel.Text = fullHtml;
+            _htmlPanel.Text = fullHtml;
             Content = _htmlScroll;
         }
         catch (Exception ex)
@@ -182,7 +207,7 @@ public sealed class RichContentView : UserControl
         {
             var html = RtfToHtmlConverter.Convert(rtf);
             var fullHtml = WrapInDocument(html);
-            _htmlLabel.Text = fullHtml;
+            _htmlPanel.Text = fullHtml;
             Content = _htmlScroll;
         }
         catch (Exception ex)

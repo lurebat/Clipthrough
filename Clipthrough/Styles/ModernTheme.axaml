@@ -167,7 +167,8 @@
         <Setter Property="Background" Value="{DynamicResource SurfaceInsetBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="20" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="6" />
     </Style>
 
     <Style Selector="Border.file-item-row">
@@ -504,6 +505,58 @@
 
     <Style Selector="GridSplitter:pointerover">
         <Setter Property="Background" Value="{DynamicResource BorderStrongBrush}" />
+    </Style>
+
+    <!-- Segmented radio button group -->
+    <Style Selector="RadioButton.segmented-left, RadioButton.segmented-center, RadioButton.segmented-right">
+        <Setter Property="Background" Value="{DynamicResource SurfaceSecondaryBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource AppMutedForegroundBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="10,4" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <ControlTemplate>
+                <Border x:Name="PART_Border"
+                        Background="{TemplateBinding Background}"
+                        BorderBrush="{TemplateBinding BorderBrush}"
+                        BorderThickness="{TemplateBinding BorderThickness}"
+                        CornerRadius="{TemplateBinding CornerRadius}"
+                        Padding="{TemplateBinding Padding}">
+                    <ContentPresenter Content="{TemplateBinding Content}"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center" />
+                </Border>
+            </ControlTemplate>
+        </Setter>
+    </Style>
+    <Style Selector="RadioButton.segmented-left">
+        <Setter Property="CornerRadius" Value="6,0,0,6" />
+        <Setter Property="BorderThickness" Value="1,1,0,1" />
+    </Style>
+    <Style Selector="RadioButton.segmented-center">
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="RadioButton.segmented-right">
+        <Setter Property="CornerRadius" Value="0,6,6,0" />
+        <Setter Property="BorderThickness" Value="0,1,1,1" />
+    </Style>
+    <Style Selector="RadioButton.segmented-left:checked /template/ Border#PART_Border, RadioButton.segmented-center:checked /template/ Border#PART_Border, RadioButton.segmented-right:checked /template/ Border#PART_Border">
+        <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    </Style>
+    <Style Selector="RadioButton.segmented-left:checked, RadioButton.segmented-center:checked, RadioButton.segmented-right:checked">
+        <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="RadioButton.segmented-left:pointerover /template/ Border#PART_Border, RadioButton.segmented-center:pointerover /template/ Border#PART_Border, RadioButton.segmented-right:pointerover /template/ Border#PART_Border">
+        <Setter Property="Background" Value="{DynamicResource SurfaceInteractiveHoverBrush}" />
+    </Style>
+    <Style Selector="RadioButton.segmented-left:checked:pointerover /template/ Border#PART_Border, RadioButton.segmented-center:checked:pointerover /template/ Border#PART_Border, RadioButton.segmented-right:checked:pointerover /template/ Border#PART_Border">
+        <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
 </Styles>
 

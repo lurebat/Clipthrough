@@ -172,6 +172,10 @@
                                                 <StackPanel Orientation="Horizontal"
                                                             Spacing="6">
                                                     <TextBlock Classes="clip-row-date"
+                                                               Text="{Binding DisplayContentType}"
+                                                               Foreground="{Binding StateAccentBrush}"
+                                                               FontSize="10" />
+                                                    <TextBlock Classes="clip-row-date"
                                                                Text="{Binding FirstCopiedAtDisplay}"
                                                                FontSize="10" />
                                                     <TextBlock Classes="clip-row-date"
@@ -250,14 +254,21 @@
                                     HorizontalAlignment="Right"
                                     VerticalAlignment="Top">
                             <StackPanel Orientation="Horizontal"
-                                        Spacing="8"
-                                        VerticalAlignment="Center">
-                                <TextBlock Classes="body-muted"
-                                           VerticalAlignment="Center"
-                                           Text="{Binding RawToggleLabel}" />
-                                <ToggleSwitch IsChecked="{Binding ShowRawContent}"
-                                              IsEnabled="{Binding HasSelectedClip}"
-                                              VerticalAlignment="Center" />
+                                        Spacing="0"
+                                        VerticalAlignment="Center"
+                                        IsVisible="{Binding IsDisplayModeApplicable}">
+                                <RadioButton GroupName="DisplayMode"
+                                             Classes="segmented-left"
+                                             IsChecked="{Binding IsRenderedMode}"
+                                             Content="Rendered" />
+                                <RadioButton GroupName="DisplayMode"
+                                             Classes="segmented-center"
+                                             IsChecked="{Binding IsTextualMode}"
+                                             Content="Textual" />
+                                <RadioButton GroupName="DisplayMode"
+                                             Classes="segmented-right"
+                                             IsChecked="{Binding IsRawMode}"
+                                             Content="Raw" />
                             </StackPanel>
 
                             <Button Classes="secondary compact"
@@ -300,9 +311,9 @@
 
                     <Border Grid.Row="1"
                             Classes="content-stage"
+                            ClipToBounds="True"
                             BorderBrush="{Binding SelectedClipAreaBorderBrush}"
-                            BorderThickness="{Binding SelectedClipAreaBorderThickness}"
-                            Padding="0">
+                            BorderThickness="{Binding SelectedClipAreaBorderThickness}">
                         <Grid>
                             <StackPanel IsVisible="{Binding ShowEmptySelectionState}"
                                         HorizontalAlignment="Center"
@@ -425,7 +436,7 @@
                                 <controls:EmbeddedImageEditorView Grid.Row="0"
                                                                   x:Name="SelectedImageEditor"
                                                                   IsVisible="{Binding ShowSelectedImageEditor}"
-                                                                  MinHeight="320"
+                                                                  MinHeight="450"
                                                                   SourceImageBytes="{Binding SelectedClipImageBytes}" />
 
                                 <TextBlock Grid.Row="1"
@@ -720,6 +731,26 @@
                         <StackPanel Spacing="14">
                             <Border Classes="inset-panel"
                                     Padding="16">
+                                <StackPanel Spacing="12">
+                                    <TextBlock Classes="panel-caption"
+                                               Text="{Binding SettingsBehaviorTitle}" />
+                                    <StackPanel Spacing="6">
+                                        <TextBlock Classes="detail-label"
+                                                   Text="{Binding SettingsThemeModeLabel}" />
+                                        <ComboBox ItemsSource="{Binding ThemeModeOptions}"
+                                                  SelectedItem="{Binding SettingsThemeMode}" />
+                                    </StackPanel>
+                                    <CheckBox Content="{Binding SettingsCloseToTrayLabel}"
+                                              IsChecked="{Binding SettingsCloseToTray}" />
+                                    <CheckBox Content="{Binding SettingsMinimizeToTrayLabel}"
+                                              IsChecked="{Binding SettingsMinimizeToTray}" />
+                                    <CheckBox Content="{Binding SettingsStartWithWindowsLabel}"
+                                              IsChecked="{Binding SettingsStartWithWindows}" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Classes="inset-panel"
+                                    Padding="16">
                                 <StackPanel Spacing="14">
                                     <TextBlock Classes="panel-caption"
                                                Text="{Binding SettingsLocalHotkeysTitle}" />
@@ -834,26 +865,6 @@
                                     <TextBlock Classes="body-muted"
                                                Text="{Binding SettingsStorageHintText}"
                                                TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Border>
-
-                            <Border Classes="inset-panel"
-                                    Padding="16">
-                                <StackPanel Spacing="12">
-                                    <TextBlock Classes="panel-caption"
-                                               Text="{Binding SettingsBehaviorTitle}" />
-                                    <StackPanel Spacing="6">
-                                        <TextBlock Classes="detail-label"
-                                                   Text="{Binding SettingsThemeModeLabel}" />
-                                        <ComboBox ItemsSource="{Binding ThemeModeOptions}"
-                                                  SelectedItem="{Binding SettingsThemeMode}" />
-                                    </StackPanel>
-                                    <CheckBox Content="{Binding SettingsCloseToTrayLabel}"
-                                              IsChecked="{Binding SettingsCloseToTray}" />
-                                    <CheckBox Content="{Binding SettingsMinimizeToTrayLabel}"
-                                              IsChecked="{Binding SettingsMinimizeToTray}" />
-                                    <CheckBox Content="{Binding SettingsStartWithWindowsLabel}"
-                                              IsChecked="{Binding SettingsStartWithWindows}" />
                                 </StackPanel>
                             </Border>
 
@@ -1084,7 +1095,7 @@
                                                                Text="{Binding TimestampText}" />
                                                 </Grid>
                                                 <StackPanel Spacing="6">
-                                                    <TextBlock Text="{Binding DisplayMessage}"
+                                                    <SelectableTextBlock Text="{Binding DisplayMessage}"
                                                                TextAlignment="Center"
                                                                TextWrapping="Wrap" />
                                                     <TextBlock Classes="body-muted"

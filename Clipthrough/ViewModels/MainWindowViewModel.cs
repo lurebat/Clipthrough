@@ -72,7 +72,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _sensitiveClipCount;
     private long _totalStoredBytes;
     private string _lastCaptureSummary = AppText.WaitingForFirstCapture;
-    private bool _showRawContent;
+    private ContentDisplayMode _contentDisplayMode;
     private string _selectedClipRenderedText = AppText.PreviewSelectContent;
     private string _selectedClipImageHint = AppText.PreviewSelectImage;
     private bool _isStartupInProgress;
@@ -306,18 +306,55 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool ShowRawContent
     {
-        get => _showRawContent;
+        get => _contentDisplayMode == ContentDisplayMode.Raw;
         set
         {
-            if (_showRawContent == value)
+            // Legacy compat: toggling raw on/off maps to Raw vs Rendered
+            SelectedContentDisplayMode = value ? ContentDisplayMode.Raw : ContentDisplayMode.Rendered;
+        }
+    }
+
+    public ContentDisplayMode SelectedContentDisplayMode
+    {
+        get => _contentDisplayMode;
+        set
+        {
+            if (_contentDisplayMode == value)
             {
                 return;
             }
 
-            this.RaiseAndSetIfChanged(ref _showRawContent, value);
+            _contentDisplayMode = value;
+            this.RaisePropertyChanged(nameof(SelectedContentDisplayMode));
+            this.RaisePropertyChanged(nameof(ShowRawContent));
             SyncEditedClipText();
             RaiseRenderModeProperties();
         }
+    }
+
+    public ContentDisplayMode[] DisplayModeOptions { get; } =
+    [
+        ContentDisplayMode.Rendered,
+        ContentDisplayMode.Textual,
+        ContentDisplayMode.Raw,
+    ];
+
+    public bool IsRenderedMode
+    {
+        get => _contentDisplayMode == ContentDisplayMode.Rendered;
+        set { if (value) SelectedContentDisplayMode = ContentDisplayMode.Rendered; }
+    }
+
+    public bool IsTextualMode
+    {
+        get => _contentDisplayMode == ContentDisplayMode.Textual;
+        set { if (value) SelectedContentDisplayMode = ContentDisplayMode.Textual; }
+    }
+
+    public bool IsRawMode
+    {
+        get => _contentDisplayMode == ContentDisplayMode.Raw;
+        set { if (value) SelectedContentDisplayMode = ContentDisplayMode.Raw; }
     }
 
     public ClipItemViewModel? SelectedClip
@@ -442,6 +479,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string RefreshButtonLabel => AppText.RefreshButtonLabel;
 
     public string RawToggleLabel => AppText.RawToggleLabel;
+
+    public bool IsDisplayModeApplicable => HasSelectedClip
+        && SelectedClip?.Clip.ContentType == ContentType.RichText;
 
     public string CopyButtonLabel => AppText.CopyButtonLabel;
 
@@ -601,11 +641,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool ShowEmptySelectionState => !HasSelectedClip;
 
-    public bool ShowRenderedContent => HasSelectedClip && !ShowRawContent;
+    public bool ShowRenderedContent => HasSelectedClip
+        && _contentDisplayMode == ContentDisplayMode.Rendered;
 
-    public bool ShowRawTextContent => HasSelectedClip && ShowRawContent;
+    public bool ShowRawTextContent => HasSelectedClip
+        && SelectedClip?.Clip.ContentType != ContentType.Image
+        && (_contentDisplayMode == ContentDisplayMode.Raw
+            || SelectedClip?.Clip.ContentType == ContentType.Text);
 
-    public bool ShowSelectedTextRenderer => ShowRenderedContent && SelectedClip?.Clip.ContentType == ContentType.Text;
+    public bool ShowSelectedTextRenderer => HasSelectedClip
+        && SelectedClip?.Clip.ContentType == ContentType.RichText
+        && _contentDisplayMode == ContentDisplayMode.Textual;
 
     public bool ShowSelectedRichTextRenderer => ShowRenderedContent && SelectedClip?.Clip.ContentType == ContentType.RichText;
 
@@ -613,7 +659,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool ShowSelectedFilesFallback => ShowRenderedContent && SelectedClip?.Clip.ContentType == ContentType.Files && !HasSelectedClipFileItems;
 
-    public bool ShowSelectedImageRenderer => ShowRenderedContent && SelectedClip?.Clip.ContentType == ContentType.Image;
+    public bool ShowSelectedImageRenderer => HasSelectedClip && SelectedClip?.Clip.ContentType == ContentType.Image;
 
     public bool ShowSelectedImageEditor => ShowSelectedImageRenderer && SelectedClip?.Clip.ContentBytes is { Length: > 0 };
 
@@ -1534,6 +1580,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(SelectedClipSeverityBadgeForeground));
         this.RaisePropertyChanged(nameof(IsSelectedClipTextEditable));
         this.RaisePropertyChanged(nameof(SelectedClipTextIsReadOnly));
+        this.RaisePropertyChanged(nameof(IsDisplayModeApplicable));
         RaiseRenderModeProperties();
         RaiseEditedClipProperties();
     }
@@ -2125,6 +2172,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(ShowSelectedImagePlaceholder));
         this.RaisePropertyChanged(nameof(ShowCopyEditedClipButton));
         this.RaisePropertyChanged(nameof(RawContentSyntaxHint));
+        this.RaisePropertyChanged(nameof(IsRenderedMode));
+        this.RaisePropertyChanged(nameof(IsTextualMode));
+        this.RaisePropertyChanged(nameof(IsRawMode));
     }
 
     private void UpdateStatus(ClipSearchResult result)
@@ -2191,11 +2241,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         EditedClipText = _editedClipBaseline;
     }
 
-    private string GetEditedClipBaseline() => SelectedClip?.Clip.ContentType == ContentType.RichText
-        ? SelectedClipRawContent
-        : ShowRawContent
-            ? SelectedClipRawContent
-            : SelectedClipRenderedText;
+    private string GetEditedClipBaseline() => SelectedClip?.Clip.ContentType switch
+    {
+        ContentType.Text => SelectedClipRawContent,
+        ContentType.RichText when _contentDisplayMode == ContentDisplayMode.Textual => SelectedClipRenderedText,
+        ContentType.RichText => SelectedClipRawContent,
+        _ when _contentDisplayMode == ContentDisplayMode.Raw => SelectedClipRawContent,
+        _ => SelectedClipRenderedText,
+    };
 
     private ClipItemViewModel? GetEffectiveSelectedClip() => SelectedClip ?? Clips.FirstOrDefault(static clip => clip.IsChecked) ?? Clips.FirstOrDefault();
 

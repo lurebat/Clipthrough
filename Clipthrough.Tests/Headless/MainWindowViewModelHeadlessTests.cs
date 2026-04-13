@@ -512,6 +512,75 @@ public sealed class MainWindowViewModelHeadlessTests
         };
     }
 
+    [AvaloniaFact]
+    public async Task ImageClip_ShowsImageRenderer_RegardlessOfRawToggle()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+        await viewModel.InitializeAsync();
+        var pngBytes = CreatePngBytes(0);
+        var clip = await CaptureImageClipAsync(scope.ClipStoreService, pngBytes, "test image");
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.NotNull(viewModel.SelectedClip);
+        Assert.True(viewModel.ShowSelectedImageRenderer);
+        Assert.False(viewModel.ShowRawTextContent);
+
+        viewModel.SelectedContentDisplayMode = ContentDisplayMode.Raw;
+        Assert.True(viewModel.ShowSelectedImageRenderer, "Image should remain visible when Raw is toggled on");
+        Assert.False(viewModel.ShowRawTextContent, "Raw text should not show for images");
+
+        viewModel.SelectedContentDisplayMode = ContentDisplayMode.Rendered;
+        Assert.True(viewModel.ShowSelectedImageRenderer, "Image should remain visible when Raw is toggled off");
+    }
+
+    [AvaloniaFact]
+    public async Task ImageClip_RawToggle_IsNotApplicable()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+        await viewModel.InitializeAsync();
+        var pngBytes = CreatePngBytes(0);
+        var clip = await CaptureImageClipAsync(scope.ClipStoreService, pngBytes, "test image");
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.NotNull(viewModel.SelectedClip);
+        Assert.False(viewModel.IsDisplayModeApplicable, "Display mode selector should not be applicable for image clips");
+    }
+
+    [AvaloniaFact]
+    public async Task TextClip_AlwaysUsesRawEditor()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+        await viewModel.InitializeAsync();
+        var clip = await CaptureTextClipAsync(scope.ClipStoreService, "hello world");
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.NotNull(viewModel.SelectedClip);
+        // Plain text clips always use the raw text editor; the rendered text
+        // editor and the Raw toggle are not applicable.
+        Assert.False(viewModel.ShowSelectedTextRenderer, "Rendered text editor should not be used for text clips");
+        Assert.True(viewModel.ShowRawTextContent, "Raw text should always show for text clips");
+        Assert.False(viewModel.IsDisplayModeApplicable, "Display mode selector should not be applicable for text clips");
+        Assert.Contains("hello world", viewModel.EditedClipText);
+    }
+
     private static byte[] CreatePngBytes(int bgraColor)
     {
         _ = bgraColor;

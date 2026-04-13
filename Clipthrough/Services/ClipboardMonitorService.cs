@@ -131,7 +131,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
 
         try
         {
-            var capturedClip = await CaptureClipboardChangeAsync(clipboard).ConfigureAwait(false);
+            var capturedClip = await CaptureClipboardChangeAsync(clipboard);
             if (capturedClip is not null)
             {
                 _capturedClips.OnNext(capturedClip);
@@ -170,7 +170,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                 var availableFormats = DescribeFormats(clipboardData);
                 Trace.TraceInformation($"Clipboard change detected. Formats: {availableFormats}");
 
-                var captureRequest = await BuildCaptureRequestAsync(clipboardData).ConfigureAwait(false);
+                var captureRequest = await BuildCaptureRequestAsync(clipboardData);
                 if (captureRequest is null)
                 {
                     Trace.TraceInformation($"Clipboard change ignored because no supported payload was found. Formats: {availableFormats}");
@@ -179,17 +179,17 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                 }
 
                 Trace.TraceInformation($"Clipboard capture selected {captureRequest.ContentType}/{captureRequest.ContentFormat} bytes={captureRequest.ContentBytes.Length} source={captureRequest.SourceApp ?? "Unknown"}");
-                return await _clipStoreService.CaptureAsync(captureRequest).ConfigureAwait(false);
+                return await _clipStoreService.CaptureAsync(captureRequest);
             }
             catch (COMException ex) when (attempt < ClipboardRetryDelays.Length)
             {
                 Trace.TraceInformation($"Clipboard read retry {attempt + 1}/{ClipboardRetryDelays.Length + 1} after COM failure 0x{ex.HResult:X8}: {ex.Message}");
-                await Task.Delay(ClipboardRetryDelays[attempt]).ConfigureAwait(false);
+                await Task.Delay(ClipboardRetryDelays[attempt]);
             }
             catch (InvalidOperationException ex) when (attempt < ClipboardRetryDelays.Length && IsTransientClipboardFailure(ex))
             {
                 Trace.TraceInformation($"Clipboard read retry {attempt + 1}/{ClipboardRetryDelays.Length + 1} after transient failure: {ex.Message}");
-                await Task.Delay(ClipboardRetryDelays[attempt]).ConfigureAwait(false);
+                await Task.Delay(ClipboardRetryDelays[attempt]);
             }
         }
     }
@@ -197,10 +197,10 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     private async Task<ClipCaptureRequest?> BuildCaptureRequestAsync(IAsyncDataTransfer clipboardData)
     {
         var sourceInfo = _sourceApplicationResolver.TryResolve();
-        var plainText = await clipboardData.TryGetTextAsync().ConfigureAwait(false);
-        var relatedSourceUrl = await TryGetPlatformStringAsync(clipboardData, SourceUrlFormats).ConfigureAwait(false);
+        var plainText = await clipboardData.TryGetTextAsync();
+        var relatedSourceUrl = await TryGetPlatformStringAsync(clipboardData, SourceUrlFormats);
 
-        var files = await clipboardData.TryGetFilesAsync().ConfigureAwait(false);
+        var files = await clipboardData.TryGetFilesAsync();
         var filePaths = Array.Empty<string>();
         if (files is { Length: > 0 })
         {
@@ -215,20 +215,20 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
             }
         }
 
-        var bitmap = await clipboardData.TryGetBitmapAsync().ConfigureAwait(false);
+        var bitmap = await clipboardData.TryGetBitmapAsync();
         if (bitmap is not null)
         {
             return CreateImageRequest(bitmap, sourceInfo, GetRelatedImageLabel(filePaths, relatedSourceUrl, plainText, sourceInfo?.WindowTitle));
         }
 
-        var pngBytes = await TryGetFirstBytesAsync(clipboardData, PngFormats).ConfigureAwait(false);
+        var pngBytes = await TryGetFirstBytesAsync(clipboardData, PngFormats);
         if (pngBytes is { Length: > 0 })
         {
             Trace.TraceInformation($"Recovered bitmap clipboard payload from platform PNG bytes ({pngBytes.Length} bytes).");
             return CreateImageRequest(pngBytes, sourceInfo, GetRelatedImageLabel(filePaths, relatedSourceUrl, plainText, sourceInfo?.WindowTitle));
         }
 
-        var html = await TryGetMarkupAsync(clipboardData, HtmlFormats, ClipContentFormat.Html).ConfigureAwait(false);
+        var html = await TryGetMarkupAsync(clipboardData, HtmlFormats, ClipContentFormat.Html);
         if (!string.IsNullOrWhiteSpace(html))
         {
             var normalizedHtml = ClipboardMarkupDecoder.NormalizePlatformMarkupString(html, ClipContentFormat.Html);
@@ -244,7 +244,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                 sourceInfo);
         }
 
-        var rtf = await TryGetMarkupAsync(clipboardData, RtfFormats, ClipContentFormat.Rtf).ConfigureAwait(false);
+        var rtf = await TryGetMarkupAsync(clipboardData, RtfFormats, ClipContentFormat.Rtf);
         if (!string.IsNullOrWhiteSpace(rtf))
         {
             var renderedText = !string.IsNullOrWhiteSpace(plainText)
@@ -280,7 +280,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     {
         foreach (var formatName in formatNames)
         {
-            var bytesValue = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(formatName)).ConfigureAwait(false);
+            var bytesValue = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(formatName));
             if (bytesValue is { Length: > 0 })
             {
                 return bytesValue;
@@ -294,7 +294,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     {
         foreach (var formatName in formatNames)
         {
-            var bytesValue = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(formatName)).ConfigureAwait(false);
+            var bytesValue = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(formatName));
             if (bytesValue is { Length: > 0 })
             {
                 var decodedFromBytes = ClipboardMarkupDecoder.DecodeMarkupBytes(bytesValue);
@@ -305,7 +305,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                 }
             }
 
-            var stringValue = await clipboardData.TryGetValueAsync(DataFormat.CreateStringPlatformFormat(formatName)).ConfigureAwait(false);
+            var stringValue = await clipboardData.TryGetValueAsync(DataFormat.CreateStringPlatformFormat(formatName));
             if (!string.IsNullOrWhiteSpace(stringValue))
             {
                 var normalizedValue = ClipboardMarkupDecoder.NormalizePlatformMarkupString(stringValue, contentFormat);
@@ -325,13 +325,13 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     {
         foreach (var formatName in formatNames)
         {
-            var stringValue = await clipboardData.TryGetValueAsync(DataFormat.CreateStringPlatformFormat(formatName)).ConfigureAwait(false);
+            var stringValue = await clipboardData.TryGetValueAsync(DataFormat.CreateStringPlatformFormat(formatName));
             if (!string.IsNullOrWhiteSpace(stringValue))
             {
                 return stringValue.Trim();
             }
 
-            var bytesValue = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(formatName)).ConfigureAwait(false);
+            var bytesValue = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(formatName));
             if (bytesValue is { Length: > 0 })
             {
                 var decodedValue = Encoding.UTF8.GetString(bytesValue).Trim('\0', ' ', '\r', '\n', '\t');
