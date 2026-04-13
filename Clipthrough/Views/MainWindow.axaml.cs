@@ -147,7 +147,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        viewModel.CopySelectedCommand.Execute().Subscribe();
+        viewModel.CopySelectedCommand.Execute().Subscribe(_ => MinimizeWindow());
         e.Handled = true;
     }
 
@@ -215,7 +215,7 @@ public partial class MainWindow : Window
             return false;
         }
 
-        viewModel.CopySelectedCommand.Execute().Subscribe();
+        viewModel.CopySelectedCommand.Execute().Subscribe(_ => MinimizeWindow());
         return true;
     }
 
@@ -269,6 +269,11 @@ public partial class MainWindow : Window
         var imageEditor = this.FindControl<EmbeddedImageEditorView>("SelectedImageEditor");
         imageEditor?.Reset();
         e.Handled = true;
+    }
+
+    private void MinimizeWindow()
+    {
+        WindowState = WindowState.Minimized;
     }
 
     private void FocusSearchBox()
