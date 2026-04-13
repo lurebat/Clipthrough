@@ -97,6 +97,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _settingsCloseToTray = AppSettings.Default.CloseToTray;
     private bool _settingsMinimizeToTray = AppSettings.Default.MinimizeToTray;
     private bool _settingsStartWithWindows = AppSettings.Default.StartWithWindows;
+    private ThemeMode _settingsThemeMode = AppSettings.Default.ThemeMode;
     private bool _settingsEnableNormalClipLifetime = AppSettings.Default.EnableNormalClipLifetime;
     private string _settingsNormalClipLifetimeDays = AppSettings.Default.NormalClipLifetimeDays.ToString(CultureInfo.InvariantCulture);
     private bool _settingsEnableSensitiveClipLifetime = AppSettings.Default.EnableSensitiveClipLifetime;
@@ -891,6 +892,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         get => _settingsStartWithWindows;
         set => this.RaiseAndSetIfChanged(ref _settingsStartWithWindows, value);
     }
+
+    public ThemeMode SettingsThemeMode
+    {
+        get => _settingsThemeMode;
+        set => this.RaiseAndSetIfChanged(ref _settingsThemeMode, value);
+    }
+
+    public ThemeMode[] ThemeModeOptions { get; } = Enum.GetValues<ThemeMode>();
+
+    public string SettingsThemeModeLabel => "Theme";
 
     public bool SettingsEnableNormalClipLifetime
     {
@@ -1704,6 +1715,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             CloseToTray = SettingsCloseToTray,
             MinimizeToTray = SettingsMinimizeToTray,
             StartWithWindows = SettingsStartWithWindows,
+            ThemeMode = SettingsThemeMode,
             EnableNormalClipLifetime = SettingsEnableNormalClipLifetime,
             NormalClipLifetimeDays = normalClipLifetimeDays,
             EnableSensitiveClipLifetime = SettingsEnableSensitiveClipLifetime,
@@ -1750,6 +1762,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsCloseToTray = settings.CloseToTray;
         SettingsMinimizeToTray = settings.MinimizeToTray;
         SettingsStartWithWindows = settings.StartWithWindows;
+        SettingsThemeMode = settings.ThemeMode;
         SettingsEnableNormalClipLifetime = settings.EnableNormalClipLifetime;
         SettingsNormalClipLifetimeDays = settings.NormalClipLifetimeDays.ToString(CultureInfo.InvariantCulture);
         SettingsEnableSensitiveClipLifetime = settings.EnableSensitiveClipLifetime;

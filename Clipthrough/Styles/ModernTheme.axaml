@@ -1,23 +1,93 @@
 ﻿<Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Styles.Resources>
-        <SolidColorBrush x:Key="AppBackgroundBrush" Color="#070D17" />
-        <SolidColorBrush x:Key="AppForegroundBrush" Color="#F8FAFC" />
-        <SolidColorBrush x:Key="AppMutedForegroundBrush" Color="#94A3B8" />
-        <SolidColorBrush x:Key="SurfaceHeroBrush" Color="#0F172A" />
-        <SolidColorBrush x:Key="SurfacePrimaryBrush" Color="#111C30" />
-        <SolidColorBrush x:Key="SurfaceSecondaryBrush" Color="#0B1323" />
-        <SolidColorBrush x:Key="SurfaceInsetBrush" Color="#08101D" />
-        <SolidColorBrush x:Key="SurfaceInteractiveBrush" Color="#152238" />
-        <SolidColorBrush x:Key="SurfaceInteractiveHoverBrush" Color="#1A2A43" />
-        <SolidColorBrush x:Key="SurfaceSelectedBrush" Color="#1E293B" />
-        <SolidColorBrush x:Key="AccentBrush" Color="#7C3AED" />
-        <SolidColorBrush x:Key="AccentHoverBrush" Color="#8B5CF6" />
-        <SolidColorBrush x:Key="SuccessBrush" Color="#10B981" />
-        <SolidColorBrush x:Key="WarningBrush" Color="#F59E0B" />
-        <SolidColorBrush x:Key="DangerBrush" Color="#EF4444" />
-        <SolidColorBrush x:Key="BorderBrush" Color="#243247" />
-        <SolidColorBrush x:Key="BorderStrongBrush" Color="#334155" />
+        <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="AppBackgroundBrush" Color="#070D17" />
+                    <SolidColorBrush x:Key="AppForegroundBrush" Color="#F8FAFC" />
+                    <SolidColorBrush x:Key="AppMutedForegroundBrush" Color="#94A3B8" />
+                    <SolidColorBrush x:Key="SurfaceHeroBrush" Color="#0F172A" />
+                    <SolidColorBrush x:Key="SurfacePrimaryBrush" Color="#111C30" />
+                    <SolidColorBrush x:Key="SurfaceSecondaryBrush" Color="#0B1323" />
+                    <SolidColorBrush x:Key="SurfaceInsetBrush" Color="#08101D" />
+                    <SolidColorBrush x:Key="SurfaceInteractiveBrush" Color="#152238" />
+                    <SolidColorBrush x:Key="SurfaceInteractiveHoverBrush" Color="#1A2A43" />
+                    <SolidColorBrush x:Key="SurfaceSelectedBrush" Color="#1E293B" />
+                    <SolidColorBrush x:Key="AccentBrush" Color="#7C3AED" />
+                    <SolidColorBrush x:Key="AccentHoverBrush" Color="#8B5CF6" />
+                    <SolidColorBrush x:Key="SuccessBrush" Color="#10B981" />
+                    <SolidColorBrush x:Key="WarningBrush" Color="#F59E0B" />
+                    <SolidColorBrush x:Key="DangerBrush" Color="#EF4444" />
+                    <SolidColorBrush x:Key="BorderBrush" Color="#243247" />
+                    <SolidColorBrush x:Key="BorderStrongBrush" Color="#334155" />
+                    <SolidColorBrush x:Key="StatCardBrush" Color="#101D32" />
+                    <SolidColorBrush x:Key="ClipRowIconBrush" Color="#132238" />
+                    <SolidColorBrush x:Key="MetaChipBrush" Color="#132238" />
+                    <SolidColorBrush x:Key="ImagePlaceholderBrush" Color="#0B1323" />
+                    <SolidColorBrush x:Key="ImageStageBrush" Color="#050A14" />
+                    <SolidColorBrush x:Key="SettingsBackdropBrush" Color="#8C020617" />
+                    <SolidColorBrush x:Key="EyebrowForegroundBrush" Color="#C4B5FD" />
+                    <SolidColorBrush x:Key="PanelCaptionForegroundBrush" Color="#C4B5FD" />
+                    <SolidColorBrush x:Key="FavoriteToggleActiveBg" Color="#3A2300" />
+                    <SolidColorBrush x:Key="FavoriteToggleActiveBorder" Color="#7C5A16" />
+                    <SolidColorBrush x:Key="FavoriteToggleActiveFg" Color="#FCD34D" />
+                    <SolidColorBrush x:Key="DestructiveButtonBg" Color="#31121A" />
+                    <SolidColorBrush x:Key="DestructiveButtonBorder" Color="#7F1D3A" />
+                    <SolidColorBrush x:Key="DestructiveButtonFg" Color="#FECDD3" />
+                    <SolidColorBrush x:Key="DestructiveButtonHoverBg" Color="#3F1723" />
+                    <SolidColorBrush x:Key="FavoriteBadgeBg" Color="#3A2300" />
+                    <SolidColorBrush x:Key="FavoriteBadgeBorder" Color="#7C5A16" />
+                    <SolidColorBrush x:Key="FavoriteBadgeFg" Color="#FCD34D" />
+                    <SolidColorBrush x:Key="SensitiveBadgeBg" Color="#2D1421" />
+                    <SolidColorBrush x:Key="SensitiveBadgeBorder" Color="#7F1D3A" />
+                    <SolidColorBrush x:Key="HtmlRendererBackground" Color="#0F172A" />
+                    <SolidColorBrush x:Key="HtmlRendererForeground" Color="#E2E8F0" />
+                </ResourceDictionary>
+
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F8FAFC" />
+                    <SolidColorBrush x:Key="AppForegroundBrush" Color="#0F172A" />
+                    <SolidColorBrush x:Key="AppMutedForegroundBrush" Color="#64748B" />
+                    <SolidColorBrush x:Key="SurfaceHeroBrush" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="SurfacePrimaryBrush" Color="#F1F5F9" />
+                    <SolidColorBrush x:Key="SurfaceSecondaryBrush" Color="#E2E8F0" />
+                    <SolidColorBrush x:Key="SurfaceInsetBrush" Color="#F8FAFC" />
+                    <SolidColorBrush x:Key="SurfaceInteractiveBrush" Color="#E2E8F0" />
+                    <SolidColorBrush x:Key="SurfaceInteractiveHoverBrush" Color="#CBD5E1" />
+                    <SolidColorBrush x:Key="SurfaceSelectedBrush" Color="#DBEAFE" />
+                    <SolidColorBrush x:Key="AccentBrush" Color="#7C3AED" />
+                    <SolidColorBrush x:Key="AccentHoverBrush" Color="#6D28D9" />
+                    <SolidColorBrush x:Key="SuccessBrush" Color="#059669" />
+                    <SolidColorBrush x:Key="WarningBrush" Color="#D97706" />
+                    <SolidColorBrush x:Key="DangerBrush" Color="#DC2626" />
+                    <SolidColorBrush x:Key="BorderBrush" Color="#CBD5E1" />
+                    <SolidColorBrush x:Key="BorderStrongBrush" Color="#94A3B8" />
+                    <SolidColorBrush x:Key="StatCardBrush" Color="#E2E8F0" />
+                    <SolidColorBrush x:Key="ClipRowIconBrush" Color="#E2E8F0" />
+                    <SolidColorBrush x:Key="MetaChipBrush" Color="#E2E8F0" />
+                    <SolidColorBrush x:Key="ImagePlaceholderBrush" Color="#F1F5F9" />
+                    <SolidColorBrush x:Key="ImageStageBrush" Color="#F8FAFC" />
+                    <SolidColorBrush x:Key="SettingsBackdropBrush" Color="#80CBD5E1" />
+                    <SolidColorBrush x:Key="EyebrowForegroundBrush" Color="#6D28D9" />
+                    <SolidColorBrush x:Key="PanelCaptionForegroundBrush" Color="#6D28D9" />
+                    <SolidColorBrush x:Key="FavoriteToggleActiveBg" Color="#FEF3C7" />
+                    <SolidColorBrush x:Key="FavoriteToggleActiveBorder" Color="#D97706" />
+                    <SolidColorBrush x:Key="FavoriteToggleActiveFg" Color="#92400E" />
+                    <SolidColorBrush x:Key="DestructiveButtonBg" Color="#FEE2E2" />
+                    <SolidColorBrush x:Key="DestructiveButtonBorder" Color="#DC2626" />
+                    <SolidColorBrush x:Key="DestructiveButtonFg" Color="#991B1B" />
+                    <SolidColorBrush x:Key="DestructiveButtonHoverBg" Color="#FECACA" />
+                    <SolidColorBrush x:Key="FavoriteBadgeBg" Color="#FEF3C7" />
+                    <SolidColorBrush x:Key="FavoriteBadgeBorder" Color="#D97706" />
+                    <SolidColorBrush x:Key="FavoriteBadgeFg" Color="#92400E" />
+                    <SolidColorBrush x:Key="SensitiveBadgeBg" Color="#FCE7F3" />
+                    <SolidColorBrush x:Key="SensitiveBadgeBorder" Color="#DB2777" />
+                    <SolidColorBrush x:Key="HtmlRendererBackground" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="HtmlRendererForeground" Color="#0F172A" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
     </Styles.Resources>
 
     <Style Selector="Window">
@@ -64,7 +134,7 @@
     </Style>
 
     <Style Selector="Border.stat-card">
-        <Setter Property="Background" Value="#101D32" />
+        <Setter Property="Background" Value="{DynamicResource StatCardBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="20" />
@@ -85,7 +155,7 @@
     </Style>
 
     <Style Selector="Border.clip-row-icon">
-        <Setter Property="Background" Value="#132238" />
+        <Setter Property="Background" Value="{DynamicResource ClipRowIconBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="10" />
@@ -115,7 +185,7 @@
     </Style>
 
     <Style Selector="Border.image-placeholder">
-        <Setter Property="Background" Value="#0B1323" />
+        <Setter Property="Background" Value="{DynamicResource ImagePlaceholderBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="18" />
@@ -123,7 +193,7 @@
     </Style>
 
     <Style Selector="Border.image-stage">
-        <Setter Property="Background" Value="#050A14" />
+        <Setter Property="Background" Value="{DynamicResource ImageStageBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="18" />
@@ -135,7 +205,7 @@
     </Style>
 
     <Style Selector="Border.settings-backdrop">
-        <Setter Property="Background" Value="#8C020617" />
+        <Setter Property="Background" Value="{DynamicResource SettingsBackdropBrush}" />
         <Setter Property="Padding" Value="24" />
     </Style>
 
@@ -146,7 +216,7 @@
     </Style>
 
     <Style Selector="Border.meta-chip">
-        <Setter Property="Background" Value="#132238" />
+        <Setter Property="Background" Value="{DynamicResource MetaChipBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="999" />
@@ -159,14 +229,14 @@
     </Style>
 
     <Style Selector="Border.badge-chip.favorite">
-        <Setter Property="Background" Value="#3A2300" />
-        <Setter Property="BorderBrush" Value="#7C5A16" />
+        <Setter Property="Background" Value="{DynamicResource FavoriteBadgeBg}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource FavoriteBadgeBorder}" />
         <Setter Property="BorderThickness" Value="1" />
     </Style>
 
     <Style Selector="Border.badge-chip.sensitive">
-        <Setter Property="Background" Value="#2D1421" />
-        <Setter Property="BorderBrush" Value="#7F1D3A" />
+        <Setter Property="Background" Value="{DynamicResource SensitiveBadgeBg}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource SensitiveBadgeBorder}" />
         <Setter Property="BorderThickness" Value="1" />
     </Style>
 
@@ -176,11 +246,11 @@
     </Style>
 
     <Style Selector="Border.badge-chip.favorite > TextBlock">
-        <Setter Property="Foreground" Value="#FCD34D" />
+        <Setter Property="Foreground" Value="{DynamicResource FavoriteBadgeFg}" />
     </Style>
 
     <Style Selector="TextBlock.eyebrow">
-        <Setter Property="Foreground" Value="#C4B5FD" />
+        <Setter Property="Foreground" Value="{DynamicResource EyebrowForegroundBrush}" />
         <Setter Property="FontSize" Value="12" />
         <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
@@ -196,7 +266,7 @@
     </Style>
 
     <Style Selector="TextBlock.panel-caption">
-        <Setter Property="Foreground" Value="#C4B5FD" />
+        <Setter Property="Foreground" Value="{DynamicResource PanelCaptionForegroundBrush}" />
         <Setter Property="FontSize" Value="11" />
         <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
@@ -308,19 +378,19 @@
     </Style>
 
     <Style Selector="Button.favorite-toggle.active">
-        <Setter Property="Background" Value="#3A2300" />
-        <Setter Property="BorderBrush" Value="#7C5A16" />
-        <Setter Property="Foreground" Value="#FCD34D" />
+        <Setter Property="Background" Value="{DynamicResource FavoriteToggleActiveBg}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource FavoriteToggleActiveBorder}" />
+        <Setter Property="Foreground" Value="{DynamicResource FavoriteToggleActiveFg}" />
     </Style>
 
     <Style Selector="Button.destructive">
-        <Setter Property="Background" Value="#31121A" />
-        <Setter Property="BorderBrush" Value="#7F1D3A" />
-        <Setter Property="Foreground" Value="#FECDD3" />
+        <Setter Property="Background" Value="{DynamicResource DestructiveButtonBg}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource DestructiveButtonBorder}" />
+        <Setter Property="Foreground" Value="{DynamicResource DestructiveButtonFg}" />
     </Style>
 
     <Style Selector="Button.destructive:pointerover">
-        <Setter Property="Background" Value="#3F1723" />
+        <Setter Property="Background" Value="{DynamicResource DestructiveButtonHoverBg}" />
     </Style>
 
     <Style Selector="TextBox">

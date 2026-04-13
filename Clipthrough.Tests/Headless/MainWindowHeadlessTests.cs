@@ -94,12 +94,12 @@ public sealed class MainWindowHeadlessTests
         window.Show();
         Dispatcher.UIThread.RunJobs();
 
-        // In headless mode, HtmlLabel may not render; TextBox fallback is valid
+        // In headless mode, HtmlLabel may not render; TextEditor fallback is valid
         Assert.NotNull(view.Content);
         var typeName = view.Content!.GetType().FullName;
         Assert.True(
             typeName == "Avalonia.Controls.ScrollViewer"
-            || typeName == "Avalonia.Controls.TextBox",
-            $"Expected ScrollViewer (wrapping HtmlLabel) or fallback TextBox, got: {typeName}");
+            || typeName == "AvaloniaEdit.TextEditor",
+            $"Expected ScrollViewer (wrapping HtmlLabel) or fallback TextEditor, got: {typeName}");
     }
 }

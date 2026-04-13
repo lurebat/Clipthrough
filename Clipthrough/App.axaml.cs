@@ -15,6 +15,7 @@ using Clipthrough.ViewModels;
 using Clipthrough.Views;
 using Microsoft.Extensions.DependencyInjection;
 using System.Reactive.Linq;
+using Avalonia.Styling;
 using ReactiveUI;
 
 namespace Clipthrough;
@@ -53,6 +54,7 @@ public partial class App : Application
             var mainWindowViewModel = Services.GetRequiredService<MainWindowViewModel>();
             _systemInteractionService = Services.GetRequiredService<ISystemInteractionService>();
             _settingsService = Services.GetRequiredService<ISettingsService>();
+            ApplyThemeMode(_settingsService.Current.ThemeMode);
             _notificationService = Services.GetRequiredService<IAppNotificationService>();
 
             _mainWindow = desktop.MainWindow = new MainWindow
@@ -195,6 +197,22 @@ public partial class App : Application
     {
         UpdateGlobalHotKeyRegistration();
         _systemInteractionService?.SyncStartWithWindows(e.StartWithWindows);
+        ApplyThemeMode(e.ThemeMode);
+    }
+
+    public static void ApplyThemeMode(ThemeMode mode)
+    {
+        if (Current is null)
+        {
+            return;
+        }
+
+        Current.RequestedThemeVariant = mode switch
+        {
+            ThemeMode.Light => ThemeVariant.Light,
+            ThemeMode.Dark => ThemeVariant.Dark,
+            _ => ThemeVariant.Default,
+        };
     }
 
     private void UpdateGlobalHotKeyRegistration()

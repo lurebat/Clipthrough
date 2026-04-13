@@ -847,6 +847,12 @@
                                 <StackPanel Spacing="12">
                                     <TextBlock Classes="panel-caption"
                                                Text="{Binding SettingsBehaviorTitle}" />
+                                    <StackPanel Spacing="6">
+                                        <TextBlock Classes="detail-label"
+                                                   Text="{Binding SettingsThemeModeLabel}" />
+                                        <ComboBox ItemsSource="{Binding ThemeModeOptions}"
+                                                  SelectedItem="{Binding SettingsThemeMode}" />
+                                    </StackPanel>
                                     <CheckBox Content="{Binding SettingsCloseToTrayLabel}"
                                               IsChecked="{Binding SettingsCloseToTray}" />
                                     <CheckBox Content="{Binding SettingsMinimizeToTrayLabel}"

@@ -46,6 +46,8 @@ public sealed record AppSettings
 
     public bool StartWithWindows { get; init; }
 
+    public ThemeMode ThemeMode { get; init; } = ThemeMode.Dark;
+
     public bool EnableNormalClipLifetime { get; init; } = true;
 
     public int NormalClipLifetimeDays { get; init; } = DefaultNormalClipLifetimeDays;
