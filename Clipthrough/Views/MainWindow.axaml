@@ -321,19 +321,14 @@
                                            Text="{Binding EmptySelectionDescriptionText}" />
                             </StackPanel>
 
-                            <TextBox IsVisible="{Binding ShowRawTextContent}"
-                                      Classes="content-viewer raw-content-viewer"
+                            <controls:SyntaxTextEditor IsVisible="{Binding ShowRawTextContent}"
                                       IsReadOnly="{Binding SelectedClipTextIsReadOnly}"
-                                      AcceptsReturn="True"
-                                      HorizontalContentAlignment="Stretch"
-                                      Text="{Binding EditedClipText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                      SyntaxHint="{Binding RawContentSyntaxHint}"
+                                      Text="{Binding EditedClipText, Mode=TwoWay}" />
 
-                            <TextBox IsVisible="{Binding ShowSelectedTextRenderer}"
-                                      Classes="content-viewer"
+                            <controls:SyntaxTextEditor IsVisible="{Binding ShowSelectedTextRenderer}"
                                       IsReadOnly="{Binding SelectedClipTextIsReadOnly}"
-                                      AcceptsReturn="True"
-                                      HorizontalContentAlignment="Stretch"
-                                      Text="{Binding EditedClipText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                      Text="{Binding EditedClipText, Mode=TwoWay}" />
 
                             <controls:RichContentView IsVisible="{Binding ShowSelectedRichTextRenderer}"
                                                        Markup="{Binding EditedClipText, Mode=OneWay}"

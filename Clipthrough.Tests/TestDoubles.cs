@@ -83,6 +83,10 @@ internal sealed class TestClipboardMonitorService : IClipboardMonitorService
     {
     }
 
+    public void SuppressNext()
+    {
+    }
+
     public void Emit(ClipEntry clip) => _capturedClips.OnNext(clip);
 }
 

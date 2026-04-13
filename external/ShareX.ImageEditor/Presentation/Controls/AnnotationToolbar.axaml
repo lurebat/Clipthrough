@@ -22,9 +22,7 @@
                 BorderThickness="1"
                 CornerRadius="0,0,4,4"
                 HorizontalAlignment="Center">
-            <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                          VerticalScrollBarVisibility="Disabled">
-                <StackPanel Orientation="Horizontal" Spacing="4">
+                <WrapPanel Orientation="Horizontal">
                     <StackPanel Orientation="Horizontal"
                                 Spacing="4"
                                 IsVisible="{ReflectionBinding ImageEditorMode}">
@@ -246,8 +244,7 @@
                                 ToolTip.Tip="Delete all (Shift+Delete)"
                                 Content="{x:Static theming:EditorIcons.ActionClearAll}"/>
                     </StackPanel>
-                </StackPanel>
-            </ScrollViewer>
+                </WrapPanel>
         </Border>
 
         <Border Padding="4,0,4,4"

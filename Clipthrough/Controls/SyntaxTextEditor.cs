@@ -1,0 +1,170 @@
+using System;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Media;
+using Avalonia.Styling;
+using AvaloniaEdit;
+using AvaloniaEdit.TextMate;
+using TextMateSharp.Grammars;
+
+namespace Clipthrough.Controls;
+
+/// <summary>
+/// A text editor with optional TextMate syntax highlighting and theme reactivity.
+/// Drop-in replacement for TextBox in content editing scenarios.
+/// </summary>
+public sealed class SyntaxTextEditor : UserControl
+{
+    public static readonly StyledProperty<string?> TextProperty =
+        AvaloniaProperty.Register<SyntaxTextEditor, string?>(nameof(Text), defaultBindingMode: Avalonia.Data.BindingMode.TwoWay);
+
+    public static readonly StyledProperty<bool> IsReadOnlyProperty =
+        AvaloniaProperty.Register<SyntaxTextEditor, bool>(nameof(IsReadOnly));
+
+    public static readonly StyledProperty<string> SyntaxHintProperty =
+        AvaloniaProperty.Register<SyntaxTextEditor, string>(nameof(SyntaxHint), string.Empty);
+
+    private readonly TextEditor _editor;
+    private TextMate.Installation? _textMateInstall;
+    private readonly RegistryOptions _darkRegistry = new(ThemeName.DarkPlus);
+    private readonly RegistryOptions _lightRegistry = new(ThemeName.LightPlus);
+    private bool _isSyncingText;
+
+    public SyntaxTextEditor()
+    {
+        _editor = new TextEditor
+        {
+            ShowLineNumbers = false,
+            WordWrap = true,
+            FontFamily = new FontFamily("Cascadia Mono, Consolas, monospace"),
+            FontSize = 13,
+        };
+
+        Content = _editor;
+
+        _editor.TextChanged += OnEditorTextChanged;
+
+        this.GetObservable(TextProperty).Subscribe(OnTextPropertyChanged);
+        this.GetObservable(IsReadOnlyProperty).Subscribe(v => _editor.IsReadOnly = v);
+        this.GetObservable(SyntaxHintProperty).Subscribe(_ => ApplyGrammar());
+    }
+
+    public string? Text
+    {
+        get => GetValue(TextProperty);
+        set => SetValue(TextProperty, value);
+    }
+
+    public bool IsReadOnly
+    {
+        get => GetValue(IsReadOnlyProperty);
+        set => SetValue(IsReadOnlyProperty, value);
+    }
+
+    /// <summary>
+    /// File extension hint for syntax highlighting (e.g. ".html", ".xml", ".json").
+    /// Empty string disables syntax highlighting.
+    /// </summary>
+    public string SyntaxHint
+    {
+        get => GetValue(SyntaxHintProperty);
+        set => SetValue(SyntaxHintProperty, value);
+    }
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        ApplyTheme();
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property.Name == "ActualThemeVariant")
+        {
+            ApplyTheme();
+        }
+    }
+
+    private void OnTextPropertyChanged(string? newText)
+    {
+        if (_isSyncingText)
+        {
+            return;
+        }
+
+        _isSyncingText = true;
+        try
+        {
+            if (_editor.Text != newText)
+            {
+                _editor.Text = newText ?? string.Empty;
+            }
+        }
+        finally
+        {
+            _isSyncingText = false;
+        }
+    }
+
+    private void OnEditorTextChanged(object? sender, EventArgs e)
+    {
+        if (_isSyncingText)
+        {
+            return;
+        }
+
+        _isSyncingText = true;
+        try
+        {
+            Text = _editor.Text;
+        }
+        finally
+        {
+            _isSyncingText = false;
+        }
+    }
+
+    private void ApplyTheme()
+    {
+        var isDark = ActualThemeVariant != ThemeVariant.Light;
+
+        _editor.Background = isDark
+            ? new SolidColorBrush(Color.Parse("#1E293B"))
+            : new SolidColorBrush(Color.Parse("#F8FAFC"));
+        _editor.Foreground = isDark
+            ? new SolidColorBrush(Color.Parse("#E2E8F0"))
+            : new SolidColorBrush(Color.Parse("#0F172A"));
+
+        _textMateInstall?.Dispose();
+        var registry = isDark ? _darkRegistry : _lightRegistry;
+        _textMateInstall = _editor.InstallTextMate(registry);
+        ApplyGrammar();
+    }
+
+    private void ApplyGrammar()
+    {
+        if (_textMateInstall is null)
+        {
+            return;
+        }
+
+        var hint = SyntaxHint;
+        if (string.IsNullOrEmpty(hint))
+        {
+            _textMateInstall.SetGrammar(null);
+            return;
+        }
+
+        var registry = ActualThemeVariant != ThemeVariant.Light ? _darkRegistry : _lightRegistry;
+        var lang = registry.GetLanguageByExtension(hint);
+        if (lang is not null)
+        {
+            _textMateInstall.SetGrammar(registry.GetScopeByLanguageId(lang.Id));
+        }
+        else
+        {
+            _textMateInstall.SetGrammar(null);
+        }
+    }
+}

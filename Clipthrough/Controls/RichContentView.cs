@@ -101,11 +101,11 @@ public sealed class RichContentView : UserControl
         var isDark = ActualThemeVariant != ThemeVariant.Light;
 
         _htmlLabel.Background = isDark
-            ? new SolidColorBrush(Color.Parse("#0F172A"))
+            ? new SolidColorBrush(Color.Parse("#1E293B"))
             : Brushes.White;
 
         _textEditor.Background = isDark
-            ? new SolidColorBrush(Color.Parse("#0F172A"))
+            ? new SolidColorBrush(Color.Parse("#1E293B"))
             : new SolidColorBrush(Color.Parse("#F8FAFC"));
         _textEditor.Foreground = isDark
             ? new SolidColorBrush(Color.Parse("#E2E8F0"))
@@ -209,7 +209,7 @@ public sealed class RichContentView : UserControl
         }
 
         var isDark = ActualThemeVariant != ThemeVariant.Light;
-        var bg = isDark ? "#0F172A" : "#FFFFFF";
+        var bg = isDark ? "#1E293B" : "#FFFFFF";
         var fg = isDark ? "#E2E8F0" : "#0F172A";
 
         return $"""

@@ -8,6 +8,7 @@ using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
@@ -46,6 +47,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     private bool _isStarted;
     private bool _isHookAttached;
     private bool _isDisposed;
+    private int _suppressCount;
 
     public ClipboardMonitorService(IClipStoreService clipStoreService, ISourceApplicationResolver sourceApplicationResolver, IAppNotificationService notificationService)
     {
@@ -55,6 +57,8 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     }
 
     public IObservable<ClipEntry> CapturedClips => _capturedClips.AsObservable();
+
+    public void SuppressNext() => Interlocked.Increment(ref _suppressCount);
 
     public void Start()
     {
@@ -116,6 +120,11 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     private async void HandleClipboardChanged()
     {
         if (!_isStarted || _isDisposed || _window?.Clipboard is not { } clipboard)
+        {
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _suppressCount, 0) > 0)
         {
             return;
         }

@@ -41,36 +41,36 @@
                     <SolidColorBrush x:Key="FavoriteBadgeFg" Color="#FCD34D" />
                     <SolidColorBrush x:Key="SensitiveBadgeBg" Color="#2D1421" />
                     <SolidColorBrush x:Key="SensitiveBadgeBorder" Color="#7F1D3A" />
-                    <SolidColorBrush x:Key="HtmlRendererBackground" Color="#0F172A" />
+                    <SolidColorBrush x:Key="HtmlRendererBackground" Color="#1E293B" />
                     <SolidColorBrush x:Key="HtmlRendererForeground" Color="#E2E8F0" />
                 </ResourceDictionary>
 
                 <ResourceDictionary x:Key="Light">
-                    <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F8FAFC" />
+                    <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F1F5F9" />
                     <SolidColorBrush x:Key="AppForegroundBrush" Color="#0F172A" />
-                    <SolidColorBrush x:Key="AppMutedForegroundBrush" Color="#64748B" />
+                    <SolidColorBrush x:Key="AppMutedForegroundBrush" Color="#475569" />
                     <SolidColorBrush x:Key="SurfaceHeroBrush" Color="#FFFFFF" />
-                    <SolidColorBrush x:Key="SurfacePrimaryBrush" Color="#F1F5F9" />
-                    <SolidColorBrush x:Key="SurfaceSecondaryBrush" Color="#E2E8F0" />
-                    <SolidColorBrush x:Key="SurfaceInsetBrush" Color="#F8FAFC" />
-                    <SolidColorBrush x:Key="SurfaceInteractiveBrush" Color="#E2E8F0" />
-                    <SolidColorBrush x:Key="SurfaceInteractiveHoverBrush" Color="#CBD5E1" />
-                    <SolidColorBrush x:Key="SurfaceSelectedBrush" Color="#DBEAFE" />
-                    <SolidColorBrush x:Key="AccentBrush" Color="#7C3AED" />
-                    <SolidColorBrush x:Key="AccentHoverBrush" Color="#6D28D9" />
-                    <SolidColorBrush x:Key="SuccessBrush" Color="#059669" />
-                    <SolidColorBrush x:Key="WarningBrush" Color="#D97706" />
-                    <SolidColorBrush x:Key="DangerBrush" Color="#DC2626" />
-                    <SolidColorBrush x:Key="BorderBrush" Color="#CBD5E1" />
-                    <SolidColorBrush x:Key="BorderStrongBrush" Color="#94A3B8" />
-                    <SolidColorBrush x:Key="StatCardBrush" Color="#E2E8F0" />
-                    <SolidColorBrush x:Key="ClipRowIconBrush" Color="#E2E8F0" />
-                    <SolidColorBrush x:Key="MetaChipBrush" Color="#E2E8F0" />
-                    <SolidColorBrush x:Key="ImagePlaceholderBrush" Color="#F1F5F9" />
-                    <SolidColorBrush x:Key="ImageStageBrush" Color="#F8FAFC" />
-                    <SolidColorBrush x:Key="SettingsBackdropBrush" Color="#80CBD5E1" />
-                    <SolidColorBrush x:Key="EyebrowForegroundBrush" Color="#6D28D9" />
-                    <SolidColorBrush x:Key="PanelCaptionForegroundBrush" Color="#6D28D9" />
+                    <SolidColorBrush x:Key="SurfacePrimaryBrush" Color="#E2E8F0" />
+                    <SolidColorBrush x:Key="SurfaceSecondaryBrush" Color="#CBD5E1" />
+                    <SolidColorBrush x:Key="SurfaceInsetBrush" Color="#F1F5F9" />
+                    <SolidColorBrush x:Key="SurfaceInteractiveBrush" Color="#CBD5E1" />
+                    <SolidColorBrush x:Key="SurfaceInteractiveHoverBrush" Color="#94A3B8" />
+                    <SolidColorBrush x:Key="SurfaceSelectedBrush" Color="#BFDBFE" />
+                    <SolidColorBrush x:Key="AccentBrush" Color="#6D28D9" />
+                    <SolidColorBrush x:Key="AccentHoverBrush" Color="#5B21B6" />
+                    <SolidColorBrush x:Key="SuccessBrush" Color="#047857" />
+                    <SolidColorBrush x:Key="WarningBrush" Color="#B45309" />
+                    <SolidColorBrush x:Key="DangerBrush" Color="#B91C1C" />
+                    <SolidColorBrush x:Key="BorderBrush" Color="#94A3B8" />
+                    <SolidColorBrush x:Key="BorderStrongBrush" Color="#64748B" />
+                    <SolidColorBrush x:Key="StatCardBrush" Color="#CBD5E1" />
+                    <SolidColorBrush x:Key="ClipRowIconBrush" Color="#CBD5E1" />
+                    <SolidColorBrush x:Key="MetaChipBrush" Color="#CBD5E1" />
+                    <SolidColorBrush x:Key="ImagePlaceholderBrush" Color="#E2E8F0" />
+                    <SolidColorBrush x:Key="ImageStageBrush" Color="#F1F5F9" />
+                    <SolidColorBrush x:Key="SettingsBackdropBrush" Color="#8094A3B8" />
+                    <SolidColorBrush x:Key="EyebrowForegroundBrush" Color="#5B21B6" />
+                    <SolidColorBrush x:Key="PanelCaptionForegroundBrush" Color="#5B21B6" />
                     <SolidColorBrush x:Key="FavoriteToggleActiveBg" Color="#FEF3C7" />
                     <SolidColorBrush x:Key="FavoriteToggleActiveBorder" Color="#D97706" />
                     <SolidColorBrush x:Key="FavoriteToggleActiveFg" Color="#92400E" />

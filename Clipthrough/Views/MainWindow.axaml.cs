@@ -221,7 +221,7 @@ public partial class MainWindow : Window
 
     private static bool TryHandleEditedClipShortcut(MainWindowViewModel viewModel, KeyEventArgs e)
     {
-        if (e.Source is not TextBox)
+        if (e.Source is not TextBox and not AvaloniaEdit.TextEditor and not Controls.SyntaxTextEditor)
         {
             return false;
         }

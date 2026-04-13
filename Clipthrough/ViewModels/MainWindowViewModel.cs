@@ -638,6 +638,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string SelectedClipRawContent => ClipDisplayFormatter.GetRawContentDisplay(SelectedClip?.Clip);
 
+    public string RawContentSyntaxHint => SelectedClip?.Clip.ContentFormat switch
+    {
+        ClipContentFormat.Html => ".html",
+        ClipContentFormat.Rtf => "",
+        _ => "",
+    };
+
     public string EditedClipText
     {
         get => _editedClipText;
@@ -1099,6 +1106,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SelectedClip = clip;
         }
 
+        _clipboardMonitorService.SuppressNext();
+
         if (clip.Clip.ContentType == ContentType.Image)
         {
             using var bitmap = TryLoadImage(clip.Clip, _settingsService.Current.MaxClipSizeBytes);
@@ -1141,6 +1150,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);
+        _clipboardMonitorService.SuppressNext();
         await _systemInteractionService.CopyTextAsync(exportResult.PrimaryPath);
         await _systemInteractionService.OpenPathAsync(exportResult.PrimaryPath);
         StatusText = AppText.FormatExportedClipStatus(exportResult.PrimaryPath);
@@ -1196,6 +1206,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ImageHeight = bitmap.PixelSize.Height,
         });
 
+        _clipboardMonitorService.SuppressNext();
         await _systemInteractionService.CopyBitmapAsync(bitmap);
 
         if (capturedClip is not null)
@@ -1281,6 +1292,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        _clipboardMonitorService.SuppressNext();
         if (SelectedClip.Clip.ContentType == ContentType.RichText)
         {
             var renderedText = ClipDisplayFormatter.RenderRichContent(EditedClipText);
@@ -2112,6 +2124,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(ShowSelectedImageEditor));
         this.RaisePropertyChanged(nameof(ShowSelectedImagePlaceholder));
         this.RaisePropertyChanged(nameof(ShowCopyEditedClipButton));
+        this.RaisePropertyChanged(nameof(RawContentSyntaxHint));
     }
 
     private void UpdateStatus(ClipSearchResult result)
