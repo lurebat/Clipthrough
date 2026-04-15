@@ -115,6 +115,8 @@ public sealed class DatabaseInitializer
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
+        await MigrateFtsSchemaIfNeededAsync(connection, cancellationToken);
+
         await using (var schemaCommand = connection.CreateCommand())
         {
             schemaCommand.CommandText = Schema;
@@ -432,6 +434,47 @@ public sealed class DatabaseInitializer
 
     private static async Task RebuildClipSearchIndexAsync(SqliteConnection connection, CancellationToken cancellationToken)
         => await ExecuteNonQueryAsync(connection, "INSERT INTO clips_fts(clips_fts) VALUES ('rebuild');", cancellationToken);
+
+    /// <summary>
+    /// Detects if the existing FTS table has the old 2-column schema (content, source_app)
+    /// and drops it along with its triggers so the Schema DDL can recreate them with
+    /// the new 4-column schema (content, source_app, source_window_title, source_url).
+    /// </summary>
+    private static async Task MigrateFtsSchemaIfNeededAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        // Check if the FTS table exists at all
+        await using var checkCommand = connection.CreateCommand();
+        checkCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='clips_fts';";
+        var exists = Convert.ToInt64(await checkCommand.ExecuteScalarAsync(cancellationToken)) > 0;
+        if (!exists)
+        {
+            return;
+        }
+
+        // Check column count by querying the FTS table's content definition
+        var columnCount = 0;
+        await using (var colCommand = connection.CreateCommand())
+        {
+            colCommand.CommandText = "PRAGMA table_info(clips_fts);";
+            await using var reader = await colCommand.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                columnCount++;
+            }
+        }
+
+        // The new schema has 4 content columns; the old had 2
+        if (columnCount >= 4)
+        {
+            return;
+        }
+
+        // Drop old triggers and FTS table so they're recreated with the new schema
+        await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_ai;", cancellationToken);
+        await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_ad;", cancellationToken);
+        await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_au;", cancellationToken);
+        await ExecuteNonQueryAsync(connection, "DROP TABLE IF EXISTS clips_fts;", cancellationToken);
+    }
 
     private static async Task ExecuteNonQueryAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)
     {
