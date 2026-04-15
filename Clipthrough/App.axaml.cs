@@ -26,10 +26,13 @@ public partial class App : Application
     private TrayIcon? _trayIcon;
     private ISystemInteractionService? _systemInteractionService;
     private ISettingsService? _settingsService;
+    private IClipStoreService? _clipStoreService;
+    private IClipboardMonitorService? _clipboardMonitorService;
     private IAppNotificationService? _notificationService;
     private IDisposable? _notificationSubscription;
     private bool _isExitRequested;
     private bool _hasShownTrayNotification;
+    private int _incrementalPasteOffset = -1;
 
     public App()
     {
@@ -54,6 +57,8 @@ public partial class App : Application
             var mainWindowViewModel = Services.GetRequiredService<MainWindowViewModel>();
             _systemInteractionService = Services.GetRequiredService<ISystemInteractionService>();
             _settingsService = Services.GetRequiredService<ISettingsService>();
+            _clipStoreService = Services.GetRequiredService<IClipStoreService>();
+            _clipboardMonitorService = Services.GetRequiredService<IClipboardMonitorService>();
             ApplyThemeMode(_settingsService.Current.ThemeMode);
             _notificationService = Services.GetRequiredService<IAppNotificationService>();
 
@@ -155,7 +160,7 @@ public partial class App : Application
 
         _notificationSubscription?.Dispose();
         _notificationSubscription = null;
-        _systemInteractionService?.UnregisterGlobalHotKey();
+        _systemInteractionService?.UnregisterAllGlobalHotKeys();
         _trayIcon?.Dispose();
         _trayIcon = null;
     }
@@ -223,15 +228,25 @@ public partial class App : Application
             return;
         }
 
-        _systemInteractionService.UnregisterGlobalHotKey();
+        _systemInteractionService.UnregisterAllGlobalHotKeys();
 
-        if (!_settingsService.Current.EnableToggleWindowHotkey
-            || !HotkeyGesture.TryParse(_settingsService.Current.ToggleWindowHotkey, out var hotkey, out _))
+        if (_settingsService.Current.EnableToggleWindowHotkey
+            && HotkeyGesture.TryParse(_settingsService.Current.ToggleWindowHotkey, out var windowHotkey, out _))
         {
-            return;
+            _systemInteractionService.TryRegisterGlobalHotKey(_mainWindow, windowHotkey!, ToggleMainWindowVisibility);
         }
 
-        _systemInteractionService.TryRegisterGlobalHotKey(_mainWindow, hotkey!, ToggleMainWindowVisibility);
+        if (_settingsService.Current.EnableIncrementalPasteHotkey
+            && HotkeyGesture.TryParse(_settingsService.Current.IncrementalPasteHotkey, out var incHotkey, out _))
+        {
+            _systemInteractionService.TryRegisterGlobalHotKey(_mainWindow, "incremental-paste", incHotkey!, IncrementalPaste);
+        }
+
+        if (_settingsService.Current.EnableDecrementalPasteHotkey
+            && HotkeyGesture.TryParse(_settingsService.Current.DecrementalPasteHotkey, out var decHotkey, out _))
+        {
+            _systemInteractionService.TryRegisterGlobalHotKey(_mainWindow, "decremental-paste", decHotkey!, DecrementalPaste);
+        }
     }
 
     private void ToggleMainWindowVisibility()
@@ -241,7 +256,55 @@ public partial class App : Application
             return;
         }
 
+        _incrementalPasteOffset = -1;
         ToggleMainWindowVisibility(_mainWindow);
+    }
+
+    private void IncrementalPaste()
+    {
+        _incrementalPasteOffset++;
+        PasteAtOffset(_incrementalPasteOffset);
+    }
+
+    private void DecrementalPaste()
+    {
+        if (_incrementalPasteOffset > 0)
+        {
+            _incrementalPasteOffset--;
+        }
+
+        PasteAtOffset(_incrementalPasteOffset);
+    }
+
+    private async void PasteAtOffset(int offset)
+    {
+        if (_clipStoreService is null || _systemInteractionService is null || _clipboardMonitorService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var clip = await _clipStoreService.GetClipAtOffsetAsync(offset);
+            if (clip is null)
+            {
+                _incrementalPasteOffset = Math.Max(0, offset - 1);
+                return;
+            }
+
+            _clipboardMonitorService.SuppressNext();
+
+            if (!string.IsNullOrEmpty(clip.Content))
+            {
+                await _systemInteractionService.CopyTextAsync(clip.Content);
+            }
+
+            await _clipStoreService.MarkPastedAsync(clip.Id);
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Incremental paste failed at offset {offset}: {ex.Message}");
+        }
     }
 
     private static void ToggleMainWindowVisibility(Window window)

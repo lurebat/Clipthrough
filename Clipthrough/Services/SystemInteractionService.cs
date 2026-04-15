@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing.Imaging;
@@ -34,6 +35,7 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
     private static readonly string[] HtmlFormats = ["HTML Format", "text/html", "public.html"];
     private static readonly string[] RtfFormats = ["Rich Text Format", "text/rtf", "public.rtf"];
     private WindowsGlobalHotKeyRegistration? _globalHotKeyRegistration;
+    private readonly Dictionary<string, WindowsGlobalHotKeyRegistration> _namedHotKeys = new(StringComparer.Ordinal);
     private WindowsBalloonNotificationHost? _notificationHost;
 
     public async Task CopyTextAsync(string text)
@@ -258,10 +260,59 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         return _globalHotKeyRegistration is not null;
     }
 
+    public bool TryRegisterGlobalHotKey(Window window, string name, HotkeyGesture hotkey, Action callback)
+    {
+        UnregisterGlobalHotKey(name);
+
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return false;
+        }
+
+        var platformHandle = window.TryGetPlatformHandle();
+        if (platformHandle?.Handle is not { } windowHandle || windowHandle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        if (!hotkey.TryGetWindowsRegistration(out var modifiers, out var virtualKey))
+        {
+            return false;
+        }
+
+        var registration = WindowsGlobalHotKeyRegistration.TryCreate(windowHandle, modifiers, virtualKey, callback);
+        if (registration is null)
+        {
+            return false;
+        }
+
+        _namedHotKeys[name] = registration;
+        return true;
+    }
+
     public void UnregisterGlobalHotKey()
     {
         _globalHotKeyRegistration?.Dispose();
         _globalHotKeyRegistration = null;
+    }
+
+    public void UnregisterGlobalHotKey(string name)
+    {
+        if (_namedHotKeys.Remove(name, out var registration))
+        {
+            registration.Dispose();
+        }
+    }
+
+    public void UnregisterAllGlobalHotKeys()
+    {
+        UnregisterGlobalHotKey();
+        foreach (var registration in _namedHotKeys.Values)
+        {
+            registration.Dispose();
+        }
+
+        _namedHotKeys.Clear();
     }
 
     public void SyncStartWithWindows(bool enabled)

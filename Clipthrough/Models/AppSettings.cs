@@ -50,6 +50,14 @@ public sealed record AppSettings
 
     public string ToggleWindowHotkey { get; init; } = "Alt+V";
 
+    public bool EnableIncrementalPasteHotkey { get; init; }
+
+    public string IncrementalPasteHotkey { get; init; } = "Ctrl+Shift+V";
+
+    public bool EnableDecrementalPasteHotkey { get; init; }
+
+    public string DecrementalPasteHotkey { get; init; } = "Ctrl+Shift+B";
+
     public int MaxClipSizeBytes { get; init; } = DefaultMaxClipSizeBytes;
 
     public bool CloseToTray { get; init; } = true;
@@ -96,6 +104,10 @@ public sealed record AppSettings
         TogglePastedHotkey = NormalizeHotkey(TogglePastedHotkey, Default.TogglePastedHotkey),
         EnableToggleWindowHotkey = EnableToggleWindowHotkey,
         ToggleWindowHotkey = NormalizeHotkey(ToggleWindowHotkey, Default.ToggleWindowHotkey),
+        EnableIncrementalPasteHotkey = EnableIncrementalPasteHotkey,
+        IncrementalPasteHotkey = NormalizeHotkey(IncrementalPasteHotkey, Default.IncrementalPasteHotkey),
+        EnableDecrementalPasteHotkey = EnableDecrementalPasteHotkey,
+        DecrementalPasteHotkey = NormalizeHotkey(DecrementalPasteHotkey, Default.DecrementalPasteHotkey),
         MaxClipSizeBytes = MaxClipSizeBytes < MinMaxClipSizeBytes || MaxClipSizeBytes > MaxMaxClipSizeBytes
             ? DefaultMaxClipSizeBytes
             : MaxClipSizeBytes,

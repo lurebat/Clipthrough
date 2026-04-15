@@ -228,7 +228,17 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
 
     public bool TryRegisterGlobalHotKey(Window window, HotkeyGesture hotkey, Action callback) => true;
 
+    public bool TryRegisterGlobalHotKey(Window window, string name, HotkeyGesture hotkey, Action callback) => true;
+
     public void UnregisterGlobalHotKey()
+    {
+    }
+
+    public void UnregisterGlobalHotKey(string name)
+    {
+    }
+
+    public void UnregisterAllGlobalHotKeys()
     {
     }
 

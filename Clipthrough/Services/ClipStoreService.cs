@@ -310,6 +310,34 @@ public sealed class ClipStoreService : IClipStoreService
         await transaction.CommitAsync(cancellationToken);
     }
 
+    public async Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default)
+    {
+        if (offset < 0)
+        {
+            return null;
+        }
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT {ClipSelectColumns}
+            FROM clips c
+            ORDER BY COALESCE(c.last_copied_at, c.captured_at) DESC
+            LIMIT 1 OFFSET $offset;
+            """;
+        command.Parameters.AddWithValue("$offset", offset);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return ReadClip(reader);
+    }
+
     private async Task<ClipEntry?> InsertClipAsync(ClipCaptureRequest request, CancellationToken cancellationToken)
     {
         var contentText = BuildStoredContentText(request);

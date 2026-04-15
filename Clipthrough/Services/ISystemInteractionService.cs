@@ -22,7 +22,13 @@ public interface ISystemInteractionService
 
     bool TryRegisterGlobalHotKey(Window window, HotkeyGesture hotkey, Action callback);
 
+    bool TryRegisterGlobalHotKey(Window window, string name, HotkeyGesture hotkey, Action callback);
+
     void UnregisterGlobalHotKey();
+
+    void UnregisterGlobalHotKey(string name);
+
+    void UnregisterAllGlobalHotKeys();
 
     void SyncStartWithWindows(bool enabled);
 }
