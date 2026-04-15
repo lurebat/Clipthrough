@@ -84,6 +84,10 @@ public sealed record AppSettings
 
     public int MaxEntryCount { get; init; } = DefaultMaxEntryCount;
 
+    public string ExternalEditorPath { get; init; } = string.Empty;
+
+    public string ExternalDiffToolPath { get; init; } = string.Empty;
+
     public static AppSettings Default { get; } = new();
 
     public AppSettings Normalize() => this with

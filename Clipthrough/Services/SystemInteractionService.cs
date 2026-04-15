@@ -207,6 +207,38 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         return Task.CompletedTask;
     }
 
+    public Task OpenInEditorAsync(string filePath, string editorPath)
+    {
+        if (string.IsNullOrWhiteSpace(editorPath) || !File.Exists(editorPath))
+        {
+            return OpenPathAsync(filePath);
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = editorPath,
+            ArgumentList = { filePath },
+            UseShellExecute = false,
+        });
+        return Task.CompletedTask;
+    }
+
+    public Task OpenInDiffToolAsync(string leftPath, string rightPath, string diffToolPath)
+    {
+        if (string.IsNullOrWhiteSpace(diffToolPath) || !File.Exists(diffToolPath))
+        {
+            throw new FileNotFoundException($"Diff tool not found: {diffToolPath}");
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = diffToolPath,
+            ArgumentList = { leftPath, rightPath },
+            UseShellExecute = false,
+        });
+        return Task.CompletedTask;
+    }
+
     public void ShowNotification(AppNotification notification)
     {
         ArgumentNullException.ThrowIfNull(notification);

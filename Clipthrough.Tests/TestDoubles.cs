@@ -222,6 +222,14 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
 
     public Task OpenContainingDirectoryAsync(string path) => Task.CompletedTask;
 
+    public Task OpenInEditorAsync(string filePath, string editorPath)
+    {
+        LastOpenedPath = filePath;
+        return Task.CompletedTask;
+    }
+
+    public Task OpenInDiffToolAsync(string leftPath, string rightPath, string diffToolPath) => Task.CompletedTask;
+
     public void ShowNotification(AppNotification notification)
     {
         LastSystemNotification = notification;

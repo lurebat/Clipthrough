@@ -146,6 +146,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         DeleteSelectedCommand = ReactiveCommand.CreateFromTask(DeleteSelectedAsync, hasSelection);
         CopySelectedCommand = ReactiveCommand.CreateFromTask(CopySelectedAsync, hasSelection);
         ExportSelectedCommand = ReactiveCommand.CreateFromTask(ExportSelectedAsync, hasSelection);
+        OpenInEditorCommand = ReactiveCommand.CreateFromTask(OpenInEditorAsync, hasSelection);
+        CompareClipsCommand = ReactiveCommand.CreateFromTask(CompareClipsAsync);
         EditSelectedImageCommand = ReactiveCommand.CreateFromTask(EditSelectedImageAsync);
         SelectAllClipsCommand = ReactiveCommand.Create(SelectAllClips);
         SelectNoClipsCommand = ReactiveCommand.Create(SelectNoClips);
@@ -196,6 +198,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .Merge(ToggleFavoriteCommand.ThrownExceptions)
                 .Merge(CopySelectedCommand.ThrownExceptions)
                 .Merge(ExportSelectedCommand.ThrownExceptions)
+                .Merge(OpenInEditorCommand.ThrownExceptions)
+                .Merge(CompareClipsCommand.ThrownExceptions)
                 .Merge(EditSelectedImageCommand.ThrownExceptions)
                 .Merge(DeleteSelectedCommand.ThrownExceptions)
                 .Merge(FavoriteCheckedClipsCommand.ThrownExceptions)
@@ -232,6 +236,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> CopySelectedCommand { get; }
 
     public ReactiveCommand<Unit, Unit> ExportSelectedCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> OpenInEditorCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> CompareClipsCommand { get; }
 
     public ReactiveCommand<Unit, Unit> EditSelectedImageCommand { get; }
 
@@ -1270,6 +1278,42 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await _systemInteractionService.CopyTextAsync(exportResult.PrimaryPath);
         await _systemInteractionService.OpenPathAsync(exportResult.PrimaryPath);
         StatusText = AppText.FormatExportedClipStatus(exportResult.PrimaryPath);
+    }
+
+    private async Task OpenInEditorAsync()
+    {
+        if (SelectedClip is null)
+        {
+            return;
+        }
+
+        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);
+        var editorPath = _settingsService.Current.ExternalEditorPath;
+        await _systemInteractionService.OpenInEditorAsync(exportResult.PrimaryPath, editorPath);
+        StatusText = $"Opened in editor: {Path.GetFileName(exportResult.PrimaryPath)}";
+    }
+
+    private async Task CompareClipsAsync()
+    {
+        var checkedClips = Clips.Where(static c => c.IsChecked).Take(2).ToList();
+        if (checkedClips.Count < 2)
+        {
+            StatusText = "Select exactly 2 clips (using Ctrl+Click) to compare.";
+            return;
+        }
+
+        var diffToolPath = _settingsService.Current.ExternalDiffToolPath;
+        if (string.IsNullOrWhiteSpace(diffToolPath))
+        {
+            StatusText = "Set an external diff tool path in settings to compare clips.";
+            return;
+        }
+
+        var left = await _clipExportService.ExportAsync(checkedClips[0].Clip);
+        var right = await _clipExportService.ExportAsync(checkedClips[1].Clip);
+
+        await _systemInteractionService.OpenInDiffToolAsync(left.PrimaryPath, right.PrimaryPath, diffToolPath);
+        StatusText = "Opened diff tool for comparison.";
     }
 
     private async Task EditSelectedImageAsync()

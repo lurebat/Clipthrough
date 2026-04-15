@@ -19,6 +19,10 @@ public interface ISystemInteractionService
 
     Task OpenContainingDirectoryAsync(string path);
 
+    Task OpenInEditorAsync(string filePath, string editorPath);
+
+    Task OpenInDiffToolAsync(string leftPath, string rightPath, string diffToolPath);
+
     void ShowNotification(AppNotification notification);
 
     bool TryRegisterGlobalHotKey(Window window, HotkeyGesture hotkey, Action callback);
