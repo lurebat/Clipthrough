@@ -52,6 +52,12 @@ public partial class MainWindow : Window
             m_clipListScrollViewer.ScrollChanged += OnClipListScrollChanged;
         }
 
+        var searchTextBox = this.FindControl<TextBox>("SearchTextBox");
+        if (searchTextBox is not null)
+        {
+            searchTextBox.GotFocus += OnSearchBoxGotFocus;
+        }
+
         FocusSearchBox();
     }
 
@@ -130,12 +136,51 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!viewModel.TryHandleShortcut(e))
+        if (viewModel.TryHandleShortcut(e))
         {
+            e.Handled = true;
             return;
         }
 
-        e.Handled = true;
+        // Type-to-filter: redirect printable keystrokes to search box
+        if (TryRedirectToSearchBox(e))
+        {
+            e.Handled = true;
+        }
+    }
+
+    private bool TryRedirectToSearchBox(KeyEventArgs e)
+    {
+        var searchTextBox = this.FindControl<TextBox>("SearchTextBox");
+        if (searchTextBox is null || searchTextBox.IsFocused)
+        {
+            return false;
+        }
+
+        // Don't redirect if already in a text input
+        if (e.Source is TextBox or AvaloniaEdit.TextEditor or Controls.SyntaxTextEditor)
+        {
+            return false;
+        }
+
+        // Only redirect unmodified or shift-modified printable keys
+        var relevantModifiers = e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Alt | KeyModifiers.Meta);
+        if (relevantModifiers != KeyModifiers.None)
+        {
+            return false;
+        }
+
+        // Check for printable key
+        if (e.Key is < Key.A or > Key.Z and < Key.D0 or > Key.D9
+            and < Key.NumPad0 or > Key.NumPad9
+            and not Key.Space and not Key.OemMinus and not Key.OemPlus
+            and not Key.OemPeriod and not Key.OemComma)
+        {
+            return false;
+        }
+
+        searchTextBox.Focus();
+        return false; // Let the key event propagate to the now-focused search box
     }
 
     private void OnClipsListDoubleTapped(object? sender, TappedEventArgs e)
@@ -274,6 +319,14 @@ public partial class MainWindow : Window
     private void MinimizeWindow()
     {
         WindowState = WindowState.Minimized;
+    }
+
+    private async void OnSearchBoxGotFocus(object? sender, GotFocusEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel viewModel)
+        {
+            await viewModel.LoadRecentSearchesAsync();
+        }
     }
 
     private void FocusSearchBox()
