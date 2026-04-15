@@ -241,7 +241,8 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                 Encoding.UTF8.GetBytes(normalizedHtml),
                 ContentType.RichText,
                 ClipContentFormat.Html,
-                sourceInfo);
+                sourceInfo,
+                relatedSourceUrl);
         }
 
         var rtf = await TryGetMarkupAsync(clipboardData, RtfFormats, ClipContentFormat.Rtf);
@@ -255,7 +256,8 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                 Encoding.UTF8.GetBytes(rtf),
                 ContentType.RichText,
                 ClipContentFormat.Rtf,
-                sourceInfo);
+                sourceInfo,
+                relatedSourceUrl);
         }
 
         if (!string.IsNullOrWhiteSpace(plainText))
@@ -265,7 +267,8 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                 Encoding.UTF8.GetBytes(plainText),
                 ContentType.Text,
                 ClipContentFormat.PlainText,
-                sourceInfo);
+                sourceInfo,
+                relatedSourceUrl);
         }
 
         if (filePaths.Length > 0)
@@ -363,6 +366,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
             SourceApp = sourceInfo?.Name,
             SourceAppPath = sourceInfo?.Path,
             SourceAppIconBytes = sourceInfo?.IconBytes,
+            SourceWindowTitle = sourceInfo?.WindowTitle,
         };
     }
 
@@ -383,6 +387,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                 SourceApp = sourceInfo?.Name,
                 SourceAppPath = sourceInfo?.Path,
                 SourceAppIconBytes = sourceInfo?.IconBytes,
+                SourceWindowTitle = sourceInfo?.WindowTitle,
             };
         }
         catch (ArgumentException ex)
@@ -402,7 +407,8 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
         byte[] contentBytes,
         ContentType contentType,
         ClipContentFormat contentFormat,
-        ClipboardSourceApplicationInfo? sourceInfo)
+        ClipboardSourceApplicationInfo? sourceInfo,
+        string? sourceUrl = null)
         => new()
         {
             ContentText = contentText,
@@ -412,6 +418,8 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
             SourceApp = sourceInfo?.Name,
             SourceAppPath = sourceInfo?.Path,
             SourceAppIconBytes = sourceInfo?.IconBytes,
+            SourceWindowTitle = sourceInfo?.WindowTitle,
+            SourceUrl = sourceUrl,
         };
 
     private static ClipCaptureRequest CreateFileRequest(string[] paths, ClipboardSourceApplicationInfo? sourceInfo)

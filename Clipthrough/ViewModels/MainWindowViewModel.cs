@@ -1168,6 +1168,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             await _systemInteractionService.CopyBitmapAsync(bitmap);
             StatusText = AppText.CopiedImageStatus;
             PublishSensitiveCopyNotificationIfNeeded(clip);
+            await _clipStoreService.MarkPastedAsync(clip.Clip.Id);
             return;
         }
 
@@ -1176,6 +1177,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             await _systemInteractionService.CopyRichContentAsync(clip.FullContent, SelectedClipRenderedText, clip.Clip.ContentFormat);
             StatusText = AppText.FormatCopiedClip(clip.DisplayContentType.ToLower(AppText.CurrentCulture));
             PublishSensitiveCopyNotificationIfNeeded(clip);
+            await _clipStoreService.MarkPastedAsync(clip.Clip.Id);
             return;
         }
 
@@ -1189,6 +1191,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ? AppText.FormatCopiedFileList(SelectedClipFiles.Count)
             : AppText.FormatCopiedClip(clip.DisplayContentType.ToLower(AppText.CurrentCulture));
         PublishSensitiveCopyNotificationIfNeeded(clip);
+        await _clipStoreService.MarkPastedAsync(clip.Clip.Id);
     }
 
     private async Task ExportSelectedAsync()

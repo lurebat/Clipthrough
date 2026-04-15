@@ -20,6 +20,10 @@ public sealed class ClipCaptureRequest
 
     public int? ImageHeight { get; init; }
 
+    public string? SourceWindowTitle { get; init; }
+
+    public string? SourceUrl { get; init; }
+
     public bool IsFavorite { get; init; }
 
     public bool IncrementExistingCopyCount { get; init; } = true;

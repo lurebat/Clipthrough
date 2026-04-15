@@ -32,32 +32,39 @@ public sealed class DatabaseInitializer
             last_copied_at  TEXT NOT NULL,
             byte_size    INTEGER NOT NULL DEFAULT 0,
             image_width  INTEGER,
-            image_height INTEGER
+            image_height INTEGER,
+            source_window_title TEXT,
+            source_url   TEXT,
+            is_pasted    INTEGER NOT NULL DEFAULT 0,
+            paste_count  INTEGER NOT NULL DEFAULT 0,
+            last_pasted_at TEXT
         );
 
         CREATE VIRTUAL TABLE IF NOT EXISTS clips_fts USING fts5(
             content,
             source_app,
+            source_window_title,
+            source_url,
             content='clips',
             content_rowid='id',
             tokenize='unicode61 remove_diacritics 2'
         );
 
         CREATE TRIGGER IF NOT EXISTS clips_ai AFTER INSERT ON clips BEGIN
-            INSERT INTO clips_fts(rowid, content, source_app)
-            VALUES (new.id, new.content, new.source_app);
+            INSERT INTO clips_fts(rowid, content, source_app, source_window_title, source_url)
+            VALUES (new.id, new.content, new.source_app, new.source_window_title, new.source_url);
         END;
 
         CREATE TRIGGER IF NOT EXISTS clips_ad AFTER DELETE ON clips BEGIN
-            INSERT INTO clips_fts(clips_fts, rowid, content, source_app)
-            VALUES ('delete', old.id, old.content, old.source_app);
+            INSERT INTO clips_fts(clips_fts, rowid, content, source_app, source_window_title, source_url)
+            VALUES ('delete', old.id, old.content, old.source_app, old.source_window_title, old.source_url);
         END;
 
         CREATE TRIGGER IF NOT EXISTS clips_au AFTER UPDATE ON clips BEGIN
-            INSERT INTO clips_fts(clips_fts, rowid, content, source_app)
-            VALUES ('delete', old.id, old.content, old.source_app);
-            INSERT INTO clips_fts(rowid, content, source_app)
-            VALUES (new.id, new.content, new.source_app);
+            INSERT INTO clips_fts(clips_fts, rowid, content, source_app, source_window_title, source_url)
+            VALUES ('delete', old.id, old.content, old.source_app, old.source_window_title, old.source_url);
+            INSERT INTO clips_fts(rowid, content, source_app, source_window_title, source_url)
+            VALUES (new.id, new.content, new.source_app, new.source_window_title, new.source_url);
         END;
 
         CREATE INDEX IF NOT EXISTS idx_clips_captured_at ON clips(captured_at DESC);
@@ -110,6 +117,7 @@ public sealed class DatabaseInitializer
 
         await EnsureClipAggregationColumnsAsync(connection, cancellationToken);
         await EnsureClipPayloadColumnsAsync(connection, cancellationToken);
+        await EnsureClipTrackingColumnsAsync(connection, cancellationToken);
         await BackfillClipAggregationColumnsAsync(connection, cancellationToken);
         await BackfillClipPayloadColumnsAsync(connection, cancellationToken);
         await DeduplicateClipsByHashAsync(connection, cancellationToken);
@@ -206,6 +214,46 @@ public sealed class DatabaseInitializer
         if (!existingColumns.Contains("image_height"))
         {
             await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN image_height INTEGER;", cancellationToken);
+        }
+    }
+
+    private static async Task EnsureClipTrackingColumnsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var existingColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "PRAGMA table_info(clips);";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                existingColumns.Add(reader.GetString(1));
+            }
+        }
+
+        if (!existingColumns.Contains("source_window_title"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN source_window_title TEXT;", cancellationToken);
+        }
+
+        if (!existingColumns.Contains("source_url"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN source_url TEXT;", cancellationToken);
+        }
+
+        if (!existingColumns.Contains("is_pasted"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN is_pasted INTEGER NOT NULL DEFAULT 0;", cancellationToken);
+        }
+
+        if (!existingColumns.Contains("paste_count"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN paste_count INTEGER NOT NULL DEFAULT 0;", cancellationToken);
+        }
+
+        if (!existingColumns.Contains("last_pasted_at"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN last_pasted_at TEXT;", cancellationToken);
         }
     }
 

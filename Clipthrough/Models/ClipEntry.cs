@@ -41,6 +41,16 @@ public sealed class ClipEntry
 
     public int? ImageHeight { get; init; }
 
+    public string? SourceWindowTitle { get; init; }
+
+    public string? SourceUrl { get; init; }
+
+    public bool IsPasted { get; set; }
+
+    public int PasteCount { get; set; }
+
+    public DateTimeOffset? LastPastedAt { get; set; }
+
     public IReadOnlyList<SensitivityMatch> SensitivityMatches { get; set; } = Array.Empty<SensitivityMatch>();
 }
 

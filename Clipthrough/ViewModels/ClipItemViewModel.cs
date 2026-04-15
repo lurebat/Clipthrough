@@ -133,6 +133,22 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     public string SourceApp => string.IsNullOrWhiteSpace(Clip.SourceApp) ? AppText.UnknownSource : Clip.SourceApp;
 
+    public string? SourceWindowTitle => Clip.SourceWindowTitle;
+
+    public bool HasSourceWindowTitle => !string.IsNullOrWhiteSpace(Clip.SourceWindowTitle);
+
+    public string? SourceUrl => Clip.SourceUrl;
+
+    public bool HasSourceUrl => !string.IsNullOrWhiteSpace(Clip.SourceUrl);
+
+    public bool IsPasted => Clip.IsPasted;
+
+    public int PasteCount => Clip.PasteCount;
+
+    public bool HasBeenPasted => Clip.PasteCount > 0;
+
+    public string PasteCountDisplay => Clip.PasteCount > 0 ? $"Pasted {Clip.PasteCount}x" : string.Empty;
+
     public Bitmap? SourceAppIconImage { get; }
 
     public bool HasSourceAppIcon => SourceAppIconImage is not null;

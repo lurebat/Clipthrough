@@ -35,7 +35,12 @@ public sealed class ClipStoreService : IClipStoreService
             c.last_copied_at,
             c.byte_size,
             c.image_width,
-            c.image_height
+            c.image_height,
+            c.source_window_title,
+            c.source_url,
+            c.is_pasted,
+            c.paste_count,
+            c.last_pasted_at
         """;
 
     private readonly SqliteConnectionFactory _connectionFactory;
@@ -181,6 +186,24 @@ public sealed class ClipStoreService : IClipStoreService
         await transaction.CommitAsync(cancellationToken);
     }
 
+    public async Task MarkPastedAsync(long clipId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE clips
+            SET is_pasted = 1,
+                paste_count = paste_count + 1,
+                last_pasted_at = $pastedAt
+            WHERE id = $id;
+            """;
+        command.Parameters.AddWithValue("$id", clipId);
+        command.Parameters.AddWithValue("$pastedAt", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     public async Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = _connectionFactory.CreateConnection();
@@ -324,6 +347,8 @@ public sealed class ClipStoreService : IClipStoreService
                             source_app = CASE WHEN $sourceApp IS NULL OR TRIM($sourceApp) = '' THEN source_app ELSE $sourceApp END,
                             source_app_path = CASE WHEN $sourceAppPath IS NULL OR TRIM($sourceAppPath) = '' THEN source_app_path ELSE $sourceAppPath END,
                             source_app_icon = CASE WHEN $sourceAppIcon IS NULL THEN source_app_icon ELSE $sourceAppIcon END,
+                            source_window_title = CASE WHEN $sourceWindowTitle IS NULL OR TRIM($sourceWindowTitle) = '' THEN source_window_title ELSE $sourceWindowTitle END,
+                            source_url = CASE WHEN $sourceUrl IS NULL OR TRIM($sourceUrl) = '' THEN source_url ELSE $sourceUrl END,
                             is_favorite = CASE WHEN is_favorite = 1 OR $isFavorite = 1 THEN 1 ELSE 0 END,
                             is_sensitive = CASE WHEN is_sensitive = 1 OR $isSensitive = 1 THEN 1 ELSE 0 END,
                             captured_at = $lastCopiedAt,
@@ -352,6 +377,8 @@ public sealed class ClipStoreService : IClipStoreService
                         source_app,
                         source_app_path,
                         source_app_icon,
+                        source_window_title,
+                        source_url,
                         hash,
                         is_favorite,
                         is_sensitive,
@@ -370,6 +397,8 @@ public sealed class ClipStoreService : IClipStoreService
                         $sourceApp,
                         $sourceAppPath,
                         $sourceAppIcon,
+                        $sourceWindowTitle,
+                        $sourceUrl,
                         $hash,
                         $isFavorite,
                         $isSensitive,
@@ -470,7 +499,9 @@ public sealed class ClipStoreService : IClipStoreService
 
         return tokens.All(token =>
             clip.Content.Contains(token, comparison) ||
-            (!string.IsNullOrWhiteSpace(clip.SourceApp) && clip.SourceApp.Contains(token, comparison)));
+            (!string.IsNullOrWhiteSpace(clip.SourceApp) && clip.SourceApp.Contains(token, comparison)) ||
+            (!string.IsNullOrWhiteSpace(clip.SourceWindowTitle) && clip.SourceWindowTitle.Contains(token, comparison)) ||
+            (!string.IsNullOrWhiteSpace(clip.SourceUrl) && clip.SourceUrl.Contains(token, comparison)));
     }
 
     private static List<string> BuildWhereClauses(ClipSearchFilters filters, bool hasSearch)
@@ -495,6 +526,11 @@ public sealed class ClipStoreService : IClipStoreService
         if (filters.SensitiveOnly)
         {
             clauses.Add("c.is_sensitive = 1");
+        }
+
+        if (filters.PastedOnly)
+        {
+            clauses.Add("c.is_pasted = 1");
         }
 
         return clauses;
@@ -553,6 +589,11 @@ public sealed class ClipStoreService : IClipStoreService
             ByteSize = reader.GetInt64(14),
             ImageWidth = reader.IsDBNull(15) ? null : reader.GetInt32(15),
             ImageHeight = reader.IsDBNull(16) ? null : reader.GetInt32(16),
+            SourceWindowTitle = reader.IsDBNull(17) ? null : reader.GetString(17),
+            SourceUrl = reader.IsDBNull(18) ? null : reader.GetString(18),
+            IsPasted = !reader.IsDBNull(19) && reader.GetInt64(19) == 1,
+            PasteCount = reader.IsDBNull(20) ? 0 : Convert.ToInt32(reader.GetInt64(20), CultureInfo.InvariantCulture),
+            LastPastedAt = ParseTimestamp(reader.IsDBNull(21) ? null : reader.GetString(21)),
         };
     }
 
@@ -803,6 +844,8 @@ public sealed class ClipStoreService : IClipStoreService
         command.Parameters.AddWithValue("$sourceApp", string.IsNullOrWhiteSpace(request.SourceApp) ? DBNull.Value : request.SourceApp);
         command.Parameters.AddWithValue("$sourceAppPath", string.IsNullOrWhiteSpace(request.SourceAppPath) ? DBNull.Value : request.SourceAppPath);
         command.Parameters.AddWithValue("$sourceAppIcon", request.SourceAppIconBytes is { Length: > 0 } iconBytes ? iconBytes : DBNull.Value);
+        command.Parameters.AddWithValue("$sourceWindowTitle", string.IsNullOrWhiteSpace(request.SourceWindowTitle) ? DBNull.Value : request.SourceWindowTitle);
+        command.Parameters.AddWithValue("$sourceUrl", string.IsNullOrWhiteSpace(request.SourceUrl) ? DBNull.Value : request.SourceUrl);
         command.Parameters.AddWithValue("$hash", hash);
         command.Parameters.AddWithValue("$isFavorite", request.IsFavorite ? 1 : 0);
         command.Parameters.AddWithValue("$isSensitive", isSensitive ? 1 : 0);

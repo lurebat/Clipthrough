@@ -14,6 +14,8 @@ public sealed class ClipSearchFilters
 
     public bool CaseSensitive { get; init; }
 
+    public bool PastedOnly { get; init; }
+
     public int Limit { get; init; } = 200;
 
     public int Offset { get; init; }
