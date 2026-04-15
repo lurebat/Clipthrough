@@ -37,5 +37,7 @@ public interface ISystemInteractionService
 
     PixelPoint? GetCaretScreenPosition();
 
+    bool IsTargetWindowElevated();
+
     void SyncStartWithWindows(bool enabled);
 }

@@ -366,6 +366,24 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         }
     }
 
+    public bool IsTargetWindowElevated()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return false;
+        }
+
+        try
+        {
+            return IsTargetWindowElevatedCore();
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceInformation($"Elevation check failed: {ex.Message}");
+            return false;
+        }
+    }
+
     public void SyncStartWithWindows(bool enabled)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -1005,6 +1023,95 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         ClientToScreen(guiInfo.hwndCaret, ref point);
 
         return new PixelPoint(point.X, point.Y);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static bool IsTargetWindowElevatedCore()
+    {
+        var foregroundWindow = GetForegroundWindow();
+        if (foregroundWindow == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        GetWindowThreadProcessId(foregroundWindow, out var processId);
+        if (processId == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById((int)processId);
+            using var processHandle = process.SafeHandle;
+            if (!OpenProcessToken(processHandle.DangerousGetHandle(), TOKEN_QUERY, out var tokenHandle))
+            {
+                return false;
+            }
+
+            try
+            {
+                var elevationResult = TOKEN_ELEVATION_TYPE.TokenElevationTypeDefault;
+                var elevationResultSize = Marshal.SizeOf(typeof(int));
+                var elevationTypePtr = Marshal.AllocHGlobal(elevationResultSize);
+                try
+                {
+                    if (GetTokenInformation(tokenHandle, TOKEN_INFORMATION_CLASS.TokenElevationType, elevationTypePtr, elevationResultSize, out _))
+                    {
+                        elevationResult = (TOKEN_ELEVATION_TYPE)Marshal.ReadInt32(elevationTypePtr);
+                    }
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(elevationTypePtr);
+                }
+
+                return elevationResult == TOKEN_ELEVATION_TYPE.TokenElevationTypeFull;
+            }
+            finally
+            {
+                CloseHandle(tokenHandle);
+            }
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+        catch (Win32Exception)
+        {
+            // Access denied likely means it is elevated
+            return true;
+        }
+    }
+
+    private const uint TOKEN_QUERY = 0x0008;
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool OpenProcessToken(IntPtr processHandle, uint desiredAccess, out IntPtr tokenHandle);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetTokenInformation(IntPtr tokenHandle, TOKEN_INFORMATION_CLASS tokenInformationClass, IntPtr tokenInformation, int tokenInformationLength, out int returnLength);
+
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr hObject);
+
+    private enum TOKEN_INFORMATION_CLASS
+    {
+        TokenElevationType = 18,
+    }
+
+    private enum TOKEN_ELEVATION_TYPE
+    {
+        TokenElevationTypeDefault = 1,
+        TokenElevationTypeFull = 2,
+        TokenElevationTypeLimited = 3,
     }
 
     [DllImport("user32.dll")]

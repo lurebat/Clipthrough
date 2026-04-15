@@ -253,6 +253,8 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
 
     public PixelPoint? GetCaretScreenPosition() => null;
 
+    public bool IsTargetWindowElevated() => false;
+
     public void SyncStartWithWindows(bool enabled)
     {
     }

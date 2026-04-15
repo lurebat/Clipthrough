@@ -1264,6 +1264,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             : AppText.FormatCopiedClip(clip.DisplayContentType.ToLower(AppText.CurrentCulture));
         PublishSensitiveCopyNotificationIfNeeded(clip);
         await _clipStoreService.MarkPastedAsync(clip.Clip.Id);
+        WarnIfTargetWindowElevated();
     }
 
     private async Task ExportSelectedAsync()
@@ -2472,6 +2473,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 }
             ]
         });
+    }
+
+    private void WarnIfTargetWindowElevated()
+    {
+        if (!_systemInteractionService.IsTargetWindowElevated())
+        {
+            return;
+        }
+
+        _notificationService.PublishWarning(
+            "Elevated Window Detected",
+            "The target window is running as administrator. Paste (Ctrl+V) may not work. Try right-clicking and selecting Paste, or run Clipthrough as administrator.");
     }
 
     private void ShowNotification(AppNotification notification)
