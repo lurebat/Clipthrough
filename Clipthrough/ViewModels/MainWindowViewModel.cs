@@ -52,6 +52,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly IAppNotificationService _notificationService;
     private readonly IClipExportService _clipExportService;
     private readonly IImageEditorService _imageEditorService;
+    private readonly ISearchHistoryService _searchHistoryService;
     private readonly DatabaseInitializer _databaseInitializer;
     private readonly CompositeDisposable _subscriptions = new();
 
@@ -113,7 +114,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _editedClipBaseline = string.Empty;
     private long? _checkedSelectionAnchorId;
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, DatabaseInitializer databaseInitializer)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, DatabaseInitializer databaseInitializer)
     {
         _clipStoreService = clipStoreService;
         _clipboardMonitorService = clipboardMonitorService;
@@ -125,6 +126,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _notificationService = notificationService;
         _clipExportService = clipExportService;
         _imageEditorService = imageEditorService;
+        _searchHistoryService = searchHistoryService;
         _databaseInitializer = databaseInitializer;
         SessionLogs = new SessionLogsViewModel(sessionLogService);
         ContentTypeOptions =
@@ -206,6 +208,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public ObservableCollection<ClipItemViewModel> Clips { get; } = [];
+
+    public ObservableCollection<string> RecentSearches { get; } = [];
 
     public ObservableCollection<ClipFileItemViewModel> SelectedClipFiles { get; } = [];
 
@@ -1148,8 +1152,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         IsBusy = true;
         try
         {
-            var result = await _clipStoreService.SearchAsync(BuildFilters(offset: 0));
+            var filters = BuildFilters(offset: 0);
+            var result = await _clipStoreService.SearchAsync(filters);
             ApplyRefreshResult(result, preferredSelectionId);
+
+            if (!string.IsNullOrWhiteSpace(filters.SearchText))
+            {
+                await _searchHistoryService.SaveSearchAsync(filters.SearchText);
+            }
         }
         finally
         {
@@ -1652,6 +1662,28 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         this.RaisePropertyChanged(nameof(ActiveFilterSummary));
         this.RaisePropertyChanged(nameof(EmptyListMessage));
+    }
+
+    public async Task LoadRecentSearchesAsync()
+    {
+        if (!_isDatabaseReady)
+        {
+            return;
+        }
+
+        try
+        {
+            var searches = await _searchHistoryService.GetRecentSearchesAsync();
+            RecentSearches.Clear();
+            foreach (var search in searches)
+            {
+                RecentSearches.Add(search);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"Failed to load search history: {ex.Message}");
+        }
     }
 
     public bool TryHandleShortcut(KeyEventArgs e)

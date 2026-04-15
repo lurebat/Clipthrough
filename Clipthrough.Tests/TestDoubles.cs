@@ -237,6 +237,27 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
     }
 }
 
+internal sealed class TestSearchHistoryService : ISearchHistoryService
+{
+    private readonly List<string> _history = [];
+
+    public Task SaveSearchAsync(string query, CancellationToken cancellationToken = default)
+    {
+        _history.Remove(query);
+        _history.Insert(0, query);
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<string>> GetRecentSearchesAsync(int limit = 20, CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<string>>(_history.GetRange(0, Math.Min(limit, _history.Count)));
+
+    public Task ClearAsync(CancellationToken cancellationToken = default)
+    {
+        _history.Clear();
+        return Task.CompletedTask;
+    }
+}
+
 internal sealed class TemporaryDatabaseScope : IDisposable
 {
     private readonly string _directoryPath;
@@ -253,6 +274,7 @@ internal sealed class TemporaryDatabaseScope : IDisposable
         SettingsService = new TestSettingsService();
         NotificationService = new TestNotificationService();
         ClipExportService = new TestClipExportService();
+        SearchHistoryService = new SearchHistoryService(ConnectionFactory);
         DatabaseInitializer = new DatabaseInitializer(ConnectionFactory, SensitivityService);
         ClipStoreService = new ClipStoreService(ConnectionFactory, SensitivityService, SettingsService, NotificationService);
     }
@@ -266,6 +288,8 @@ internal sealed class TemporaryDatabaseScope : IDisposable
     public TestNotificationService NotificationService { get; }
 
     public TestClipExportService ClipExportService { get; }
+
+    public SearchHistoryService SearchHistoryService { get; }
 
     public SqliteConnectionFactory ConnectionFactory { get; }
 

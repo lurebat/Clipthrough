@@ -304,4 +304,48 @@ public sealed class ClipStoreServiceTests
         Assert.Single(results.Items);
         Assert.Equal("cat is here", results.Items[0].Content);
     }
+
+    [Fact]
+    public async Task SearchHistory_SavesAndRetrievesQueries()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        await scope.SearchHistoryService.SaveSearchAsync("first query");
+        await scope.SearchHistoryService.SaveSearchAsync("second query");
+
+        var results = await scope.SearchHistoryService.GetRecentSearchesAsync();
+        Assert.Equal(2, results.Count);
+        Assert.Equal("second query", results[0]);
+        Assert.Equal("first query", results[1]);
+    }
+
+    [Fact]
+    public async Task SearchHistory_DeduplicatesOnSave()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        await scope.SearchHistoryService.SaveSearchAsync("test");
+        await scope.SearchHistoryService.SaveSearchAsync("other");
+        await scope.SearchHistoryService.SaveSearchAsync("test");
+
+        var results = await scope.SearchHistoryService.GetRecentSearchesAsync();
+        Assert.Equal(2, results.Count);
+        Assert.Equal("test", results[0]);
+    }
+
+    [Fact]
+    public async Task SearchHistory_ClearRemovesAll()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        await scope.SearchHistoryService.SaveSearchAsync("query1");
+        await scope.SearchHistoryService.SaveSearchAsync("query2");
+        await scope.SearchHistoryService.ClearAsync();
+
+        var results = await scope.SearchHistoryService.GetRecentSearchesAsync();
+        Assert.Empty(results);
+    }
 }

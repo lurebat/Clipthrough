@@ -93,6 +93,12 @@ public sealed class DatabaseInitializer
             rule_id INTEGER NOT NULL REFERENCES sensitivity_rules(id) ON DELETE CASCADE,
             PRIMARY KEY (clip_id, rule_id)
         );
+
+        CREATE TABLE IF NOT EXISTS search_history (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            query    TEXT NOT NULL UNIQUE,
+            used_at  TEXT NOT NULL
+        );
         """;
 
     private readonly SqliteConnectionFactory _connectionFactory;

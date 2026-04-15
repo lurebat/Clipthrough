@@ -126,6 +126,7 @@ public partial class App : Application
         services.AddSingleton<ISystemInteractionService, SystemInteractionService>();
         services.AddSingleton<DatabaseInitializer>();
         services.AddSingleton<IClipExportService, ClipExportService>();
+        services.AddSingleton<ISearchHistoryService, SearchHistoryService>();
         services.AddSingleton<IImageEditorService, ShareXImageEditorService>();
         services.AddSingleton<IClipStoreService, ClipStoreService>();
         services.AddSingleton<IClipSampleDataService, ClipSampleDataService>();

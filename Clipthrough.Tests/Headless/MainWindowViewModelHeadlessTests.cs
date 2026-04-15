@@ -443,6 +443,7 @@ public sealed class MainWindowViewModelHeadlessTests
             sessionLogService,
             scope.ClipExportService,
             imageEditorService ?? new TestImageEditorService(),
+            scope.SearchHistoryService,
             scope.DatabaseInitializer);
     }
 
