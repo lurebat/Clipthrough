@@ -34,6 +34,18 @@ public sealed record AppSettings
 
     public string ToggleCaseSensitiveHotkey { get; init; } = "Alt+C";
 
+    public bool EnableToggleWildcardHotkey { get; init; } = true;
+
+    public string ToggleWildcardHotkey { get; init; } = "Alt+W";
+
+    public bool EnableToggleWholeWordHotkey { get; init; } = true;
+
+    public string ToggleWholeWordHotkey { get; init; } = "Alt+H";
+
+    public bool EnableTogglePastedHotkey { get; init; } = true;
+
+    public string TogglePastedHotkey { get; init; } = "Alt+P";
+
     public bool EnableToggleWindowHotkey { get; init; } = true;
 
     public string ToggleWindowHotkey { get; init; } = "Alt+V";
@@ -76,6 +88,12 @@ public sealed record AppSettings
         ToggleSensitiveHotkey = NormalizeHotkey(ToggleSensitiveHotkey, Default.ToggleSensitiveHotkey),
         EnableToggleCaseSensitiveHotkey = EnableToggleCaseSensitiveHotkey,
         ToggleCaseSensitiveHotkey = NormalizeHotkey(ToggleCaseSensitiveHotkey, Default.ToggleCaseSensitiveHotkey),
+        EnableToggleWildcardHotkey = EnableToggleWildcardHotkey,
+        ToggleWildcardHotkey = NormalizeHotkey(ToggleWildcardHotkey, Default.ToggleWildcardHotkey),
+        EnableToggleWholeWordHotkey = EnableToggleWholeWordHotkey,
+        ToggleWholeWordHotkey = NormalizeHotkey(ToggleWholeWordHotkey, Default.ToggleWholeWordHotkey),
+        EnableTogglePastedHotkey = EnableTogglePastedHotkey,
+        TogglePastedHotkey = NormalizeHotkey(TogglePastedHotkey, Default.TogglePastedHotkey),
         EnableToggleWindowHotkey = EnableToggleWindowHotkey,
         ToggleWindowHotkey = NormalizeHotkey(ToggleWindowHotkey, Default.ToggleWindowHotkey),
         MaxClipSizeBytes = MaxClipSizeBytes < MinMaxClipSizeBytes || MaxClipSizeBytes > MaxMaxClipSizeBytes

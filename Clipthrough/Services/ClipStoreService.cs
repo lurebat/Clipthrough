@@ -85,7 +85,7 @@ public sealed class ClipStoreService : IClipStoreService
         await connection.OpenAsync(cancellationToken);
 
         var hasSearch = !string.IsNullOrWhiteSpace(filters.SearchText);
-        if (hasSearch && (filters.UseRegex || filters.CaseSensitive))
+        if (hasSearch && (filters.UseRegex || filters.CaseSensitive || filters.UseWildcard || filters.WholeWord))
         {
             return await SearchInMemoryAsync(connection, filters, cancellationToken);
         }
@@ -493,6 +493,18 @@ public sealed class ClipStoreService : IClipStoreService
             return IsRegexMatch(clip, regex);
         }
 
+        if (filters.UseWildcard)
+        {
+            var wildcardRegex = BuildWildcardRegex(filters.SearchText, filters.CaseSensitive, filters.WholeWord);
+            return IsRegexMatch(clip, wildcardRegex);
+        }
+
+        if (filters.WholeWord)
+        {
+            var wholeWordRegex = BuildWholeWordRegex(filters.SearchText, filters.CaseSensitive);
+            return IsRegexMatch(clip, wholeWordRegex);
+        }
+
         var comparison = filters.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
         var tokens = filters.SearchText
             .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -502,6 +514,39 @@ public sealed class ClipStoreService : IClipStoreService
             (!string.IsNullOrWhiteSpace(clip.SourceApp) && clip.SourceApp.Contains(token, comparison)) ||
             (!string.IsNullOrWhiteSpace(clip.SourceWindowTitle) && clip.SourceWindowTitle.Contains(token, comparison)) ||
             (!string.IsNullOrWhiteSpace(clip.SourceUrl) && clip.SourceUrl.Contains(token, comparison)));
+    }
+
+    private static Regex BuildWildcardRegex(string pattern, bool caseSensitive, bool wholeWord)
+    {
+        var escaped = Regex.Escape(pattern)
+            .Replace("\\*", ".*", StringComparison.Ordinal)
+            .Replace("\\?", ".", StringComparison.Ordinal);
+        if (wholeWord)
+        {
+            escaped = $@"\b{escaped}\b";
+        }
+
+        var options = RegexOptions.Singleline | RegexOptions.NonBacktracking;
+        if (!caseSensitive)
+        {
+            options |= RegexOptions.IgnoreCase;
+        }
+
+        return new Regex(escaped, options);
+    }
+
+    private static Regex BuildWholeWordRegex(string searchText, bool caseSensitive)
+    {
+        var tokens = searchText
+            .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var pattern = string.Join("|", tokens.Select(static t => $@"\b{Regex.Escape(t)}\b"));
+        var options = RegexOptions.Singleline | RegexOptions.NonBacktracking;
+        if (!caseSensitive)
+        {
+            options |= RegexOptions.IgnoreCase;
+        }
+
+        return new Regex(pattern, options);
     }
 
     private static List<string> BuildWhereClauses(ClipSearchFilters filters, bool hasSearch)

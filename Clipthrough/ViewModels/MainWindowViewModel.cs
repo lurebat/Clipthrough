@@ -61,6 +61,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _showSensitiveOnly;
     private bool _useRegexSearch;
     private bool _caseSensitiveSearch;
+    private bool _useWildcardSearch;
+    private bool _wholeWordSearch;
+    private bool _showPastedOnly;
     private ClipItemViewModel? _selectedClip;
     private ClipFileItemViewModel? _selectedFileItem;
     private bool _hasMoreResults;
@@ -156,16 +159,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _settingsService.SettingsChanged += OnSettingsChanged;
 
         _subscriptions.Add(
-            this.WhenAnyValue(
-                    x => x.SearchText,
-                    x => x.SelectedContentTypeOption,
-                    x => x.ShowFavoritesOnly,
-                    x => x.ShowSensitiveOnly,
-                    x => x.UseRegexSearch,
-                    x => x.CaseSensitiveSearch)
+            Observable.Merge(
+                this.WhenAnyValue(
+                        x => x.SearchText,
+                        x => x.SelectedContentTypeOption,
+                        x => x.ShowFavoritesOnly,
+                        x => x.ShowSensitiveOnly,
+                        x => x.UseRegexSearch,
+                        x => x.CaseSensitiveSearch)
+                    .Select(static _ => Unit.Default),
+                this.WhenAnyValue(
+                        x => x.UseWildcardSearch,
+                        x => x.WholeWordSearch,
+                        x => x.ShowPastedOnly)
+                    .Select(static _ => Unit.Default))
                 .Skip(1)
                 .Throttle(TimeSpan.FromMilliseconds(300), RxApp.MainThreadScheduler)
-                .Select(static _ => Unit.Default)
                 .InvokeCommand(RefreshCommand));
 
         _subscriptions.Add(
@@ -300,6 +309,36 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set
         {
             this.RaiseAndSetIfChanged(ref _caseSensitiveSearch, value);
+            RaiseFilterStateProperties();
+        }
+    }
+
+    public bool UseWildcardSearch
+    {
+        get => _useWildcardSearch;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _useWildcardSearch, value);
+            RaiseFilterStateProperties();
+        }
+    }
+
+    public bool WholeWordSearch
+    {
+        get => _wholeWordSearch;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _wholeWordSearch, value);
+            RaiseFilterStateProperties();
+        }
+    }
+
+    public bool ShowPastedOnly
+    {
+        get => _showPastedOnly;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _showPastedOnly, value);
             RaiseFilterStateProperties();
         }
     }
@@ -806,6 +845,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (CaseSensitiveSearch)
             {
                 parts.Add(AppText.FilterCaseSensitive);
+            }
+
+            if (UseWildcardSearch)
+            {
+                parts.Add("Wildcard");
+            }
+
+            if (WholeWordSearch)
+            {
+                parts.Add("Whole Word");
+            }
+
+            if (ShowPastedOnly)
+            {
+                parts.Add("Pasted");
             }
 
             if (!string.IsNullOrWhiteSpace(SearchText))
@@ -1422,8 +1476,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ContentType = SelectedContentTypeOption.Value,
         FavoritesOnly = ShowFavoritesOnly,
         SensitiveOnly = ShowSensitiveOnly,
+        PastedOnly = ShowPastedOnly,
         UseRegex = UseRegexSearch,
         CaseSensitive = CaseSensitiveSearch,
+        UseWildcard = UseWildcardSearch,
+        WholeWord = WholeWordSearch,
         Limit = PageSize,
         Offset = offset,
     };
@@ -1607,7 +1664,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return TryHandleShortcut(e, _settingsService.Current.EnableToggleRegexHotkey, _settingsService.Current.ToggleRegexHotkey, () => UseRegexSearch = !UseRegexSearch)
             || TryHandleShortcut(e, _settingsService.Current.EnableToggleFavoritesHotkey, _settingsService.Current.ToggleFavoritesHotkey, () => ShowFavoritesOnly = !ShowFavoritesOnly)
             || TryHandleShortcut(e, _settingsService.Current.EnableToggleSensitiveHotkey, _settingsService.Current.ToggleSensitiveHotkey, () => ShowSensitiveOnly = !ShowSensitiveOnly)
-            || TryHandleShortcut(e, _settingsService.Current.EnableToggleCaseSensitiveHotkey, _settingsService.Current.ToggleCaseSensitiveHotkey, () => CaseSensitiveSearch = !CaseSensitiveSearch);
+            || TryHandleShortcut(e, _settingsService.Current.EnableToggleCaseSensitiveHotkey, _settingsService.Current.ToggleCaseSensitiveHotkey, () => CaseSensitiveSearch = !CaseSensitiveSearch)
+            || TryHandleShortcut(e, _settingsService.Current.EnableToggleWildcardHotkey, _settingsService.Current.ToggleWildcardHotkey, () => UseWildcardSearch = !UseWildcardSearch)
+            || TryHandleShortcut(e, _settingsService.Current.EnableToggleWholeWordHotkey, _settingsService.Current.ToggleWholeWordHotkey, () => WholeWordSearch = !WholeWordSearch)
+            || TryHandleShortcut(e, _settingsService.Current.EnableTogglePastedHotkey, _settingsService.Current.TogglePastedHotkey, () => ShowPastedOnly = !ShowPastedOnly);
     }
 
     private bool TryHandleShortcut(KeyEventArgs e, bool isEnabled, string hotkeyText, Action action)

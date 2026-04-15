@@ -14,6 +14,10 @@ public sealed class ClipSearchFilters
 
     public bool CaseSensitive { get; init; }
 
+    public bool UseWildcard { get; init; }
+
+    public bool WholeWord { get; init; }
+
     public bool PastedOnly { get; init; }
 
     public int Limit { get; init; } = 200;

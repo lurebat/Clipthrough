@@ -242,4 +242,66 @@ public sealed class ClipStoreServiceTests
         var results = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters { SearchText = "UniqueWindowTitle" });
         Assert.Single(results.Items);
     }
+
+    [Fact]
+    public async Task SearchAsync_WildcardMatchesPartialContent()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "hello world",
+            ContentBytes = Encoding.UTF8.GetBytes("hello world"),
+        });
+        await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "goodbye world",
+            ContentBytes = Encoding.UTF8.GetBytes("goodbye world"),
+        });
+
+        var results = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters
+        {
+            SearchText = "hel*",
+            UseWildcard = true,
+        });
+        Assert.Single(results.Items);
+        Assert.Equal("hello world", results.Items[0].Content);
+    }
+
+    [Fact]
+    public async Task SearchAsync_WholeWordExcludesPartialMatches()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "cat is here",
+            ContentBytes = Encoding.UTF8.GetBytes("cat is here"),
+        });
+        await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "category of items",
+            ContentBytes = Encoding.UTF8.GetBytes("category of items"),
+        });
+
+        var results = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters
+        {
+            SearchText = "cat",
+            WholeWord = true,
+        });
+        Assert.Single(results.Items);
+        Assert.Equal("cat is here", results.Items[0].Content);
+    }
 }
