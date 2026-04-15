@@ -12,6 +12,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media.Imaging;
@@ -313,6 +314,24 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         }
 
         _namedHotKeys.Clear();
+    }
+
+    public PixelPoint? GetCaretScreenPosition()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return null;
+        }
+
+        try
+        {
+            return GetCaretScreenPositionCore();
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceInformation($"Caret position detection failed: {ex.Message}");
+            return null;
+        }
     }
 
     public void SyncStartWithWindows(bool enabled)
@@ -916,6 +935,92 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
                 : SetWindowLong32(hWnd, nIndex, newProc.ToInt32());
 
         private delegate nint WndProc(nint hWnd, uint msg, nint wParam, nint lParam);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static PixelPoint? GetCaretScreenPositionCore()
+    {
+        var foregroundWindow = GetForegroundWindow();
+        if (foregroundWindow == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        var threadId = GetWindowThreadProcessId(foregroundWindow, out _);
+        if (threadId == 0)
+        {
+            return null;
+        }
+
+        var guiInfo = new GUITHREADINFO { cbSize = (uint)Marshal.SizeOf<GUITHREADINFO>() };
+        if (!GetGUIThreadInfo(threadId, ref guiInfo))
+        {
+            return null;
+        }
+
+        if (guiInfo.hwndCaret == IntPtr.Zero)
+        {
+            // No caret — fall back to foreground window position
+            if (GetWindowRect(foregroundWindow, out var windowRect))
+            {
+                return new PixelPoint(windowRect.Left + 50, windowRect.Top + 50);
+            }
+
+            return null;
+        }
+
+        var point = new POINT { X = guiInfo.rcCaret.Left, Y = guiInfo.rcCaret.Bottom };
+        ClientToScreen(guiInfo.hwndCaret, ref point);
+
+        return new PixelPoint(point.X, point.Y);
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO lpgui);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct GUITHREADINFO
+    {
+        public uint cbSize;
+        public uint flags;
+        public IntPtr hwndActive;
+        public IntPtr hwndFocus;
+        public IntPtr hwndCapture;
+        public IntPtr hwndMenuOwner;
+        public IntPtr hwndMoveSize;
+        public IntPtr hwndCaret;
+        public RECT rcCaret;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
     }
 
     private sealed class WindowsGlobalHotKeyRegistration : IDisposable

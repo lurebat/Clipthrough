@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Threading.Tasks;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media.Imaging;
 using Clipthrough.Models;
@@ -29,6 +30,8 @@ public interface ISystemInteractionService
     void UnregisterGlobalHotKey(string name);
 
     void UnregisterAllGlobalHotKeys();
+
+    PixelPoint? GetCaretScreenPosition();
 
     void SyncStartWithWindows(bool enabled);
 }

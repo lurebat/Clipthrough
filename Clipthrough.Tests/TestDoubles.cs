@@ -5,6 +5,7 @@ using System.Reactive.Subjects;
 using System.Reactive.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media.Imaging;
 using Clipthrough.Database;
@@ -241,6 +242,8 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
     public void UnregisterAllGlobalHotKeys()
     {
     }
+
+    public PixelPoint? GetCaretScreenPosition() => null;
 
     public void SyncStartWithWindows(bool enabled)
     {

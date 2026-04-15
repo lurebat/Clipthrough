@@ -307,7 +307,7 @@ public partial class App : Application
         }
     }
 
-    private static void ToggleMainWindowVisibility(Window window)
+    private void ToggleMainWindowVisibility(Window window)
     {
         Dispatcher.UIThread.Post(() =>
         {
@@ -317,6 +317,8 @@ public partial class App : Application
                 return;
             }
 
+            PositionWindowNearCaret(window);
+
             if (!window.IsVisible)
             {
                 window.Show();
@@ -324,6 +326,47 @@ public partial class App : Application
 
             RestoreAndActivateWindow(window);
         });
+    }
+
+    private void PositionWindowNearCaret(Window window)
+    {
+        var caretPosition = _systemInteractionService?.GetCaretScreenPosition();
+        if (caretPosition is not { } caret)
+        {
+            return;
+        }
+
+        var screen = window.Screens.ScreenFromPoint(caret);
+        if (screen is null)
+        {
+            return;
+        }
+
+        var bounds = screen.WorkingArea;
+        var windowWidth = (int)window.Width;
+        var windowHeight = (int)window.Height;
+        if (windowWidth <= 0)
+        {
+            windowWidth = 800;
+        }
+
+        if (windowHeight <= 0)
+        {
+            windowHeight = 600;
+        }
+
+        // Position below and to the right of the caret, clamped to screen bounds
+        var x = Math.Min(caret.X, bounds.Right - windowWidth);
+        var y = caret.Y + 20;
+        if (y + windowHeight > bounds.Bottom)
+        {
+            y = caret.Y - windowHeight - 10;
+        }
+
+        x = Math.Max(bounds.X, x);
+        y = Math.Max(bounds.Y, y);
+
+        window.Position = new PixelPoint(x, y);
     }
 
     private void HideMainWindowToTray()
