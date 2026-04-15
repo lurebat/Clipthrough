@@ -1240,7 +1240,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             await _systemInteractionService.CopyBitmapAsync(bitmap);
             StatusText = AppText.CopiedImageStatus;
             PublishSensitiveCopyNotificationIfNeeded(clip);
-            await _clipStoreService.MarkPastedAsync(clip.Clip.Id);
+            TrackPasteInBackground(clip.Clip.Id);
             return;
         }
 
@@ -1249,7 +1249,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             await _systemInteractionService.CopyRichContentAsync(clip.FullContent, SelectedClipRenderedText, clip.Clip.ContentFormat);
             StatusText = AppText.FormatCopiedClip(clip.DisplayContentType.ToLower(AppText.CurrentCulture));
             PublishSensitiveCopyNotificationIfNeeded(clip);
-            await _clipStoreService.MarkPastedAsync(clip.Clip.Id);
+            TrackPasteInBackground(clip.Clip.Id);
             return;
         }
 
@@ -1263,8 +1263,28 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ? AppText.FormatCopiedFileList(SelectedClipFiles.Count)
             : AppText.FormatCopiedClip(clip.DisplayContentType.ToLower(AppText.CurrentCulture));
         PublishSensitiveCopyNotificationIfNeeded(clip);
-        await _clipStoreService.MarkPastedAsync(clip.Clip.Id);
-        WarnIfTargetWindowElevated();
+        TrackPasteInBackground(clip.Clip.Id);
+    }
+
+    private async void TrackPasteInBackground(long clipId)
+    {
+        try
+        {
+            await _clipStoreService.MarkPastedAsync(clipId);
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Failed to track paste for clip {clipId}: {ex.Message}");
+        }
+
+        try
+        {
+            WarnIfTargetWindowElevated();
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Elevation check failed: {ex.Message}");
+        }
     }
 
     private async Task ExportSelectedAsync()

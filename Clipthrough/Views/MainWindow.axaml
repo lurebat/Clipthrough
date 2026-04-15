@@ -1052,6 +1052,9 @@
                         <Button Classes="secondary compact"
                                 Command="{Binding SessionLogs.CloseCommand}"
                                 Content="{Binding SessionLogs.CloseButtonLabel}" />
+                        <Button Classes="secondary compact"
+                                Content="📋 Copy All"
+                                Click="OnCopyAllLogsClick" />
                     </StackPanel>
 
                     <Border Grid.Row="3"
@@ -1067,44 +1070,35 @@
                             <ListBox x:Name="SessionLogsListBox"
                                      ItemsSource="{Binding SessionLogs.VisibleSessionLogs}"
                                      IsVisible="{Binding SessionLogs.HasLogs}"
-                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                     ScrollViewer.HorizontalScrollBarVisibility="Auto">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate x:DataType="vm:SessionLogEntryViewModel">
-                                        <Border Background="{Binding LevelBackground}"
-                                                BorderBrush="{Binding LevelBorderBrush}"
-                                                BorderThickness="1"
-                                                CornerRadius="8"
-                                                Margin="0,0,0,8"
-                                                Padding="12">
-                                            <StackPanel Spacing="8"
-                                                        HorizontalAlignment="Center"
-                                                        MaxWidth="920">
-                                                <Grid ColumnDefinitions="Auto,Auto,*"
-                                                      HorizontalAlignment="Center"
-                                                      ColumnSpacing="10">
-                                                    <Border Background="{Binding LevelBackground}"
-                                                            BorderBrush="{Binding LevelBorderBrush}"
-                                                            BorderThickness="1"
-                                                            CornerRadius="999"
-                                                            Padding="8,2">
-                                                        <TextBlock Text="{Binding LevelText}" />
-                                                    </Border>
-                                                    <TextBlock Grid.Column="1"
-                                                               Classes="body-muted"
-                                                               VerticalAlignment="Center"
-                                                               Text="{Binding TimestampText}" />
-                                                </Grid>
-                                                <StackPanel Spacing="6">
-                                                    <SelectableTextBlock Text="{Binding DisplayMessage}"
-                                                               TextAlignment="Center"
-                                                               TextWrapping="Wrap" />
-                                                    <TextBlock Classes="body-muted"
-                                                               HorizontalAlignment="Center"
-                                                               IsVisible="{Binding CanExpand}"
-                                                               Text="Double-click to expand" />
-                                                </StackPanel>
-                                            </StackPanel>
-                                        </Border>
+                                        <Grid ColumnDefinitions="80,70,*"
+                                              ColumnSpacing="8"
+                                              Margin="4,2">
+                                            <TextBlock Grid.Column="0"
+                                                       Classes="body-muted"
+                                                       VerticalAlignment="Top"
+                                                       Text="{Binding TimestampText}"
+                                                       FontFamily="Cascadia Mono,Consolas,Courier New,monospace"
+                                                       FontSize="12" />
+                                            <Border Grid.Column="1"
+                                                    Background="{Binding LevelBackground}"
+                                                    BorderBrush="{Binding LevelBorderBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="4"
+                                                    Padding="6,1"
+                                                    VerticalAlignment="Top"
+                                                    HorizontalAlignment="Left">
+                                                <TextBlock Text="{Binding LevelText}"
+                                                           FontSize="11" />
+                                            </Border>
+                                            <SelectableTextBlock Grid.Column="2"
+                                                       VerticalAlignment="Top"
+                                                       Text="{Binding DisplayMessage}"
+                                                       TextWrapping="Wrap"
+                                                       FontSize="12" />
+                                        </Grid>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
                             </ListBox>

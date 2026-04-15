@@ -25,6 +25,8 @@ public sealed class SessionLogEntryViewModel : ViewModelBase
 
     public string TimestampText => Entry.Timestamp.ToLocalTime().ToString("HH:mm:ss", AppText.CurrentCulture);
 
+    public string DateText => Entry.Timestamp.ToLocalTime().ToString("yyyy-MM-dd", AppText.CurrentCulture);
+
     public string LevelText => AppText.GetLogLevelLabel(Entry.Level);
 
     public string Message => Entry.Message;

@@ -318,7 +318,7 @@ public partial class MainWindow : Window
 
     private void MinimizeWindow()
     {
-        WindowState = WindowState.Minimized;
+        Dispatcher.UIThread.Post(() => WindowState = WindowState.Minimized);
     }
 
     private async void OnSearchBoxGotFocus(object? sender, GotFocusEventArgs e)
@@ -326,6 +326,21 @@ public partial class MainWindow : Window
         if (DataContext is MainWindowViewModel viewModel)
         {
             await viewModel.LoadRecentSearchesAsync();
+        }
+    }
+
+    private async void OnCopyAllLogsClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        var text = viewModel.SessionLogs.AllLogsAsText;
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is not null && !string.IsNullOrWhiteSpace(text))
+        {
+            await clipboard.SetTextAsync(text);
         }
     }
 
