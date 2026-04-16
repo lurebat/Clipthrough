@@ -24,7 +24,11 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     private static readonly IBrush s_frequencyMediumBrush = new SolidColorBrush(Color.Parse("#1A22C55E"));
     private static readonly IBrush s_frequencyHighBrush = new SolidColorBrush(Color.Parse("#1AF59E0B"));
 
+    private static readonly IBrush s_shortcutIndexForeground = new SolidColorBrush(Color.Parse("#E2E8F0"));
+    private static readonly IBrush s_normalIndexForeground = new SolidColorBrush(Color.Parse("#475569"));
+
     private bool _isChecked;
+    private int _displayIndex;
 
     public ClipItemViewModel(
         ClipEntry clip,
@@ -87,6 +91,30 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         get => _isChecked;
         set => this.RaiseAndSetIfChanged(ref _isChecked, value);
     }
+
+    public int DisplayIndex
+    {
+        get => _displayIndex;
+        set
+        {
+            if (_displayIndex == value)
+            {
+                return;
+            }
+
+            _displayIndex = value;
+            this.RaisePropertyChanged(nameof(DisplayIndex));
+            this.RaisePropertyChanged(nameof(DisplayIndexText));
+            this.RaisePropertyChanged(nameof(IsShortcutIndexed));
+            this.RaisePropertyChanged(nameof(DisplayIndexForeground));
+        }
+    }
+
+    public string DisplayIndexText => _displayIndex.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    public bool IsShortcutIndexed => _displayIndex >= 1 && _displayIndex <= 9;
+
+    public IBrush DisplayIndexForeground => IsShortcutIndexed ? s_shortcutIndexForeground : s_normalIndexForeground;
 
     public string Title => ClipDisplayFormatter.BuildTitle(Clip);
 

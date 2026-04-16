@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -33,6 +32,38 @@ public sealed class StorageOptionsService : IStorageOptionsService
     public bool HasSavedConfig => File.Exists(_configPath);
 
     public bool DatabaseExists => File.Exists(Current.DatabasePath);
+
+    /// <summary>
+    /// Returns true when the database file at <paramref name="dbPath"/> is encrypted
+    /// and requires a password to open.
+    /// </summary>
+    public static bool RequiresPassword(string dbPath)
+    {
+        if (!File.Exists(dbPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var builder = new SqliteConnectionStringBuilder
+            {
+                DataSource = dbPath,
+                Mode = SqliteOpenMode.ReadOnly,
+            };
+
+            using var connection = new SqliteConnection(builder.ToString());
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT count(*) FROM sqlite_master;";
+            command.ExecuteScalar();
+            return false;
+        }
+        catch (SqliteException)
+        {
+            return true;
+        }
+    }
 
     public async Task SaveAsync(StorageOptions options, CancellationToken cancellationToken = default)
     {
@@ -117,6 +148,15 @@ public sealed class StorageOptionsService : IStorageOptionsService
         return new SqliteConnection(builder.ToString());
     }
 
+    public void SetInMemoryPassword(string password)
+    {
+        Current = new StorageOptions
+        {
+            DatabasePath = Current.DatabasePath,
+            DatabasePassword = password,
+        }.Normalize();
+    }
+
     private StorageOptions LoadFromDisk()
     {
         try
@@ -136,10 +176,10 @@ public sealed class StorageOptionsService : IStorageOptionsService
             return new StorageOptions
             {
                 DatabasePath = stored.DatabasePath ?? StorageOptions.GetDefaultDatabasePath(),
-                DatabasePassword = UnprotectPassword(stored.ProtectedDatabasePassword),
+                DatabasePassword = string.Empty,
             }.Normalize();
         }
-        catch (Exception ex) when (ex is IOException or JsonException or CryptographicException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
             Trace.TraceWarning($"Storage settings load failed: {ex.Message}");
             return StorageOptions.Default.Normalize();
@@ -154,32 +194,9 @@ public sealed class StorageOptionsService : IStorageOptionsService
         var document = new StorageOptionsDocument
         {
             DatabasePath = options.DatabasePath,
-            ProtectedDatabasePassword = ProtectPassword(options.DatabasePassword),
         };
 
         await File.WriteAllTextAsync(_configPath, JsonSerializer.Serialize(document, JsonOptions), cancellationToken);
-    }
-
-    private string ProtectPassword(string password)
-    {
-        if (string.IsNullOrEmpty(password))
-        {
-            return string.Empty;
-        }
-
-        var bytes = System.Text.Encoding.UTF8.GetBytes(password);
-        return Convert.ToBase64String(_dataProtection.Protect(bytes));
-    }
-
-    private string UnprotectPassword(string? protectedPassword)
-    {
-        if (string.IsNullOrWhiteSpace(protectedPassword))
-        {
-            return string.Empty;
-        }
-
-        var bytes = Convert.FromBase64String(protectedPassword);
-        return System.Text.Encoding.UTF8.GetString(_dataProtection.Unprotect(bytes));
     }
 
     private static string EscapeSqlLiteral(string value) => value.Replace("'", "''", StringComparison.Ordinal);
@@ -187,7 +204,5 @@ public sealed class StorageOptionsService : IStorageOptionsService
     private sealed class StorageOptionsDocument
     {
         public string? DatabasePath { get; init; }
-
-        public string? ProtectedDatabasePassword { get; init; }
     }
 }

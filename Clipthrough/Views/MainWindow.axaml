@@ -17,10 +17,9 @@
         MinHeight="700">
 
     <Grid>
-        <Grid IsVisible="{Binding IsMainWorkspaceVisible}"
-              RowDefinitions="Auto,*,Auto"
-              RowSpacing="10"
-              Margin="10">
+        <Grid RowDefinitions="Auto,*,Auto"
+              RowSpacing="6"
+              Margin="8">
         <Border Grid.Row="0"
                 Classes="hero-toolbar"
                 Padding="12,10">
@@ -150,13 +149,21 @@
                                                           Command="{Binding DeleteCommand}" />
                                             </ContextMenu>
                                         </Border.ContextMenu>
-                                        <Grid ColumnDefinitions="Auto,Auto,*,Auto"
+                                        <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto"
                                               ColumnSpacing="10">
                                             <CheckBox Grid.Column="0"
                                                       VerticalAlignment="Center"
                                                       IsChecked="{Binding IsChecked, Mode=TwoWay}" />
 
-                                            <Border Grid.Column="1"
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding DisplayIndexText}"
+                                                       Foreground="{Binding DisplayIndexForeground}"
+                                                       VerticalAlignment="Center"
+                                                       FontSize="11"
+                                                       Width="18"
+                                                       TextAlignment="Center" />
+
+                                            <Border Grid.Column="2"
                                                     Classes="clip-row-icon"
                                                     VerticalAlignment="Center">
                                                 <Grid>
@@ -172,7 +179,7 @@
                                                 </Grid>
                                             </Border>
 
-                                            <StackPanel Grid.Column="2"
+                                            <StackPanel Grid.Column="3"
                                                         VerticalAlignment="Center"
                                                         Spacing="2">
                                                 <Image Source="{Binding PreviewThumbnailImage}"
@@ -200,7 +207,7 @@
                                                 </StackPanel>
                                             </StackPanel>
 
-                                            <StackPanel Grid.Column="3"
+                                            <StackPanel Grid.Column="4"
                                                         Orientation="Horizontal"
                                                         Spacing="8"
                                                         VerticalAlignment="Center">
@@ -1344,6 +1351,65 @@
                             Classes="primary"
                             Command="{Binding SaveSettingsCommand}"
                             Content="{Binding WelcomeSaveButtonLabel}" />
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- Password Prompt Panel -->
+        <Border IsVisible="{Binding IsPasswordPromptOpen}"
+                Margin="10"
+                Classes="hero-surface"
+                Padding="28">
+            <Grid RowDefinitions="Auto,*,Auto"
+                  RowSpacing="18"
+                  MaxWidth="480"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center">
+                <StackPanel Spacing="8">
+                    <TextBlock Classes="eyebrow"
+                               Text="{Binding WindowTitle}" />
+                    <TextBlock Classes="hero-title"
+                               Text="Enter Database Password" />
+                    <TextBlock Classes="body-muted"
+                               Text="Your clipboard database is encrypted. Enter the password to unlock it."
+                               TextWrapping="Wrap" />
+                </StackPanel>
+
+                <StackPanel Grid.Row="1"
+                            Spacing="14"
+                            VerticalAlignment="Center">
+                    <Border Classes="surface-panel"
+                            Padding="18">
+                        <StackPanel Spacing="12">
+                            <StackPanel Spacing="6">
+                                <TextBlock Classes="detail-label"
+                                           Text="Password" />
+                                <TextBox Text="{Binding PasswordPromptInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         PasswordChar="*"
+                                         RevealPassword="{Binding IsPasswordPromptPasswordVisible}"
+                                         Watermark="Enter your database password" />
+                                <CheckBox Content="Show password"
+                                          IsChecked="{Binding IsPasswordPromptPasswordVisible}" />
+                            </StackPanel>
+
+                            <TextBlock Text="{Binding PasswordPromptError}"
+                                       IsVisible="{Binding PasswordPromptError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                       Foreground="{DynamicResource DangerBrush}"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <Grid Grid.Row="2"
+                      ColumnDefinitions="Auto,*,Auto"
+                      ColumnSpacing="12">
+                    <Button Classes="secondary"
+                            Command="{Binding ExitApplicationCommand}"
+                            Content="Exit" />
+                    <Button Grid.Column="2"
+                            Classes="primary"
+                            Command="{Binding UnlockDatabaseCommand}"
+                            Content="Unlock" />
                 </Grid>
             </Grid>
         </Border>

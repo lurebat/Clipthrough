@@ -13,4 +13,10 @@ public interface IStorageOptionsService
     bool DatabaseExists { get; }
 
     Task SaveAsync(StorageOptions options, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sets the database password in memory only, without persisting or triggering rekey.
+    /// Used after validating the password at unlock time.
+    /// </summary>
+    void SetInMemoryPassword(string password);
 }

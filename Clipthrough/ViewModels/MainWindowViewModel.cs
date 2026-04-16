@@ -10,6 +10,7 @@ using System.Reactive;
 using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
@@ -55,6 +56,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly ISearchHistoryService _searchHistoryService;
     private readonly DatabaseInitializer _databaseInitializer;
     private readonly CompositeDisposable _subscriptions = new();
+    private readonly Dictionary<long, (ClipEntry Clip, CancellationTokenSource Cts)> _pendingDeletes = new();
 
     private string _searchText = string.Empty;
     private ContentTypeOption _selectedContentTypeOption = new(null);
@@ -84,6 +86,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isStarted;
     private bool _isSettingsOpen;
     private bool _isWelcomeOpen;
+    private bool _isPasswordPromptOpen;
+    private string _passwordPromptInput = string.Empty;
+    private string _passwordPromptError = string.Empty;
+    private bool _isPasswordPromptPasswordVisible;
     private bool _isDatabasePasswordVisible;
     private string _settingsToggleRegexHotkey = AppSettings.Default.ToggleRegexHotkey;
     private bool _settingsEnableToggleRegexHotkey = AppSettings.Default.EnableToggleRegexHotkey;
@@ -171,6 +177,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
         SaveSettingsCommand = ReactiveCommand.CreateFromTask(SaveSettingsAsync);
         BrowseDatabasePathCommand = ReactiveCommand.CreateFromTask<Window?>(BrowseDatabasePathAsync);
+        UnlockDatabaseCommand = ReactiveCommand.CreateFromTask(UnlockDatabaseAsync);
+        ExitApplicationCommand = ReactiveCommand.Create(ExitApplication);
 
         _settingsService.SettingsChanged += OnSettingsChanged;
 
@@ -219,6 +227,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .Merge(CopyEditedClipCommand.ThrownExceptions)
                 .Merge(SaveSettingsCommand.ThrownExceptions)
                 .Merge(BrowseDatabasePathCommand.ThrownExceptions)
+                .Merge(UnlockDatabaseCommand.ThrownExceptions)
                 .ObserveOn(RxApp.MainThreadScheduler)
                 .Subscribe(ex => StatusText = AppText.FormatErrorStatus(ex.Message)));
     }
@@ -276,6 +285,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> SaveSettingsCommand { get; }
 
     public ReactiveCommand<Window?, Unit> BrowseDatabasePathCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> UnlockDatabaseCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> ExitApplicationCommand { get; }
 
     public string SearchText
     {
@@ -937,7 +950,39 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public bool IsMainWorkspaceVisible => !IsWelcomeOpen;
+    public bool IsMainWorkspaceVisible => !IsWelcomeOpen && !IsPasswordPromptOpen;
+
+    public bool IsPasswordPromptOpen
+    {
+        get => _isPasswordPromptOpen;
+        private set
+        {
+            if (!this.RaiseAndSetIfChanged(ref _isPasswordPromptOpen, value))
+            {
+                return;
+            }
+
+            this.RaisePropertyChanged(nameof(IsMainWorkspaceVisible));
+        }
+    }
+
+    public string PasswordPromptInput
+    {
+        get => _passwordPromptInput;
+        set => this.RaiseAndSetIfChanged(ref _passwordPromptInput, value);
+    }
+
+    public string PasswordPromptError
+    {
+        get => _passwordPromptError;
+        private set => this.RaiseAndSetIfChanged(ref _passwordPromptError, value);
+    }
+
+    public bool IsPasswordPromptPasswordVisible
+    {
+        get => _isPasswordPromptPasswordVisible;
+        set => this.RaiseAndSetIfChanged(ref _isPasswordPromptPasswordVisible, value);
+    }
 
     public string SettingsToggleRegexHotkey
     {
@@ -1193,6 +1238,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        CancelAllPendingDeletes();
         _clipboardMonitorService.Stop();
         _settingsService.SettingsChanged -= OnSettingsChanged;
         SelectedClipFiles.Clear();
@@ -1226,6 +1272,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 ReplaceSensitivityRules(_sensitivityService.GetDefaultRules());
                 IsWelcomeOpen = true;
                 StatusText = AppText.WelcomeStatusText;
+                _isStarted = true;
+                return;
+            }
+
+            if (StorageOptionsService.RequiresPassword(_storageOptionsService.Current.DatabasePath))
+            {
+                IsPasswordPromptOpen = true;
+                StatusText = "Enter your database password to continue.";
                 _isStarted = true;
                 return;
             }
@@ -1294,6 +1348,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             this.RaisePropertyChanged(nameof(HasNoClips));
             RaiseBulkSelectionProperties();
             UpdateStatus(result);
+            UpdateClipDisplayIndices();
         }
         finally
         {
@@ -1555,13 +1610,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        foreach (var clipId in targetClips.Select(static clip => clip.Id))
-        {
-            await _clipStoreService.DeleteAsync(clipId);
-        }
-
-        StatusText = AppText.FormatDeletedClipCount(targetClips.Length);
-        await RefreshAsync();
+        await SoftDeleteClipsAsync(targetClips);
     }
 
     private async Task CopyEditedClipAsync()
@@ -1602,6 +1651,28 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await ExportSelectedAsync();
     }
 
+    public async Task<bool> CopyClipByIndexAsync(int oneBasedIndex)
+    {
+        if (oneBasedIndex < 1 || oneBasedIndex > Clips.Count)
+        {
+            return false;
+        }
+
+        var clip = Clips[oneBasedIndex - 1];
+        await CopyClipAsync(clip);
+        return true;
+    }
+
+    public void SelectClipByIndex(int oneBasedIndex)
+    {
+        if (oneBasedIndex < 1 || oneBasedIndex > Clips.Count)
+        {
+            return;
+        }
+
+        SelectedClip = Clips[oneBasedIndex - 1];
+    }
+
     private async Task ToggleFavoriteClipAsync(ClipItemViewModel clip)
     {
         SelectedClip = clip;
@@ -1628,8 +1699,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private async Task DeleteClipAsync(ClipItemViewModel clip)
     {
         SelectedClip = clip;
-        await _clipStoreService.DeleteAsync(clip.Id);
-        await RefreshAsync();
+        await SoftDeleteClipsAsync([clip]);
     }
 
     private async Task DeleteSelectedAsync()
@@ -1639,8 +1709,115 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        await _clipStoreService.DeleteAsync(SelectedClip.Id);
+        await SoftDeleteClipsAsync([SelectedClip]);
+    }
+
+    private async Task SoftDeleteClipsAsync(ClipItemViewModel[] clipVms)
+    {
+        var entries = new List<(long Id, ClipEntry Clip)>(clipVms.Length);
+        foreach (var vm in clipVms)
+        {
+            entries.Add((vm.Id, vm.Clip));
+            Clips.Remove(vm);
+            vm.Dispose();
+        }
+
+        this.RaisePropertyChanged(nameof(HasNoClips));
+        RaiseBulkSelectionProperties();
+
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        foreach (var (id, clip) in entries)
+        {
+            _pendingDeletes[id] = (clip, cts);
+        }
+
+        var ids = entries.Select(static e => e.Id).ToArray();
+
+        var preview = entries.Count == 1
+            ? $"'{ClipDisplayFormatter.BuildSingleLinePreview(entries[0].Clip)}' removed"
+            : AppText.FormatDeletedClipCount(entries.Count);
+
+        StatusText = entries.Count == 1 ? "Clip deleted" : AppText.FormatDeletedClipCount(entries.Count);
+
+        _notificationService.Publish(new AppNotification
+        {
+            Title = entries.Count == 1 ? "Clip deleted" : $"{entries.Count} clips deleted",
+            Message = preview,
+            Level = AppNotificationLevel.Information,
+            Actions =
+            [
+                new AppNotificationAction
+                {
+                    Label = "Undo",
+                    ExecuteAsync = () => UndoDeleteAsync(ids, cts),
+                },
+            ],
+        });
+
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), cts.Token);
+            await CommitPendingDeletesAsync(ids);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            cts.Dispose();
+        }
+    }
+
+    private async Task UndoDeleteAsync(long[] clipIds, CancellationTokenSource cts)
+    {
+        var anyRestored = false;
+        foreach (var id in clipIds)
+        {
+            if (_pendingDeletes.Remove(id))
+            {
+                anyRestored = true;
+            }
+        }
+
+        if (!anyRestored)
+        {
+            return;
+        }
+
+        cts.Cancel();
         await RefreshAsync();
+        StatusText = clipIds.Length == 1 ? "Clip restored" : $"{clipIds.Length} clips restored";
+    }
+
+    private async Task CommitPendingDeletesAsync(long[] clipIds)
+    {
+        foreach (var id in clipIds)
+        {
+            if (_pendingDeletes.Remove(id, out _))
+            {
+                await _clipStoreService.DeleteAsync(id);
+            }
+        }
+    }
+
+    private void CancelAllPendingDeletes()
+    {
+        var seen = new HashSet<CancellationTokenSource>(ReferenceEqualityComparer.Instance);
+        foreach (var (_, cts) in _pendingDeletes.Values)
+        {
+            if (seen.Add(cts))
+            {
+                cts.Cancel();
+                cts.Dispose();
+            }
+        }
+
+        _pendingDeletes.Clear();
     }
 
     private ClipSearchFilters BuildFilters(int offset) => new()
@@ -1748,6 +1925,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         RaiseBulkSelectionProperties();
         UpdateStatus(result);
+        UpdateClipDisplayIndices();
     }
 
     private void UpdateSelectedClipPresentation()
@@ -1851,7 +2029,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool TryHandleShortcut(KeyEventArgs e)
     {
-        if (IsSettingsOpen || IsWelcomeOpen || SessionLogs.IsOpen)
+        if (IsSettingsOpen || IsWelcomeOpen || IsPasswordPromptOpen || SessionLogs.IsOpen)
         {
             return false;
         }
@@ -2172,6 +2350,67 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _isDatabaseReady = true;
         _clipboardMonitorService.Start();
         StartMaintenanceLoop();
+    }
+
+    private async Task UnlockDatabaseAsync()
+    {
+        var password = PasswordPromptInput?.Trim() ?? string.Empty;
+        if (string.IsNullOrEmpty(password))
+        {
+            PasswordPromptError = "Please enter a password.";
+            return;
+        }
+
+        try
+        {
+            var dbPath = _storageOptionsService.Current.DatabasePath;
+            var builder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+            {
+                DataSource = dbPath,
+                Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly,
+                Password = password,
+            };
+
+            await using var connection = new Microsoft.Data.Sqlite.SqliteConnection(builder.ToString());
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT count(*) FROM sqlite_master;";
+            await command.ExecuteScalarAsync();
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException)
+        {
+            PasswordPromptError = "Incorrect password. Please try again.";
+            return;
+        }
+
+        // Password is correct — store in memory only (never persist to disk)
+        _storageOptionsService.SetInMemoryPassword(password);
+
+        PasswordPromptError = string.Empty;
+        PasswordPromptInput = string.Empty;
+
+        try
+        {
+            var draftSettings = _settingsService.HasSavedSettings ? _settingsService.Current : AppSettings.Default;
+            LoadSettingsDraft(draftSettings);
+
+            await StartDatabaseAsync();
+            await ApplyMaintenanceAndRefreshAsync();
+
+            IsPasswordPromptOpen = false;
+        }
+        catch (Exception ex)
+        {
+            PasswordPromptError = $"Failed to start: {ex.Message}";
+        }
+    }
+
+    private static void ExitApplication()
+    {
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            desktop.Shutdown();
+        }
     }
 
     private static async Task<string?> PickDatabasePathAsync(IStorageProvider storageProvider, string currentPath)
@@ -2521,6 +2760,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         Clips.Clear();
+    }
+
+    private void UpdateClipDisplayIndices()
+    {
+        for (int i = 0; i < Clips.Count; i++)
+        {
+            Clips[i].DisplayIndex = i + 1;
+        }
     }
 
     private ClipItemViewModel CreateClipItemViewModel(ClipEntry clip, ISet<long>? checkedIds = null)

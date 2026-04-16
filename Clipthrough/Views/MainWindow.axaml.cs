@@ -46,11 +46,7 @@ public partial class MainWindow : Window
             m_sessionLogsListBox.AddHandler(InputElement.DoubleTappedEvent, OnSessionLogsDoubleTapped, RoutingStrategies.Bubble);
         }
 
-        m_clipListScrollViewer = m_clipsListBox?.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
-        if (m_clipListScrollViewer is not null)
-        {
-            m_clipListScrollViewer.ScrollChanged += OnClipListScrollChanged;
-        }
+        TryConnectClipListScrollViewer();
 
         var searchTextBox = this.FindControl<TextBox>("SearchTextBox");
         if (searchTextBox is not null)
@@ -59,6 +55,25 @@ public partial class MainWindow : Window
         }
 
         FocusSearchBox();
+    }
+
+    /// <summary>
+    /// Lazily connects the clip list scroll viewer for scroll-to-load.
+    /// Called on open and again after the password prompt is dismissed,
+    /// because the ListBox may not have visual descendants while hidden.
+    /// </summary>
+    internal void TryConnectClipListScrollViewer()
+    {
+        if (m_clipListScrollViewer is not null)
+        {
+            return;
+        }
+
+        m_clipListScrollViewer = m_clipsListBox?.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+        if (m_clipListScrollViewer is not null)
+        {
+            m_clipListScrollViewer.ScrollChanged += OnClipListScrollChanged;
+        }
     }
 
     private void OnClosed(object? sender, EventArgs e)
@@ -130,7 +145,19 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (TryHandleClipIndexShortcut(viewModel, e))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (TryHandleClipRecopyShortcut(viewModel, e))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        if (TryHandleEnterToCopyShortcut(viewModel, e))
         {
             e.Handled = true;
             return;
@@ -264,6 +291,28 @@ public partial class MainWindow : Window
         return true;
     }
 
+    private bool TryHandleEnterToCopyShortcut(MainWindowViewModel viewModel, KeyEventArgs e)
+    {
+        if (viewModel.SelectedClip is null || viewModel.IsSettingsOpen || viewModel.IsWelcomeOpen || viewModel.SessionLogs.IsOpen)
+        {
+            return false;
+        }
+
+        if (e.Source is TextBox or AvaloniaEdit.TextEditor or Controls.SyntaxTextEditor)
+        {
+            return false;
+        }
+
+        var relevantModifiers = e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Meta);
+        if (e.Key != Key.Enter || relevantModifiers != KeyModifiers.None)
+        {
+            return false;
+        }
+
+        viewModel.CopySelectedCommand.Execute().Subscribe(_ => MinimizeWindow());
+        return true;
+    }
+
     private static bool TryHandleEditedClipShortcut(MainWindowViewModel viewModel, KeyEventArgs e)
     {
         if (e.Source is not TextBox and not AvaloniaEdit.TextEditor and not Controls.SyntaxTextEditor)
@@ -316,9 +365,61 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private bool TryHandleClipIndexShortcut(MainWindowViewModel viewModel, KeyEventArgs e)
+    {
+        if (viewModel.IsSettingsOpen || viewModel.IsWelcomeOpen || viewModel.SessionLogs.IsOpen)
+        {
+            return false;
+        }
+
+        // Don't intercept when inside a text input
+        if (e.Source is TextBox or AvaloniaEdit.TextEditor or Controls.SyntaxTextEditor)
+        {
+            return false;
+        }
+
+        var key = e.Key;
+        int index = key switch
+        {
+            Key.D1 => 1,
+            Key.D2 => 2,
+            Key.D3 => 3,
+            Key.D4 => 4,
+            Key.D5 => 5,
+            Key.D6 => 6,
+            Key.D7 => 7,
+            Key.D8 => 8,
+            Key.D9 => 9,
+            _ => 0,
+        };
+
+        if (index == 0)
+        {
+            return false;
+        }
+
+        var modifiers = e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Meta);
+
+        if (modifiers == KeyModifiers.Control)
+        {
+            _ = viewModel.CopyClipByIndexAsync(index).ContinueWith(
+                _ => Dispatcher.UIThread.Post(() => MinimizeWindow()),
+                System.Threading.Tasks.TaskScheduler.Default);
+            return true;
+        }
+
+        if (modifiers == KeyModifiers.Alt)
+        {
+            viewModel.SelectClipByIndex(index);
+            return true;
+        }
+
+        return false;
+    }
+
     private void MinimizeWindow()
     {
-        Dispatcher.UIThread.Post(() => WindowState = WindowState.Minimized);
+        Dispatcher.UIThread.Post(() => Hide());
     }
 
     private async void OnSearchBoxGotFocus(object? sender, GotFocusEventArgs e)
@@ -344,7 +445,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void FocusSearchBox()
+    public void FocusSearchBox()
     {
         var searchTextBox = this.FindControl<TextBox>("SearchTextBox");
         if (searchTextBox is null)

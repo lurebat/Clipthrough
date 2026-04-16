@@ -31,6 +31,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     private static readonly string[] RtfFormats = ["Rich Text Format", "text/rtf", "public.rtf"];
     private static readonly string[] PngFormats = ["PNG", "image/png", "public.png"];
     private static readonly string[] SourceUrlFormats = ["Chromium internal source URL", "UniformResourceLocatorW", "UniformResourceLocator"];
+    private static readonly string[] ClipboardIgnoreFormats = ["Clipboard Viewer Ignore", "ExcludeClipboardContentFromMonitorProcessing"];
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool AddClipboardFormatListener(IntPtr hwnd);
@@ -169,6 +170,12 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
 
                 var availableFormats = DescribeFormats(clipboardData);
                 Trace.TraceInformation($"Clipboard change detected. Formats: {availableFormats}");
+
+                if (ShouldIgnoreClipboard(clipboardData))
+                {
+                    Trace.TraceInformation($"Clipboard change ignored because the source app set a clipboard-viewer-ignore format. Formats: {availableFormats}");
+                    return null;
+                }
 
                 var captureRequest = await BuildCaptureRequestAsync(clipboardData);
                 if (captureRequest is null)
@@ -350,6 +357,12 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
 
     private static string DescribeFormats(IAsyncDataTransfer clipboardData)
         => string.Join(", ", clipboardData.Formats.Select(static format => $"{format.Kind}:{format.Identifier}"));
+
+    private static bool ShouldIgnoreClipboard(IAsyncDataTransfer clipboardData)
+    {
+        var formatIds = clipboardData.Formats.Select(static f => f.Identifier).ToArray();
+        return ClipboardIgnoreFormats.Any(ignore => formatIds.Any(id => string.Equals(id, ignore, StringComparison.OrdinalIgnoreCase)));
+    }
 
     private static ClipCaptureRequest CreateImageRequest(Bitmap bitmap, ClipboardSourceApplicationInfo? sourceInfo, string? imageLabel)
     {
