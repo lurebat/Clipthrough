@@ -93,6 +93,7 @@ public partial class MainWindow : Window
         if (m_subscribedViewModel is not null)
         {
             m_subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            m_subscribedViewModel.HelpRequested -= OnHelpRequested;
             m_subscribedViewModel = null;
         }
 
@@ -435,6 +436,7 @@ public partial class MainWindow : Window
         if (m_subscribedViewModel is not null)
         {
             m_subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            m_subscribedViewModel.HelpRequested -= OnHelpRequested;
             m_subscribedViewModel = null;
         }
 
@@ -446,8 +448,18 @@ public partial class MainWindow : Window
 
             m_subscribedViewModel = viewModel;
             m_subscribedViewModel.PropertyChanged += OnViewModelPropertyChanged;
+            m_subscribedViewModel.HelpRequested += OnHelpRequested;
             UpdateSettingsWindowVisibility(viewModel.IsSettingsOpen);
         }
+    }
+
+    private void OnHelpRequested(object? sender, EventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var window = new HelpWindow();
+            window.Show(this);
+        });
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)

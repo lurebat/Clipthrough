@@ -19,10 +19,32 @@
         MinHeight="640">
 
     <Grid>
-        <Grid RowDefinitions="Auto,*,Auto"
+        <Grid RowDefinitions="Auto,Auto,*,Auto"
               RowSpacing="6"
               Margin="8">
-        <Border Grid.Row="0"
+        <Menu Grid.Row="0">
+            <MenuItem Header="_File">
+                <MenuItem Header="_Settings…"
+                          Command="{Binding OpenSettingsCommand}"
+                          InputGesture="Ctrl+," />
+                <Separator />
+                <MenuItem Header="E_xit" Command="{Binding ExitApplicationCommand}" />
+            </MenuItem>
+            <MenuItem Header="_Edit">
+                <MenuItem Header="_Copy selected" Command="{Binding CopySelectedCommand}" />
+                <MenuItem Header="_Delete selected" Command="{Binding DeleteSelectedCommand}" />
+                <Separator />
+                <MenuItem Header="Toggle _favorite" Command="{Binding ToggleFavoriteCommand}" />
+                <MenuItem Header="Toggle _pin" Command="{Binding TogglePinCommand}" />
+            </MenuItem>
+            <MenuItem Header="_View">
+                <MenuItem Header="Show session _logs" Command="{Binding SessionLogs.OpenCommand}" />
+            </MenuItem>
+            <MenuItem Header="_Help">
+                <MenuItem Header="_User guide" Command="{Binding OpenHelpCommand}" />
+            </MenuItem>
+        </Menu>
+        <Border Grid.Row="1"
                 Classes="hero-toolbar"
                 Padding="12,8">
             <Grid RowDefinitions="Auto,Auto"
@@ -102,7 +124,7 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="1"
+        <Grid Grid.Row="2"
               ColumnDefinitions="*,6,2*"
               ColumnSpacing="4">
             <Border Grid.Column="0"
@@ -829,7 +851,7 @@
             </Border>
         </Grid>
 
-        <Border Grid.Row="2"
+        <Border Grid.Row="3"
                 Classes="inset-panel footer-panel"
                 Padding="12,6">
             <Grid ColumnDefinitions="Auto,*,Auto"

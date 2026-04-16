@@ -1,0 +1,68 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Clipthrough.Views.HelpWindow"
+        Title="Clipthrough — Help"
+        Width="780"
+        Height="640"
+        MinWidth="520"
+        MinHeight="380"
+        Background="{DynamicResource AppBackgroundBrush}"
+        ShowInTaskbar="True"
+        WindowStartupLocation="CenterOwner">
+
+    <ScrollViewer Padding="24">
+        <StackPanel Spacing="14" MaxWidth="680">
+            <TextBlock FontSize="22" FontWeight="SemiBold" Text="Clipthrough quick guide" />
+            <TextBlock Opacity="0.8"
+                       TextWrapping="Wrap"
+                       Text="Clipthrough is a SQLite-backed clipboard history with powerful search, transformations, and sensitivity handling. This page summarises the most common tasks." />
+
+            <Border Classes="surface-panel" Padding="16">
+                <StackPanel Spacing="6">
+                    <TextBlock FontWeight="SemiBold" Text="Getting started" />
+                    <TextBlock TextWrapping="Wrap" Text="• Copy anything — text, HTML, rich text, images, files — and it appears in the left pane." />
+                    <TextBlock TextWrapping="Wrap" Text="• Use the global hotkey (default Alt+V) to toggle the Clipthrough window from anywhere." />
+                    <TextBlock TextWrapping="Wrap" Text="• Select a clip to preview / edit it in the right pane. Double-click or press Enter to copy it to the system clipboard." />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="surface-panel" Padding="16">
+                <StackPanel Spacing="6">
+                    <TextBlock FontWeight="SemiBold" Text="Search" />
+                    <TextBlock TextWrapping="Wrap" Text="• The search box uses full-text search by default. Multiple words are AND'd." />
+                    <TextBlock TextWrapping="Wrap" Text="• Toggle Regex, Wildcard, Whole word, Case-sensitive, or Fuzzy for different matching modes." />
+                    <TextBlock TextWrapping="Wrap" Text="• Fuzzy mode OR's tokens and tries 1-char-deletion variants (e.g. 'exampl' matches 'example')." />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="surface-panel" Padding="16">
+                <StackPanel Spacing="6">
+                    <TextBlock FontWeight="SemiBold" Text="Actions" />
+                    <TextBlock TextWrapping="Wrap" Text="• Pin a clip to keep it at the top regardless of recency." />
+                    <TextBlock TextWrapping="Wrap" Text="• Mark as favorite to quickly filter it later (Alt+F toggles the filter)." />
+                    <TextBlock TextWrapping="Wrap" Text="• Sensitivity rules scrub/auto-expire clips that match configured patterns (credit cards, tokens, …)." />
+                    <TextBlock TextWrapping="Wrap" Text="• Incremental paste (Ctrl+Shift+V) walks backwards through clip history; Decremental (Ctrl+Shift+B) goes forward." />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="surface-panel" Padding="16">
+                <StackPanel Spacing="6">
+                    <TextBlock FontWeight="SemiBold" Text="Transformations" />
+                    <TextBlock TextWrapping="Wrap" Text="Right-click any text clip and pick a transformation to UPPER/lower/Title case, trim whitespace, collapse blanks, or encode/decode Base64 / URL. The result is saved as a new clip so the original stays intact." />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="surface-panel" Padding="16">
+                <StackPanel Spacing="6">
+                    <TextBlock FontWeight="SemiBold" Text="Settings" />
+                    <TextBlock TextWrapping="Wrap" Text="Open Settings (gear icon or the File menu) to change storage path, encryption password, retention, hotkeys, and the theme. The Fuzzy toggle next to the filter box accepts synonyms like 'keybind' → 'hotkey' or 'dark mode' → 'theme'." />
+                </StackPanel>
+            </Border>
+
+            <TextBlock Opacity="0.6"
+                       FontSize="12"
+                       TextWrapping="Wrap"
+                       Text="Press Esc to close this window." />
+        </StackPanel>
+    </ScrollViewer>
+</Window>

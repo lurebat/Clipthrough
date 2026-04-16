@@ -181,6 +181,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ApplyTextTransformationCommand = ReactiveCommand.CreateFromTask<TextTransformation>(ApplyTextTransformationAsync);
         AddSensitivityRuleCommand = ReactiveCommand.Create(AddSensitivityRule);
         OpenSettingsCommand = ReactiveCommand.Create(OpenSettings);
+        OpenHelpCommand = ReactiveCommand.Create(OpenHelp);
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
         SaveSettingsCommand = ReactiveCommand.CreateFromTask(SaveSettingsAsync);
         BrowseDatabasePathCommand = ReactiveCommand.CreateFromTask<Window?>(BrowseDatabasePathAsync);
@@ -303,6 +304,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> AddSensitivityRuleCommand { get; }
 
     public ReactiveCommand<Unit, Unit> OpenSettingsCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> OpenHelpCommand { get; }
 
     public ReactiveCommand<Unit, Unit> CloseSettingsCommand { get; }
 
@@ -2635,6 +2638,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         LoadSettingsDraft(_settingsService.Current);
         IsSettingsOpen = true;
     }
+
+    private void OpenHelp()
+    {
+        // Handled in the view-layer (code-behind) via an observable; the command
+        // just pulses and the view listens and opens the HelpWindow.
+        HelpRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    public event EventHandler? HelpRequested;
 
     private void CloseSettings()
     {
