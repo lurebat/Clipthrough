@@ -110,6 +110,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _settingsMaxLibrarySizeMegabytes = AppSettings.Default.MaxLibrarySizeMegabytes.ToString(CultureInfo.InvariantCulture);
     private bool _settingsEnableMaxEntryCount = AppSettings.Default.EnableMaxEntryCount;
     private string _settingsMaxEntryCount = AppSettings.Default.MaxEntryCount.ToString(CultureInfo.InvariantCulture);
+    private string _settingsToggleWildcardHotkey = AppSettings.Default.ToggleWildcardHotkey;
+    private bool _settingsEnableToggleWildcardHotkey = AppSettings.Default.EnableToggleWildcardHotkey;
+    private string _settingsToggleWholeWordHotkey = AppSettings.Default.ToggleWholeWordHotkey;
+    private bool _settingsEnableToggleWholeWordHotkey = AppSettings.Default.EnableToggleWholeWordHotkey;
+    private string _settingsTogglePastedHotkey = AppSettings.Default.TogglePastedHotkey;
+    private bool _settingsEnableTogglePastedHotkey = AppSettings.Default.EnableTogglePastedHotkey;
+    private string _settingsIncrementalPasteHotkey = AppSettings.Default.IncrementalPasteHotkey;
+    private bool _settingsEnableIncrementalPasteHotkey = AppSettings.Default.EnableIncrementalPasteHotkey;
+    private string _settingsDecrementalPasteHotkey = AppSettings.Default.DecrementalPasteHotkey;
+    private bool _settingsEnableDecrementalPasteHotkey = AppSettings.Default.EnableDecrementalPasteHotkey;
+    private string _settingsExternalEditorPath = AppSettings.Default.ExternalEditorPath;
+    private string _settingsExternalDiffToolPath = AppSettings.Default.ExternalDiffToolPath;
     private string _editedClipText = string.Empty;
     private string _editedClipBaseline = string.Empty;
     private long? _checkedSelectionAnchorId;
@@ -640,6 +652,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string SettingsCancelButtonLabel => AppText.SettingsCancelButtonLabel;
 
+    public string SettingsWildcardHotkeyLabel => AppText.SettingsWildcardHotkeyLabel;
+    public string SettingsWholeWordHotkeyLabel => AppText.SettingsWholeWordHotkeyLabel;
+    public string SettingsPastedHotkeyLabel => AppText.SettingsPastedHotkeyLabel;
+    public string SettingsIncrementalPasteHotkeyLabel => AppText.SettingsIncrementalPasteHotkeyLabel;
+    public string SettingsDecrementalPasteHotkeyLabel => AppText.SettingsDecrementalPasteHotkeyLabel;
+    public string SettingsToolsTitle => AppText.SettingsToolsTitle;
+    public string SettingsExternalEditorPathLabel => AppText.SettingsExternalEditorPathLabel;
+    public string SettingsExternalDiffToolPathLabel => AppText.SettingsExternalDiffToolPathLabel;
+    public string OpenInEditorButtonLabel => AppText.OpenInEditorButtonLabel;
+    public string CompareClipsButtonLabel => AppText.CompareClipsButtonLabel;
+    public string WildcardFilterLabel => AppText.WildcardFilterLabel;
+    public string WholeWordFilterLabel => AppText.WholeWordFilterLabel;
+    public string PastedFilterLabel => AppText.PastedFilterLabel;
+
     public string SettingsHintText => AppText.SettingsHintText;
 
     public string SettingsStorageHintText => AppText.SettingsStorageHintText;
@@ -973,6 +999,78 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => this.RaiseAndSetIfChanged(ref _settingsEnableToggleWindowHotkey, value);
     }
 
+    public string SettingsToggleWildcardHotkey
+    {
+        get => _settingsToggleWildcardHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsToggleWildcardHotkey, value);
+    }
+
+    public bool SettingsEnableToggleWildcardHotkey
+    {
+        get => _settingsEnableToggleWildcardHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnableToggleWildcardHotkey, value);
+    }
+
+    public string SettingsToggleWholeWordHotkey
+    {
+        get => _settingsToggleWholeWordHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsToggleWholeWordHotkey, value);
+    }
+
+    public bool SettingsEnableToggleWholeWordHotkey
+    {
+        get => _settingsEnableToggleWholeWordHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnableToggleWholeWordHotkey, value);
+    }
+
+    public string SettingsTogglePastedHotkey
+    {
+        get => _settingsTogglePastedHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsTogglePastedHotkey, value);
+    }
+
+    public bool SettingsEnableTogglePastedHotkey
+    {
+        get => _settingsEnableTogglePastedHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnableTogglePastedHotkey, value);
+    }
+
+    public string SettingsIncrementalPasteHotkey
+    {
+        get => _settingsIncrementalPasteHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsIncrementalPasteHotkey, value);
+    }
+
+    public bool SettingsEnableIncrementalPasteHotkey
+    {
+        get => _settingsEnableIncrementalPasteHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnableIncrementalPasteHotkey, value);
+    }
+
+    public string SettingsDecrementalPasteHotkey
+    {
+        get => _settingsDecrementalPasteHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsDecrementalPasteHotkey, value);
+    }
+
+    public bool SettingsEnableDecrementalPasteHotkey
+    {
+        get => _settingsEnableDecrementalPasteHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnableDecrementalPasteHotkey, value);
+    }
+
+    public string SettingsExternalEditorPath
+    {
+        get => _settingsExternalEditorPath;
+        set => this.RaiseAndSetIfChanged(ref _settingsExternalEditorPath, value);
+    }
+
+    public string SettingsExternalDiffToolPath
+    {
+        get => _settingsExternalDiffToolPath;
+        set => this.RaiseAndSetIfChanged(ref _settingsExternalDiffToolPath, value);
+    }
+
     public string SettingsMaxClipSizeKilobytes
     {
         get => _settingsMaxClipSizeKilobytes;
@@ -1023,7 +1121,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ThemeMode[] ThemeModeOptions { get; } = Enum.GetValues<ThemeMode>();
 
-    public string SettingsThemeModeLabel => "Theme";
+    public string SettingsThemeModeLabel => AppText.SettingsThemeModeLabel;
 
     public bool SettingsEnableNormalClipLifetime
     {
@@ -1311,7 +1409,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);
         var editorPath = _settingsService.Current.ExternalEditorPath;
         await _systemInteractionService.OpenInEditorAsync(exportResult.PrimaryPath, editorPath);
-        StatusText = $"Opened in editor: {Path.GetFileName(exportResult.PrimaryPath)}";
+        StatusText = $"{AppText.OpenedInEditorStatus}: {Path.GetFileName(exportResult.PrimaryPath)}";
     }
 
     private async Task CompareClipsAsync()
@@ -1319,14 +1417,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var checkedClips = Clips.Where(static c => c.IsChecked).Take(2).ToList();
         if (checkedClips.Count < 2)
         {
-            StatusText = "Select exactly 2 clips (using Ctrl+Click) to compare.";
+            StatusText = AppText.CompareNeedsTwoClipsStatus;
             return;
         }
 
         var diffToolPath = _settingsService.Current.ExternalDiffToolPath;
         if (string.IsNullOrWhiteSpace(diffToolPath))
         {
-            StatusText = "Set an external diff tool path in settings to compare clips.";
+            StatusText = AppText.CompareNeedsDiffToolStatus;
             return;
         }
 
@@ -1334,7 +1432,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var right = await _clipExportService.ExportAsync(checkedClips[1].Clip);
 
         await _systemInteractionService.OpenInDiffToolAsync(left.PrimaryPath, right.PrimaryPath, diffToolPath);
-        StatusText = "Opened diff tool for comparison.";
+        StatusText = AppText.CompareOpenedStatus;
     }
 
     private async Task EditSelectedImageAsync()
@@ -1817,6 +1915,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new HotkeyDraft(nameof(AppSettings.ToggleFavoritesHotkey), SettingsEnableToggleFavoritesHotkey, SettingsToggleFavoritesHotkey),
             new HotkeyDraft(nameof(AppSettings.ToggleSensitiveHotkey), SettingsEnableToggleSensitiveHotkey, SettingsToggleSensitiveHotkey),
             new HotkeyDraft(nameof(AppSettings.ToggleCaseSensitiveHotkey), SettingsEnableToggleCaseSensitiveHotkey, SettingsToggleCaseSensitiveHotkey),
+            new HotkeyDraft(nameof(AppSettings.ToggleWildcardHotkey), SettingsEnableToggleWildcardHotkey, SettingsToggleWildcardHotkey),
+            new HotkeyDraft(nameof(AppSettings.ToggleWholeWordHotkey), SettingsEnableToggleWholeWordHotkey, SettingsToggleWholeWordHotkey),
+            new HotkeyDraft(nameof(AppSettings.TogglePastedHotkey), SettingsEnableTogglePastedHotkey, SettingsTogglePastedHotkey),
         };
 
         var normalizedHotkeys = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -1851,10 +1952,38 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             normalizedGlobalHotkey = parsedGlobalHotkey!.ToString();
         }
 
+        var normalizedIncrementalHotkey = SettingsIncrementalPasteHotkey.Trim();
+        HotkeyGesture? parsedIncrementalHotkey = null;
+        if (SettingsEnableIncrementalPasteHotkey
+            && (!HotkeyGesture.TryParse(SettingsIncrementalPasteHotkey, out parsedIncrementalHotkey, out var incHotkeyError) || parsedIncrementalHotkey is null))
+        {
+            StatusText = AppText.FormatSettingsValidationError(incHotkeyError ?? AppText.SettingsInvalidHotkeyFallback);
+            return;
+        }
+        else if (SettingsEnableIncrementalPasteHotkey)
+        {
+            normalizedIncrementalHotkey = parsedIncrementalHotkey!.ToString();
+        }
+
+        var normalizedDecrementalHotkey = SettingsDecrementalPasteHotkey.Trim();
+        HotkeyGesture? parsedDecrementalHotkey = null;
+        if (SettingsEnableDecrementalPasteHotkey
+            && (!HotkeyGesture.TryParse(SettingsDecrementalPasteHotkey, out parsedDecrementalHotkey, out var decHotkeyError) || parsedDecrementalHotkey is null))
+        {
+            StatusText = AppText.FormatSettingsValidationError(decHotkeyError ?? AppText.SettingsInvalidHotkeyFallback);
+            return;
+        }
+        else if (SettingsEnableDecrementalPasteHotkey)
+        {
+            normalizedDecrementalHotkey = parsedDecrementalHotkey!.ToString();
+        }
+
         var duplicates = localHotkeys
             .Where(static draft => draft.IsEnabled)
             .Select(draft => normalizedHotkeys[draft.Name])
             .Append(SettingsEnableToggleWindowHotkey ? normalizedGlobalHotkey : string.Empty)
+            .Append(SettingsEnableIncrementalPasteHotkey ? normalizedIncrementalHotkey : string.Empty)
+            .Append(SettingsEnableDecrementalPasteHotkey ? normalizedDecrementalHotkey : string.Empty)
             .Where(static value => !string.IsNullOrWhiteSpace(value))
             .GroupBy(static value => value, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault(static group => group.Count() > 1);
@@ -1933,6 +2062,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ToggleCaseSensitiveHotkey = normalizedHotkeys[nameof(AppSettings.ToggleCaseSensitiveHotkey)],
             EnableToggleWindowHotkey = SettingsEnableToggleWindowHotkey,
             ToggleWindowHotkey = normalizedGlobalHotkey,
+            EnableToggleWildcardHotkey = SettingsEnableToggleWildcardHotkey,
+            ToggleWildcardHotkey = normalizedHotkeys[nameof(AppSettings.ToggleWildcardHotkey)],
+            EnableToggleWholeWordHotkey = SettingsEnableToggleWholeWordHotkey,
+            ToggleWholeWordHotkey = normalizedHotkeys[nameof(AppSettings.ToggleWholeWordHotkey)],
+            EnableTogglePastedHotkey = SettingsEnableTogglePastedHotkey,
+            TogglePastedHotkey = normalizedHotkeys[nameof(AppSettings.TogglePastedHotkey)],
+            EnableIncrementalPasteHotkey = SettingsEnableIncrementalPasteHotkey,
+            IncrementalPasteHotkey = normalizedIncrementalHotkey,
+            EnableDecrementalPasteHotkey = SettingsEnableDecrementalPasteHotkey,
+            DecrementalPasteHotkey = normalizedDecrementalHotkey,
+            ExternalEditorPath = SettingsExternalEditorPath.Trim(),
+            ExternalDiffToolPath = SettingsExternalDiffToolPath.Trim(),
             MaxClipSizeBytes = maxClipSizeBytes,
             CloseToTray = SettingsCloseToTray,
             MinimizeToTray = SettingsMinimizeToTray,
@@ -1993,6 +2134,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsMaxLibrarySizeMegabytes = settings.MaxLibrarySizeMegabytes.ToString(CultureInfo.InvariantCulture);
         SettingsEnableMaxEntryCount = settings.EnableMaxEntryCount;
         SettingsMaxEntryCount = settings.MaxEntryCount.ToString(CultureInfo.InvariantCulture);
+        SettingsEnableToggleWildcardHotkey = settings.EnableToggleWildcardHotkey;
+        SettingsToggleWildcardHotkey = settings.ToggleWildcardHotkey;
+        SettingsEnableToggleWholeWordHotkey = settings.EnableToggleWholeWordHotkey;
+        SettingsToggleWholeWordHotkey = settings.ToggleWholeWordHotkey;
+        SettingsEnableTogglePastedHotkey = settings.EnableTogglePastedHotkey;
+        SettingsTogglePastedHotkey = settings.TogglePastedHotkey;
+        SettingsEnableIncrementalPasteHotkey = settings.EnableIncrementalPasteHotkey;
+        SettingsIncrementalPasteHotkey = settings.IncrementalPasteHotkey;
+        SettingsEnableDecrementalPasteHotkey = settings.EnableDecrementalPasteHotkey;
+        SettingsDecrementalPasteHotkey = settings.DecrementalPasteHotkey;
+        SettingsExternalEditorPath = settings.ExternalEditorPath;
+        SettingsExternalDiffToolPath = settings.ExternalDiffToolPath;
         IsDatabasePasswordVisible = false;
     }
 

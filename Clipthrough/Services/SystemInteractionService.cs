@@ -48,7 +48,6 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         }
 
         await clipboard.SetTextAsync(text);
-        await clipboard.FlushAsync();
     }
 
     public async Task CopyRichContentAsync(string richContent, string plainText, ClipContentFormat contentFormat)
@@ -56,11 +55,12 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         var effectivePlainText = string.IsNullOrWhiteSpace(plainText) ? ClipDisplayFormatter.RenderRichContent(richContent) : plainText;
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            if (TryCopyRichContentToWindowsClipboard(richContent, effectivePlainText, contentFormat, out var richCopyError))
+            var (richCopySuccess, richCopyError) = await Task.Run(() =>
             {
-                return;
-            }
-
+                var ok = TryCopyRichContentToWindowsClipboard(richContent, effectivePlainText, contentFormat, out var err);
+                return (ok, err);
+            });
+            if (richCopySuccess) return;
             throw new InvalidOperationException(richCopyError ?? "Unable to copy rich text to the Windows clipboard.");
         }
 
@@ -88,18 +88,18 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         var data = new DataTransfer();
         data.Add(item);
         await clipboard.SetDataAsync(data);
-        await clipboard.FlushAsync();
     }
 
     public async Task CopyBitmapAsync(Bitmap bitmap)
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            if (TryCopyBitmapToWindowsClipboard(bitmap, out var bitmapCopyError))
+            var (bitmapCopySuccess, bitmapCopyError) = await Task.Run(() =>
             {
-                return;
-            }
-
+                var ok = TryCopyBitmapToWindowsClipboard(bitmap, out var err);
+                return (ok, err);
+            });
+            if (bitmapCopySuccess) return;
             throw new InvalidOperationException(bitmapCopyError ?? "Unable to copy image data to the Windows clipboard.");
         }
 
@@ -115,7 +115,6 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         data.Add(item);
 
         await clipboard.SetDataAsync(data);
-        await clipboard.FlushAsync();
     }
 
     public Task OpenPathAsync(string path)

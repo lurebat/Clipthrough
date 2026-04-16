@@ -119,6 +119,8 @@ public sealed record AppSettings
         SensitiveClipLifetimeMinutes = NormalizeInt(SensitiveClipLifetimeMinutes, DefaultSensitiveClipLifetimeMinutes, MinSensitiveClipLifetimeMinutes, MaxSensitiveClipLifetimeMinutes),
         MaxLibrarySizeMegabytes = NormalizeInt(MaxLibrarySizeMegabytes, DefaultMaxLibrarySizeMegabytes, MinMaxLibrarySizeMegabytes, MaxMaxLibrarySizeMegabytes),
         MaxEntryCount = NormalizeInt(MaxEntryCount, DefaultMaxEntryCount, MinMaxEntryCount, MaxMaxEntryCount),
+        ExternalEditorPath = ExternalEditorPath?.Trim() ?? string.Empty,
+        ExternalDiffToolPath = ExternalDiffToolPath?.Trim() ?? string.Empty,
     };
 
     private static string NormalizeHotkey(string? value, string fallback)
