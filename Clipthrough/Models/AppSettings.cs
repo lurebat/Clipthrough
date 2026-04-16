@@ -58,6 +58,30 @@ public sealed record AppSettings
 
     public string DecrementalPasteHotkey { get; init; } = "Ctrl+Shift+B";
 
+    public bool EnableCopyAndFavoriteHotkey { get; init; }
+
+    public string CopyAndFavoriteHotkey { get; init; } = string.Empty;
+
+    public bool EnableCopyAndSensitiveHotkey { get; init; }
+
+    public string CopyAndSensitiveHotkey { get; init; } = string.Empty;
+
+    public bool EnableCopyWithoutSavingHotkey { get; init; }
+
+    public string CopyWithoutSavingHotkey { get; init; } = string.Empty;
+
+    public bool EnablePasteAndDeleteHotkey { get; init; }
+
+    public string PasteAndDeleteHotkey { get; init; } = string.Empty;
+
+    public bool EnablePasteAndFavoriteHotkey { get; init; }
+
+    public string PasteAndFavoriteHotkey { get; init; } = string.Empty;
+
+    public bool EnablePasteWithTransformHotkey { get; init; }
+
+    public string PasteWithTransformHotkey { get; init; } = string.Empty;
+
     public int MaxClipSizeBytes { get; init; } = DefaultMaxClipSizeBytes;
 
     public bool CloseToTray { get; init; } = true;
@@ -118,6 +142,18 @@ public sealed record AppSettings
         IncrementalPasteHotkey = NormalizeHotkey(IncrementalPasteHotkey, Default.IncrementalPasteHotkey),
         EnableDecrementalPasteHotkey = EnableDecrementalPasteHotkey,
         DecrementalPasteHotkey = NormalizeHotkey(DecrementalPasteHotkey, Default.DecrementalPasteHotkey),
+        EnableCopyAndFavoriteHotkey = EnableCopyAndFavoriteHotkey,
+        CopyAndFavoriteHotkey = NormalizeOptionalHotkey(CopyAndFavoriteHotkey),
+        EnableCopyAndSensitiveHotkey = EnableCopyAndSensitiveHotkey,
+        CopyAndSensitiveHotkey = NormalizeOptionalHotkey(CopyAndSensitiveHotkey),
+        EnableCopyWithoutSavingHotkey = EnableCopyWithoutSavingHotkey,
+        CopyWithoutSavingHotkey = NormalizeOptionalHotkey(CopyWithoutSavingHotkey),
+        EnablePasteAndDeleteHotkey = EnablePasteAndDeleteHotkey,
+        PasteAndDeleteHotkey = NormalizeOptionalHotkey(PasteAndDeleteHotkey),
+        EnablePasteAndFavoriteHotkey = EnablePasteAndFavoriteHotkey,
+        PasteAndFavoriteHotkey = NormalizeOptionalHotkey(PasteAndFavoriteHotkey),
+        EnablePasteWithTransformHotkey = EnablePasteWithTransformHotkey,
+        PasteWithTransformHotkey = NormalizeOptionalHotkey(PasteWithTransformHotkey),
         MaxClipSizeBytes = MaxClipSizeBytes < MinMaxClipSizeBytes || MaxClipSizeBytes > MaxMaxClipSizeBytes
             ? DefaultMaxClipSizeBytes
             : MaxClipSizeBytes,
@@ -132,6 +168,9 @@ public sealed record AppSettings
 
     private static string NormalizeHotkey(string? value, string fallback)
         => string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+
+    private static string NormalizeOptionalHotkey(string? value)
+        => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
 
     private static int NormalizeInt(int value, int fallback, int min, int max)
         => value < min || value > max ? fallback : value;

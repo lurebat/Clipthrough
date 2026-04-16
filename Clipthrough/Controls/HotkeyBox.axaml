@@ -1,0 +1,20 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Clipthrough.Controls.HotkeyBox">
+  <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+    <TextBox Name="PART_Text"
+             Grid.Column="0"
+             Watermark="e.g. Ctrl+Shift+V" />
+    <Button Name="PART_Record"
+            Grid.Column="1"
+            Content="Record"
+            ToolTip.Tip="Click then press the desired key combination"
+            Classes="secondary" />
+    <Button Name="PART_Clear"
+            Grid.Column="2"
+            Content="✕"
+            Width="32"
+            ToolTip.Tip="Clear"
+            Classes="secondary" />
+  </Grid>
+</UserControl>
