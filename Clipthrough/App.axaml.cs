@@ -436,6 +436,11 @@ public partial class App : Application
         window.Topmost = true;
         window.Topmost = false;
         window.Focus();
+
+        if (window is MainWindow mainWindow)
+        {
+            mainWindow.FocusSearchBox();
+        }
     }
 
     private static void RestoreWindowState(Window window)
