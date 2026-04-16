@@ -6,13 +6,15 @@ Clipthrough is an Avalonia desktop clipboard history app focused on rich clipboa
 
 - Clipboard history for text, rich text, images, and file lists
 - In-place rich-text editing plus an embedded image editor before copying as a new clip
-- Source application name and icon capture
-- Search, favorites, sensitivity tagging, copy-count metadata, and per-session logs
+- Source application name and window title capture
+- FTS5 full-text search with fuzzy option, favorites, sensitivity tagging, and clip pinning
+- Per-session log window with a filterable activity trail
+- Configurable local hotkeys (recorded in the settings window) and global hotkeys for paste cycling
 - First-run welcome flow for storage path, password, and hotkey setup
-- Configurable SQLite database path with optional encryption password
-- Editable sensitivity rules plus optional retention and capacity limits
+- SQLite database with optional encryption password, retention policies, and size caps
 - Clip export with original payload, rendered text, and metadata
-- Windows publish artifact via GitHub Actions
+- Top menu bar and an in-app Help window
+- Windows publish artifact via GitHub Actions, plus a tagged-release workflow
 
 ## Development
 
@@ -31,6 +33,15 @@ dotnet run --project .\Clipthrough\Clipthrough.csproj
 
 ```powershell
 dotnet test .\Clipthrough.Tests\Clipthrough.Tests.csproj
+```
+
+### Release a new version
+
+Tag the commit `vX.Y.Z` and push. The `release.yml` workflow publishes a framework-dependent build, zips it, and drafts a GitHub Release with the artifact attached. Review and publish the draft to promote the release.
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
 ## Project layout
