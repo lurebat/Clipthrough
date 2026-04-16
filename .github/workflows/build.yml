@@ -8,7 +8,8 @@ on:
   pull_request:
 
 jobs:
-  build-windows:
+  test:
+    name: Build & Test (Windows)
     runs-on: windows-latest
 
     steps:
@@ -20,20 +21,42 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/*.slnx') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
       - name: Restore
         run: dotnet restore .\Clipthrough.slnx
 
-      - name: Test
-        run: dotnet test .\Clipthrough.Tests\Clipthrough.Tests.csproj --configuration Release --no-restore
-
       - name: Build
-        run: dotnet build .\Clipthrough\Clipthrough.csproj --configuration Release --no-restore
+        run: dotnet build .\Clipthrough.slnx --configuration Release --no-restore
+
+      - name: Test (with coverage)
+        run: >
+          dotnet test .\Clipthrough.Tests\Clipthrough.Tests.csproj
+          --configuration Release --no-build
+          --filter "FullyQualifiedName!~HeadlessTests"
+          --logger "trx;LogFileName=test-results.trx"
+          --collect:"XPlat Code Coverage"
+          --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults/**
 
       - name: Publish
-        run: dotnet publish .\Clipthrough\Clipthrough.csproj --configuration Release --runtime win-x64 --self-contained false --output artifacts\win-x64
+        run: dotnet publish .\Clipthrough\Clipthrough.csproj --configuration Release --runtime win-x64 --self-contained false --no-build --output artifacts\win-x64
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: Clipthrough-win-x64
           path: artifacts\win-x64\**
+
