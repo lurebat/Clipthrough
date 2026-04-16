@@ -59,6 +59,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly Dictionary<long, (ClipEntry Clip, CancellationTokenSource Cts)> _pendingDeletes = new();
 
     private DateTimeOffset? _lastCapturedAtRaw;
+    private bool _suppressEditAutoSave;
     private string _searchText = string.Empty;
     private ContentTypeOption _selectedContentTypeOption = new(null);
     private bool _showFavoritesOnly;
@@ -214,7 +215,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .Subscribe(ShowNotification));
 
         _subscriptions.Add(
-            Observable.Interval(TimeSpan.FromSeconds(30), RxApp.MainThreadScheduler)
+            Observable.Interval(TimeSpan.FromSeconds(10), RxApp.MainThreadScheduler)
                 .Subscribe(_ => RefreshLastCaptureSummary()));
 
         _subscriptions.Add(
@@ -488,6 +489,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 return;
             }
+
+            // Auto-save edited text as a new clip before switching away.
+            _ = CommitEditedClipOnSelectionChangeAsync();
 
             this.RaiseAndSetIfChanged(ref _selectedClip, value);
             if (value is not null)
@@ -807,9 +811,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public int CheckedClipCount => Clips.Count(static clip => clip.IsChecked);
 
-    public string CheckedClipSummaryText => CheckedClipCount > 0
-        ? AppText.FormatCheckedClipCount(CheckedClipCount)
-        : string.Empty;
+    public string CheckedClipSummaryText => AppText.FormatCheckedClipCount(CheckedClipCount);
 
     public bool IsSelectedClipTextEditable =>
         SelectedClip?.Clip.ContentType is ContentType.Text
@@ -1685,7 +1687,46 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         PublishSensitiveCopyNotificationIfNeeded(SelectedClip);
     }
 
-    public Task CommitEditedClipOnFocusLossAsync() => Task.CompletedTask;
+    public async Task CommitEditedClipOnFocusLossAsync() => await CommitEditedClipOnSelectionChangeAsync();
+
+    private async Task CommitEditedClipOnSelectionChangeAsync()
+    {
+        if (_suppressEditAutoSave)
+        {
+            return;
+        }
+
+        if (_selectedClip is null || !IsSelectedClipTextEditable)
+        {
+            return;
+        }
+
+        if (string.Equals(_editedClipText, _editedClipBaseline, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_editedClipText))
+        {
+            return;
+        }
+
+        var textBytes = System.Text.Encoding.UTF8.GetBytes(_editedClipText);
+        var request = new ClipCaptureRequest
+        {
+            ContentBytes = textBytes,
+            ContentText = _editedClipText,
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            SourceApp = _selectedClip.SourceApp,
+            SourceAppPath = _selectedClip.Clip.SourceAppPath,
+            SourceAppIconBytes = _selectedClip.Clip.SourceAppIconBytes,
+            IncrementExistingCopyCount = false,
+        };
+
+        await _clipStoreService.CaptureAsync(request);
+        _editedClipBaseline = _editedClipText;
+    }
 
     private async Task CopyClipAsync(ClipItemViewModel clip)
     {
@@ -1958,18 +1999,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             .Select(static clip => clip.Id)
             .ToHashSet();
 
-        ClearClips();
-        foreach (var item in result.Items.Select(clip => CreateClipItemViewModel(clip, checkedIds)))
+        _suppressEditAutoSave = true;
+        try
         {
-            Clips.Add(item);
-        }
+            ClearClips();
+            foreach (var item in result.Items.Select(clip => CreateClipItemViewModel(clip, checkedIds)))
+            {
+                Clips.Add(item);
+            }
 
-        _currentOffset = result.Items.Count;
-        HasMoreResults = Clips.Count < result.TotalMatchingCount;
-        this.RaisePropertyChanged(nameof(HasNoClips));
-        SelectedClip = previousSelectionId is null
-            ? Clips.FirstOrDefault()
-            : Clips.FirstOrDefault(clip => clip.Id == previousSelectionId) ?? Clips.FirstOrDefault();
+            _currentOffset = result.Items.Count;
+            HasMoreResults = Clips.Count < result.TotalMatchingCount;
+            this.RaisePropertyChanged(nameof(HasNoClips));
+            SelectedClip = previousSelectionId is null
+                ? Clips.FirstOrDefault()
+                : Clips.FirstOrDefault(clip => clip.Id == previousSelectionId) ?? Clips.FirstOrDefault();
+        }
+        finally
+        {
+            _suppressEditAutoSave = false;
+        }
 
         RaiseBulkSelectionProperties();
         UpdateStatus(result);

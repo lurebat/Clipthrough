@@ -219,6 +219,7 @@ public static class AppText
         ["Format.DuplicateHotkey"] = "The hotkey {0} is assigned more than once.",
         ["Format.DuplicateSensitivityRule"] = "The sensitivity rule {0} is defined more than once.",
         ["Format.InvalidSensitivityRule"] = "The sensitivity rule {0} is invalid: {1}",
+        ["Format.RelativeSeconds"] = "{0}s ago",
         ["Format.RelativeMinutes"] = "{0} min ago",
         ["Format.RelativeHours"] = "{0} hr ago",
         ["Format.RelativeDaysSingular"] = "{0} day ago",
@@ -541,6 +542,8 @@ public static class AppText
     public static string FormatDuplicateSensitivityRule(string name) => Format("Format.DuplicateSensitivityRule", name);
 
     public static string FormatInvalidSensitivityRule(string name, string message) => Format("Format.InvalidSensitivityRule", name, message);
+
+    public static string FormatRelativeSeconds(int seconds) => Format("Format.RelativeSeconds", seconds);
 
     public static string FormatRelativeMinutes(int minutes) => Format("Format.RelativeMinutes", minutes);
 

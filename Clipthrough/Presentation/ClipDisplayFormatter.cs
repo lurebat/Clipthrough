@@ -260,9 +260,14 @@ public static class ClipDisplayFormatter
     {
         var delta = DateTimeOffset.UtcNow - timestamp.ToUniversalTime();
 
-        if (delta.TotalMinutes < 1)
+        if (delta.TotalSeconds < 10)
         {
             return AppText.JustNow;
+        }
+
+        if (delta.TotalMinutes < 1)
+        {
+            return AppText.FormatRelativeSeconds(Math.Max(1, (int)delta.TotalSeconds));
         }
 
         if (delta.TotalHours < 1)
