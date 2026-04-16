@@ -196,7 +196,9 @@ public sealed class ClipStoreService : IClipStoreService
             UPDATE clips
             SET is_pasted = 1,
                 paste_count = paste_count + 1,
-                last_pasted_at = $pastedAt
+                last_pasted_at = $pastedAt,
+                last_copied_at = $pastedAt,
+                copy_count = copy_count + 1
             WHERE id = $id;
             """;
         command.Parameters.AddWithValue("$id", clipId);

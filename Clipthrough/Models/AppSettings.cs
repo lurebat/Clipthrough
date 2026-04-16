@@ -50,11 +50,11 @@ public sealed record AppSettings
 
     public string ToggleWindowHotkey { get; init; } = "Alt+V";
 
-    public bool EnableIncrementalPasteHotkey { get; init; }
+    public bool EnableIncrementalPasteHotkey { get; init; } = true;
 
     public string IncrementalPasteHotkey { get; init; } = "Ctrl+Shift+V";
 
-    public bool EnableDecrementalPasteHotkey { get; init; }
+    public bool EnableDecrementalPasteHotkey { get; init; } = true;
 
     public string DecrementalPasteHotkey { get; init; } = "Ctrl+Shift+B";
 
@@ -87,6 +87,8 @@ public sealed record AppSettings
     public string ExternalEditorPath { get; init; } = string.Empty;
 
     public string ExternalDiffToolPath { get; init; } = string.Empty;
+
+    public ViewModels.ContentDisplayMode LastContentDisplayMode { get; init; } = ViewModels.ContentDisplayMode.Rendered;
 
     public static AppSettings Default { get; } = new();
 
@@ -121,6 +123,7 @@ public sealed record AppSettings
         MaxEntryCount = NormalizeInt(MaxEntryCount, DefaultMaxEntryCount, MinMaxEntryCount, MaxMaxEntryCount),
         ExternalEditorPath = ExternalEditorPath?.Trim() ?? string.Empty,
         ExternalDiffToolPath = ExternalDiffToolPath?.Trim() ?? string.Empty,
+        LastContentDisplayMode = LastContentDisplayMode,
     };
 
     private static string NormalizeHotkey(string? value, string fallback)

@@ -1,0 +1,93 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Clipthrough.ViewModels"
+        x:Class="Clipthrough.Views.SessionLogsWindow"
+        x:DataType="vm:SessionLogsViewModel"
+        Title="{Binding TitleText}"
+        Width="1080"
+        Height="680"
+        MinWidth="720"
+        MinHeight="420"
+        ShowInTaskbar="True"
+        WindowStartupLocation="CenterOwner">
+
+    <Grid RowDefinitions="Auto,Auto,*"
+          RowSpacing="10"
+          Margin="12">
+
+        <StackPanel Grid.Row="0" Spacing="4">
+            <TextBlock Classes="body-muted"
+                       TextWrapping="Wrap"
+                       Text="{Binding DescriptionText}" />
+            <TextBlock Classes="body-muted"
+                       Text="{Binding CountText}" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="1"
+                    Orientation="Horizontal"
+                    Spacing="10">
+            <TextBox Width="420"
+                     Watermark="{Binding SearchWatermark}"
+                     Text="{Binding SearchText}" />
+            <ComboBox Width="160"
+                      ItemsSource="{Binding LogLevelOptions}"
+                      SelectedItem="{Binding SelectedLogLevelOption}" />
+            <Button Classes="secondary compact"
+                    Content="📋 Copy All"
+                    Click="OnCopyAllLogsClick" />
+        </StackPanel>
+
+        <Border Grid.Row="2"
+                Classes="inset-panel"
+                Padding="0">
+            <Grid>
+                <TextBlock Classes="empty-state"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           IsVisible="{Binding ShowEmptyState}"
+                           Text="{Binding EmptyMessage}" />
+
+                <DataGrid x:Name="SessionLogsDataGrid"
+                          ItemsSource="{Binding VisibleSessionLogs}"
+                          IsVisible="{Binding HasLogs}"
+                          IsReadOnly="True"
+                          CanUserReorderColumns="True"
+                          CanUserResizeColumns="True"
+                          CanUserSortColumns="True"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          SelectionMode="Extended">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Date"
+                                            Binding="{Binding DateText}"
+                                            Width="110" />
+                        <DataGridTextColumn Header="Time"
+                                            Binding="{Binding TimestampText}"
+                                            Width="90" />
+                        <DataGridTemplateColumn Header="Level" Width="90">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate x:DataType="vm:SessionLogEntryViewModel">
+                                    <Border Background="{Binding LevelBackground}"
+                                            BorderBrush="{Binding LevelBorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="6,1"
+                                            Margin="4,2"
+                                            HorizontalAlignment="Left"
+                                            VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding LevelText}"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold" />
+                                    </Border>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTextColumn Header="Message"
+                                            Binding="{Binding Message}"
+                                            Width="*" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

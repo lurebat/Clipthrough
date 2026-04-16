@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
@@ -15,13 +16,15 @@ public partial class MainWindow : Window
 {
     private ListBox? m_clipsListBox;
     private ScrollViewer? m_clipListScrollViewer;
-    private ListBox? m_sessionLogsListBox;
+    private SessionLogsViewModel? m_subscribedSessionLogs;
+    private SessionLogsWindow? m_sessionLogsWindow;
 
     public MainWindow()
     {
         InitializeComponent();
         Opened += OnOpened;
         Closed += OnClosed;
+        DataContextChanged += OnDataContextChanged;
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
     }
 
@@ -34,16 +37,10 @@ public partial class MainWindow : Window
         }
 
         m_clipsListBox = this.FindControl<ListBox>("ClipsListBox");
-        m_sessionLogsListBox = this.FindControl<ListBox>("SessionLogsListBox");
         if (m_clipsListBox is not null)
         {
             m_clipsListBox.AddHandler(InputElement.DoubleTappedEvent, OnClipsListDoubleTapped, RoutingStrategies.Bubble);
             m_clipsListBox.AddHandler(InputElement.PointerPressedEvent, OnClipsListPointerPressed, RoutingStrategies.Tunnel);
-        }
-
-        if (m_sessionLogsListBox is not null)
-        {
-            m_sessionLogsListBox.AddHandler(InputElement.DoubleTappedEvent, OnSessionLogsDoubleTapped, RoutingStrategies.Bubble);
         }
 
         TryConnectClipListScrollViewer();
@@ -78,18 +75,25 @@ public partial class MainWindow : Window
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        if (m_subscribedSessionLogs is not null)
+        {
+            m_subscribedSessionLogs.PropertyChanged -= OnSessionLogsPropertyChanged;
+            m_subscribedSessionLogs = null;
+        }
+
+        if (m_sessionLogsWindow is not null)
+        {
+            m_sessionLogsWindow.Closing -= OnSessionLogsWindowClosing;
+            try { m_sessionLogsWindow.Close(); } catch { }
+            m_sessionLogsWindow = null;
+        }
+
         if (m_clipListScrollViewer is null)
         {
             if (m_clipsListBox is not null)
             {
                 m_clipsListBox.RemoveHandler(InputElement.DoubleTappedEvent, OnClipsListDoubleTapped);
                 m_clipsListBox = null;
-            }
-
-            if (m_sessionLogsListBox is not null)
-            {
-                m_sessionLogsListBox.RemoveHandler(InputElement.DoubleTappedEvent, OnSessionLogsDoubleTapped);
-                m_sessionLogsListBox = null;
             }
 
             return;
@@ -102,12 +106,6 @@ public partial class MainWindow : Window
             m_clipsListBox.RemoveHandler(InputElement.DoubleTappedEvent, OnClipsListDoubleTapped);
             m_clipsListBox.RemoveHandler(InputElement.PointerPressedEvent, OnClipsListPointerPressed);
             m_clipsListBox = null;
-        }
-
-        if (m_sessionLogsListBox is not null)
-        {
-            m_sessionLogsListBox.RemoveHandler(InputElement.DoubleTappedEvent, OnSessionLogsDoubleTapped);
-            m_sessionLogsListBox = null;
         }
     }
 
@@ -253,25 +251,6 @@ public partial class MainWindow : Window
             viewModel.ToggleClipCheckedSelection(clip);
             e.Handled = true;
         }
-    }
-
-    private void OnSessionLogsDoubleTapped(object? sender, TappedEventArgs e)
-    {
-        if (e.Source is not Avalonia.Visual sourceVisual)
-        {
-            return;
-        }
-
-        var dataContextElement = sourceVisual.GetSelfAndVisualAncestors()
-            .OfType<StyledElement>()
-            .FirstOrDefault(current => current.DataContext is SessionLogEntryViewModel);
-        if (dataContextElement?.DataContext is not SessionLogEntryViewModel logEntry)
-        {
-            return;
-        }
-
-        logEntry.ToggleExpanded();
-        e.Handled = true;
     }
 
     private bool TryHandleClipRecopyShortcut(MainWindowViewModel viewModel, KeyEventArgs e)
@@ -430,18 +409,70 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void OnCopyAllLogsClick(object? sender, RoutedEventArgs e)
+    private void OnDataContextChanged(object? sender, EventArgs e)
     {
-        if (DataContext is not MainWindowViewModel viewModel)
+        if (m_subscribedSessionLogs is not null)
         {
-            return;
+            m_subscribedSessionLogs.PropertyChanged -= OnSessionLogsPropertyChanged;
+            m_subscribedSessionLogs = null;
         }
 
-        var text = viewModel.SessionLogs.AllLogsAsText;
-        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
-        if (clipboard is not null && !string.IsNullOrWhiteSpace(text))
+        if (DataContext is MainWindowViewModel viewModel)
         {
-            await clipboard.SetTextAsync(text);
+            m_subscribedSessionLogs = viewModel.SessionLogs;
+            m_subscribedSessionLogs.PropertyChanged += OnSessionLogsPropertyChanged;
+            UpdateSessionLogsWindowVisibility(m_subscribedSessionLogs.IsOpen);
+        }
+    }
+
+    private void OnSessionLogsPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(SessionLogsViewModel.IsOpen) && sender is SessionLogsViewModel vm)
+        {
+            Dispatcher.UIThread.Post(() => UpdateSessionLogsWindowVisibility(vm.IsOpen));
+        }
+    }
+
+    private void UpdateSessionLogsWindowVisibility(bool open)
+    {
+        if (open)
+        {
+            if (m_sessionLogsWindow is null)
+            {
+                m_sessionLogsWindow = new SessionLogsWindow
+                {
+                    DataContext = m_subscribedSessionLogs
+                };
+                m_sessionLogsWindow.Closing += OnSessionLogsWindowClosing;
+                m_sessionLogsWindow.Show(this);
+            }
+            else
+            {
+                m_sessionLogsWindow.Activate();
+            }
+        }
+        else if (m_sessionLogsWindow is not null)
+        {
+            var window = m_sessionLogsWindow;
+            m_sessionLogsWindow = null;
+            window.Closing -= OnSessionLogsWindowClosing;
+            try { window.Close(); } catch { }
+        }
+    }
+
+    private void OnSessionLogsWindowClosing(object? sender, WindowClosingEventArgs e)
+    {
+        // User closed via native chrome → sync VM state.
+        if (sender is Window window)
+        {
+            window.Closing -= OnSessionLogsWindowClosing;
+        }
+
+        m_sessionLogsWindow = null;
+
+        if (m_subscribedSessionLogs is not null && m_subscribedSessionLogs.IsOpen)
+        {
+            m_subscribedSessionLogs.Close();
         }
     }
 

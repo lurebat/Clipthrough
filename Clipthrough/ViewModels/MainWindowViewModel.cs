@@ -168,6 +168,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ExportSelectedCommand = ReactiveCommand.CreateFromTask(ExportSelectedAsync, hasSelection);
         OpenInEditorCommand = ReactiveCommand.CreateFromTask(OpenInEditorAsync, hasSelection);
         CompareClipsCommand = ReactiveCommand.CreateFromTask(CompareClipsAsync);
+        OpenSelectedClipSourceUrlCommand = ReactiveCommand.CreateFromTask(OpenSelectedClipSourceUrlAsync);
+        CopySelectedClipWindowTitleCommand = ReactiveCommand.CreateFromTask(CopySelectedClipWindowTitleAsync);
         EditSelectedImageCommand = ReactiveCommand.CreateFromTask(EditSelectedImageAsync);
         SelectAllClipsCommand = ReactiveCommand.Create(SelectAllClips);
         SelectNoClipsCommand = ReactiveCommand.Create(SelectNoClips);
@@ -267,6 +269,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> OpenInEditorCommand { get; }
 
     public ReactiveCommand<Unit, Unit> CompareClipsCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> OpenSelectedClipSourceUrlCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> CopySelectedClipWindowTitleCommand { get; }
 
     public ReactiveCommand<Unit, Unit> EditSelectedImageCommand { get; }
 
@@ -412,6 +418,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             this.RaisePropertyChanged(nameof(ShowRawContent));
             SyncEditedClipText();
             RaiseRenderModeProperties();
+            PersistContentDisplayModeInBackground(value);
         }
     }
 
@@ -849,6 +856,38 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public IReadOnlyList<TextTransformation> TextTransformationOptions { get; } = Enum.GetValues<TextTransformation>();
+
+    private TextTransformation _selectedTextTransformation = TextTransformation.None;
+
+    public TextTransformation SelectedTextTransformation
+    {
+        get => _selectedTextTransformation;
+        set
+        {
+            if (_selectedTextTransformation == value)
+            {
+                return;
+            }
+
+            _selectedTextTransformation = value;
+            this.RaisePropertyChanged(nameof(SelectedTextTransformation));
+
+            if (value != TextTransformation.None && IsSelectedClipTextEditable && !string.IsNullOrEmpty(_editedClipText))
+            {
+                var transformed = TextTransformationService.Apply(value, _editedClipText);
+                if (!string.Equals(transformed, _editedClipText, StringComparison.Ordinal))
+                {
+                    EditedClipText = transformed;
+                }
+
+                // Snap back to None so re-selecting same transformation re-triggers
+                _selectedTextTransformation = TextTransformation.None;
+                this.RaisePropertyChanged(nameof(SelectedTextTransformation));
+            }
+        }
+    }
+
     public byte[]? SelectedClipImageBytes => SelectedClip?.Clip.ContentType == ContentType.Image ? SelectedClip.Clip.ContentBytes : null;
 
     public string SelectedClipImageHint => _selectedClipImageHint;
@@ -880,6 +919,62 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool ShowSelectedImageResolutionCard => SelectedClip?.Clip.ContentType == ContentType.Image;
 
     public string SelectedClipSensitivityText => SelectedClip?.SensitivitySummary ?? AppText.NoClipSelected;
+
+    public string SelectedClipWindowTitleText => SelectedClip?.SourceWindowTitle ?? string.Empty;
+
+    public bool ShowSelectedClipWindowTitle => SelectedClip?.HasSourceWindowTitle == true;
+
+    public bool HasSelectedClipSourceUrl => SelectedClip?.HasSourceUrl == true;
+
+    public string SelectedClipPastedText => SelectedClip?.PastedMarker ?? string.Empty;
+
+    public bool ShowSelectedClipPasted => SelectedClip?.HasBeenPasted == true;
+
+    public IBrush SelectedClipTypeChipBackground => SelectedClip?.TypeChipBackground ?? s_defaultDetailBorderBrush;
+    public IBrush SelectedClipTypeChipBorderBrush => SelectedClip?.TypeChipBorderBrush ?? s_defaultDetailBorderBrush;
+    public IBrush SelectedClipTypeChipForeground => SelectedClip?.TypeChipForeground ?? s_defaultDetailAccentBrush;
+
+    public IBrush SelectedClipAgeChipBackground => SelectedClip?.AgeChipBackground ?? s_defaultDetailBorderBrush;
+    public IBrush SelectedClipAgeChipBorderBrush => SelectedClip?.AgeChipBorderBrush ?? s_defaultDetailBorderBrush;
+    public IBrush SelectedClipAgeChipForeground => SelectedClip?.AgeChipForeground ?? s_defaultDetailAccentBrush;
+
+    public IBrush SelectedClipPastedChipBackground => SelectedClip?.PastedChipBackground ?? s_defaultDetailBorderBrush;
+    public IBrush SelectedClipPastedChipBorderBrush => SelectedClip?.PastedChipBorderBrush ?? s_defaultDetailBorderBrush;
+    public IBrush SelectedClipPastedChipForeground => SelectedClip?.PastedChipForeground ?? s_defaultDetailAccentBrush;
+
+    // Size chip (amber-ish, based on byte size)
+    private static readonly IBrush s_sizeSmallBg = new SolidColorBrush(Color.Parse("#22263D"));
+    private static readonly IBrush s_sizeSmallBorder = new SolidColorBrush(Color.Parse("#475569"));
+    private static readonly IBrush s_sizeSmallFg = new SolidColorBrush(Color.Parse("#CBD5E1"));
+    private static readonly IBrush s_sizeMedBg = new SolidColorBrush(Color.Parse("#3A2807"));
+    private static readonly IBrush s_sizeMedBorder = new SolidColorBrush(Color.Parse("#A16207"));
+    private static readonly IBrush s_sizeMedFg = new SolidColorBrush(Color.Parse("#FCD34D"));
+    private static readonly IBrush s_sizeLargeBg = new SolidColorBrush(Color.Parse("#2D1421"));
+    private static readonly IBrush s_sizeLargeBorder = new SolidColorBrush(Color.Parse("#BE123C"));
+    private static readonly IBrush s_sizeLargeFg = new SolidColorBrush(Color.Parse("#FDA4AF"));
+
+    private (IBrush Bg, IBrush Border, IBrush Fg) GetSizeColors()
+    {
+        var bytes = SelectedClip?.Clip.ByteSize ?? 0;
+        if (bytes < 10 * 1024) return (s_sizeSmallBg, s_sizeSmallBorder, s_sizeSmallFg);
+        if (bytes < 256 * 1024) return (s_sizeMedBg, s_sizeMedBorder, s_sizeMedFg);
+        return (s_sizeLargeBg, s_sizeLargeBorder, s_sizeLargeFg);
+    }
+
+    public IBrush SelectedClipSizeChipBackground => GetSizeColors().Bg;
+    public IBrush SelectedClipSizeChipBorderBrush => GetSizeColors().Border;
+    public IBrush SelectedClipSizeChipForeground => GetSizeColors().Fg;
+
+    // Sensitivity chip colors derived from severity
+    public IBrush SelectedClipSensitivityChipBackground => SelectedClip?.HasCriticalSeverity == true
+        ? s_criticalBadgeBackgroundBrush
+        : SelectedClip?.IsSensitive == true ? s_warningBadgeBackgroundBrush : s_defaultDetailBorderBrush;
+    public IBrush SelectedClipSensitivityChipBorderBrush => SelectedClip?.HasCriticalSeverity == true
+        ? s_criticalBadgeBorderBrush
+        : SelectedClip?.IsSensitive == true ? s_warningBadgeBorderBrush : s_defaultDetailBorderBrush;
+    public IBrush SelectedClipSensitivityChipForeground => SelectedClip?.HasCriticalSeverity == true
+        ? s_criticalBadgeForegroundBrush
+        : SelectedClip?.IsSensitive == true ? s_warningBadgeForegroundBrush : s_defaultDetailAccentBrush;
 
     public IBrush SelectedClipAccentBrush => SelectedClip?.StateAccentBrush ?? s_defaultDetailAccentBrush;
 
@@ -1316,6 +1411,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             var draftSettings = _settingsService.HasSavedSettings ? _settingsService.Current : AppSettings.Default;
             LoadSettingsDraft(draftSettings);
+            _contentDisplayMode = draftSettings.LastContentDisplayMode;
+            RaiseRenderModeProperties();
 
             if (!_storageOptionsService.HasSavedConfig || !_storageOptionsService.DatabaseExists)
             {
@@ -1419,54 +1516,62 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task CopySelectedAsync()
     {
-        var clip = GetEffectiveSelectedClip();
-        if (clip is null)
+        try
         {
-            return;
-        }
-
-        if (!ReferenceEquals(SelectedClip, clip))
-        {
-            SelectedClip = clip;
-        }
-
-        _clipboardMonitorService.SuppressNext();
-
-        if (clip.Clip.ContentType == ContentType.Image)
-        {
-            using var bitmap = TryLoadImage(clip.Clip, _settingsService.Current.MaxClipSizeBytes);
-            if (bitmap is null)
+            var clip = GetEffectiveSelectedClip();
+            if (clip is null)
             {
-                throw new InvalidOperationException("The selected image clip could not be decoded for copying.");
+                return;
             }
 
-            await _systemInteractionService.CopyBitmapAsync(bitmap);
-            StatusText = AppText.CopiedImageStatus;
+            if (!ReferenceEquals(SelectedClip, clip))
+            {
+                SelectedClip = clip;
+            }
+
+            _clipboardMonitorService.SuppressNext();
+
+            if (clip.Clip.ContentType == ContentType.Image)
+            {
+                using var bitmap = TryLoadImage(clip.Clip, _settingsService.Current.MaxClipSizeBytes);
+                if (bitmap is null)
+                {
+                    throw new InvalidOperationException("The selected image clip could not be decoded for copying.");
+                }
+
+                await _systemInteractionService.CopyBitmapAsync(bitmap);
+                StatusText = AppText.CopiedImageStatus;
+                PublishSensitiveCopyNotificationIfNeeded(clip);
+                TrackPasteInBackground(clip.Clip.Id);
+                return;
+            }
+
+            if (clip.Clip.ContentType == ContentType.RichText)
+            {
+                await _systemInteractionService.CopyRichContentAsync(clip.FullContent, SelectedClipRenderedText, clip.Clip.ContentFormat);
+                StatusText = AppText.FormatCopiedClip(clip.DisplayContentType.ToLower(AppText.CurrentCulture));
+                PublishSensitiveCopyNotificationIfNeeded(clip);
+                TrackPasteInBackground(clip.Clip.Id);
+                return;
+            }
+
+            var isFileList = clip.Clip.ContentType == ContentType.Files && SelectedClipFiles.Count > 0;
+            var contentToCopy = isFileList
+                ? string.Join(Environment.NewLine, SelectedClipFiles.Select(static file => file.FilePath))
+                : clip.FullContent;
+
+            await _systemInteractionService.CopyTextAsync(contentToCopy);
+            StatusText = isFileList
+                ? AppText.FormatCopiedFileList(SelectedClipFiles.Count)
+                : AppText.FormatCopiedClip(clip.DisplayContentType.ToLower(AppText.CurrentCulture));
             PublishSensitiveCopyNotificationIfNeeded(clip);
             TrackPasteInBackground(clip.Clip.Id);
-            return;
         }
-
-        if (clip.Clip.ContentType == ContentType.RichText)
+        catch (Exception ex)
         {
-            await _systemInteractionService.CopyRichContentAsync(clip.FullContent, SelectedClipRenderedText, clip.Clip.ContentFormat);
-            StatusText = AppText.FormatCopiedClip(clip.DisplayContentType.ToLower(AppText.CurrentCulture));
-            PublishSensitiveCopyNotificationIfNeeded(clip);
-            TrackPasteInBackground(clip.Clip.Id);
-            return;
+            Trace.TraceWarning($"Copy selected failed: {ex}");
+            StatusText = $"Copy failed: {ex.Message}";
         }
-
-        var isFileList = clip.Clip.ContentType == ContentType.Files && SelectedClipFiles.Count > 0;
-        var contentToCopy = isFileList
-            ? string.Join(Environment.NewLine, SelectedClipFiles.Select(static file => file.FilePath))
-            : clip.FullContent;
-
-        await _systemInteractionService.CopyTextAsync(contentToCopy);
-        StatusText = isFileList
-            ? AppText.FormatCopiedFileList(SelectedClipFiles.Count)
-            : AppText.FormatCopiedClip(clip.DisplayContentType.ToLower(AppText.CurrentCulture));
-        PublishSensitiveCopyNotificationIfNeeded(clip);
-        TrackPasteInBackground(clip.Clip.Id);
     }
 
     private async void TrackPasteInBackground(long clipId)
@@ -1487,6 +1592,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         catch (Exception ex)
         {
             Trace.TraceWarning($"Elevation check failed: {ex.Message}");
+        }
+
+        try
+        {
+            await RefreshAsync(clipId);
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Refresh after paste failed: {ex.Message}");
         }
     }
 
@@ -1515,6 +1629,45 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var editorPath = _settingsService.Current.ExternalEditorPath;
         await _systemInteractionService.OpenInEditorAsync(exportResult.PrimaryPath, editorPath);
         StatusText = $"{AppText.OpenedInEditorStatus}: {Path.GetFileName(exportResult.PrimaryPath)}";
+    }
+
+    private async Task OpenSelectedClipSourceUrlAsync()
+    {
+        var url = SelectedClip?.SourceUrl;
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return;
+        }
+
+        try
+        {
+            await _systemInteractionService.OpenPathAsync(url);
+            StatusText = $"Opened {url}";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Open URL failed: {ex.Message}";
+        }
+    }
+
+    private async Task CopySelectedClipWindowTitleAsync()
+    {
+        var title = SelectedClip?.SourceWindowTitle;
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return;
+        }
+
+        try
+        {
+            _clipboardMonitorService.SuppressNext();
+            await _systemInteractionService.CopyTextAsync(title);
+            StatusText = "Copied window title";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Copy title failed: {ex.Message}";
+        }
     }
 
     private async Task CompareClipsAsync()
@@ -2081,6 +2234,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(SelectedClipImageResolutionText));
         this.RaisePropertyChanged(nameof(ShowSelectedImageResolutionCard));
         this.RaisePropertyChanged(nameof(SelectedClipSensitivityText));
+        this.RaisePropertyChanged(nameof(SelectedClipWindowTitleText));
+        this.RaisePropertyChanged(nameof(ShowSelectedClipWindowTitle));
+        this.RaisePropertyChanged(nameof(HasSelectedClipSourceUrl));
+        this.RaisePropertyChanged(nameof(SelectedClipPastedText));
+        this.RaisePropertyChanged(nameof(ShowSelectedClipPasted));
+        this.RaisePropertyChanged(nameof(SelectedClipTypeChipBackground));
+        this.RaisePropertyChanged(nameof(SelectedClipTypeChipBorderBrush));
+        this.RaisePropertyChanged(nameof(SelectedClipTypeChipForeground));
+        this.RaisePropertyChanged(nameof(SelectedClipAgeChipBackground));
+        this.RaisePropertyChanged(nameof(SelectedClipAgeChipBorderBrush));
+        this.RaisePropertyChanged(nameof(SelectedClipAgeChipForeground));
+        this.RaisePropertyChanged(nameof(SelectedClipPastedChipBackground));
+        this.RaisePropertyChanged(nameof(SelectedClipPastedChipBorderBrush));
+        this.RaisePropertyChanged(nameof(SelectedClipPastedChipForeground));
+        this.RaisePropertyChanged(nameof(SelectedClipSizeChipBackground));
+        this.RaisePropertyChanged(nameof(SelectedClipSizeChipBorderBrush));
+        this.RaisePropertyChanged(nameof(SelectedClipSizeChipForeground));
+        this.RaisePropertyChanged(nameof(SelectedClipSensitivityChipBackground));
+        this.RaisePropertyChanged(nameof(SelectedClipSensitivityChipBorderBrush));
+        this.RaisePropertyChanged(nameof(SelectedClipSensitivityChipForeground));
         this.RaisePropertyChanged(nameof(SelectedClipAccentBrush));
         this.RaisePropertyChanged(nameof(SelectedClipAreaBorderBrush));
         this.RaisePropertyChanged(nameof(SelectedClipAreaBorderThickness));
@@ -2850,6 +3023,28 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(IsRenderedMode));
         this.RaisePropertyChanged(nameof(IsTextualMode));
         this.RaisePropertyChanged(nameof(IsRawMode));
+    }
+
+    private async void PersistContentDisplayModeInBackground(ContentDisplayMode mode)
+    {
+        try
+        {
+            if (!_settingsService.HasSavedSettings)
+            {
+                return;
+            }
+
+            if (_settingsService.Current.LastContentDisplayMode == mode)
+            {
+                return;
+            }
+
+            await _settingsService.SaveAsync(_settingsService.Current with { LastContentDisplayMode = mode });
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Failed to persist display mode: {ex.Message}");
+        }
     }
 
     private void UpdateStatus(ClipSearchResult result)

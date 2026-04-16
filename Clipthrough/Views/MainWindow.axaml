@@ -154,10 +154,23 @@
                                             <ContextMenu>
                                                 <MenuItem Header="{Binding CopyLabel}"
                                                           Command="{Binding CopyCommand}" />
+                                                <MenuItem Header="Open in editor"
+                                                          Command="{Binding #ClipsListBox.DataContext.OpenInEditorCommand}" />
+                                                <MenuItem Header="Compare checked clips"
+                                                          Command="{Binding #ClipsListBox.DataContext.CompareClipsCommand}" />
+                                                <Separator />
                                                 <MenuItem Header="{Binding FavoriteActionLabel}"
                                                           Command="{Binding ToggleFavoriteCommand}" />
                                                 <MenuItem Header="{Binding ExportLabel}"
                                                           Command="{Binding ExportCommand}" />
+                                                <Separator />
+                                                <MenuItem Header="Open source URL"
+                                                          IsVisible="{Binding HasSourceUrl}"
+                                                          Command="{Binding #ClipsListBox.DataContext.OpenSelectedClipSourceUrlCommand}" />
+                                                <MenuItem Header="Copy window title"
+                                                          IsVisible="{Binding HasSourceWindowTitle}"
+                                                          Command="{Binding #ClipsListBox.DataContext.CopySelectedClipWindowTitleCommand}" />
+                                                <Separator />
                                                 <MenuItem Header="{Binding DeleteLabel}"
                                                           Command="{Binding DeleteCommand}" />
                                             </ContextMenu>
@@ -200,31 +213,61 @@
                                                        Height="48"
                                                        Stretch="UniformToFill"
                                                        IsVisible="{Binding ShowPreviewThumbnail}" />
+                                                <TextBlock Text="{Binding ThumbnailInfoCompact}"
+                                                           Classes="body-muted"
+                                                           FontSize="10"
+                                                           MaxWidth="160"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           IsVisible="{Binding ShowPreviewThumbnail}" />
                                                 <TextBlock Classes="clip-row-preview"
                                                            Text="{Binding SingleLinePreview}"
                                                            TextTrimming="CharacterEllipsis"
                                                            IsVisible="{Binding ShowTextPreview}" />
-                                                <StackPanel Orientation="Horizontal"
-                                                            Spacing="6">
-                                                    <TextBlock Classes="clip-row-date"
-                                                               Text="{Binding DisplayContentType}"
-                                                               Foreground="{Binding StateAccentBrush}"
-                                                               FontSize="10" />
-                                                    <TextBlock Classes="clip-row-date"
-                                                               Text="{Binding FirstCopiedAtDisplay}"
-                                                               FontSize="10" />
+                                                <WrapPanel Orientation="Horizontal"
+                                                           ItemSpacing="4"
+                                                           LineSpacing="2">
+                                                    <Border Classes="meta-chip"
+                                                            Padding="6,1"
+                                                            Background="{Binding TypeChipBackground}"
+                                                            BorderBrush="{Binding TypeChipBorderBrush}"
+                                                            VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding DisplayContentType}"
+                                                                   Foreground="{Binding TypeChipForeground}"
+                                                                   FontSize="10"
+                                                                   FontWeight="SemiBold" />
+                                                    </Border>
+                                                    <Border Classes="meta-chip"
+                                                            Padding="6,1"
+                                                            Background="{Binding AgeChipBackground}"
+                                                            BorderBrush="{Binding AgeChipBorderBrush}"
+                                                            VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding CapturedAtCompact}"
+                                                                   Foreground="{Binding AgeChipForeground}"
+                                                                   FontSize="10"
+                                                                   FontWeight="SemiBold" />
+                                                    </Border>
+                                                    <Border Classes="meta-chip"
+                                                            Padding="6,1"
+                                                            Background="{Binding PastedChipBackground}"
+                                                            BorderBrush="{Binding PastedChipBorderBrush}"
+                                                            IsVisible="{Binding HasBeenPasted}"
+                                                            VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding PastedMarker}"
+                                                                   Foreground="{Binding PastedChipForeground}"
+                                                                   FontSize="10"
+                                                                   FontWeight="SemiBold" />
+                                                    </Border>
                                                     <TextBlock Classes="clip-row-date"
                                                                Text="{Binding CopyCountCompact}"
                                                                IsVisible="{Binding ShowCopyCountBadge}"
+                                                               VerticalAlignment="Center"
                                                                FontSize="10" />
                                                     <TextBlock Text="{Binding FavoriteMarker}"
                                                                Foreground="{Binding StateAccentBrush}"
                                                                IsVisible="{Binding IsFavorite}"
+                                                               VerticalAlignment="Center"
                                                                FontSize="10" />
-                                                    <TextBlock Classes="clip-row-date"
-                                                               Text="{Binding CapturedAtCompact}"
-                                                               FontSize="10" />
-                                                </StackPanel>
+                                                </WrapPanel>
                                             </StackPanel>
                                         </Grid>
                                     </Border>
@@ -287,6 +330,7 @@
                                        TextTrimming="CharacterEllipsis" />
                             <TextBlock Classes="body-muted"
                                        Text="{Binding SelectionStateTitle}"
+                                       IsVisible="{Binding !HasSelectedClip}"
                                        TextWrapping="Wrap" />
                             <StackPanel Orientation="Horizontal"
                                         Spacing="8">
@@ -300,84 +344,77 @@
                             </StackPanel>
                         </StackPanel>
 
-                        <Grid Grid.Column="1"
-                              RowDefinitions="Auto,Auto"
-                              RowSpacing="6"
-                              HorizontalAlignment="Right"
-                              VerticalAlignment="Top">
+                        <WrapPanel Grid.Column="1"
+                                   Orientation="Horizontal"
+                                   HorizontalAlignment="Right"
+                                   VerticalAlignment="Top"
+                                   ItemSpacing="8"
+                                   LineSpacing="6">
                             <StackPanel Orientation="Horizontal"
-                                        Spacing="8"
-                                        HorizontalAlignment="Right">
-                                <StackPanel Orientation="Horizontal"
-                                            Spacing="0"
-                                            VerticalAlignment="Center"
-                                            IsEnabled="{Binding IsDisplayModeApplicable}">
-                                    <RadioButton GroupName="DisplayMode"
-                                                 Classes="segmented-left"
-                                                 IsChecked="{Binding IsRenderedMode}"
-                                                 Content="Rendered" />
-                                    <RadioButton GroupName="DisplayMode"
-                                                 Classes="segmented-center"
-                                                 IsChecked="{Binding IsTextualMode}"
-                                                 Content="Textual" />
-                                    <RadioButton GroupName="DisplayMode"
-                                                 Classes="segmented-right"
-                                                 IsChecked="{Binding IsRawMode}"
-                                                 Content="Raw" />
-                                </StackPanel>
-
-                                <Button Classes="secondary compact"
-                                        Command="{Binding CopySelectedCommand}"
-                                        IsEnabled="{Binding HasSelectedClip}"
-                                        Content="{Binding CopyButtonLabel}" />
-
-                                <Button Classes="secondary compact"
-                                        Command="{Binding ExportSelectedCommand}"
-                                        IsEnabled="{Binding HasSelectedClip}"
-                                        Content="{Binding ExportButtonLabel}" />
-
-                                <Button Classes="secondary compact"
-                                        Command="{Binding OpenInEditorCommand}"
-                                        IsEnabled="{Binding HasSelectedClip}"
-                                        Content="{Binding OpenInEditorButtonLabel}" />
-
-                                <Button Classes="secondary compact"
-                                        Command="{Binding CompareClipsCommand}"
-                                        IsEnabled="{Binding IsCompareAvailable}"
-                                        Content="{Binding CompareClipsButtonLabel}" />
+                                        Spacing="0"
+                                        VerticalAlignment="Center"
+                                        IsEnabled="{Binding IsDisplayModeApplicable}">
+                                <RadioButton GroupName="DisplayMode"
+                                             Classes="segmented-left"
+                                             IsChecked="{Binding IsRenderedMode}"
+                                             Content="Rendered" />
+                                <RadioButton GroupName="DisplayMode"
+                                             Classes="segmented-center"
+                                             IsChecked="{Binding IsTextualMode}"
+                                             Content="Textual" />
+                                <RadioButton GroupName="DisplayMode"
+                                             Classes="segmented-right"
+                                             IsChecked="{Binding IsRawMode}"
+                                             Content="Raw" />
                             </StackPanel>
 
-                            <StackPanel Grid.Row="1"
-                                        Orientation="Horizontal"
-                                        Spacing="8"
-                                        HorizontalAlignment="Right">
-                                <Button Classes="secondary compact"
-                                        Command="{Binding CopyEditedClipCommand}"
-                                        IsEnabled="{Binding ShowCopyEditedClipButton}"
-                                        Content="{Binding CopyAsNewButtonLabel}" />
+                            <Button Classes="secondary compact"
+                                    Command="{Binding CopySelectedCommand}"
+                                    IsEnabled="{Binding HasSelectedClip}"
+                                    Content="{Binding CopyButtonLabel}" />
 
-                                <Button Classes="secondary compact"
-                                        Click="OnCopyEditedImageClick"
-                                        IsVisible="{Binding ShowSelectedImageEditor}"
-                                        Content="{Binding CopyAsNewButtonLabel}" />
+                            <Button Classes="secondary compact"
+                                    Command="{Binding ExportSelectedCommand}"
+                                    IsEnabled="{Binding HasSelectedClip}"
+                                    Content="{Binding ExportButtonLabel}" />
 
-                                <Button Classes="secondary compact"
-                                        Click="OnResetEditedImageClick"
-                                        IsVisible="{Binding ShowSelectedImageEditor}"
-                                        Content="{Binding ResetImageEditsButtonLabel}" />
+                            <Button Classes="secondary compact"
+                                    Command="{Binding OpenInEditorCommand}"
+                                    IsEnabled="{Binding HasSelectedClip}"
+                                    Content="{Binding OpenInEditorButtonLabel}" />
 
-                                <Button Classes="secondary compact favorite-toggle"
-                                        Command="{Binding ToggleFavoriteCommand}"
-                                        Classes.active="{Binding IsSelectedClipFavorite}"
-                                        IsEnabled="{Binding HasSelectedClip}"
-                                        Content="{Binding SelectedClipFavoriteButtonLabel}" />
+                            <Button Classes="secondary compact"
+                                    Command="{Binding CompareClipsCommand}"
+                                    IsEnabled="{Binding IsCompareAvailable}"
+                                    Content="{Binding CompareClipsButtonLabel}" />
 
-                                <Button Classes="destructive compact"
-                                        Command="{Binding DeleteSelectedCommand}"
-                                        IsEnabled="{Binding HasSelectedClip}"
-                                        Content="{Binding DeleteButtonLabel}" />
-                            </StackPanel>
-                        </Grid>
+                            <Button Classes="secondary compact"
+                                    Command="{Binding CopyEditedClipCommand}"
+                                    IsEnabled="{Binding ShowCopyEditedClipButton}"
+                                    IsVisible="{Binding !ShowSelectedImageEditor}"
+                                    Content="{Binding CopyAsNewButtonLabel}" />
+
+                            <Button Classes="secondary compact"
+                                    Click="OnCopyEditedImageClick"
+                                    IsVisible="{Binding ShowSelectedImageEditor}"
+                                    Content="{Binding CopyAsNewButtonLabel}" />
+
+                            <Button Classes="secondary compact"
+                                    Click="OnResetEditedImageClick"
+                                    IsVisible="{Binding ShowSelectedImageEditor}"
+                                    Content="{Binding ResetImageEditsButtonLabel}" />
+
+                            <Button Classes="secondary compact favorite-toggle"
+                                    Command="{Binding ToggleFavoriteCommand}"
+                                    Classes.active="{Binding IsSelectedClipFavorite}"
+                                    IsEnabled="{Binding HasSelectedClip}"
+                                    Content="{Binding SelectedClipFavoriteButtonLabel}" />
+
+                            <Button Classes="destructive compact"
+                                    Command="{Binding DeleteSelectedCommand}"
+                                    IsEnabled="{Binding HasSelectedClip}"
+                                    Content="{Binding DeleteButtonLabel}" />
+                        </WrapPanel>
                     </Grid>
 
                     <Border Grid.Row="1"
@@ -386,6 +423,15 @@
                             BorderBrush="{Binding SelectedClipAreaBorderBrush}"
                             BorderThickness="{Binding SelectedClipAreaBorderThickness}">
                         <Grid>
+                            <ComboBox ItemsSource="{Binding TextTransformationOptions}"
+                                      SelectedItem="{Binding SelectedTextTransformation, Mode=TwoWay}"
+                                      IsVisible="{Binding IsSelectedClipTextEditable}"
+                                      HorizontalAlignment="Right"
+                                      VerticalAlignment="Top"
+                                      Margin="0,6,10,0"
+                                      Width="180"
+                                      ZIndex="10"
+                                      ToolTip.Tip="Apply text transformation" />
                             <StackPanel IsVisible="{Binding ShowEmptySelectionState}"
                                         HorizontalAlignment="Center"
                                         VerticalAlignment="Center"
@@ -521,89 +567,131 @@
                     <Border Grid.Row="2"
                             Classes="inset-panel"
                             Padding="10,6">
-                        <Grid RowDefinitions="Auto,Auto"
-                              RowSpacing="4">
-                            <StackPanel Orientation="Horizontal"
-                                        Spacing="6">
-                                <Border Classes="meta-chip"
-                                        Padding="8,2"
-                                        VerticalAlignment="Center">
-                                    <StackPanel Orientation="Horizontal"
-                                                Spacing="4">
-                                        <Image Source="{Binding SelectedClipSourceAppIcon}"
-                                               Width="14"
-                                               Height="14"
-                                               Stretch="Uniform"
-                                               IsVisible="{Binding ShowSelectedClipSourceAppIcon}" />
-                                        <TextBlock Classes="body-muted"
-                                                   FontSize="11"
-                                                   VerticalAlignment="Center"
-                                                   Text="{Binding SelectedClipSourceText}" />
-                                    </StackPanel>
-                                </Border>
-                                <Border Classes="meta-chip"
-                                        Padding="8,2"
-                                        VerticalAlignment="Center">
+                        <WrapPanel Orientation="Horizontal"
+                                   ItemSpacing="6"
+                                   LineSpacing="4">
+                            <Border Classes="meta-chip"
+                                    Padding="8,2"
+                                    VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal"
+                                            Spacing="4">
+                                    <Image Source="{Binding SelectedClipSourceAppIcon}"
+                                           Width="14"
+                                           Height="14"
+                                           Stretch="Uniform"
+                                           IsVisible="{Binding ShowSelectedClipSourceAppIcon}" />
                                     <TextBlock Classes="body-muted"
                                                FontSize="11"
                                                VerticalAlignment="Center"
-                                               Text="{Binding SelectedClipFirstCopiedAtText}" />
-                                </Border>
-                                <Border Classes="meta-chip"
-                                        Padding="8,2"
-                                        VerticalAlignment="Center">
-                                    <TextBlock Classes="body-muted"
-                                               FontSize="11"
-                                               VerticalAlignment="Center"
-                                               Text="{Binding SelectedClipCapturedAtText}" />
-                                </Border>
-                                <Border Classes="meta-chip"
-                                        Padding="8,2"
-                                        VerticalAlignment="Center">
-                                    <TextBlock Classes="body-muted"
-                                               FontSize="11"
-                                               VerticalAlignment="Center"
-                                               Text="{Binding SelectedClipExpiresAtText}" />
-                                </Border>
-                            </StackPanel>
-                            <StackPanel Grid.Row="1"
-                                        Orientation="Horizontal"
-                                        Spacing="6">
-                                <Border Classes="meta-chip"
-                                        Padding="8,2"
-                                        VerticalAlignment="Center">
-                                    <TextBlock Classes="body-muted"
-                                               FontSize="11"
-                                               VerticalAlignment="Center"
-                                               Text="{Binding SelectedClipCopyCountText}" />
-                                </Border>
-                                <Border Classes="meta-chip"
-                                        Padding="8,2"
-                                        VerticalAlignment="Center">
-                                    <TextBlock Classes="body-muted"
-                                               FontSize="11"
-                                               VerticalAlignment="Center"
-                                               Text="{Binding SelectedClipByteSizeText}" />
-                                </Border>
-                                <Border Classes="meta-chip"
-                                        Padding="8,2"
-                                        IsVisible="{Binding ShowSelectedImageResolutionCard}"
-                                        VerticalAlignment="Center">
-                                    <TextBlock Classes="body-muted"
-                                               FontSize="11"
-                                               VerticalAlignment="Center"
-                                               Text="{Binding SelectedClipImageResolutionText}" />
-                                </Border>
-                                <Border Classes="meta-chip"
-                                        Padding="8,2"
-                                        VerticalAlignment="Center">
-                                    <TextBlock Classes="body-muted"
-                                               FontSize="11"
-                                               VerticalAlignment="Center"
-                                               Text="{Binding SelectedClipSensitivityText}" />
-                                </Border>
-                            </StackPanel>
-                        </Grid>
+                                               Text="{Binding SelectedClipSourceText}" />
+                                </StackPanel>
+                            </Border>
+                            <Border Classes="meta-chip"
+                                    Padding="8,2"
+                                    IsVisible="{Binding ShowSelectedClipWindowTitle}"
+                                    VerticalAlignment="Center">
+                                <TextBlock Classes="body-muted"
+                                           FontSize="11"
+                                           MaxWidth="260"
+                                           TextTrimming="CharacterEllipsis"
+                                           VerticalAlignment="Center"
+                                           Text="{Binding SelectedClipWindowTitleText}" />
+                            </Border>
+                            <Border Padding="8,2"
+                                    CornerRadius="999"
+                                    BorderThickness="1"
+                                    Background="{Binding SelectedClipPastedChipBackground}"
+                                    BorderBrush="{Binding SelectedClipPastedChipBorderBrush}"
+                                    IsVisible="{Binding ShowSelectedClipPasted}"
+                                    VerticalAlignment="Center">
+                                <TextBlock FontSize="11"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"
+                                           Foreground="{Binding SelectedClipPastedChipForeground}"
+                                           Text="{Binding SelectedClipPastedText}" />
+                            </Border>
+                            <Border Padding="8,2"
+                                    CornerRadius="999"
+                                    BorderThickness="1"
+                                    Background="{Binding SelectedClipTypeChipBackground}"
+                                    BorderBrush="{Binding SelectedClipTypeChipBorderBrush}"
+                                    VerticalAlignment="Center">
+                                <TextBlock FontSize="11"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"
+                                           Foreground="{Binding SelectedClipTypeChipForeground}"
+                                           Text="{Binding SelectedClipContentTypeText}" />
+                            </Border>
+                            <Border Padding="8,2"
+                                    CornerRadius="999"
+                                    BorderThickness="1"
+                                    Background="{Binding SelectedClipAgeChipBackground}"
+                                    BorderBrush="{Binding SelectedClipAgeChipBorderBrush}"
+                                    VerticalAlignment="Center">
+                                <TextBlock FontSize="11"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"
+                                           Foreground="{Binding SelectedClipAgeChipForeground}"
+                                           Text="{Binding SelectedClipFirstCopiedAtText}" />
+                            </Border>
+                            <Border Classes="meta-chip"
+                                    Padding="8,2"
+                                    VerticalAlignment="Center">
+                                <TextBlock Classes="body-muted"
+                                           FontSize="11"
+                                           VerticalAlignment="Center"
+                                           Text="{Binding SelectedClipCapturedAtText}" />
+                            </Border>
+                            <Border Classes="meta-chip"
+                                    Padding="8,2"
+                                    VerticalAlignment="Center">
+                                <TextBlock Classes="body-muted"
+                                           FontSize="11"
+                                           VerticalAlignment="Center"
+                                           Text="{Binding SelectedClipExpiresAtText}" />
+                            </Border>
+                            <Border Classes="meta-chip"
+                                    Padding="8,2"
+                                    VerticalAlignment="Center">
+                                <TextBlock Classes="body-muted"
+                                           FontSize="11"
+                                           VerticalAlignment="Center"
+                                           Text="{Binding SelectedClipCopyCountText}" />
+                            </Border>
+                            <Border Padding="8,2"
+                                    CornerRadius="999"
+                                    BorderThickness="1"
+                                    Background="{Binding SelectedClipSizeChipBackground}"
+                                    BorderBrush="{Binding SelectedClipSizeChipBorderBrush}"
+                                    VerticalAlignment="Center">
+                                <TextBlock FontSize="11"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"
+                                           Foreground="{Binding SelectedClipSizeChipForeground}"
+                                           Text="{Binding SelectedClipByteSizeText}" />
+                            </Border>
+                            <Border Classes="meta-chip"
+                                    Padding="8,2"
+                                    IsVisible="{Binding ShowSelectedImageResolutionCard}"
+                                    VerticalAlignment="Center">
+                                <TextBlock Classes="body-muted"
+                                           FontSize="11"
+                                           VerticalAlignment="Center"
+                                           Text="{Binding SelectedClipImageResolutionText}" />
+                            </Border>
+                            <Border Padding="8,2"
+                                    CornerRadius="999"
+                                    BorderThickness="1"
+                                    Background="{Binding SelectedClipSensitivityChipBackground}"
+                                    BorderBrush="{Binding SelectedClipSensitivityChipBorderBrush}"
+                                    VerticalAlignment="Center">
+                                <TextBlock FontSize="11"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"
+                                           Foreground="{Binding SelectedClipSensitivityChipForeground}"
+                                           Text="{Binding SelectedClipSensitivityText}" />
+                            </Border>
+                        </WrapPanel>
                     </Border>
                 </Grid>
             </Border>
@@ -635,7 +723,8 @@
                             HorizontalAlignment="Center"
                             VerticalAlignment="Center">
                     <Border Classes="detail-stat-card"
-                            Padding="8,4">
+                            Padding="8,4"
+                            MinWidth="280">
                         <StackPanel Spacing="4">
                             <Grid ColumnDefinitions="*,Auto"
                                   ColumnSpacing="8">
@@ -655,7 +744,8 @@
                     </Border>
 
                     <Border Classes="detail-stat-card"
-                            Padding="8,4">
+                            Padding="8,4"
+                            MinWidth="280">
                         <StackPanel Spacing="4">
                             <Grid ColumnDefinitions="*,Auto"
                                   ColumnSpacing="8">
@@ -1119,104 +1209,6 @@
                                 Command="{Binding SaveSettingsCommand}"
                                 Content="{Binding SettingsSaveButtonLabel}" />
                     </StackPanel>
-                </Grid>
-            </Border>
-        </Border>
-
-        <Border Grid.RowSpan="3"
-                Classes="settings-backdrop"
-                IsVisible="{Binding SessionLogs.IsOpen}">
-            <Border Classes="surface-panel settings-sheet"
-                     HorizontalAlignment="Center"
-                     VerticalAlignment="Center"
-                     MaxWidth="1100"
-                     MinWidth="980"
-                     Padding="18">
-                <Grid RowDefinitions="Auto,Auto,Auto,*"
-                      RowSpacing="14">
-                    <StackPanel Spacing="4"
-                                HorizontalAlignment="Center">
-                        <TextBlock Classes="panel-title"
-                                   HorizontalAlignment="Center"
-                                   Text="{Binding SessionLogs.TitleText}" />
-                        <TextBlock Classes="body-muted"
-                                   HorizontalAlignment="Center"
-                                   TextAlignment="Center"
-                                   TextWrapping="Wrap"
-                                   MaxWidth="760"
-                                   Text="{Binding SessionLogs.DescriptionText}" />
-                    </StackPanel>
-
-                    <TextBlock Grid.Row="1"
-                               Classes="body-muted"
-                               HorizontalAlignment="Center"
-                               Text="{Binding SessionLogs.CountText}" />
-
-                    <StackPanel Grid.Row="2"
-                                Orientation="Horizontal"
-                                HorizontalAlignment="Center"
-                                Spacing="10">
-                        <TextBox Width="420"
-                                 Watermark="{Binding SessionLogs.SearchWatermark}"
-                                 Text="{Binding SessionLogs.SearchText}" />
-                        <ComboBox Width="150"
-                                  ItemsSource="{Binding SessionLogs.LogLevelOptions}"
-                                  SelectedItem="{Binding SessionLogs.SelectedLogLevelOption}" />
-                        <Button Classes="secondary compact"
-                                Command="{Binding SessionLogs.CloseCommand}"
-                                Content="{Binding SessionLogs.CloseButtonLabel}" />
-                        <Button Classes="secondary compact"
-                                Content="📋 Copy All"
-                                Click="OnCopyAllLogsClick" />
-                    </StackPanel>
-
-                    <Border Grid.Row="3"
-                            Classes="inset-panel"
-                            Padding="14">
-                        <Grid>
-                            <TextBlock Classes="empty-state"
-                                       HorizontalAlignment="Center"
-                                       VerticalAlignment="Center"
-                                       IsVisible="{Binding SessionLogs.ShowEmptyState}"
-                                       Text="{Binding SessionLogs.EmptyMessage}" />
-
-                            <ListBox x:Name="SessionLogsListBox"
-                                     ItemsSource="{Binding SessionLogs.VisibleSessionLogs}"
-                                     IsVisible="{Binding SessionLogs.HasLogs}"
-                                     ScrollViewer.HorizontalScrollBarVisibility="Auto">
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate x:DataType="vm:SessionLogEntryViewModel">
-                                        <Grid ColumnDefinitions="80,70,*"
-                                              ColumnSpacing="8"
-                                              Margin="4,2">
-                                            <TextBlock Grid.Column="0"
-                                                       Classes="body-muted"
-                                                       VerticalAlignment="Top"
-                                                       Text="{Binding TimestampText}"
-                                                       FontFamily="Cascadia Mono,Consolas,Courier New,monospace"
-                                                       FontSize="12" />
-                                            <Border Grid.Column="1"
-                                                    Background="{Binding LevelBackground}"
-                                                    BorderBrush="{Binding LevelBorderBrush}"
-                                                    BorderThickness="1"
-                                                    CornerRadius="4"
-                                                    Padding="6,1"
-                                                    VerticalAlignment="Top"
-                                                    HorizontalAlignment="Left">
-                                                <TextBlock Text="{Binding LevelText}"
-                                                           FontSize="11" />
-                                            </Border>
-                                            <SelectableTextBlock Grid.Column="2"
-                                                       VerticalAlignment="Top"
-                                                       Text="{Binding DisplayMessage}"
-                                                       TextWrapping="Wrap"
-                                                       FontSize="12" />
-                                        </Grid>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
-                        </Grid>
-                    </Border>
                 </Grid>
             </Border>
         </Border>

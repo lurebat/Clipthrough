@@ -27,6 +27,45 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     private static readonly IBrush s_shortcutIndexForeground = new SolidColorBrush(Color.Parse("#E2E8F0"));
     private static readonly IBrush s_normalIndexForeground = new SolidColorBrush(Color.Parse("#475569"));
 
+    // Type chip colors (bg, border, fg triples), content-type themed
+    private static readonly IBrush s_typeTextBg = new SolidColorBrush(Color.Parse("#1E1E44"));
+    private static readonly IBrush s_typeTextBorder = new SolidColorBrush(Color.Parse("#4338CA"));
+    private static readonly IBrush s_typeTextFg = new SolidColorBrush(Color.Parse("#C7D2FE"));
+
+    private static readonly IBrush s_typeImageBg = new SolidColorBrush(Color.Parse("#082F20"));
+    private static readonly IBrush s_typeImageBorder = new SolidColorBrush(Color.Parse("#047857"));
+    private static readonly IBrush s_typeImageFg = new SolidColorBrush(Color.Parse("#6EE7B7"));
+
+    private static readonly IBrush s_typeRichBg = new SolidColorBrush(Color.Parse("#3B1A00"));
+    private static readonly IBrush s_typeRichBorder = new SolidColorBrush(Color.Parse("#C2410C"));
+    private static readonly IBrush s_typeRichFg = new SolidColorBrush(Color.Parse("#FDBA74"));
+
+    private static readonly IBrush s_typeFilesBg = new SolidColorBrush(Color.Parse("#0B2A3F"));
+    private static readonly IBrush s_typeFilesBorder = new SolidColorBrush(Color.Parse("#0369A1"));
+    private static readonly IBrush s_typeFilesFg = new SolidColorBrush(Color.Parse("#7DD3FC"));
+
+    // Age chip colors
+    private static readonly IBrush s_ageFreshBg = new SolidColorBrush(Color.Parse("#0A2E1F"));
+    private static readonly IBrush s_ageFreshBorder = new SolidColorBrush(Color.Parse("#047857"));
+    private static readonly IBrush s_ageFreshFg = new SolidColorBrush(Color.Parse("#6EE7B7"));
+
+    private static readonly IBrush s_ageRecentBg = new SolidColorBrush(Color.Parse("#22263D"));
+    private static readonly IBrush s_ageRecentBorder = new SolidColorBrush(Color.Parse("#475569"));
+    private static readonly IBrush s_ageRecentFg = new SolidColorBrush(Color.Parse("#CBD5E1"));
+
+    private static readonly IBrush s_ageOldBg = new SolidColorBrush(Color.Parse("#3A2807"));
+    private static readonly IBrush s_ageOldBorder = new SolidColorBrush(Color.Parse("#A16207"));
+    private static readonly IBrush s_ageOldFg = new SolidColorBrush(Color.Parse("#FCD34D"));
+
+    private static readonly IBrush s_ageAncientBg = new SolidColorBrush(Color.Parse("#2D1421"));
+    private static readonly IBrush s_ageAncientBorder = new SolidColorBrush(Color.Parse("#7F1D3A"));
+    private static readonly IBrush s_ageAncientFg = new SolidColorBrush(Color.Parse("#FECDD3"));
+
+    // Pasted chip colors
+    private static readonly IBrush s_pastedBg = new SolidColorBrush(Color.Parse("#1E1444"));
+    private static readonly IBrush s_pastedBorder = new SolidColorBrush(Color.Parse("#7C3AED"));
+    private static readonly IBrush s_pastedFg = new SolidColorBrush(Color.Parse("#C4B5FD"));
+
     private bool _isChecked;
     private int _displayIndex;
 
@@ -191,6 +230,21 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     public string ImageResolutionDisplay => ClipDisplayFormatter.TryGetImageDimensionsDisplay(Clip) ?? AppText.NotAvailable;
 
+    public string ThumbnailInfoCompact
+    {
+        get
+        {
+            if (!ShowPreviewThumbnail)
+            {
+                return string.Empty;
+            }
+
+            var dims = ClipDisplayFormatter.TryGetImageDimensionsDisplay(Clip);
+            var size = AppText.FormatByteCount(Clip.ByteSize);
+            return string.IsNullOrWhiteSpace(dims) ? size : $"{dims} · {size}";
+        }
+    }
+
     public string SourceSummary => HasMultipleCopies
         ? $"{SourceApp} · {RelativeCapturedAt} · {CopyCountDisplay}"
         : $"{SourceApp} · {RelativeCapturedAt}";
@@ -243,6 +297,58 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     public string CopyCountBadge => Clip.CopyCount > 1 ? $"×{Clip.CopyCount}" : string.Empty;
 
     public bool ShowCopyCountBadge => Clip.CopyCount > 1;
+
+    public IBrush TypeChipBackground => Clip.ContentType switch
+    {
+        ContentType.Text => s_typeTextBg,
+        ContentType.Image => s_typeImageBg,
+        ContentType.RichText => s_typeRichBg,
+        ContentType.Files => s_typeFilesBg,
+        _ => s_typeTextBg,
+    };
+
+    public IBrush TypeChipBorderBrush => Clip.ContentType switch
+    {
+        ContentType.Text => s_typeTextBorder,
+        ContentType.Image => s_typeImageBorder,
+        ContentType.RichText => s_typeRichBorder,
+        ContentType.Files => s_typeFilesBorder,
+        _ => s_typeTextBorder,
+    };
+
+    public IBrush TypeChipForeground => Clip.ContentType switch
+    {
+        ContentType.Text => s_typeTextFg,
+        ContentType.Image => s_typeImageFg,
+        ContentType.RichText => s_typeRichFg,
+        ContentType.Files => s_typeFilesFg,
+        _ => s_typeTextFg,
+    };
+
+    private (IBrush Bg, IBrush Border, IBrush Fg) GetAgeColors()
+    {
+        var age = DateTimeOffset.UtcNow - Clip.LastCopiedAt.ToUniversalTime();
+        if (age.TotalHours < 1) return (s_ageFreshBg, s_ageFreshBorder, s_ageFreshFg);
+        if (age.TotalDays < 1) return (s_ageRecentBg, s_ageRecentBorder, s_ageRecentFg);
+        if (age.TotalDays < 7) return (s_ageOldBg, s_ageOldBorder, s_ageOldFg);
+        return (s_ageAncientBg, s_ageAncientBorder, s_ageAncientFg);
+    }
+
+    public IBrush AgeChipBackground => GetAgeColors().Bg;
+
+    public IBrush AgeChipBorderBrush => GetAgeColors().Border;
+
+    public IBrush AgeChipForeground => GetAgeColors().Fg;
+
+    public IBrush PastedChipBackground => s_pastedBg;
+
+    public IBrush PastedChipBorderBrush => s_pastedBorder;
+
+    public IBrush PastedChipForeground => s_pastedFg;
+
+    public string PastedMarker => HasBeenPasted
+        ? (Clip.PasteCount > 1 ? $"📌 Pasted ×{Clip.PasteCount}" : "📌 Pasted")
+        : string.Empty;
 
     public void SetFavoriteState(bool isFavorite)
     {
