@@ -189,7 +189,7 @@ public static class AppText
         ["Format.ByteCount"] = "{0:N0} bytes",
         ["Format.MatchingCount"] = "Matching {0:N0}",
         ["Format.SensitiveCount"] = "Sensitive {0:N0}",
-        ["Format.SearchFilter"] = "Search: \"{0}\"",
+        ["Format.SearchFilter"] = "\"{0}\"",
         ["Format.LastCapture"] = "Last copy {0}",
         ["Format.StatusSummary"] = "{0:N0} matching · {1:N0} total clips · {2:N0} sensitive · Last copy {3}",
         ["Format.CopyCountSingular"] = "{0:N0} copy",

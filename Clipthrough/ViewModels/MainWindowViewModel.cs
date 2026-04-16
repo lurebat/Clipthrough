@@ -58,6 +58,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly CompositeDisposable _subscriptions = new();
     private readonly Dictionary<long, (ClipEntry Clip, CancellationTokenSource Cts)> _pendingDeletes = new();
 
+    private DateTimeOffset? _lastCapturedAtRaw;
     private string _searchText = string.Empty;
     private ContentTypeOption _selectedContentTypeOption = new(null);
     private bool _showFavoritesOnly;
@@ -213,6 +214,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .Subscribe(ShowNotification));
 
         _subscriptions.Add(
+            Observable.Interval(TimeSpan.FromSeconds(30), RxApp.MainThreadScheduler)
+                .Subscribe(_ => RefreshLastCaptureSummary()));
+
+        _subscriptions.Add(
             RefreshCommand.ThrownExceptions
                 .Merge(LoadMoreCommand.ThrownExceptions)
                 .Merge(ToggleFavoriteCommand.ThrownExceptions)
@@ -307,6 +312,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             this.RaiseAndSetIfChanged(ref _selectedContentTypeOption, value);
             RaiseFilterStateProperties();
+            RaiseContentTypeToggleProperties();
         }
     }
 
@@ -432,6 +438,40 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         get => _contentDisplayMode == ContentDisplayMode.Raw;
         set { if (value) SelectedContentDisplayMode = ContentDisplayMode.Raw; }
     }
+
+    public bool IsAllTypeSelected
+    {
+        get => _selectedContentTypeOption.Value is null;
+        set { if (value) SelectedContentTypeOption = ContentTypeOptions[0]; }
+    }
+
+    public bool IsTextTypeSelected
+    {
+        get => _selectedContentTypeOption.Value == ContentType.Text;
+        set { if (value) SelectedContentTypeOption = ContentTypeOptions[1]; }
+    }
+
+    public bool IsImageTypeSelected
+    {
+        get => _selectedContentTypeOption.Value == ContentType.Image;
+        set { if (value) SelectedContentTypeOption = ContentTypeOptions[2]; }
+    }
+
+    public bool IsRichTextTypeSelected
+    {
+        get => _selectedContentTypeOption.Value == ContentType.RichText;
+        set { if (value) SelectedContentTypeOption = ContentTypeOptions[3]; }
+    }
+
+    public bool IsFilesTypeSelected
+    {
+        get => _selectedContentTypeOption.Value == ContentType.Files;
+        set { if (value) SelectedContentTypeOption = ContentTypeOptions[4]; }
+    }
+
+    public bool HasCheckedOrSelectedClip => HasCheckedClips || HasSelectedClip;
+
+    public bool IsCompareAvailable => !string.IsNullOrWhiteSpace(_settingsService.Current.ExternalDiffToolPath);
 
     public ClipItemViewModel? SelectedClip
     {
@@ -761,7 +801,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public int CheckedClipCount => Clips.Count(static clip => clip.IsChecked);
 
-    public string CheckedClipSummaryText => AppText.FormatCheckedClipCount(CheckedClipCount);
+    public string CheckedClipSummaryText => CheckedClipCount > 0
+        ? AppText.FormatCheckedClipCount(CheckedClipCount)
+        : string.Empty;
 
     public bool IsSelectedClipTextEditable =>
         SelectedClip?.Clip.ContentType is ContentType.Text
@@ -1995,6 +2037,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(IsSelectedClipTextEditable));
         this.RaisePropertyChanged(nameof(SelectedClipTextIsReadOnly));
         this.RaisePropertyChanged(nameof(IsDisplayModeApplicable));
+        this.RaisePropertyChanged(nameof(HasCheckedOrSelectedClip));
         RaiseRenderModeProperties();
         RaiseEditedClipProperties();
     }
@@ -2003,6 +2046,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         this.RaisePropertyChanged(nameof(ActiveFilterSummary));
         this.RaisePropertyChanged(nameof(EmptyListMessage));
+    }
+
+    private void RaiseContentTypeToggleProperties()
+    {
+        this.RaisePropertyChanged(nameof(IsAllTypeSelected));
+        this.RaisePropertyChanged(nameof(IsTextTypeSelected));
+        this.RaisePropertyChanged(nameof(IsImageTypeSelected));
+        this.RaisePropertyChanged(nameof(IsRichTextTypeSelected));
+        this.RaisePropertyChanged(nameof(IsFilesTypeSelected));
+    }
+
+    private void RefreshLastCaptureSummary()
+    {
+        if (_lastCapturedAtRaw is null)
+        {
+            return;
+        }
+
+        LastCaptureSummary = AppText.FormatLastCapture(ClipDisplayFormatter.ToRelativeTime(_lastCapturedAtRaw.Value));
     }
 
     public async Task LoadRecentSearchesAsync()
@@ -2336,6 +2398,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         UpdateSelectedClipPresentation();
         RaiseSelectionStateProperties();
+        this.RaisePropertyChanged(nameof(IsCompareAvailable));
     }
 
     private async Task StartDatabaseAsync()
@@ -2736,6 +2799,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void UpdateStatus(ClipSearchResult result)
     {
+        _lastCapturedAtRaw = result.LastCapturedAt;
         var lastCaptured = result.LastCapturedAt is null
             ? AppText.NoCapturesYetLower
             : ClipDisplayFormatter.ToRelativeTime(result.LastCapturedAt.Value);
@@ -2793,6 +2857,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(HasCheckedClips));
         this.RaisePropertyChanged(nameof(CheckedClipCount));
         this.RaisePropertyChanged(nameof(CheckedClipSummaryText));
+        this.RaisePropertyChanged(nameof(HasCheckedOrSelectedClip));
     }
 
     private void RaiseEditedClipProperties()

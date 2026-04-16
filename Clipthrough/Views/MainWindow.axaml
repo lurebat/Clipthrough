@@ -23,7 +23,7 @@
         <Border Grid.Row="0"
                 Classes="hero-toolbar"
                 Padding="12,10">
-            <Grid ColumnDefinitions="Auto,*,160,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                   ColumnSpacing="10">
                 <TextBlock Classes="window-title"
                            VerticalAlignment="Center"
@@ -34,10 +34,31 @@
                          Watermark="{Binding SearchWatermark}"
                          Text="{Binding SearchText}" />
 
-                <ComboBox Grid.Column="2"
-                          Classes="compact-field"
-                          ItemsSource="{Binding ContentTypeOptions}"
-                          SelectedItem="{Binding SelectedContentTypeOption}" />
+                <StackPanel Grid.Column="2"
+                            Orientation="Horizontal"
+                            Spacing="0"
+                            VerticalAlignment="Center">
+                    <RadioButton GroupName="ContentType"
+                                 Classes="segmented-left"
+                                 IsChecked="{Binding IsAllTypeSelected}"
+                                 Content="All" />
+                    <RadioButton GroupName="ContentType"
+                                 Classes="segmented-center"
+                                 IsChecked="{Binding IsTextTypeSelected}"
+                                 Content="Text" />
+                    <RadioButton GroupName="ContentType"
+                                 Classes="segmented-center"
+                                 IsChecked="{Binding IsImageTypeSelected}"
+                                 Content="Image" />
+                    <RadioButton GroupName="ContentType"
+                                 Classes="segmented-center"
+                                 IsChecked="{Binding IsRichTextTypeSelected}"
+                                 Content="Rich" />
+                    <RadioButton GroupName="ContentType"
+                                 Classes="segmented-right"
+                                 IsChecked="{Binding IsFilesTypeSelected}"
+                                 Content="Files" />
+                </StackPanel>
 
                 <CheckBox Grid.Column="3"
                           Classes="filter-toggle compact-toggle"
@@ -73,26 +94,20 @@
                           Classes="filter-toggle compact-toggle"
                           IsChecked="{Binding ShowPastedOnly}"
                           Content="{Binding PastedFilterLabel}" />
-
-                <Button Grid.Column="10"
-                        Classes="secondary compact"
-                        Command="{Binding RefreshCommand}"
-                        Content="{Binding RefreshButtonLabel}" />
             </Grid>
         </Border>
 
         <Grid Grid.Row="1"
               ColumnDefinitions="380,6,*"
-              ColumnSpacing="10">
+              ColumnSpacing="4">
             <Border Grid.Column="0"
                     Classes="surface-panel">
                 <Grid RowDefinitions="Auto,*,Auto"
                       RowSpacing="10"
                       Margin="12">
-                    <Grid RowDefinitions="Auto,Auto"
-                           ColumnDefinitions="Auto,Auto,*,*"
-                           ColumnSpacing="4"
-                           RowSpacing="8">
+                    <Grid ColumnDefinitions="Auto,Auto,Auto,Auto"
+                          ColumnSpacing="4"
+                          HorizontalAlignment="Left">
                         <Button Classes="secondary compact"
                                 Command="{Binding SelectAllClipsCommand}"
                                 Content="{Binding SelectAllButtonLabel}" />
@@ -103,19 +118,13 @@
                         <Button Classes="secondary compact"
                                  Grid.Column="2"
                                 Command="{Binding FavoriteCheckedClipsCommand}"
-                                IsEnabled="{Binding HasCheckedClips}"
+                                IsEnabled="{Binding HasCheckedOrSelectedClip}"
                                 Content="{Binding FavoriteSelectedButtonLabel}" />
                         <Button Classes="destructive compact"
                                 Grid.Column="3"
                                 Command="{Binding DeleteCheckedClipsCommand}"
-                                IsEnabled="{Binding HasCheckedClips}"
+                                IsEnabled="{Binding HasCheckedOrSelectedClip}"
                                 Content="{Binding DeleteButtonLabel}" />
-                        <TextBlock Classes="body-muted"
-                                   Grid.Row="1"
-                                   Grid.ColumnSpan="4"
-                                   VerticalAlignment="Center"
-                                   TextAlignment="Center"
-                                    Text="{Binding CheckedClipSummaryText}" />
                     </Grid>
 
                     <Grid Grid.Row="1">
@@ -149,8 +158,8 @@
                                                           Command="{Binding DeleteCommand}" />
                                             </ContextMenu>
                                         </Border.ContextMenu>
-                                        <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto"
-                                              ColumnSpacing="10">
+                                        <Grid ColumnDefinitions="Auto,Auto,Auto,*"
+                                              ColumnSpacing="4">
                                             <CheckBox Grid.Column="0"
                                                       VerticalAlignment="Center"
                                                       IsChecked="{Binding IsChecked, Mode=TwoWay}" />
@@ -204,18 +213,14 @@
                                                                Text="{Binding CopyCountCompact}"
                                                                IsVisible="{Binding ShowCopyCountBadge}"
                                                                FontSize="10" />
+                                                    <TextBlock Text="{Binding FavoriteMarker}"
+                                                               Foreground="{Binding StateAccentBrush}"
+                                                               IsVisible="{Binding IsFavorite}"
+                                                               FontSize="10" />
+                                                    <TextBlock Classes="clip-row-date"
+                                                               Text="{Binding CapturedAtCompact}"
+                                                               FontSize="10" />
                                                 </StackPanel>
-                                            </StackPanel>
-
-                                            <StackPanel Grid.Column="4"
-                                                        Orientation="Horizontal"
-                                                        Spacing="8"
-                                                        VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding FavoriteMarker}"
-                                                           Foreground="{Binding StateAccentBrush}"
-                                                           IsVisible="{Binding IsFavorite}" />
-                                                <TextBlock Classes="clip-row-date"
-                                                           Text="{Binding CapturedAtCompact}" />
                                             </StackPanel>
                                         </Grid>
                                     </Border>
@@ -226,10 +231,19 @@
 
                     <Border Grid.Row="2"
                             Classes="inset-panel"
-                            Padding="10,8">
-                        <TextBlock Classes="body-muted"
-                                   VerticalAlignment="Center"
-                                   Text="{Binding ClipboardStateText}" />
+                            Padding="8,6">
+                        <StackPanel Orientation="Horizontal"
+                                    Spacing="12">
+                            <TextBlock Classes="body-muted"
+                                       VerticalAlignment="Center"
+                                       Text="{Binding CheckedClipSummaryText}" />
+                            <TextBlock Classes="footer-metric"
+                                       VerticalAlignment="Center"
+                                       Text="{Binding MatchingClipCountText}" />
+                            <TextBlock Classes="footer-metric"
+                                       VerticalAlignment="Center"
+                                       Text="{Binding SensitiveClipCountText}" />
+                        </StackPanel>
                     </Border>
                 </Grid>
             </Border>
@@ -245,7 +259,7 @@
                     BorderThickness="{Binding SelectedClipAreaBorderThickness}">
                 <Grid RowDefinitions="Auto,*,Auto"
                       RowSpacing="10"
-                      Margin="14">
+                      Margin="10">
                     <Grid ColumnDefinitions="*,Auto"
                           ColumnSpacing="12">
                         <StackPanel Spacing="4">
@@ -310,6 +324,7 @@
 
                             <Button Classes="secondary compact"
                                     Command="{Binding CompareClipsCommand}"
+                                    IsEnabled="{Binding IsCompareAvailable}"
                                     Content="{Binding CompareClipsButtonLabel}" />
 
                             <Button Classes="secondary compact"
@@ -478,207 +493,134 @@
                         </Grid>
                     </Border>
 
-                    <Grid Grid.Row="2"
-                          RowDefinitions="Auto,Auto"
-                          ColumnDefinitions="1.2*,1*,1*,1*"
-                          ColumnSpacing="10"
-                          RowSpacing="10">
-                        <Border Classes="detail-stat-card"
-                                Padding="12,10"
-                                Grid.Column="0">
-                            <StackPanel Spacing="4">
-                                <TextBlock Classes="detail-label"
-                                           Text="{Binding AppLabelText}" />
-                                <Grid ColumnDefinitions="Auto,*"
-                                      ColumnSpacing="8">
+                    <Border Grid.Row="2"
+                            Classes="inset-panel"
+                            Padding="10,6">
+                        <Grid RowDefinitions="Auto,Auto"
+                              RowSpacing="4">
+                            <StackPanel Orientation="Horizontal"
+                                        Spacing="16">
+                                <StackPanel Orientation="Horizontal"
+                                            Spacing="4">
                                     <Image Source="{Binding SelectedClipSourceAppIcon}"
-                                           Width="18"
-                                           Height="18"
+                                           Width="14"
+                                           Height="14"
                                            Stretch="Uniform"
                                            IsVisible="{Binding ShowSelectedClipSourceAppIcon}" />
-                                    <TextBlock Grid.Column="1"
-                                               Classes="detail-value"
-                                               Text="{Binding SelectedClipSourceText}"
-                                               TextWrapping="Wrap" />
-                                </Grid>
+                                    <TextBlock Classes="body-muted"
+                                               VerticalAlignment="Center"
+                                               Text="{Binding SelectedClipSourceText}" />
+                                </StackPanel>
+                                <TextBlock Classes="body-muted"
+                                           VerticalAlignment="Center"
+                                           Text="{Binding SelectedClipFirstCopiedAtText}" />
+                                <TextBlock Classes="body-muted"
+                                           VerticalAlignment="Center"
+                                           Text="{Binding SelectedClipCapturedAtText}" />
+                                <TextBlock Classes="body-muted"
+                                           VerticalAlignment="Center"
+                                           Text="{Binding SelectedClipExpiresAtText}" />
                             </StackPanel>
-                        </Border>
-
-                        <Border Grid.Column="1"
-                                Classes="detail-stat-card"
-                                Padding="12,10">
-                            <StackPanel Spacing="4">
-                                <TextBlock Classes="detail-label"
-                                           Text="{Binding FirstCopiedLabelText}" />
-                                <TextBlock Classes="detail-value"
-                                           Text="{Binding SelectedClipFirstCopiedAtText}"
-                                           TextWrapping="Wrap" />
+                            <StackPanel Grid.Row="1"
+                                        Orientation="Horizontal"
+                                        Spacing="16">
+                                <TextBlock Classes="body-muted"
+                                           VerticalAlignment="Center"
+                                           Text="{Binding SelectedClipCopyCountText}" />
+                                <TextBlock Classes="body-muted"
+                                           VerticalAlignment="Center"
+                                           Text="{Binding SelectedClipByteSizeText}" />
+                                <TextBlock Classes="body-muted"
+                                           VerticalAlignment="Center"
+                                           IsVisible="{Binding ShowSelectedImageResolutionCard}"
+                                           Text="{Binding SelectedClipImageResolutionText}" />
+                                <TextBlock Classes="body-muted"
+                                           VerticalAlignment="Center"
+                                           Text="{Binding SelectedClipSensitivityText}" />
                             </StackPanel>
-                        </Border>
-
-                        <Border Grid.Column="2"
-                                Classes="detail-stat-card"
-                                Padding="12,10">
-                            <StackPanel Spacing="4">
-                                <TextBlock Classes="detail-label"
-                                           Text="{Binding CapturedLabelText}" />
-                                <TextBlock Classes="detail-value"
-                                           Text="{Binding SelectedClipCapturedAtText}"
-                                           TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-
-                        <Border Grid.Column="3"
-                                Classes="detail-stat-card"
-                                Padding="12,10">
-                            <StackPanel Spacing="4">
-                                <TextBlock Classes="detail-label"
-                                           Text="{Binding ExpiresLabelText}" />
-                                <TextBlock Classes="detail-value"
-                                           Text="{Binding SelectedClipExpiresAtText}"
-                                           TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-
-                        <Border Grid.Row="1"
-                                 Classes="detail-stat-card"
-                                 Padding="12,10">
-                            <StackPanel Spacing="4">
-                                <TextBlock Classes="detail-label"
-                                           Text="{Binding CopiesLabelText}" />
-                                <TextBlock Classes="detail-value"
-                                           Text="{Binding SelectedClipCopyCountText}"
-                                           TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-
-                        <Border Grid.Row="1"
-                                Grid.Column="1"
-                                Classes="detail-stat-card"
-                                Padding="12,10">
-                            <StackPanel Spacing="4">
-                                <TextBlock Classes="detail-label"
-                                           Text="{Binding SizeLabelText}" />
-                                <TextBlock Classes="detail-value"
-                                           Text="{Binding SelectedClipByteSizeText}"
-                                           TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-
-                        <Border Grid.Row="1"
-                                Grid.Column="2"
-                                Classes="detail-stat-card"
-                                Padding="12,10">
-                            <Border.IsVisible>
-                                <Binding Path="ShowSelectedImageResolutionCard" />
-                            </Border.IsVisible>
-                            <StackPanel Spacing="4">
-                                <TextBlock Classes="detail-label"
-                                           Text="{Binding ResolutionLabelText}" />
-                                <TextBlock Classes="detail-value"
-                                           Text="{Binding SelectedClipImageResolutionText}"
-                                           TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-
-                        <Border Grid.Row="1"
-                                Grid.Column="3"
-                                Classes="detail-stat-card"
-                                Padding="12,10">
-                            <StackPanel Spacing="4">
-                                <TextBlock Classes="detail-label"
-                                           Text="{Binding SensitivityLabelText}" />
-                                <TextBlock Classes="detail-value"
-                                           Text="{Binding SelectedClipSensitivityText}"
-                                           TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-                    </Grid>
+                        </Grid>
+                    </Border>
                 </Grid>
             </Border>
         </Grid>
 
         <Border Grid.Row="2"
                 Classes="inset-panel footer-panel"
-                Padding="12,8">
-            <Grid RowDefinitions="Auto,Auto"
-                  RowSpacing="10">
-                <Grid ColumnDefinitions="*,Auto,Auto"
-                      ColumnSpacing="14"
-                      VerticalAlignment="Center">
-                    <StackPanel Spacing="2"
-                                VerticalAlignment="Center">
-                        <TextBlock Classes="body-muted"
-                                   Text="{Binding ActiveFilterSummary}"
-                                   TextWrapping="Wrap" />
-                        <TextBlock Classes="body-muted"
-                                   Text="{Binding LastCaptureSummary}"
-                                   TextWrapping="Wrap" />
-                    </StackPanel>
+                Padding="12,6">
+            <Grid ColumnDefinitions="Auto,*,Auto"
+                  ColumnSpacing="14"
+                  VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal"
+                            Spacing="10"
+                            VerticalAlignment="Center">
+                    <TextBlock Classes="body-muted"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               MaxWidth="300"
+                               Text="{Binding ActiveFilterSummary}" />
+                    <Border Classes="badge-chip"
+                            VerticalAlignment="Center">
+                        <TextBlock Text="{Binding LastCaptureSummary}" />
+                    </Border>
+                </StackPanel>
 
-                    <StackPanel Grid.Column="1"
-                                Orientation="Horizontal"
-                                Spacing="12"
-                                VerticalAlignment="Center">
-                        <TextBlock Classes="footer-metric"
-                                   VerticalAlignment="Center"
-                                   Text="{Binding MatchingClipCountText}" />
-                        <TextBlock Classes="footer-metric"
-                                   VerticalAlignment="Center"
-                                   Text="{Binding SensitiveClipCountText}" />
-                    </StackPanel>
-
-                    <StackPanel Grid.Column="2"
-                                Orientation="Horizontal"
-                                Spacing="8"
-                                VerticalAlignment="Center">
-                        <Button Classes="secondary compact"
-                                Command="{Binding SessionLogs.OpenCommand}"
-                                Content="{Binding LogsButtonLabel}" />
-                        <Button Classes="secondary compact"
-                                Command="{Binding OpenSettingsCommand}"
-                                Content="{Binding SettingsButtonLabel}" />
-                    </StackPanel>
-                </Grid>
-
-                <Grid Grid.Row="1"
-                      ColumnDefinitions="*,*"
-                      ColumnSpacing="16">
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            Spacing="16"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center">
                     <Border Classes="detail-stat-card"
-                            Padding="10,8">
-                        <StackPanel Spacing="6">
+                            Padding="8,4">
+                        <StackPanel Spacing="4">
                             <Grid ColumnDefinitions="*,Auto"
                                   ColumnSpacing="8">
                                 <TextBlock Classes="detail-label"
+                                           FontSize="10"
                                            Text="{Binding StorageUsageText}" />
                                 <TextBlock Grid.Column="1"
                                            Classes="body-muted"
+                                           FontSize="10"
                                            Text="{Binding StorageCapacityText}" />
                             </Grid>
                             <ProgressBar Minimum="0"
                                          Maximum="100"
-                                         Value="{Binding StorageUsagePercent}" />
+                                         Value="{Binding StorageUsagePercent}"
+                                         Height="4" />
                         </StackPanel>
                     </Border>
 
-                    <Border Grid.Column="1"
-                            Classes="detail-stat-card"
-                            Padding="10,8">
-                        <StackPanel Spacing="6">
+                    <Border Classes="detail-stat-card"
+                            Padding="8,4">
+                        <StackPanel Spacing="4">
                             <Grid ColumnDefinitions="*,Auto"
                                   ColumnSpacing="8">
                                 <TextBlock Classes="detail-label"
+                                           FontSize="10"
                                            Text="{Binding EntryUsageText}" />
                                 <TextBlock Grid.Column="1"
                                            Classes="body-muted"
+                                           FontSize="10"
                                            Text="{Binding EntryCapacityText}" />
                             </Grid>
                             <ProgressBar Minimum="0"
                                          Maximum="100"
-                                         Value="{Binding EntryUsagePercent}" />
+                                         Value="{Binding EntryUsagePercent}"
+                                         Height="4" />
                         </StackPanel>
                     </Border>
-                </Grid>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2"
+                            Orientation="Horizontal"
+                            Spacing="8"
+                            VerticalAlignment="Center">
+                    <Button Classes="secondary compact"
+                            Command="{Binding SessionLogs.OpenCommand}"
+                            Content="{Binding LogsButtonLabel}" />
+                    <Button Classes="secondary compact"
+                            Command="{Binding OpenSettingsCommand}"
+                            Content="{Binding SettingsButtonLabel}" />
+                </StackPanel>
             </Grid>
         </Border>
 
