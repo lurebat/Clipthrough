@@ -84,10 +84,25 @@ public sealed class RemoteControlService : IRemoteControlService
         var app = builder.Build();
 
         var token = settings.RemoteApiToken;
+        var tokenBytes = Encoding.UTF8.GetBytes(token);
         app.Use(async (ctx, next) =>
         {
-            if (!ctx.Request.Headers.TryGetValue("Authorization", out var header) ||
-                !header.ToString().Equals($"Bearer {token}", StringComparison.Ordinal))
+            if (!ctx.Request.Headers.TryGetValue("Authorization", out var header))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await ctx.Response.WriteAsJsonAsync(new { error = "unauthorized" }).ConfigureAwait(false);
+                return;
+            }
+            var raw = header.ToString();
+            const string prefix = "Bearer ";
+            if (!raw.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await ctx.Response.WriteAsJsonAsync(new { error = "unauthorized" }).ConfigureAwait(false);
+                return;
+            }
+            var presented = Encoding.UTF8.GetBytes(raw.Substring(prefix.Length));
+            if (!System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(presented, tokenBytes))
             {
                 ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 await ctx.Response.WriteAsJsonAsync(new { error = "unauthorized" }).ConfigureAwait(false);

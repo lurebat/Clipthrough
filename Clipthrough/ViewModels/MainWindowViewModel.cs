@@ -2954,14 +2954,38 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         AiPromptError = string.Empty;
         try
         {
+            var useSelectionSlice = checkedClips.Count == 0
+                && SelectedClip is not null
+                && EditedClipSelectionLength > 0
+                && EditedClipSelectionStart >= 0
+                && EditedClipSelectionStart + EditedClipSelectionLength <= (EditedClipText?.Length ?? 0);
+
             var produced = 0;
             foreach (var target in targets)
             {
-                var source = target.Clip.Content ?? string.Empty;
+                string source;
                 string result;
                 try
                 {
-                    result = await _aiTransformService.TransformAsync(prompt, source);
+                    if (useSelectionSlice && ReferenceEquals(target, SelectedClip))
+                    {
+                        var full = EditedClipText ?? string.Empty;
+                        var slice = full.Substring(EditedClipSelectionStart, EditedClipSelectionLength);
+                        var transformedSlice = await _aiTransformService.TransformAsync(prompt, slice);
+                        if (string.IsNullOrEmpty(transformedSlice) || string.Equals(slice, transformedSlice, StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+                        source = full;
+                        result = full.Substring(0, EditedClipSelectionStart)
+                            + transformedSlice
+                            + full.Substring(EditedClipSelectionStart + EditedClipSelectionLength);
+                    }
+                    else
+                    {
+                        source = target.Clip.Content ?? string.Empty;
+                        result = await _aiTransformService.TransformAsync(prompt, source);
+                    }
                 }
                 catch (Exception ex)
                 {

@@ -426,10 +426,14 @@
                             <TextBlock Classes="detail-label" Text="Bearer token" />
                             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
                                 <TextBox Grid.Column="0"
+                                         PasswordChar="•"
+                                         RevealPassword="True"
                                          Watermark="Paste or generate a token"
+                                         AutomationProperties.Name="Remote API bearer token"
                                          Text="{Binding SettingsRemoteApiToken, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                 <Button Grid.Column="1" Classes="secondary compact"
                                         Content="Generate"
+                                        AutomationProperties.Name="Generate a random bearer token"
                                         Command="{Binding GenerateRemoteApiTokenCommand}" />
                             </Grid>
                         </StackPanel>
