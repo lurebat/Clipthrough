@@ -39,6 +39,9 @@ jobs:
       - name: Restore
         run: dotnet restore .\Clipthrough.slnx
 
+      - name: Install Velopack CLI
+        run: dotnet tool install -g vpk
+
       - name: Publish (framework-dependent)
         run: >
           dotnet publish .\Clipthrough\Clipthrough.csproj
@@ -53,11 +56,24 @@ jobs:
           Compress-Archive -Path artifacts\publish\* -DestinationPath $zip
           echo "ZIP_PATH=$zip" >> $env:GITHUB_ENV
 
+      - name: Build Velopack package
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          vpk pack `
+            --packId Clipthrough `
+            --packVersion ${{ steps.ver.outputs.version }} `
+            --packDir artifacts\publish `
+            --mainExe Clipthrough.exe `
+            --outputDir artifacts\velopack
+
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
           name: Clipthrough-${{ steps.ver.outputs.version }}-win-x64
-          path: artifacts\Clipthrough-${{ steps.ver.outputs.version }}-win-x64.zip
+          path: |
+            artifacts\Clipthrough-${{ steps.ver.outputs.version }}-win-x64.zip
+            artifacts\velopack\**
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -69,3 +85,4 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/Clipthrough-${{ steps.ver.outputs.version }}-win-x64.zip
+            artifacts/velopack/*

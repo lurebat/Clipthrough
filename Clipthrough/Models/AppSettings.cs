@@ -130,6 +130,10 @@ public sealed record AppSettings
 
     public System.Collections.Generic.IReadOnlyList<UserScript> UserScripts { get; init; } = System.Array.Empty<UserScript>();
 
+    public bool EnableAutoUpdate { get; init; }
+
+    public string UpdateFeedUrl { get; init; } = string.Empty;
+
     public static AppSettings Default { get; } = new();
 
     public AppSettings Normalize() => this with
@@ -183,6 +187,7 @@ public sealed record AppSettings
             .Where(s => s is not null && !string.IsNullOrWhiteSpace(s.Name) && !string.IsNullOrWhiteSpace(s.Code))
             .Select(s => new UserScript { Name = s.Name.Trim(), Code = s.Code })
             .ToList(),
+        UpdateFeedUrl = UpdateFeedUrl?.Trim() ?? string.Empty,
     };
 
     private static string NormalizeHotkey(string? value, string fallback)

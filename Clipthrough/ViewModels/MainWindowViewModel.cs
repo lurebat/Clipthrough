@@ -140,6 +140,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _settingsAiBaseUrl = AppSettings.Default.AiBaseUrl;
     private string _settingsAiApiKey = AppSettings.Default.AiApiKey;
     private string _settingsAiModel = AppSettings.Default.AiModel;
+    private bool _settingsEnableAutoUpdate = AppSettings.Default.EnableAutoUpdate;
+    private string _settingsUpdateFeedUrl = AppSettings.Default.UpdateFeedUrl;
     private string _editedClipText = string.Empty;
     private string _editedClipBaseline = string.Empty;
     private long? _checkedSelectionAnchorId;
@@ -1228,6 +1230,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get => _settingsAiModel;
         set => this.RaiseAndSetIfChanged(ref _settingsAiModel, value);
+    }
+
+    public bool SettingsEnableAutoUpdate
+    {
+        get => _settingsEnableAutoUpdate;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnableAutoUpdate, value);
+    }
+
+    public string SettingsUpdateFeedUrl
+    {
+        get => _settingsUpdateFeedUrl;
+        set => this.RaiseAndSetIfChanged(ref _settingsUpdateFeedUrl, value);
     }
 
     public string SettingsToggleRegexHotkey
@@ -3097,6 +3111,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             AiBaseUrl = (SettingsAiBaseUrl ?? string.Empty).Trim(),
             AiApiKey = (SettingsAiApiKey ?? string.Empty).Trim(),
             AiModel = (SettingsAiModel ?? string.Empty).Trim(),
+            EnableAutoUpdate = SettingsEnableAutoUpdate,
+            UpdateFeedUrl = (SettingsUpdateFeedUrl ?? string.Empty).Trim(),
             MaxClipSizeBytes = maxClipSizeBytes,
             CloseToTray = SettingsCloseToTray,
             MinimizeToTray = SettingsMinimizeToTray,
@@ -3175,6 +3191,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsAiBaseUrl = settings.AiBaseUrl;
         SettingsAiApiKey = settings.AiApiKey;
         SettingsAiModel = settings.AiModel;
+        SettingsEnableAutoUpdate = settings.EnableAutoUpdate;
+        SettingsUpdateFeedUrl = settings.UpdateFeedUrl;
         SettingsUseFuzzySearch = settings.UseFuzzySettingsSearch;
         UseFuzzyClipSearch = settings.UseFuzzyClipSearch;
         IsDatabasePasswordVisible = false;

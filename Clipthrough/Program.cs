@@ -3,6 +3,7 @@ using ReactiveUI.Avalonia;
 using System;
 using System.Diagnostics;
 using Clipthrough.Diagnostics;
+using Velopack;
 
 namespace Clipthrough;
 
@@ -16,6 +17,16 @@ sealed class Program
     {
         SQLitePCL.Batteries_V2.Init();
         TraceConfiguration.Initialize();
+
+        try
+        {
+            // Must run before any Avalonia/UI work. Handles --squirrel-* hooks, bootstraps logging, and early-exits for install/uninstall events.
+            VelopackApp.Build().Run();
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceError($"Velopack initialization failed: {ex}");
+        }
 
         try
         {

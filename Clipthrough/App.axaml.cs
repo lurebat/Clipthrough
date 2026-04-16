@@ -139,6 +139,7 @@ public partial class App : Application
         services.AddSingleton<IClipboardMonitorService, ClipboardMonitorService>();
         services.AddSingleton<IAiTransformService, AiTransformService>();
         services.AddSingleton<IScriptingService, ScriptingService>();
+        services.AddSingleton<IUpdateService, UpdateService>();
         services.AddSingleton<MainWindowViewModel>();
 
         return services.BuildServiceProvider();
@@ -147,6 +148,24 @@ public partial class App : Application
     private void OnMainWindowOpened(object? sender, EventArgs e)
     {
         UpdateGlobalHotKeyRegistration();
+        _ = KickOffUpdateCheckAsync();
+    }
+
+    private async Task KickOffUpdateCheckAsync()
+    {
+        try
+        {
+            var svc = Services?.GetService<IUpdateService>();
+            if (svc is null)
+            {
+                return;
+            }
+            await svc.CheckAndApplyAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"Update check failed: {ex}");
+        }
     }
 
     private void OnMainWindowClosed(object? sender, EventArgs e)
