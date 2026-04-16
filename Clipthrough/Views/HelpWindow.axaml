@@ -54,6 +54,13 @@
 
             <Border Classes="surface-panel" Padding="16">
                 <StackPanel Spacing="6">
+                    <TextBlock FontWeight="SemiBold" Text="AI transforms" />
+                    <TextBlock TextWrapping="Wrap" Text="Enable AI transforms under Settings → AI transforms, then pick Edit → AI transform… (Ctrl+I) to send the selected or checked text clips to an OpenAI-compatible endpoint with your own instruction. Configure a base URL, API key and model, or leave them blank to use the OPENAI_BASE_URL and OPENAI_API_KEY environment variables. Results are saved as new clips." />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="surface-panel" Padding="16">
+                <StackPanel Spacing="6">
                     <TextBlock FontWeight="SemiBold" Text="Settings" />
                     <TextBlock TextWrapping="Wrap" Text="Open Settings (gear icon or the File menu) to change storage path, encryption password, retention, hotkeys, and the theme. The Fuzzy toggle next to the filter box accepts synonyms like 'keybind' → 'hotkey' or 'dark mode' → 'theme'." />
                 </StackPanel>

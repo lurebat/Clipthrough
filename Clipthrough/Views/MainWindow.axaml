@@ -36,6 +36,8 @@
                 <Separator />
                 <MenuItem Header="Toggle _favorite" Command="{Binding ToggleFavoriteCommand}" />
                 <MenuItem Header="Toggle _pin" Command="{Binding TogglePinCommand}" />
+                <Separator />
+                <MenuItem Header="_AI transform…" Command="{Binding OpenAiPromptCommand}" InputGesture="Ctrl+I" />
             </MenuItem>
             <MenuItem Header="_View">
                 <MenuItem Header="Show session _logs" Command="{Binding SessionLogs.OpenCommand}" />
@@ -1180,6 +1182,52 @@
                             Classes="primary"
                             Command="{Binding UnlockDatabaseCommand}"
                             Content="Unlock" />
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- AI Prompt Panel -->
+        <Border IsVisible="{Binding IsAiPromptOpen}"
+                Margin="10"
+                Classes="hero-surface"
+                Padding="28">
+            <Grid RowDefinitions="Auto,*,Auto"
+                  RowSpacing="16"
+                  MaxWidth="640"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center">
+                <StackPanel Spacing="8">
+                    <TextBlock Classes="eyebrow" Text="AI transform" />
+                    <TextBlock Classes="hero-title" Text="Describe what you want" />
+                    <TextBlock Classes="body-muted"
+                               TextWrapping="Wrap"
+                               Text="The selected (or checked) text clips will be sent to your AI provider along with this instruction. The result is saved as a new clip." />
+                </StackPanel>
+
+                <Border Grid.Row="1" Classes="surface-panel" Padding="18">
+                    <StackPanel Spacing="12">
+                        <TextBox AcceptsReturn="True"
+                                 MinHeight="120"
+                                 TextWrapping="Wrap"
+                                 Watermark="e.g. Rewrite this as a formal email, or Convert to JSON"
+                                 Text="{Binding AiPromptInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Text="{Binding AiPromptError}"
+                                   IsVisible="{Binding AiPromptError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                   Foreground="{DynamicResource DangerBrush}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <Grid Grid.Row="2" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                    <Button Classes="secondary"
+                            Command="{Binding CancelAiPromptCommand}"
+                            IsEnabled="{Binding !IsAiPromptBusy}"
+                            Content="Cancel" />
+                    <Button Grid.Column="2"
+                            Classes="primary"
+                            Command="{Binding SubmitAiPromptCommand}"
+                            IsEnabled="{Binding !IsAiPromptBusy}"
+                            Content="Apply" />
                 </Grid>
             </Grid>
         </Border>

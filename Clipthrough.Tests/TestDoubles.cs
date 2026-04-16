@@ -352,3 +352,10 @@ internal sealed class TemporaryDatabaseScope : IDisposable
         }
     }
 }
+
+internal sealed class TestAiTransformService : IAiTransformService
+{
+    public bool IsConfigured => false;
+    public Task<string> TransformAsync(string systemPrompt, string input, CancellationToken cancellationToken = default)
+        => Task.FromResult(input);
+}

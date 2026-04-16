@@ -54,6 +54,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly IClipExportService _clipExportService;
     private readonly IImageEditorService _imageEditorService;
     private readonly ISearchHistoryService _searchHistoryService;
+    private readonly IAiTransformService _aiTransformService;
     private readonly DatabaseInitializer _databaseInitializer;
     private readonly CompositeDisposable _subscriptions = new();
     private readonly Dictionary<long, (ClipEntry Clip, CancellationTokenSource Cts)> _pendingDeletes = new();
@@ -89,6 +90,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isSettingsOpen;
     private bool _isWelcomeOpen;
     private bool _isPasswordPromptOpen;
+    private bool _isAiPromptOpen;
+    private string _aiPromptInput = string.Empty;
+    private string _aiPromptError = string.Empty;
+    private bool _isAiPromptBusy;
     private string _passwordPromptInput = string.Empty;
     private string _passwordPromptError = string.Empty;
     private bool _isPasswordPromptPasswordVisible;
@@ -130,11 +135,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _settingsEnableDecrementalPasteHotkey = AppSettings.Default.EnableDecrementalPasteHotkey;
     private string _settingsExternalEditorPath = AppSettings.Default.ExternalEditorPath;
     private string _settingsExternalDiffToolPath = AppSettings.Default.ExternalDiffToolPath;
+    private bool _settingsEnableAi = AppSettings.Default.EnableAi;
+    private string _settingsAiBaseUrl = AppSettings.Default.AiBaseUrl;
+    private string _settingsAiApiKey = AppSettings.Default.AiApiKey;
+    private string _settingsAiModel = AppSettings.Default.AiModel;
     private string _editedClipText = string.Empty;
     private string _editedClipBaseline = string.Empty;
     private long? _checkedSelectionAnchorId;
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, DatabaseInitializer databaseInitializer)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, DatabaseInitializer databaseInitializer)
     {
         _clipStoreService = clipStoreService;
         _clipboardMonitorService = clipboardMonitorService;
@@ -147,6 +156,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _clipExportService = clipExportService;
         _imageEditorService = imageEditorService;
         _searchHistoryService = searchHistoryService;
+        _aiTransformService = aiTransformService;
         _databaseInitializer = databaseInitializer;
         SessionLogs = new SessionLogsViewModel(sessionLogService);
         ContentTypeOptions =
@@ -187,6 +197,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         BrowseDatabasePathCommand = ReactiveCommand.CreateFromTask<Window?>(BrowseDatabasePathAsync);
         UnlockDatabaseCommand = ReactiveCommand.CreateFromTask(UnlockDatabaseAsync);
         ExitApplicationCommand = ReactiveCommand.Create(ExitApplication);
+        OpenAiPromptCommand = ReactiveCommand.Create(OpenAiPrompt);
+        SubmitAiPromptCommand = ReactiveCommand.CreateFromTask(SubmitAiPromptAsync);
+        CancelAiPromptCommand = ReactiveCommand.Create(CancelAiPrompt);
 
         _settingsService.SettingsChanged += OnSettingsChanged;
 
@@ -316,6 +329,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> UnlockDatabaseCommand { get; }
 
     public ReactiveCommand<Unit, Unit> ExitApplicationCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> OpenAiPromptCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> SubmitAiPromptCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> CancelAiPromptCommand { get; }
 
     public string SearchText
     {
@@ -1150,6 +1169,54 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get => _isPasswordPromptPasswordVisible;
         set => this.RaiseAndSetIfChanged(ref _isPasswordPromptPasswordVisible, value);
+    }
+
+    public bool IsAiPromptOpen
+    {
+        get => _isAiPromptOpen;
+        private set => this.RaiseAndSetIfChanged(ref _isAiPromptOpen, value);
+    }
+
+    public string AiPromptInput
+    {
+        get => _aiPromptInput;
+        set => this.RaiseAndSetIfChanged(ref _aiPromptInput, value);
+    }
+
+    public string AiPromptError
+    {
+        get => _aiPromptError;
+        private set => this.RaiseAndSetIfChanged(ref _aiPromptError, value);
+    }
+
+    public bool IsAiPromptBusy
+    {
+        get => _isAiPromptBusy;
+        private set => this.RaiseAndSetIfChanged(ref _isAiPromptBusy, value);
+    }
+
+    public bool SettingsEnableAi
+    {
+        get => _settingsEnableAi;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnableAi, value);
+    }
+
+    public string SettingsAiBaseUrl
+    {
+        get => _settingsAiBaseUrl;
+        set => this.RaiseAndSetIfChanged(ref _settingsAiBaseUrl, value);
+    }
+
+    public string SettingsAiApiKey
+    {
+        get => _settingsAiApiKey;
+        set => this.RaiseAndSetIfChanged(ref _settingsAiApiKey, value);
+    }
+
+    public string SettingsAiModel
+    {
+        get => _settingsAiModel;
+        set => this.RaiseAndSetIfChanged(ref _settingsAiModel, value);
     }
 
     public string SettingsToggleRegexHotkey
@@ -2603,7 +2670,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool TryHandleShortcut(KeyEventArgs e)
     {
-        if (IsSettingsOpen || IsWelcomeOpen || IsPasswordPromptOpen || SessionLogs.IsOpen)
+        if (IsSettingsOpen || IsWelcomeOpen || IsPasswordPromptOpen || IsAiPromptOpen || SessionLogs.IsOpen)
         {
             return false;
         }
@@ -2647,6 +2714,110 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public event EventHandler? HelpRequested;
+
+    private void OpenAiPrompt()
+    {
+        if (!_aiTransformService.IsConfigured)
+        {
+            StatusText = "AI is not configured. Enable it in Settings → AI and set an API key (or OPENAI_API_KEY env var).";
+            return;
+        }
+        AiPromptError = string.Empty;
+        AiPromptInput = string.Empty;
+        IsAiPromptOpen = true;
+    }
+
+    private void CancelAiPrompt()
+    {
+        IsAiPromptOpen = false;
+        AiPromptError = string.Empty;
+    }
+
+    private async Task SubmitAiPromptAsync()
+    {
+        if (IsAiPromptBusy)
+        {
+            return;
+        }
+        var prompt = (AiPromptInput ?? string.Empty).Trim();
+        if (string.IsNullOrEmpty(prompt))
+        {
+            AiPromptError = "Please enter a prompt.";
+            return;
+        }
+
+        var checkedClips = Clips.Where(static c => c.IsChecked).ToList();
+        var targets = checkedClips.Count > 0
+            ? checkedClips
+            : SelectedClip is not null ? new List<ClipItemViewModel> { SelectedClip } : new List<ClipItemViewModel>();
+
+        targets = targets
+            .Where(t => (t.Clip.ContentType == ContentType.Text || t.Clip.ContentType == ContentType.RichText)
+                && !string.IsNullOrEmpty(t.Clip.Content))
+            .ToList();
+
+        if (targets.Count == 0)
+        {
+            AiPromptError = "Select one or more text clips first.";
+            return;
+        }
+
+        IsAiPromptBusy = true;
+        AiPromptError = string.Empty;
+        try
+        {
+            var produced = 0;
+            foreach (var target in targets)
+            {
+                var source = target.Clip.Content ?? string.Empty;
+                string result;
+                try
+                {
+                    result = await _aiTransformService.TransformAsync(prompt, source);
+                }
+                catch (Exception ex)
+                {
+                    AiPromptError = ex.Message;
+                    return;
+                }
+
+                if (string.IsNullOrEmpty(result) || string.Equals(result, source, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
+                await _clipStoreService.CaptureAsync(new ClipCaptureRequest
+                {
+                    ContentBytes = textBytes,
+                    ContentText = result,
+                    ContentType = ContentType.Text,
+                    ContentFormat = ClipContentFormat.PlainText,
+                    SourceApp = target.SourceApp,
+                    SourceAppPath = target.Clip.SourceAppPath,
+                    SourceAppIconBytes = target.Clip.SourceAppIconBytes,
+                    IncrementExistingCopyCount = false,
+                });
+                produced++;
+            }
+
+            if (produced > 0)
+            {
+                StatusText = produced == 1
+                    ? "AI transform produced a new clip."
+                    : $"AI transform produced {produced} new clips.";
+            }
+            else
+            {
+                StatusText = "AI transform returned no new content.";
+            }
+            IsAiPromptOpen = false;
+        }
+        finally
+        {
+            IsAiPromptBusy = false;
+        }
+    }
 
     private void CloseSettings()
     {
@@ -2835,6 +3006,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             DecrementalPasteHotkey = normalizedDecrementalHotkey,
             ExternalEditorPath = SettingsExternalEditorPath.Trim(),
             ExternalDiffToolPath = SettingsExternalDiffToolPath.Trim(),
+            EnableAi = SettingsEnableAi,
+            AiBaseUrl = (SettingsAiBaseUrl ?? string.Empty).Trim(),
+            AiApiKey = (SettingsAiApiKey ?? string.Empty).Trim(),
+            AiModel = (SettingsAiModel ?? string.Empty).Trim(),
             MaxClipSizeBytes = maxClipSizeBytes,
             CloseToTray = SettingsCloseToTray,
             MinimizeToTray = SettingsMinimizeToTray,
@@ -2909,6 +3084,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsDecrementalPasteHotkey = settings.DecrementalPasteHotkey;
         SettingsExternalEditorPath = settings.ExternalEditorPath;
         SettingsExternalDiffToolPath = settings.ExternalDiffToolPath;
+        SettingsEnableAi = settings.EnableAi;
+        SettingsAiBaseUrl = settings.AiBaseUrl;
+        SettingsAiApiKey = settings.AiApiKey;
+        SettingsAiModel = settings.AiModel;
         SettingsUseFuzzySearch = settings.UseFuzzySettingsSearch;
         UseFuzzyClipSearch = settings.UseFuzzyClipSearch;
         IsDatabasePasswordVisible = false;

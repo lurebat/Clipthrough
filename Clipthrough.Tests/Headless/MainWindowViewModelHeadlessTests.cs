@@ -444,6 +444,7 @@ public sealed class MainWindowViewModelHeadlessTests
             scope.ClipExportService,
             imageEditorService ?? new TestImageEditorService(),
             scope.SearchHistoryService,
+            new TestAiTransformService(),
             scope.DatabaseInitializer);
     }
 

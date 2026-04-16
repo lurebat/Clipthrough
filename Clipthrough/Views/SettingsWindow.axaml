@@ -341,6 +341,38 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </Expander>
+
+                <!-- AI transforms -->
+                <Expander Classes="settings-section" IsExpanded="False">
+                    <Expander.Header>
+                        <TextBlock Text="AI transforms"
+                                   FontSize="16"
+                                   FontWeight="SemiBold" />
+                    </Expander.Header>
+                    <StackPanel Spacing="10" Margin="8,10,0,0">
+                        <TextBlock Classes="body-muted"
+                                   TextWrapping="Wrap"
+                                   Text="Send text clips to an OpenAI-compatible chat-completions endpoint and save the result as a new clip. Base URL and API key are read from the fields below; blank values fall back to the OPENAI_BASE_URL and OPENAI_API_KEY environment variables." />
+                        <CheckBox Content="Enable AI transforms"
+                                  IsChecked="{Binding SettingsEnableAi}" />
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="detail-label" Text="Base URL (blank = https://api.openai.com/v1)" />
+                            <TextBox Watermark="https://api.openai.com/v1"
+                                     Text="{Binding SettingsAiBaseUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="detail-label" Text="API key (blank = use OPENAI_API_KEY env var)" />
+                            <TextBox PasswordChar="*"
+                                     Watermark="sk-…"
+                                     Text="{Binding SettingsAiApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="detail-label" Text="Model (blank = gpt-4o-mini)" />
+                            <TextBox Watermark="gpt-4o-mini"
+                                     Text="{Binding SettingsAiModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Expander>
             </StackPanel>
         </ScrollViewer>
 
