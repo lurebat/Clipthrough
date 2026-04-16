@@ -15,7 +15,7 @@
         Title="{Binding WindowTitle}"
         Width="1360"
         Height="860"
-        MinWidth="920"
+        MinWidth="1100"
         MinHeight="640">
 
     <Grid>
@@ -99,10 +99,11 @@
         </Border>
 
         <Grid Grid.Row="1"
-              ColumnDefinitions="380,6,*"
+              ColumnDefinitions="*,6,2*"
               ColumnSpacing="4">
             <Border Grid.Column="0"
-                    Classes="surface-panel">
+                    Classes="surface-panel"
+                    MinWidth="340">
                 <Grid RowDefinitions="Auto,*,Auto"
                       RowSpacing="10"
                       Margin="12">
@@ -186,7 +187,7 @@
                                                               Command="{Binding #ClipsListBox.DataContext.ApplyTextTransformationCommand}"
                                                               CommandParameter="{x:Static models:TextTransformation.RemoveDuplicateLines}" />
                                                 </MenuItem>
-                                                <Separator />
+                                                <Separator IsVisible="{Binding HasAnySourceInfo}" />
                                                 <MenuItem Header="Open source URL"
                                                           IsVisible="{Binding HasSourceUrl}"
                                                           Command="{Binding #ClipsListBox.DataContext.OpenSelectedClipSourceUrlCommand}" />
@@ -230,12 +231,32 @@
 
                                             <StackPanel Grid.Column="3"
                                                         VerticalAlignment="Center"
-                                                        Spacing="2">
-                                                <Image Source="{Binding PreviewThumbnailImage}"
-                                                       Width="84"
-                                                       Height="48"
-                                                       Stretch="UniformToFill"
-                                                       IsVisible="{Binding ShowPreviewThumbnail}" />
+                                                        Spacing="4">
+                                                <Grid ColumnDefinitions="Auto,*"
+                                                      ColumnSpacing="10"
+                                                      IsVisible="{Binding ShowPreviewThumbnail}">
+                                                    <Image Grid.Column="0"
+                                                           Source="{Binding PreviewThumbnailImage}"
+                                                           Width="84"
+                                                           Height="48"
+                                                           Stretch="UniformToFill"
+                                                           HorizontalAlignment="Left"
+                                                           VerticalAlignment="Center" />
+                                                    <StackPanel Grid.Column="1"
+                                                                VerticalAlignment="Center"
+                                                                Spacing="2">
+                                                        <TextBlock Text="{Binding SourceWindowTitle}"
+                                                                   IsVisible="{Binding HasSourceWindowTitle}"
+                                                                   FontSize="11"
+                                                                   FontWeight="SemiBold"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   ToolTip.Tip="{Binding SourceWindowTitle}" />
+                                                        <TextBlock Text="{Binding ThumbnailInfoCompact}"
+                                                                   FontSize="11"
+                                                                   Opacity="0.8"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                    </StackPanel>
+                                                </Grid>
                                                 <TextBlock Classes="clip-row-preview"
                                                            Text="{Binding SingleLinePreview}"
                                                            TextTrimming="CharacterEllipsis"
@@ -265,14 +286,7 @@
                                                     </Border>
                                                     <Border Classes="meta-chip"
                                                             Padding="6,1"
-                                                            IsVisible="{Binding ShowPreviewThumbnail}"
-                                                            VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding ThumbnailInfoCompact}"
-                                                                   FontSize="10" />
-                                                    </Border>
-                                                    <Border Classes="meta-chip"
-                                                            Padding="6,1"
-                                                            IsVisible="{Binding HasSourceWindowTitle}"
+                                                            IsVisible="{Binding ShowWindowTitleChipInRow}"
                                                             VerticalAlignment="Center"
                                                             ToolTip.Tip="{Binding SourceWindowTitle}">
                                                         <TextBlock Text="{Binding SourceWindowTitle}"
@@ -347,7 +361,7 @@
 
             <Border Grid.Column="2"
                     Classes="surface-panel"
-                    MinWidth="480"
+                    MinWidth="620"
                     BorderBrush="{Binding SelectedClipAreaBorderBrush}"
                     BorderThickness="{Binding SelectedClipAreaBorderThickness}">
                 <Grid RowDefinitions="Auto,*,Auto"
@@ -355,38 +369,36 @@
                       Margin="10">
                     <Grid RowDefinitions="Auto,Auto"
                           RowSpacing="8">
-                        <StackPanel Spacing="4">
-                            <TextBlock Classes="panel-caption"
-                                       Text="{Binding SelectedClipContentTypeText}" />
-                            <TextBlock Classes="panel-title"
-                                       Foreground="{Binding SelectedClipAccentBrush}"
-                                       Text="{Binding SelectedClipTitleText}"
-                                       TextWrapping="Wrap" />
-                            <TextBlock Classes="body-muted"
-                                       Text="{Binding SelectionStateTitle}"
-                                       IsVisible="{Binding !HasSelectedClip}"
-                                       TextWrapping="Wrap" />
-                            <StackPanel Orientation="Horizontal"
-                                        Spacing="8">
-                                <Border Classes="badge-chip"
-                                        IsVisible="{Binding ShowSelectedClipSeverityIndicator}"
-                                        Background="{Binding SelectedClipSeverityBadgeBackground}"
-                                        BorderBrush="{Binding SelectedClipSeverityBadgeBorderBrush}">
-                                    <TextBlock Text="{Binding SelectedClipSeverityIndicatorText}"
-                                               Foreground="{Binding SelectedClipSeverityBadgeForeground}" />
-                                </Border>
+                        <Grid ColumnDefinitions="*,Auto"
+                              ColumnSpacing="12">
+                            <StackPanel Grid.Column="0" Spacing="4">
+                                <TextBlock Classes="panel-caption"
+                                           Text="{Binding SelectedClipContentTypeText}" />
+                                <TextBlock Classes="panel-title"
+                                           Foreground="{Binding SelectedClipAccentBrush}"
+                                           Text="{Binding SelectedClipTitleText}"
+                                           TextWrapping="Wrap" />
+                                <TextBlock Classes="body-muted"
+                                           Text="{Binding SelectionStateTitle}"
+                                           IsVisible="{Binding !HasSelectedClip}"
+                                           TextWrapping="Wrap" />
+                                <StackPanel Orientation="Horizontal"
+                                            Spacing="8">
+                                    <Border Classes="badge-chip"
+                                            IsVisible="{Binding ShowSelectedClipSeverityIndicator}"
+                                            Background="{Binding SelectedClipSeverityBadgeBackground}"
+                                            BorderBrush="{Binding SelectedClipSeverityBadgeBorderBrush}">
+                                        <TextBlock Text="{Binding SelectedClipSeverityIndicatorText}"
+                                                   Foreground="{Binding SelectedClipSeverityBadgeForeground}" />
+                                    </Border>
+                                </StackPanel>
                             </StackPanel>
-                        </StackPanel>
 
-                        <WrapPanel Grid.Row="1"
-                                   Orientation="Horizontal"
-                                   HorizontalAlignment="Left"
-                                   VerticalAlignment="Center"
-                                   ItemSpacing="8"
-                                   LineSpacing="6">
-                            <StackPanel Orientation="Horizontal"
+                            <StackPanel Grid.Column="1"
+                                        Orientation="Horizontal"
                                         Spacing="0"
-                                        VerticalAlignment="Center"
+                                        VerticalAlignment="Top"
+                                        HorizontalAlignment="Right"
                                         IsVisible="{Binding IsDisplayModeApplicable}">
                                 <RadioButton GroupName="DisplayMode"
                                              Classes="segmented-left"
@@ -401,7 +413,14 @@
                                              IsChecked="{Binding IsRawMode}"
                                              Content="Raw" />
                             </StackPanel>
+                        </Grid>
 
+                        <WrapPanel Grid.Row="1"
+                                   Orientation="Horizontal"
+                                   HorizontalAlignment="Left"
+                                   VerticalAlignment="Center"
+                                   ItemSpacing="8"
+                                   LineSpacing="6">
                             <Button Classes="secondary compact"
                                     Command="{Binding CopySelectedCommand}"
                                     IsEnabled="{Binding HasSelectedClip}"
@@ -521,21 +540,6 @@
                             BorderBrush="{Binding SelectedClipAreaBorderBrush}"
                             BorderThickness="{Binding SelectedClipAreaBorderThickness}">
                         <Grid>
-                            <ComboBox ItemsSource="{Binding TextTransformationOptions}"
-                                      SelectedItem="{Binding SelectedTextTransformation, Mode=TwoWay}"
-                                      IsVisible="{Binding IsSelectedClipTextEditable}"
-                                      HorizontalAlignment="Right"
-                                      VerticalAlignment="Top"
-                                      Margin="0,6,10,0"
-                                      Width="220"
-                                      ZIndex="10"
-                                      ToolTip.Tip="Apply text transformation (auto-saves as new clip)">
-                                <ComboBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding Converter={x:Static conv:TextTransformationDisplayConverter.Instance}}" />
-                                    </DataTemplate>
-                                </ComboBox.ItemTemplate>
-                            </ComboBox>
                             <StackPanel IsVisible="{Binding ShowEmptySelectionState}"
                                         HorizontalAlignment="Center"
                                         VerticalAlignment="Center"

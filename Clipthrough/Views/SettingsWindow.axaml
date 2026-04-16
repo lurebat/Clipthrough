@@ -8,6 +8,7 @@
         Height="720"
         MinWidth="720"
         MinHeight="480"
+        Background="{DynamicResource AppBackgroundBrush}"
         ShowInTaskbar="True"
         WindowStartupLocation="CenterOwner">
 
@@ -23,7 +24,7 @@
                       HorizontalScrollBarVisibility="Disabled">
             <StackPanel Spacing="10">
                 <!-- Behavior -->
-                <Expander IsVisible="{Binding IsSettingsSectionBehaviorVisible}"
+                <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionBehaviorVisible}"
                           IsExpanded="{Binding IsSettingsSectionBehaviorExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="{Binding SettingsBehaviorTitle}"
@@ -48,7 +49,7 @@
                 </Expander>
 
                 <!-- Local hotkeys -->
-                <Expander IsVisible="{Binding IsSettingsSectionLocalHotkeysVisible}"
+                <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionLocalHotkeysVisible}"
                           IsExpanded="{Binding IsSettingsSectionLocalHotkeysExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="{Binding SettingsLocalHotkeysTitle}"
@@ -112,18 +113,21 @@
                 </Expander>
 
                 <!-- Global hotkey + paste-sized hotkeys -->
-                <Expander IsVisible="{Binding IsSettingsSectionGlobalHotkeyVisible}"
+                <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionGlobalHotkeyVisible}"
                           IsExpanded="{Binding IsSettingsSectionGlobalHotkeyExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="{Binding SettingsGlobalHotkeyTitle}"
                                    FontSize="16"
                                    FontWeight="SemiBold" />
                     </Expander.Header>
-                    <Grid ColumnDefinitions="Auto,260,*"
-                          RowDefinitions="Auto,Auto,Auto,Auto"
-                          ColumnSpacing="12"
-                          RowSpacing="10"
-                          Margin="8,10,0,0">
+                    <StackPanel Spacing="10" Margin="8,10,0,0">
+                        <TextBlock Classes="body-muted"
+                                   TextWrapping="Wrap"
+                                   Text="Global hotkeys work from anywhere on the desktop. Incremental paste cycles backward through your clipboard history — press once to paste the previous clip, press again for the one before that, and so on. Decremental paste cycles the other way. Clipthrough puts the clip on the clipboard and synthesizes Ctrl+V into the currently-focused window, so make sure the target window has focus when you press the hotkey." />
+                        <Grid ColumnDefinitions="Auto,260,*"
+                              RowDefinitions="Auto,Auto,Auto,Auto"
+                              ColumnSpacing="12"
+                              RowSpacing="10">
                         <CheckBox Content="{Binding SettingsEnableShortcutLabel}"
                                   IsChecked="{Binding SettingsEnableToggleWindowHotkey}" />
                         <TextBlock Grid.Column="1" VerticalAlignment="Center"
@@ -149,11 +153,12 @@
                                    Text="{Binding SettingsDecrementalPasteHotkeyLabel}" />
                         <TextBox Grid.Row="3" Grid.Column="2"
                                  Text="{Binding SettingsDecrementalPasteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                    </Grid>
+                        </Grid>
+                    </StackPanel>
                 </Expander>
 
                 <!-- Storage -->
-                <Expander IsVisible="{Binding IsSettingsSectionStorageVisible}"
+                <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionStorageVisible}"
                           IsExpanded="{Binding IsSettingsSectionStorageExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="{Binding SettingsStorageTitle}"
@@ -192,7 +197,7 @@
                 </Expander>
 
                 <!-- Tools -->
-                <Expander IsVisible="{Binding IsSettingsSectionToolsVisible}"
+                <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionToolsVisible}"
                           IsExpanded="{Binding IsSettingsSectionToolsExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="{Binding SettingsToolsTitle}"
@@ -218,7 +223,7 @@
                 </Expander>
 
                 <!-- Retention -->
-                <Expander IsVisible="{Binding IsSettingsSectionRetentionVisible}"
+                <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionRetentionVisible}"
                           IsExpanded="{Binding IsSettingsSectionRetentionExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="{Binding SettingsRetentionTitle}"
@@ -247,7 +252,7 @@
                 </Expander>
 
                 <!-- Capacity -->
-                <Expander IsVisible="{Binding IsSettingsSectionCapacityVisible}"
+                <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionCapacityVisible}"
                           IsExpanded="{Binding IsSettingsSectionCapacityExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="{Binding SettingsCapacityTitle}"
@@ -276,7 +281,7 @@
                 </Expander>
 
                 <!-- Sensitivity rules -->
-                <Expander IsVisible="{Binding IsSettingsSectionSensitivityVisible}"
+                <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionSensitivityVisible}"
                           IsExpanded="{Binding IsSettingsSectionSensitivityExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <Grid ColumnDefinitions="*,Auto"
@@ -354,3 +359,4 @@
         </StackPanel>
     </Grid>
 </Window>
+

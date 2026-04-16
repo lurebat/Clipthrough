@@ -208,6 +208,10 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     public bool HasSourceUrl => !string.IsNullOrWhiteSpace(Clip.SourceUrl);
 
+    public bool HasAnySourceInfo => HasSourceUrl || HasSourceWindowTitle;
+
+    public bool ShowWindowTitleChipInRow => HasSourceWindowTitle && !ShowPreviewThumbnail;
+
     public bool IsPasted => Clip.IsPasted;
 
     public int PasteCount => Clip.PasteCount;

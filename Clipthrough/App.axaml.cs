@@ -33,7 +33,7 @@ public partial class App : Application
     private IDisposable? _notificationSubscription;
     private bool _isExitRequested;
     private bool _hasShownTrayNotification;
-    private int _incrementalPasteOffset = -1;
+    private int _incrementalPasteOffset = 0;
 
     public App()
     {
@@ -257,7 +257,7 @@ public partial class App : Application
             return;
         }
 
-        _incrementalPasteOffset = -1;
+        _incrementalPasteOffset = 0;
         ToggleMainWindowVisibility(_mainWindow);
     }
 
@@ -304,7 +304,7 @@ public partial class App : Application
 
             // Give the target window a moment to become ready and the clipboard
             // change to propagate before we synthesize the paste keystroke.
-            await Task.Delay(50);
+            await Task.Delay(120);
             _systemInteractionService.SimulatePasteKeystroke();
         }
         catch (Exception ex)
