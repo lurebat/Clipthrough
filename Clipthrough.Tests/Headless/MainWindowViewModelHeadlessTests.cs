@@ -446,6 +446,7 @@ public sealed class MainWindowViewModelHeadlessTests
             scope.SearchHistoryService,
             new TestAiTransformService(),
             new Clipthrough.Services.ScriptingService(),
+            new TestOcrService(),
             scope.DatabaseInitializer);
     }
 

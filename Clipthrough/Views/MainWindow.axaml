@@ -48,6 +48,8 @@
                     </MenuItem.ItemContainerTheme>
                 </MenuItem>
                 <MenuItem Header="Load _default scripts" Command="{Binding LoadDefaultScriptsCommand}" />
+                <Separator />
+                <MenuItem Header="Extract text from image (_OCR)" Command="{Binding RunOcrOnSelectedImageCommand}" />
             </MenuItem>
             <MenuItem Header="_View">
                 <MenuItem Header="Show session _logs" Command="{Binding SessionLogs.OpenCommand}" />

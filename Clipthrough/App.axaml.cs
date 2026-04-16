@@ -140,6 +140,7 @@ public partial class App : Application
         services.AddSingleton<IAiTransformService, AiTransformService>();
         services.AddSingleton<IScriptingService, ScriptingService>();
         services.AddSingleton<IUpdateService, UpdateService>();
+        services.AddSingleton<IOcrService, OcrService>();
         services.AddSingleton<MainWindowViewModel>();
 
         return services.BuildServiceProvider();

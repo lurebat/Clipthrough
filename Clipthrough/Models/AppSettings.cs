@@ -134,6 +134,8 @@ public sealed record AppSettings
 
     public string UpdateFeedUrl { get; init; } = string.Empty;
 
+    public string OcrLanguages { get; init; } = "en";
+
     public static AppSettings Default { get; } = new();
 
     public AppSettings Normalize() => this with
@@ -188,6 +190,7 @@ public sealed record AppSettings
             .Select(s => new UserScript { Name = s.Name.Trim(), Code = s.Code })
             .ToList(),
         UpdateFeedUrl = UpdateFeedUrl?.Trim() ?? string.Empty,
+        OcrLanguages = string.IsNullOrWhiteSpace(OcrLanguages) ? "en" : OcrLanguages.Trim(),
     };
 
     private static string NormalizeHotkey(string? value, string fallback)

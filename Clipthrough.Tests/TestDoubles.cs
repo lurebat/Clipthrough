@@ -359,3 +359,10 @@ internal sealed class TestAiTransformService : IAiTransformService
     public Task<string> TransformAsync(string systemPrompt, string input, CancellationToken cancellationToken = default)
         => Task.FromResult(input);
 }
+
+internal sealed class TestOcrService : IOcrService
+{
+    public bool IsAvailable => false;
+    public Task<OcrResult> ExtractTextAsync(byte[] imageBytes, string languages, CancellationToken cancellationToken = default)
+        => Task.FromResult(new OcrResult(false, string.Empty, "stub"));
+}

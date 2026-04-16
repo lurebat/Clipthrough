@@ -56,6 +56,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly ISearchHistoryService _searchHistoryService;
     private readonly IAiTransformService _aiTransformService;
     private readonly IScriptingService _scriptingService;
+    private readonly IOcrService _ocrService;
     private readonly DatabaseInitializer _databaseInitializer;
     private readonly CompositeDisposable _subscriptions = new();
     private readonly Dictionary<long, (ClipEntry Clip, CancellationTokenSource Cts)> _pendingDeletes = new();
@@ -142,11 +143,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _settingsAiModel = AppSettings.Default.AiModel;
     private bool _settingsEnableAutoUpdate = AppSettings.Default.EnableAutoUpdate;
     private string _settingsUpdateFeedUrl = AppSettings.Default.UpdateFeedUrl;
+    private string _settingsOcrLanguages = AppSettings.Default.OcrLanguages;
     private string _editedClipText = string.Empty;
     private string _editedClipBaseline = string.Empty;
     private long? _checkedSelectionAnchorId;
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, DatabaseInitializer databaseInitializer)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, DatabaseInitializer databaseInitializer)
     {
         _clipStoreService = clipStoreService;
         _clipboardMonitorService = clipboardMonitorService;
@@ -161,6 +163,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _searchHistoryService = searchHistoryService;
         _aiTransformService = aiTransformService;
         _scriptingService = scriptingService;
+        _ocrService = ocrService;
         _databaseInitializer = databaseInitializer;
         SessionLogs = new SessionLogsViewModel(sessionLogService);
         ContentTypeOptions =
@@ -206,6 +209,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         CancelAiPromptCommand = ReactiveCommand.Create(CancelAiPrompt);
         ApplyUserScriptCommand = ReactiveCommand.CreateFromTask<UserScript>(ApplyUserScriptAsync);
         LoadDefaultScriptsCommand = ReactiveCommand.CreateFromTask(LoadDefaultScriptsAsync);
+        RunOcrOnSelectedImageCommand = ReactiveCommand.CreateFromTask(RunOcrOnSelectedImageAsync);
 
         _settingsService.SettingsChanged += OnSettingsChanged;
         SyncUserScripts(_settingsService.Current);
@@ -324,6 +328,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<UserScript, Unit> ApplyUserScriptCommand { get; }
 
     public ReactiveCommand<Unit, Unit> LoadDefaultScriptsCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> RunOcrOnSelectedImageCommand { get; }
 
     public ObservableCollection<UserScript> UserScripts { get; } = new();
 
@@ -1242,6 +1248,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get => _settingsUpdateFeedUrl;
         set => this.RaiseAndSetIfChanged(ref _settingsUpdateFeedUrl, value);
+    }
+
+    public string SettingsOcrLanguages
+    {
+        get => _settingsOcrLanguages;
+        set => this.RaiseAndSetIfChanged(ref _settingsOcrLanguages, value);
     }
 
     public string SettingsToggleRegexHotkey
@@ -2291,6 +2303,45 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         StatusText = "Loaded default scripts";
     }
 
+    private async Task RunOcrOnSelectedImageAsync()
+    {
+        var clip = SelectedClip;
+        if (clip is null || clip.Clip.ContentType != ContentType.Image || clip.Clip.ContentBytes is null)
+        {
+            StatusText = "Select an image clip first";
+            return;
+        }
+
+        if (!_ocrService.IsAvailable)
+        {
+            StatusText = "Tesseract not found — install it or set the path in Settings → OCR";
+            return;
+        }
+
+        StatusText = "Running OCR…";
+        var languages = _settingsService.Current.OcrLanguages;
+        var result = await _ocrService.ExtractTextAsync(clip.Clip.ContentBytes, languages);
+        if (!result.Success || string.IsNullOrWhiteSpace(result.Text))
+        {
+            StatusText = result.Error ?? "OCR produced no text";
+            return;
+        }
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(result.Text);
+        await _clipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentBytes = bytes,
+            ContentText = result.Text,
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            SourceApp = clip.SourceApp,
+            SourceAppPath = clip.Clip.SourceAppPath,
+            SourceAppIconBytes = clip.Clip.SourceAppIconBytes,
+            IncrementExistingCopyCount = false,
+        });
+        StatusText = $"OCR extracted {result.Text.Length} characters";
+    }
+
     private async Task CommitEditedClipOnSelectionChangeAsync()
     {
         if (_suppressEditAutoSave)
@@ -3113,6 +3164,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             AiModel = (SettingsAiModel ?? string.Empty).Trim(),
             EnableAutoUpdate = SettingsEnableAutoUpdate,
             UpdateFeedUrl = (SettingsUpdateFeedUrl ?? string.Empty).Trim(),
+            OcrLanguages = (SettingsOcrLanguages ?? string.Empty).Trim(),
             MaxClipSizeBytes = maxClipSizeBytes,
             CloseToTray = SettingsCloseToTray,
             MinimizeToTray = SettingsMinimizeToTray,
@@ -3193,6 +3245,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsAiModel = settings.AiModel;
         SettingsEnableAutoUpdate = settings.EnableAutoUpdate;
         SettingsUpdateFeedUrl = settings.UpdateFeedUrl;
+        SettingsOcrLanguages = settings.OcrLanguages;
         SettingsUseFuzzySearch = settings.UseFuzzySettingsSearch;
         UseFuzzyClipSearch = settings.UseFuzzyClipSearch;
         IsDatabasePasswordVisible = false;
