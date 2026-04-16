@@ -2235,13 +2235,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         PasswordPromptError = string.Empty;
         PasswordPromptInput = string.Empty;
-        IsPasswordPromptOpen = false;
 
-        var draftSettings = _settingsService.HasSavedSettings ? _settingsService.Current : AppSettings.Default;
-        LoadSettingsDraft(draftSettings);
+        try
+        {
+            var draftSettings = _settingsService.HasSavedSettings ? _settingsService.Current : AppSettings.Default;
+            LoadSettingsDraft(draftSettings);
 
-        await StartDatabaseAsync();
-        await ApplyMaintenanceAndRefreshAsync();
+            await StartDatabaseAsync();
+            await ApplyMaintenanceAndRefreshAsync();
+
+            IsPasswordPromptOpen = false;
+        }
+        catch (Exception ex)
+        {
+            PasswordPromptError = $"Failed to start: {ex.Message}";
+        }
     }
 
     private static void ExitApplication()

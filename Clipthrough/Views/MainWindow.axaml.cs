@@ -46,11 +46,7 @@ public partial class MainWindow : Window
             m_sessionLogsListBox.AddHandler(InputElement.DoubleTappedEvent, OnSessionLogsDoubleTapped, RoutingStrategies.Bubble);
         }
 
-        m_clipListScrollViewer = m_clipsListBox?.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
-        if (m_clipListScrollViewer is not null)
-        {
-            m_clipListScrollViewer.ScrollChanged += OnClipListScrollChanged;
-        }
+        TryConnectClipListScrollViewer();
 
         var searchTextBox = this.FindControl<TextBox>("SearchTextBox");
         if (searchTextBox is not null)
@@ -59,6 +55,25 @@ public partial class MainWindow : Window
         }
 
         FocusSearchBox();
+    }
+
+    /// <summary>
+    /// Lazily connects the clip list scroll viewer for scroll-to-load.
+    /// Called on open and again after the password prompt is dismissed,
+    /// because the ListBox may not have visual descendants while hidden.
+    /// </summary>
+    internal void TryConnectClipListScrollViewer()
+    {
+        if (m_clipListScrollViewer is not null)
+        {
+            return;
+        }
+
+        m_clipListScrollViewer = m_clipsListBox?.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+        if (m_clipListScrollViewer is not null)
+        {
+            m_clipListScrollViewer.ScrollChanged += OnClipListScrollChanged;
+        }
     }
 
     private void OnClosed(object? sender, EventArgs e)
