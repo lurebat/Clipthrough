@@ -23,6 +23,8 @@ public interface ISystemInteractionService
 
     Task OpenInDiffToolAsync(string leftPath, string rightPath, string diffToolPath);
 
+    void SimulatePasteKeystroke();
+
     void ShowNotification(AppNotification notification);
 
     bool TryRegisterGlobalHotKey(Window window, HotkeyGesture hotkey, Action callback);

@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="using:Clipthrough.Controls"
         xmlns:conv="using:Clipthrough.Converters"
+        xmlns:models="using:Clipthrough.Models"
         xmlns:vm="using:Clipthrough.ViewModels"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -14,8 +15,8 @@
         Title="{Binding WindowTitle}"
         Width="1360"
         Height="860"
-        MinWidth="1080"
-        MinHeight="700">
+        MinWidth="920"
+        MinHeight="640">
 
     <Grid>
         <Grid RowDefinitions="Auto,*,Auto"
@@ -159,6 +160,32 @@
                                                           Command="{Binding ToggleFavoriteCommand}" />
                                                 <MenuItem Header="{Binding ExportLabel}"
                                                           Command="{Binding ExportCommand}" />
+                                                <MenuItem Header="Transform ▾">
+                                                    <MenuItem Header="UPPERCASE"
+                                                              Command="{Binding #ClipsListBox.DataContext.ApplyTextTransformationCommand}"
+                                                              CommandParameter="{x:Static models:TextTransformation.UpperCase}" />
+                                                    <MenuItem Header="lowercase"
+                                                              Command="{Binding #ClipsListBox.DataContext.ApplyTextTransformationCommand}"
+                                                              CommandParameter="{x:Static models:TextTransformation.LowerCase}" />
+                                                    <MenuItem Header="Title Case"
+                                                              Command="{Binding #ClipsListBox.DataContext.ApplyTextTransformationCommand}"
+                                                              CommandParameter="{x:Static models:TextTransformation.TitleCase}" />
+                                                    <MenuItem Header="Trim whitespace"
+                                                              Command="{Binding #ClipsListBox.DataContext.ApplyTextTransformationCommand}"
+                                                              CommandParameter="{x:Static models:TextTransformation.TrimWhitespace}" />
+                                                    <MenuItem Header="Collapse whitespace"
+                                                              Command="{Binding #ClipsListBox.DataContext.ApplyTextTransformationCommand}"
+                                                              CommandParameter="{x:Static models:TextTransformation.CollapseWhitespace}" />
+                                                    <MenuItem Header="Sort lines"
+                                                              Command="{Binding #ClipsListBox.DataContext.ApplyTextTransformationCommand}"
+                                                              CommandParameter="{x:Static models:TextTransformation.SortLines}" />
+                                                    <MenuItem Header="Remove empty lines"
+                                                              Command="{Binding #ClipsListBox.DataContext.ApplyTextTransformationCommand}"
+                                                              CommandParameter="{x:Static models:TextTransformation.RemoveEmptyLines}" />
+                                                    <MenuItem Header="Remove duplicate lines"
+                                                              Command="{Binding #ClipsListBox.DataContext.ApplyTextTransformationCommand}"
+                                                              CommandParameter="{x:Static models:TextTransformation.RemoveDuplicateLines}" />
+                                                </MenuItem>
                                                 <Separator />
                                                 <MenuItem Header="Open source URL"
                                                           IsVisible="{Binding HasSourceUrl}"
@@ -396,6 +423,70 @@
                                     Content="{Binding CompareClipsButtonLabel}" />
 
                             <Button Classes="secondary compact"
+                                    IsEnabled="{Binding HasCheckedOrSelectedClip}"
+                                    ToolTip.Tip="Apply a text transformation (works on checked clips when any are selected)">
+                                <Button.Content>Transform ▾</Button.Content>
+                                <Button.Flyout>
+                                    <MenuFlyout>
+                                        <MenuItem Header="UPPERCASE"
+                                                  Command="{Binding ApplyTextTransformationCommand}"
+                                                  CommandParameter="{x:Static models:TextTransformation.UpperCase}" />
+                                        <MenuItem Header="lowercase"
+                                                  Command="{Binding ApplyTextTransformationCommand}"
+                                                  CommandParameter="{x:Static models:TextTransformation.LowerCase}" />
+                                        <MenuItem Header="Title Case"
+                                                  Command="{Binding ApplyTextTransformationCommand}"
+                                                  CommandParameter="{x:Static models:TextTransformation.TitleCase}" />
+                                        <MenuItem Header="Sentence case"
+                                                  Command="{Binding ApplyTextTransformationCommand}"
+                                                  CommandParameter="{x:Static models:TextTransformation.SentenceCase}" />
+                                        <Separator />
+                                        <MenuItem Header="UpperCamelCase"
+                                                  Command="{Binding ApplyTextTransformationCommand}"
+                                                  CommandParameter="{x:Static models:TextTransformation.UpperCamelCase}" />
+                                        <MenuItem Header="lowerCamelCase"
+                                                  Command="{Binding ApplyTextTransformationCommand}"
+                                                  CommandParameter="{x:Static models:TextTransformation.LowerCamelCase}" />
+                                        <MenuItem Header="From camelCase"
+                                                  Command="{Binding ApplyTextTransformationCommand}"
+                                                  CommandParameter="{x:Static models:TextTransformation.FromCamelCase}" />
+                                        <Separator />
+                                        <MenuItem Header="Trim whitespace"
+                                                  Command="{Binding ApplyTextTransformationCommand}"
+                                                  CommandParameter="{x:Static models:TextTransformation.TrimWhitespace}" />
+                                        <MenuItem Header="Collapse whitespace"
+                                                  Command="{Binding ApplyTextTransformationCommand}"
+                                                  CommandParameter="{x:Static models:TextTransformation.CollapseWhitespace}" />
+                                        <MenuItem Header="Tabs → Spaces"
+                                                  Command="{Binding ApplyTextTransformationCommand}"
+                                                  CommandParameter="{x:Static models:TextTransformation.TabsToSpaces}" />
+                                        <MenuItem Header="Spaces → Tabs"
+                                                  Command="{Binding ApplyTextTransformationCommand}"
+                                                  CommandParameter="{x:Static models:TextTransformation.SpacesToTabs}" />
+                                        <MenuItem Header="Normalize line endings"
+                                                  Command="{Binding ApplyTextTransformationCommand}"
+                                                  CommandParameter="{x:Static models:TextTransformation.NormalizeEol}" />
+                                        <Separator />
+                                        <MenuItem Header="Sort lines"
+                                                  Command="{Binding ApplyTextTransformationCommand}"
+                                                  CommandParameter="{x:Static models:TextTransformation.SortLines}" />
+                                        <MenuItem Header="Reverse lines"
+                                                  Command="{Binding ApplyTextTransformationCommand}"
+                                                  CommandParameter="{x:Static models:TextTransformation.ReverseLines}" />
+                                        <MenuItem Header="Remove empty lines"
+                                                  Command="{Binding ApplyTextTransformationCommand}"
+                                                  CommandParameter="{x:Static models:TextTransformation.RemoveEmptyLines}" />
+                                        <MenuItem Header="Remove duplicate lines"
+                                                  Command="{Binding ApplyTextTransformationCommand}"
+                                                  CommandParameter="{x:Static models:TextTransformation.RemoveDuplicateLines}" />
+                                        <MenuItem Header="Lines → JSON array"
+                                                  Command="{Binding ApplyTextTransformationCommand}"
+                                                  CommandParameter="{x:Static models:TextTransformation.LinesToJsonArray}" />
+                                    </MenuFlyout>
+                                </Button.Flyout>
+                            </Button>
+
+                            <Button Classes="secondary compact"
                                     Command="{Binding CopyEditedClipCommand}"
                                     IsEnabled="{Binding HasEditedClipChanges}"
                                     IsVisible="{Binding !ShowSelectedImageEditor}"
@@ -536,6 +627,7 @@
                                      Classes="content-viewer"
                                      IsReadOnly="True"
                                      AcceptsReturn="True"
+                                     TextWrapping="Wrap"
                                      HorizontalContentAlignment="Stretch"
                                      Text="{Binding SelectedClipRawContent}" />
 

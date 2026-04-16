@@ -238,6 +238,120 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         return Task.CompletedTask;
     }
 
+    public void SimulatePasteKeystroke()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        try
+        {
+            SendPasteInputs();
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Simulate paste failed: {ex.Message}");
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void SendPasteInputs()
+    {
+        const ushort VK_CONTROL = 0x11;
+        const ushort VK_SHIFT = 0x10;
+        const ushort VK_LWIN = 0x5B;
+        const ushort VK_RWIN = 0x5C;
+        const ushort VK_MENU = 0x12;
+        const ushort VK_V = 0x56;
+        const uint KEYEVENTF_KEYUP = 0x0002;
+
+        // Release any currently-held modifiers so our synthetic Ctrl+V isn't interpreted
+        // as Ctrl+Shift+V / Ctrl+Alt+V / etc. by the receiving application.
+        var toRelease = new List<ushort>();
+        void ReleaseIfDown(ushort vk)
+        {
+            if ((GetAsyncKeyState(vk) & 0x8000) != 0)
+            {
+                toRelease.Add(vk);
+            }
+        }
+
+        ReleaseIfDown(VK_SHIFT);
+        ReleaseIfDown(VK_MENU);
+        ReleaseIfDown(VK_LWIN);
+        ReleaseIfDown(VK_RWIN);
+        // Note: VK_CONTROL is intentionally not released here — we will press V while Ctrl is down.
+        var ctrlIsDown = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+
+        var inputs = new List<INPUT>();
+        foreach (var vk in toRelease)
+        {
+            inputs.Add(MakeKey(vk, KEYEVENTF_KEYUP));
+        }
+
+        if (!ctrlIsDown)
+        {
+            inputs.Add(MakeKey(VK_CONTROL, 0));
+        }
+
+        inputs.Add(MakeKey(VK_V, 0));
+        inputs.Add(MakeKey(VK_V, KEYEVENTF_KEYUP));
+
+        if (!ctrlIsDown)
+        {
+            inputs.Add(MakeKey(VK_CONTROL, KEYEVENTF_KEYUP));
+        }
+
+        var arr = inputs.ToArray();
+        _ = SendInput((uint)arr.Length, arr, Marshal.SizeOf<INPUT>());
+
+        static INPUT MakeKey(ushort vk, uint flags) => new()
+        {
+            type = 1, // INPUT_KEYBOARD
+            U = new InputUnion
+            {
+                ki = new KEYBDINPUT
+                {
+                    wVk = vk,
+                    wScan = 0,
+                    dwFlags = flags,
+                    time = 0,
+                    dwExtraInfo = IntPtr.Zero,
+                },
+            },
+        };
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct INPUT
+    {
+        public uint type;
+        public InputUnion U;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct InputUnion
+    {
+        [FieldOffset(0)] public KEYBDINPUT ki;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KEYBDINPUT
+    {
+        public ushort wVk;
+        public ushort wScan;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
+
     public void ShowNotification(AppNotification notification)
     {
         ArgumentNullException.ThrowIfNull(notification);

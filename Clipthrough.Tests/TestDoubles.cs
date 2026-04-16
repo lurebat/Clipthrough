@@ -239,6 +239,10 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
 
     public Task OpenInDiffToolAsync(string leftPath, string rightPath, string diffToolPath) => Task.CompletedTask;
 
+    public void SimulatePasteKeystroke()
+    {
+    }
+
     public void ShowNotification(AppNotification notification)
     {
         LastSystemNotification = notification;

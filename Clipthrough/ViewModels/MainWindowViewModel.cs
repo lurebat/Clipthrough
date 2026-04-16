@@ -176,6 +176,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         FavoriteCheckedClipsCommand = ReactiveCommand.CreateFromTask(FavoriteCheckedClipsAsync);
         DeleteCheckedClipsCommand = ReactiveCommand.CreateFromTask(DeleteCheckedClipsAsync);
         CopyEditedClipCommand = ReactiveCommand.CreateFromTask(CopyEditedClipAsync);
+        ApplyTextTransformationCommand = ReactiveCommand.CreateFromTask<TextTransformation>(ApplyTextTransformationAsync);
         AddSensitivityRuleCommand = ReactiveCommand.Create(AddSensitivityRule);
         OpenSettingsCommand = ReactiveCommand.Create(OpenSettings);
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
@@ -287,6 +288,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> DeleteCheckedClipsCommand { get; }
 
     public ReactiveCommand<Unit, Unit> CopyEditedClipCommand { get; }
+
+    public ReactiveCommand<TextTransformation, Unit> ApplyTextTransformationCommand { get; }
 
     public ReactiveCommand<Unit, Unit> AddSensitivityRuleCommand { get; }
 
@@ -1845,6 +1848,61 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public async Task CommitEditedClipOnFocusLossAsync() => await CommitEditedClipOnSelectionChangeAsync();
+
+    private async Task ApplyTextTransformationAsync(TextTransformation transformation)
+    {
+        if (transformation == TextTransformation.None)
+        {
+            return;
+        }
+
+        var checkedClips = Clips.Where(static c => c.IsChecked).ToList();
+        var targets = checkedClips.Count > 0
+            ? checkedClips
+            : SelectedClip is not null ? new List<ClipItemViewModel> { SelectedClip } : new List<ClipItemViewModel>();
+
+        var transformed = 0;
+        foreach (var target in targets)
+        {
+            if (target.Clip.ContentType != ContentType.Text && target.Clip.ContentType != ContentType.RichText)
+            {
+                continue;
+            }
+
+            var source = target.Clip.Content ?? string.Empty;
+            if (string.IsNullOrEmpty(source))
+            {
+                continue;
+            }
+
+            var result = TextTransformationService.Apply(transformation, source);
+            if (string.Equals(result, source, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
+            await _clipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentBytes = textBytes,
+                ContentText = result,
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                SourceApp = target.SourceApp,
+                SourceAppPath = target.Clip.SourceAppPath,
+                SourceAppIconBytes = target.Clip.SourceAppIconBytes,
+                IncrementExistingCopyCount = false,
+            });
+            transformed++;
+        }
+
+        if (transformed > 0)
+        {
+            StatusText = transformed == 1
+                ? AppText.EditedClipCopiedStatus
+                : $"Applied transformation to {transformed} clips";
+        }
+    }
 
     private async Task CommitEditedClipOnSelectionChangeAsync()
     {

@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -300,6 +301,11 @@ public partial class App : Application
             }
 
             await _clipStoreService.MarkPastedAsync(clip.Id);
+
+            // Give the target window a moment to become ready and the clipboard
+            // change to propagate before we synthesize the paste keystroke.
+            await Task.Delay(50);
+            _systemInteractionService.SimulatePasteKeystroke();
         }
         catch (Exception ex)
         {
