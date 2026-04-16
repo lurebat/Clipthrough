@@ -118,6 +118,14 @@ public sealed record AppSettings
 
     public bool UseFuzzySettingsSearch { get; init; } = true;
 
+    public bool EnableAi { get; init; }
+
+    public string AiBaseUrl { get; init; } = string.Empty;
+
+    public string AiApiKey { get; init; } = string.Empty;
+
+    public string AiModel { get; init; } = string.Empty;
+
     public static AppSettings Default { get; } = new();
 
     public AppSettings Normalize() => this with
@@ -164,6 +172,9 @@ public sealed record AppSettings
         ExternalEditorPath = ExternalEditorPath?.Trim() ?? string.Empty,
         ExternalDiffToolPath = ExternalDiffToolPath?.Trim() ?? string.Empty,
         LastContentDisplayMode = LastContentDisplayMode,
+        AiBaseUrl = AiBaseUrl?.Trim() ?? string.Empty,
+        AiApiKey = AiApiKey?.Trim() ?? string.Empty,
+        AiModel = AiModel?.Trim() ?? string.Empty,
     };
 
     private static string NormalizeHotkey(string? value, string fallback)
