@@ -406,6 +406,37 @@
                         </StackPanel>
                     </StackPanel>
                 </Expander>
+
+                <!-- Remote API -->
+                <Expander Classes="settings-section" IsExpanded="False">
+                    <Expander.Header>
+                        <TextBlock Text="Remote API" FontSize="16" FontWeight="SemiBold" />
+                    </Expander.Header>
+                    <StackPanel Spacing="10" Margin="8,10,0,0">
+                        <TextBlock Classes="body-muted" TextWrapping="Wrap"
+                                   Text="Exposes an authenticated HTTP API bound to 127.0.0.1 so local tools and AI agents can list, capture, delete, and transform clips. Requires a bearer token." />
+                        <CheckBox Content="Enable local HTTP API"
+                                  IsChecked="{Binding SettingsEnableRemoteApi, Mode=TwoWay}" />
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="detail-label" Text="Port (1–65535)" />
+                            <NumericUpDown Minimum="1" Maximum="65535" Increment="1"
+                                           Value="{Binding SettingsRemoteApiPort, Mode=TwoWay}" />
+                        </StackPanel>
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="detail-label" Text="Bearer token" />
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                <TextBox Grid.Column="0"
+                                         Watermark="Paste or generate a token"
+                                         Text="{Binding SettingsRemoteApiToken, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <Button Grid.Column="1" Classes="secondary compact"
+                                        Content="Generate"
+                                        Command="{Binding GenerateRemoteApiTokenCommand}" />
+                            </Grid>
+                        </StackPanel>
+                        <TextBlock Classes="body-muted" TextWrapping="Wrap"
+                                   Text="Send requests with header: Authorization: Bearer &lt;token&gt;. Endpoints: GET /clips, GET /clips/{id}, POST /clips, DELETE /clips/{id}, POST /clips/{id}/transform." />
+                    </StackPanel>
+                </Expander>
             </StackPanel>
         </ScrollViewer>
 

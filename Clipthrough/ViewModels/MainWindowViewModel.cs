@@ -144,6 +144,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _settingsEnableAutoUpdate = AppSettings.Default.EnableAutoUpdate;
     private string _settingsUpdateFeedUrl = AppSettings.Default.UpdateFeedUrl;
     private string _settingsOcrLanguages = AppSettings.Default.OcrLanguages;
+    private bool _settingsEnableRemoteApi = AppSettings.Default.EnableRemoteApi;
+    private int _settingsRemoteApiPort = AppSettings.Default.RemoteApiPort;
+    private string _settingsRemoteApiToken = AppSettings.Default.RemoteApiToken;
     private string _editedClipText = string.Empty;
     private string _editedClipBaseline = string.Empty;
     private int _editedClipSelectionStart;
@@ -212,6 +215,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ApplyUserScriptCommand = ReactiveCommand.CreateFromTask<UserScript>(ApplyUserScriptAsync);
         LoadDefaultScriptsCommand = ReactiveCommand.CreateFromTask(LoadDefaultScriptsAsync);
         RunOcrOnSelectedImageCommand = ReactiveCommand.CreateFromTask(RunOcrOnSelectedImageAsync);
+        GenerateRemoteApiTokenCommand = ReactiveCommand.Create(() =>
+            SettingsRemoteApiToken = System.Guid.NewGuid().ToString("N"));
 
         _settingsService.SettingsChanged += OnSettingsChanged;
         SyncUserScripts(_settingsService.Current);
@@ -332,6 +337,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> LoadDefaultScriptsCommand { get; }
 
     public ReactiveCommand<Unit, Unit> RunOcrOnSelectedImageCommand { get; }
+
+    public ReactiveCommand<Unit, string> GenerateRemoteApiTokenCommand { get; }
 
     public ObservableCollection<UserScript> UserScripts { get; } = new();
 
@@ -1268,6 +1275,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get => _settingsOcrLanguages;
         set => this.RaiseAndSetIfChanged(ref _settingsOcrLanguages, value);
+    }
+
+    public bool SettingsEnableRemoteApi
+    {
+        get => _settingsEnableRemoteApi;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnableRemoteApi, value);
+    }
+
+    public int SettingsRemoteApiPort
+    {
+        get => _settingsRemoteApiPort;
+        set => this.RaiseAndSetIfChanged(ref _settingsRemoteApiPort, value);
+    }
+
+    public string SettingsRemoteApiToken
+    {
+        get => _settingsRemoteApiToken;
+        set => this.RaiseAndSetIfChanged(ref _settingsRemoteApiToken, value);
     }
 
     public string SettingsToggleRegexHotkey
@@ -3176,6 +3201,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             EnableAutoUpdate = SettingsEnableAutoUpdate,
             UpdateFeedUrl = (SettingsUpdateFeedUrl ?? string.Empty).Trim(),
             OcrLanguages = (SettingsOcrLanguages ?? string.Empty).Trim(),
+            EnableRemoteApi = SettingsEnableRemoteApi,
+            RemoteApiPort = SettingsRemoteApiPort,
+            RemoteApiToken = (SettingsRemoteApiToken ?? string.Empty).Trim(),
             MaxClipSizeBytes = maxClipSizeBytes,
             CloseToTray = SettingsCloseToTray,
             MinimizeToTray = SettingsMinimizeToTray,
@@ -3257,6 +3285,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsEnableAutoUpdate = settings.EnableAutoUpdate;
         SettingsUpdateFeedUrl = settings.UpdateFeedUrl;
         SettingsOcrLanguages = settings.OcrLanguages;
+        SettingsEnableRemoteApi = settings.EnableRemoteApi;
+        SettingsRemoteApiPort = settings.RemoteApiPort;
+        SettingsRemoteApiToken = settings.RemoteApiToken;
         SettingsUseFuzzySearch = settings.UseFuzzySettingsSearch;
         UseFuzzyClipSearch = settings.UseFuzzyClipSearch;
         IsDatabasePasswordVisible = false;

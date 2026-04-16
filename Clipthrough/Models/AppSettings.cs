@@ -136,6 +136,12 @@ public sealed record AppSettings
 
     public string OcrLanguages { get; init; } = "en";
 
+    public bool EnableRemoteApi { get; init; }
+
+    public int RemoteApiPort { get; init; } = 53117;
+
+    public string RemoteApiToken { get; init; } = string.Empty;
+
     public static AppSettings Default { get; } = new();
 
     public AppSettings Normalize() => this with
@@ -191,6 +197,9 @@ public sealed record AppSettings
             .ToList(),
         UpdateFeedUrl = UpdateFeedUrl?.Trim() ?? string.Empty,
         OcrLanguages = string.IsNullOrWhiteSpace(OcrLanguages) ? "en" : OcrLanguages.Trim(),
+        EnableRemoteApi = EnableRemoteApi,
+        RemoteApiPort = RemoteApiPort <= 0 || RemoteApiPort > 65535 ? 53117 : RemoteApiPort,
+        RemoteApiToken = RemoteApiToken?.Trim() ?? string.Empty,
     };
 
     private static string NormalizeHotkey(string? value, string fallback)

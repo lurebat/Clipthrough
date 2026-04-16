@@ -141,6 +141,7 @@ public partial class App : Application
         services.AddSingleton<IScriptingService, ScriptingService>();
         services.AddSingleton<IUpdateService, UpdateService>();
         services.AddSingleton<IOcrService, OcrService>();
+        services.AddSingleton<IRemoteControlService, RemoteControlService>();
         services.AddSingleton<MainWindowViewModel>();
 
         return services.BuildServiceProvider();
@@ -150,6 +151,24 @@ public partial class App : Application
     {
         UpdateGlobalHotKeyRegistration();
         _ = KickOffUpdateCheckAsync();
+        _ = KickOffRemoteApiAsync();
+    }
+
+    private async Task KickOffRemoteApiAsync()
+    {
+        try
+        {
+            var svc = Services?.GetService<IRemoteControlService>();
+            if (svc is null)
+            {
+                return;
+            }
+            await svc.ApplySettingsAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"Remote API startup failed: {ex}");
+        }
     }
 
     private async Task KickOffUpdateCheckAsync()
