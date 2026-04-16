@@ -478,6 +478,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         get => _selectedClip;
         set
         {
+            // When deselecting while clips exist, auto-select the first clip.
+            if (value is null && Clips.Count > 0)
+            {
+                value = Clips[0];
+            }
+
             if (_selectedClip == value)
             {
                 return;
