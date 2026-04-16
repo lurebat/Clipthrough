@@ -52,7 +52,7 @@ jobs:
           path: TestResults/**
 
       - name: Publish
-        run: dotnet publish .\Clipthrough\Clipthrough.csproj --configuration Release --runtime win-x64 --self-contained false --no-build --output artifacts\win-x64
+        run: dotnet publish .\Clipthrough\Clipthrough.csproj --configuration Release --output artifacts\win-x64
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
