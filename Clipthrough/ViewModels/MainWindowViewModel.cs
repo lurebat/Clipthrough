@@ -146,6 +146,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _settingsOcrLanguages = AppSettings.Default.OcrLanguages;
     private string _editedClipText = string.Empty;
     private string _editedClipBaseline = string.Empty;
+    private int _editedClipSelectionStart;
+    private int _editedClipSelectionLength;
     private long? _checkedSelectionAnchorId;
 
     public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, DatabaseInitializer databaseInitializer)
@@ -914,6 +916,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             this.RaiseAndSetIfChanged(ref _editedClipText, value);
             RaiseEditedClipProperties();
         }
+    }
+
+    public int EditedClipSelectionStart
+    {
+        get => _editedClipSelectionStart;
+        set => this.RaiseAndSetIfChanged(ref _editedClipSelectionStart, value);
+    }
+
+    public int EditedClipSelectionLength
+    {
+        get => _editedClipSelectionLength;
+        set => this.RaiseAndSetIfChanged(ref _editedClipSelectionLength, value);
     }
 
     public IReadOnlyList<TextTransformation> TextTransformationOptions { get; } = Enum.GetValues<TextTransformation>();
@@ -2179,52 +2193,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var checkedClips = Clips.Where(static c => c.IsChecked).ToList();
-        var targets = checkedClips.Count > 0
-            ? checkedClips
-            : SelectedClip is not null ? new List<ClipItemViewModel> { SelectedClip } : new List<ClipItemViewModel>();
-
-        var transformed = 0;
-        foreach (var target in targets)
-        {
-            if (target.Clip.ContentType != ContentType.Text && target.Clip.ContentType != ContentType.RichText)
-            {
-                continue;
-            }
-
-            var source = target.Clip.Content ?? string.Empty;
-            if (string.IsNullOrEmpty(source))
-            {
-                continue;
-            }
-
-            var result = TextTransformationService.Apply(transformation, source);
-            if (string.Equals(result, source, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
-            await _clipStoreService.CaptureAsync(new ClipCaptureRequest
-            {
-                ContentBytes = textBytes,
-                ContentText = result,
-                ContentType = ContentType.Text,
-                ContentFormat = ClipContentFormat.PlainText,
-                SourceApp = target.SourceApp,
-                SourceAppPath = target.Clip.SourceAppPath,
-                SourceAppIconBytes = target.Clip.SourceAppIconBytes,
-                IncrementExistingCopyCount = false,
-            });
-            transformed++;
-        }
-
-        if (transformed > 0)
-        {
-            StatusText = transformed == 1
-                ? AppText.EditedClipCopiedStatus
-                : $"Applied transformation to {transformed} clips";
-        }
+        await ApplyTransformToTargetsAsync(
+            (source, _) => Task.FromResult(TextTransformationService.Apply(transformation, source)),
+            $"transformation",
+            multiSummary: count => $"Applied transformation to {count} clips");
     }
 
     private async Task ApplyUserScriptAsync(UserScript? script)
@@ -2234,7 +2206,31 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        try
+        {
+            await ApplyTransformToTargetsAsync(
+                async (source, ct) => await _scriptingService.EvaluateAsync(script.Code, source, ct),
+                $"script '{script.Name}'",
+                multiSummary: count => $"Applied '{script.Name}' to {count} clips");
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Script '{script.Name}' failed: {ex.Message}";
+        }
+    }
+
+    private async Task ApplyTransformToTargetsAsync(
+        Func<string, CancellationToken, Task<string>> transform,
+        string singleLabel,
+        Func<int, string> multiSummary)
+    {
         var checkedClips = Clips.Where(static c => c.IsChecked).ToList();
+        var useSelectionSlice = checkedClips.Count == 0
+            && SelectedClip is not null
+            && EditedClipSelectionLength > 0
+            && EditedClipSelectionStart >= 0
+            && EditedClipSelectionStart + EditedClipSelectionLength <= (EditedClipText?.Length ?? 0);
+
         var targets = checkedClips.Count > 0
             ? checkedClips
             : SelectedClip is not null ? new List<ClipItemViewModel> { SelectedClip } : new List<ClipItemViewModel>();
@@ -2247,21 +2243,34 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 continue;
             }
 
-            var source = target.Clip.Content ?? string.Empty;
+            string source;
             string result;
-            try
+            if (useSelectionSlice && ReferenceEquals(target, SelectedClip))
             {
-                result = await _scriptingService.EvaluateAsync(script.Code, source);
+                var full = EditedClipText ?? string.Empty;
+                var slice = full.Substring(EditedClipSelectionStart, EditedClipSelectionLength);
+                var transformedSlice = await transform(slice, CancellationToken.None);
+                if (string.Equals(slice, transformedSlice, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                source = full;
+                result = full.Substring(0, EditedClipSelectionStart)
+                    + transformedSlice
+                    + full.Substring(EditedClipSelectionStart + EditedClipSelectionLength);
             }
-            catch (Exception ex)
+            else
             {
-                StatusText = $"Script '{script.Name}' failed: {ex.Message}";
-                return;
-            }
-
-            if (string.Equals(result, source, StringComparison.Ordinal))
-            {
-                continue;
+                source = target.Clip.Content ?? string.Empty;
+                if (string.IsNullOrEmpty(source))
+                {
+                    continue;
+                }
+                result = await transform(source, CancellationToken.None);
+                if (string.Equals(result, source, StringComparison.Ordinal))
+                {
+                    continue;
+                }
             }
 
             var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
@@ -2282,10 +2291,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (transformed > 0)
         {
             StatusText = transformed == 1
-                ? $"Applied '{script.Name}'"
-                : $"Applied '{script.Name}' to {transformed} clips";
+                ? (useSelectionSlice ? $"Applied {singleLabel} to selection" : AppText.EditedClipCopiedStatus)
+                : multiSummary(transformed);
         }
     }
+
+    // Old single-clip script body replaced above; keep old method signature for legacy callers (none left).
 
     private async Task LoadDefaultScriptsAsync()
     {

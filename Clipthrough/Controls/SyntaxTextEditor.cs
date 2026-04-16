@@ -24,6 +24,12 @@ public sealed class SyntaxTextEditor : UserControl
     public static readonly StyledProperty<string> SyntaxHintProperty =
         AvaloniaProperty.Register<SyntaxTextEditor, string>(nameof(SyntaxHint), string.Empty);
 
+    public static readonly StyledProperty<int> SelectionStartProperty =
+        AvaloniaProperty.Register<SyntaxTextEditor, int>(nameof(SelectionStart), defaultBindingMode: Avalonia.Data.BindingMode.TwoWay);
+
+    public static readonly StyledProperty<int> SelectionLengthProperty =
+        AvaloniaProperty.Register<SyntaxTextEditor, int>(nameof(SelectionLength), defaultBindingMode: Avalonia.Data.BindingMode.TwoWay);
+
     private readonly TextEditor _editor;
     private TextMate.Installation? _textMateInstall;
     private readonly RegistryOptions _darkRegistry = new(ThemeName.DarkPlus);
@@ -43,6 +49,7 @@ public sealed class SyntaxTextEditor : UserControl
         Content = _editor;
 
         _editor.TextChanged += OnEditorTextChanged;
+        _editor.TextArea.SelectionChanged += OnEditorSelectionChanged;
 
         this.GetObservable(TextProperty).Subscribe(OnTextPropertyChanged);
         this.GetObservable(IsReadOnlyProperty).Subscribe(v => _editor.IsReadOnly = v);
@@ -53,6 +60,18 @@ public sealed class SyntaxTextEditor : UserControl
     {
         get => GetValue(TextProperty);
         set => SetValue(TextProperty, value);
+    }
+
+    public int SelectionStart
+    {
+        get => GetValue(SelectionStartProperty);
+        set => SetValue(SelectionStartProperty, value);
+    }
+
+    public int SelectionLength
+    {
+        get => GetValue(SelectionLengthProperty);
+        set => SetValue(SelectionLengthProperty, value);
     }
 
     public bool IsReadOnly
@@ -123,6 +142,12 @@ public sealed class SyntaxTextEditor : UserControl
         {
             _isSyncingText = false;
         }
+    }
+
+    private void OnEditorSelectionChanged(object? sender, EventArgs e)
+    {
+        SelectionStart = _editor.SelectionStart;
+        SelectionLength = _editor.SelectionLength;
     }
 
     private void ApplyTheme()

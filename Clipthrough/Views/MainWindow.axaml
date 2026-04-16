@@ -619,10 +619,14 @@
                             <controls:SyntaxTextEditor IsVisible="{Binding ShowRawTextContent}"
                                       IsReadOnly="{Binding SelectedClipTextIsReadOnly}"
                                       SyntaxHint="{Binding RawContentSyntaxHint}"
+                                      SelectionStart="{Binding EditedClipSelectionStart, Mode=TwoWay}"
+                                      SelectionLength="{Binding EditedClipSelectionLength, Mode=TwoWay}"
                                       Text="{Binding EditedClipText, Mode=TwoWay}" />
 
                             <controls:SyntaxTextEditor IsVisible="{Binding ShowSelectedTextRenderer}"
                                       IsReadOnly="{Binding SelectedClipTextIsReadOnly}"
+                                      SelectionStart="{Binding EditedClipSelectionStart, Mode=TwoWay}"
+                                      SelectionLength="{Binding EditedClipSelectionLength, Mode=TwoWay}"
                                       Text="{Binding EditedClipText, Mode=TwoWay}" />
 
                             <controls:RichContentView IsVisible="{Binding ShowSelectedRichTextRenderer}"
