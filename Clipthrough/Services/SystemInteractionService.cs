@@ -288,7 +288,7 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
             return false;
         }
 
-        _globalHotKeyRegistration = WindowsGlobalHotKeyRegistration.TryCreate(windowHandle, modifiers, virtualKey, callback);
+        _globalHotKeyRegistration = WindowsGlobalHotKeyRegistration.TryCreate(window, windowHandle, modifiers, virtualKey, callback);
         return _globalHotKeyRegistration is not null;
     }
 
@@ -312,7 +312,7 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
             return false;
         }
 
-        var registration = WindowsGlobalHotKeyRegistration.TryCreate(windowHandle, modifiers, virtualKey, callback);
+        var registration = WindowsGlobalHotKeyRegistration.TryCreate(window, windowHandle, modifiers, virtualKey, callback);
         if (registration is null)
         {
             return false;
@@ -1163,40 +1163,34 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
 
     private sealed class WindowsGlobalHotKeyRegistration : IDisposable
     {
-        private const int GwlWndProc = -4;
         private const int WmHotKey = 0x0312;
 
-        private static readonly ConcurrentDictionary<nint, WindowsGlobalHotKeyRegistration> Registrations = new();
-
+        private readonly Window _window;
         private readonly nint _windowHandle;
         private readonly int _hotKeyId;
         private readonly Action _callback;
-        private readonly WndProc _wndProcDelegate;
-        private readonly nint _newWndProc;
-        private readonly nint _previousWndProc;
+        private readonly Win32Properties.CustomWndProcHookCallback _hookCallback;
         private bool _isDisposed;
 
-        private WindowsGlobalHotKeyRegistration(nint windowHandle, int hotKeyId, Action callback)
+        private WindowsGlobalHotKeyRegistration(Window window, nint windowHandle, int hotKeyId, Action callback)
         {
+            _window = window;
             _windowHandle = windowHandle;
             _hotKeyId = hotKeyId;
             _callback = callback;
-            _wndProcDelegate = WindowProc;
-            _newWndProc = Marshal.GetFunctionPointerForDelegate(_wndProcDelegate);
-            _previousWndProc = SetWindowLongPtr(windowHandle, GwlWndProc, _newWndProc);
+            _hookCallback = HookCallback;
+            Win32Properties.AddWndProcHookCallback(_window, _hookCallback);
         }
 
-        public static WindowsGlobalHotKeyRegistration? TryCreate(nint windowHandle, uint modifiers, uint virtualKey, Action callback)
+        public static WindowsGlobalHotKeyRegistration? TryCreate(Window window, nint windowHandle, uint modifiers, uint virtualKey, Action callback)
         {
-            var hotKeyId = RuntimeHelpers.GetHashCode(callback);
+            var hotKeyId = unchecked(RuntimeHelpers.GetHashCode(callback) & 0x7FFFFFFF);
             if (!RegisterHotKey(windowHandle, hotKeyId, modifiers, virtualKey))
             {
                 return null;
             }
 
-            var registration = new WindowsGlobalHotKeyRegistration(windowHandle, hotKeyId, callback);
-            Registrations[windowHandle] = registration;
-            return registration;
+            return new WindowsGlobalHotKeyRegistration(window, windowHandle, hotKeyId, callback);
         }
 
         public void Dispose()
@@ -1207,20 +1201,20 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
             }
 
             _isDisposed = true;
-            Registrations.TryRemove(_windowHandle, out _);
+            Win32Properties.RemoveWndProcHookCallback(_window, _hookCallback);
             UnregisterHotKey(_windowHandle, _hotKeyId);
-            SetWindowLongPtr(_windowHandle, GwlWndProc, _previousWndProc);
         }
 
-        private nint WindowProc(nint hWnd, uint msg, nint wParam, nint lParam)
+        private nint HookCallback(nint hWnd, uint msg, nint wParam, nint lParam, ref bool handled)
         {
-            if (msg == WmHotKey && wParam.ToInt32() == _hotKeyId)
+            if (!_isDisposed && msg == WmHotKey && wParam.ToInt32() == _hotKeyId)
             {
                 Dispatcher.UIThread.Post(_callback);
-                return 0;
+                handled = true;
+                return IntPtr.Zero;
             }
 
-            return CallWindowProc(_previousWndProc, hWnd, msg, wParam, lParam);
+            return IntPtr.Zero;
         }
 
         [DllImport("user32.dll", SetLastError = true)]
@@ -1230,21 +1224,5 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool UnregisterHotKey(nint hWnd, int id);
-
-        [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
-        private static extern nint SetWindowLongPtr64(nint hWnd, int nIndex, nint dwNewLong);
-
-        [DllImport("user32.dll", EntryPoint = "SetWindowLongW", SetLastError = true)]
-        private static extern int SetWindowLong32(nint hWnd, int nIndex, int dwNewLong);
-
-        [DllImport("user32.dll", EntryPoint = "CallWindowProcW")]
-        private static extern nint CallWindowProc(nint lpPrevWndFunc, nint hWnd, uint msg, nint wParam, nint lParam);
-
-        private delegate nint WndProc(nint hWnd, uint msg, nint wParam, nint lParam);
-
-        private static nint SetWindowLongPtr(nint hWnd, int nIndex, nint newProc)
-            => IntPtr.Size == 8
-                ? SetWindowLongPtr64(hWnd, nIndex, newProc)
-                : SetWindowLong32(hWnd, nIndex, newProc.ToInt32());
     }
 }
