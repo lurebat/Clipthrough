@@ -424,7 +424,7 @@
                         </StackPanel>
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label" Text="Bearer token" />
-                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
                                 <TextBox Grid.Column="0"
                                          PasswordChar="•"
                                          RevealPassword="True"
@@ -435,6 +435,10 @@
                                         Content="Generate"
                                         AutomationProperties.Name="Generate a random bearer token"
                                         Command="{Binding GenerateRemoteApiTokenCommand}" />
+                                <Button Grid.Column="2" Classes="secondary compact"
+                                        Content="Copy"
+                                        AutomationProperties.Name="Copy bearer token to clipboard"
+                                        Command="{Binding CopyRemoteApiTokenCommand}" />
                             </Grid>
                         </StackPanel>
                         <TextBlock Classes="body-muted" TextWrapping="Wrap"

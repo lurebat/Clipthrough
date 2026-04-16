@@ -130,8 +130,7 @@ public sealed class RemoteControlService : IRemoteControlService
 
         app.MapGet("/clips/{id:long}", async (long id, CancellationToken ct) =>
         {
-            var res = await _clipStore.SearchAsync(new ClipSearchFilters { SearchText = string.Empty, Limit = int.MaxValue }, ct).ConfigureAwait(false);
-            var item = res.Items.FirstOrDefault(c => c.Id == id);
+            var item = await _clipStore.GetByIdAsync(id, ct).ConfigureAwait(false);
             return item is null ? Results.NotFound() : Results.Ok(ToDto(item));
         });
 
@@ -166,8 +165,7 @@ public sealed class RemoteControlService : IRemoteControlService
             {
                 return Results.BadRequest(new { error = "kind required" });
             }
-            var res = await _clipStore.SearchAsync(new ClipSearchFilters { SearchText = string.Empty, Limit = int.MaxValue }, ct).ConfigureAwait(false);
-            var item = res.Items.FirstOrDefault(c => c.Id == id);
+            var item = await _clipStore.GetByIdAsync(id, ct).ConfigureAwait(false);
             if (item is null)
             {
                 return Results.NotFound();
@@ -183,6 +181,10 @@ public sealed class RemoteControlService : IRemoteControlService
                     "ai" => await _ai.TransformAsync(body.Prompt ?? string.Empty, source, ct).ConfigureAwait(false),
                     _ => source,
                 };
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {

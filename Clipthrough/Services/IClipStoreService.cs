@@ -25,4 +25,6 @@ public interface IClipStoreService
     Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default);
 
     Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default);
+
+    Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default);
 }

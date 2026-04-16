@@ -199,7 +199,7 @@ public sealed record AppSettings
         OcrLanguages = string.IsNullOrWhiteSpace(OcrLanguages) ? "en" : OcrLanguages.Trim(),
         EnableRemoteApi = EnableRemoteApi,
         RemoteApiPort = RemoteApiPort <= 0 || RemoteApiPort > 65535 ? 53117 : RemoteApiPort,
-        RemoteApiToken = RemoteApiToken?.Trim() ?? string.Empty,
+        RemoteApiToken = EnableRemoteApi ? (RemoteApiToken?.Trim() ?? string.Empty) : string.Empty,
     };
 
     private static string NormalizeHotkey(string? value, string fallback)

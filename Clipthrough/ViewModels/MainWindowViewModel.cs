@@ -217,6 +217,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RunOcrOnSelectedImageCommand = ReactiveCommand.CreateFromTask(RunOcrOnSelectedImageAsync);
         GenerateRemoteApiTokenCommand = ReactiveCommand.Create(() =>
             SettingsRemoteApiToken = System.Guid.NewGuid().ToString("N"));
+        CopyRemoteApiTokenCommand = ReactiveCommand.CreateFromTask(async () =>
+        {
+            if (!string.IsNullOrWhiteSpace(SettingsRemoteApiToken))
+            {
+                await _systemInteractionService.CopyTextAsync(SettingsRemoteApiToken);
+                StatusText = "Remote API token copied";
+            }
+        });
 
         _settingsService.SettingsChanged += OnSettingsChanged;
         SyncUserScripts(_settingsService.Current);
@@ -339,6 +347,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> RunOcrOnSelectedImageCommand { get; }
 
     public ReactiveCommand<Unit, string> GenerateRemoteApiTokenCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> CopyRemoteApiTokenCommand { get; }
 
     public ObservableCollection<UserScript> UserScripts { get; } = new();
 
@@ -3829,6 +3839,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private void SyncEditedClipText()
     {
         _editedClipBaseline = GetEditedClipBaseline();
+        EditedClipSelectionStart = 0;
+        EditedClipSelectionLength = 0;
         EditedClipText = _editedClipBaseline;
     }
 
