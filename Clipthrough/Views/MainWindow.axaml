@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="using:Clipthrough.Controls"
+        xmlns:conv="using:Clipthrough.Converters"
         xmlns:vm="using:Clipthrough.ViewModels"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -22,8 +23,10 @@
               Margin="8">
         <Border Grid.Row="0"
                 Classes="hero-toolbar"
-                Padding="12,10">
-            <Grid ColumnDefinitions="Auto,*,*,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                Padding="12,8">
+            <Grid RowDefinitions="Auto,Auto"
+                  RowSpacing="6">
+            <Grid ColumnDefinitions="Auto,*,*"
                   ColumnSpacing="10">
                 <TextBlock Classes="window-title"
                            VerticalAlignment="Center"
@@ -63,41 +66,34 @@
                                  HorizontalContentAlignment="Center"
                                  Content="Files" />
                 </UniformGrid>
+            </Grid>
 
-                <CheckBox Grid.Column="3"
-                          Classes="filter-toggle compact-toggle"
+            <WrapPanel Grid.Row="1"
+                       Orientation="Horizontal"
+                       ItemSpacing="8"
+                       LineSpacing="4">
+                <CheckBox Classes="filter-toggle compact-toggle"
                           IsChecked="{Binding ShowFavoritesOnly}"
                           Content="{Binding FavoritesFilterLabel}" />
-
-                <CheckBox Grid.Column="4"
-                          Classes="filter-toggle compact-toggle"
+                <CheckBox Classes="filter-toggle compact-toggle"
                           IsChecked="{Binding ShowSensitiveOnly}"
                           Content="{Binding SensitiveFilterLabel}" />
-
-                <CheckBox Grid.Column="5"
-                          Classes="filter-toggle compact-toggle"
+                <CheckBox Classes="filter-toggle compact-toggle"
                           IsChecked="{Binding UseRegexSearch}"
                           Content="{Binding RegexFilterLabel}" />
-
-                <CheckBox Grid.Column="6"
-                          Classes="filter-toggle compact-toggle"
+                <CheckBox Classes="filter-toggle compact-toggle"
                           IsChecked="{Binding CaseSensitiveSearch}"
                           Content="{Binding CaseSensitiveFilterLabel}" />
-
-                <CheckBox Grid.Column="7"
-                          Classes="filter-toggle compact-toggle"
+                <CheckBox Classes="filter-toggle compact-toggle"
                           IsChecked="{Binding UseWildcardSearch}"
                           Content="{Binding WildcardFilterLabel}" />
-
-                <CheckBox Grid.Column="8"
-                          Classes="filter-toggle compact-toggle"
+                <CheckBox Classes="filter-toggle compact-toggle"
                           IsChecked="{Binding WholeWordSearch}"
                           Content="{Binding WholeWordFilterLabel}" />
-
-                <CheckBox Grid.Column="9"
-                          Classes="filter-toggle compact-toggle"
+                <CheckBox Classes="filter-toggle compact-toggle"
                           IsChecked="{Binding ShowPastedOnly}"
                           Content="{Binding PastedFilterLabel}" />
+            </WrapPanel>
             </Grid>
         </Border>
 
@@ -213,12 +209,6 @@
                                                        Height="48"
                                                        Stretch="UniformToFill"
                                                        IsVisible="{Binding ShowPreviewThumbnail}" />
-                                                <TextBlock Text="{Binding ThumbnailInfoCompact}"
-                                                           Classes="body-muted"
-                                                           FontSize="10"
-                                                           MaxWidth="160"
-                                                           TextTrimming="CharacterEllipsis"
-                                                           IsVisible="{Binding ShowPreviewThumbnail}" />
                                                 <TextBlock Classes="clip-row-preview"
                                                            Text="{Binding SingleLinePreview}"
                                                            TextTrimming="CharacterEllipsis"
@@ -245,6 +235,23 @@
                                                                    Foreground="{Binding AgeChipForeground}"
                                                                    FontSize="10"
                                                                    FontWeight="SemiBold" />
+                                                    </Border>
+                                                    <Border Classes="meta-chip"
+                                                            Padding="6,1"
+                                                            IsVisible="{Binding ShowPreviewThumbnail}"
+                                                            VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding ThumbnailInfoCompact}"
+                                                                   FontSize="10" />
+                                                    </Border>
+                                                    <Border Classes="meta-chip"
+                                                            Padding="6,1"
+                                                            IsVisible="{Binding HasSourceWindowTitle}"
+                                                            VerticalAlignment="Center"
+                                                            ToolTip.Tip="{Binding SourceWindowTitle}">
+                                                        <TextBlock Text="{Binding SourceWindowTitle}"
+                                                                   FontSize="10"
+                                                                   MaxWidth="200"
+                                                                   TextTrimming="CharacterEllipsis" />
                                                     </Border>
                                                     <Border Classes="meta-chip"
                                                             Padding="6,1"
@@ -319,15 +326,15 @@
                 <Grid RowDefinitions="Auto,*,Auto"
                       RowSpacing="10"
                       Margin="10">
-                    <Grid ColumnDefinitions="*,Auto"
-                          ColumnSpacing="12">
+                    <Grid RowDefinitions="Auto,Auto"
+                          RowSpacing="8">
                         <StackPanel Spacing="4">
                             <TextBlock Classes="panel-caption"
                                        Text="{Binding SelectedClipContentTypeText}" />
                             <TextBlock Classes="panel-title"
                                        Foreground="{Binding SelectedClipAccentBrush}"
                                        Text="{Binding SelectedClipTitleText}"
-                                       TextTrimming="CharacterEllipsis" />
+                                       TextWrapping="Wrap" />
                             <TextBlock Classes="body-muted"
                                        Text="{Binding SelectionStateTitle}"
                                        IsVisible="{Binding !HasSelectedClip}"
@@ -344,16 +351,16 @@
                             </StackPanel>
                         </StackPanel>
 
-                        <WrapPanel Grid.Column="1"
+                        <WrapPanel Grid.Row="1"
                                    Orientation="Horizontal"
-                                   HorizontalAlignment="Right"
-                                   VerticalAlignment="Top"
+                                   HorizontalAlignment="Left"
+                                   VerticalAlignment="Center"
                                    ItemSpacing="8"
                                    LineSpacing="6">
                             <StackPanel Orientation="Horizontal"
                                         Spacing="0"
                                         VerticalAlignment="Center"
-                                        IsEnabled="{Binding IsDisplayModeApplicable}">
+                                        IsVisible="{Binding IsDisplayModeApplicable}">
                                 <RadioButton GroupName="DisplayMode"
                                              Classes="segmented-left"
                                              IsChecked="{Binding IsRenderedMode}"
@@ -390,7 +397,7 @@
 
                             <Button Classes="secondary compact"
                                     Command="{Binding CopyEditedClipCommand}"
-                                    IsEnabled="{Binding ShowCopyEditedClipButton}"
+                                    IsEnabled="{Binding HasEditedClipChanges}"
                                     IsVisible="{Binding !ShowSelectedImageEditor}"
                                     Content="{Binding CopyAsNewButtonLabel}" />
 
@@ -429,9 +436,15 @@
                                       HorizontalAlignment="Right"
                                       VerticalAlignment="Top"
                                       Margin="0,6,10,0"
-                                      Width="180"
+                                      Width="220"
                                       ZIndex="10"
-                                      ToolTip.Tip="Apply text transformation" />
+                                      ToolTip.Tip="Apply text transformation (auto-saves as new clip)">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Converter={x:Static conv:TextTransformationDisplayConverter.Instance}}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
                             <StackPanel IsVisible="{Binding ShowEmptySelectionState}"
                                         HorizontalAlignment="Center"
                                         VerticalAlignment="Center"
@@ -838,22 +851,12 @@
                      MaxWidth="1240"
                      MinWidth="960"
                      Padding="22">
-                <Grid RowDefinitions="Auto,Auto,*,Auto"
+                <Grid RowDefinitions="Auto,*,Auto"
                       RowSpacing="16">
-                    <StackPanel Spacing="4">
-                        <TextBlock Classes="panel-title"
-                                   Text="{Binding SettingsTitleText}" />
-                        <TextBlock Classes="body-muted"
-                                   Text="{Binding SettingsDescriptionText}"
-                                   TextWrapping="Wrap" />
-                    </StackPanel>
+                    <TextBlock Classes="panel-title"
+                               Text="{Binding SettingsTitleText}" />
 
-                    <TextBlock Grid.Row="1"
-                               Classes="body-muted"
-                               Text="{Binding SettingsHintText}"
-                               TextWrapping="Wrap" />
-
-                    <ScrollViewer Grid.Row="2"
+                    <ScrollViewer Grid.Row="1"
                                   MaxHeight="620"
                                   HorizontalScrollBarVisibility="Disabled">
                         <StackPanel Spacing="14">
@@ -1067,6 +1070,10 @@
                                         <TextBlock Classes="detail-label"
                                                    Text="{Binding SettingsExternalDiffToolPathLabel}" />
                                         <TextBox Text="{Binding SettingsExternalDiffToolPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        <TextBlock Classes="body-muted"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"
+                                                   Text="Full path to a diff executable. Invoked as: tool.exe &quot;left-file&quot; &quot;right-file&quot;. Works with WinMerge, Beyond Compare, VS Code (use code --diff wrapper), Meld, KDiff3, etc." />
                                     </StackPanel>
                                 </StackPanel>
                             </Border>
@@ -1198,7 +1205,7 @@
                         </StackPanel>
                     </ScrollViewer>
 
-                    <StackPanel Grid.Row="3"
+                    <StackPanel Grid.Row="2"
                                 Orientation="Horizontal"
                                 Spacing="10"
                                 HorizontalAlignment="Right">

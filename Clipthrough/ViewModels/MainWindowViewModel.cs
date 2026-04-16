@@ -614,7 +614,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string RawToggleLabel => AppText.RawToggleLabel;
 
     public bool IsDisplayModeApplicable => HasSelectedClip
-        && SelectedClip?.Clip.ContentType == ContentType.RichText;
+        && SelectedClip?.Clip.ContentType is ContentType.RichText or ContentType.Files;
 
     public string CopyButtonLabel => AppText.CopyButtonLabel;
 
@@ -830,6 +830,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool ShowCopyEditedClipButton => IsSelectedClipTextEditable
         && (ShowSelectedTextRenderer || ShowSelectedRichTextRenderer || ShowRawTextContent);
 
+    public bool HasEditedClipChanges => IsSelectedClipTextEditable
+        && !string.Equals(_editedClipText, _editedClipBaseline, StringComparison.Ordinal);
+
     public string SelectedClipRenderedText => _selectedClipRenderedText;
 
     public string SelectedClipRawContent => ClipDisplayFormatter.GetRawContentDisplay(SelectedClip?.Clip);
@@ -879,6 +882,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 if (!string.Equals(transformed, _editedClipText, StringComparison.Ordinal))
                 {
                     EditedClipText = transformed;
+                    _ = CopyEditedClipAsync();
                 }
 
                 // Snap back to None so re-selecting same transformation re-triggers
@@ -3113,6 +3117,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private void RaiseEditedClipProperties()
     {
         this.RaisePropertyChanged(nameof(ShowCopyEditedClipButton));
+        this.RaisePropertyChanged(nameof(HasEditedClipChanges));
     }
 
     private void SyncEditedClipText()
