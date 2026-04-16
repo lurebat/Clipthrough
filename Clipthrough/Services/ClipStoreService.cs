@@ -40,7 +40,8 @@ public sealed class ClipStoreService : IClipStoreService
             c.source_url,
             c.is_pasted,
             c.paste_count,
-            c.last_pasted_at
+            c.last_pasted_at,
+            c.pinned_at
         """;
 
     private readonly SqliteConnectionFactory _connectionFactory;
@@ -96,8 +97,8 @@ public sealed class ClipStoreService : IClipStoreService
         var whereClauses = BuildWhereClauses(filters, hasSearch);
         var whereClause = whereClauses.Count > 0 ? $"WHERE {string.Join(" AND ", whereClauses)}" : string.Empty;
         var orderClause = hasSearch
-            ? "ORDER BY bm25(clips_fts), COALESCE(c.last_copied_at, c.captured_at) DESC"
-            : "ORDER BY COALESCE(c.last_copied_at, c.captured_at) DESC";
+            ? "ORDER BY CASE WHEN c.pinned_at IS NULL THEN 1 ELSE 0 END, c.pinned_at DESC, bm25(clips_fts), COALESCE(c.last_copied_at, c.captured_at) DESC"
+            : "ORDER BY CASE WHEN c.pinned_at IS NULL THEN 1 ELSE 0 END, c.pinned_at DESC, COALESCE(c.last_copied_at, c.captured_at) DESC";
 
         var items = new List<ClipEntry>();
 
@@ -147,6 +148,22 @@ public sealed class ClipStoreService : IClipStoreService
         command.CommandText = "UPDATE clips SET is_favorite = $isFavorite WHERE id = $id;";
         command.Parameters.AddWithValue("$id", clipId);
         command.Parameters.AddWithValue("$isFavorite", isFavorite ? 1 : 0);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task SetPinnedAsync(long clipId, bool isPinned, CancellationToken cancellationToken = default)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE clips SET pinned_at = $pinnedAt WHERE id = $id;";
+        command.Parameters.AddWithValue("$id", clipId);
+        command.Parameters.AddWithValue(
+            "$pinnedAt",
+            isPinned
+                ? DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture)
+                : (object)DBNull.Value);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -669,6 +686,7 @@ public sealed class ClipStoreService : IClipStoreService
             IsPasted = !reader.IsDBNull(19) && reader.GetInt64(19) == 1,
             PasteCount = reader.IsDBNull(20) ? 0 : Convert.ToInt32(reader.GetInt64(20), CultureInfo.InvariantCulture),
             LastPastedAt = ParseTimestamp(reader.IsDBNull(21) ? null : reader.GetString(21)),
+            PinnedAt = ParseTimestamp(reader.IsDBNull(22) ? null : reader.GetString(22)),
         };
     }
 

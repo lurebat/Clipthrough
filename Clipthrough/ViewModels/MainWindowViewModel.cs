@@ -163,6 +163,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         var hasSelection = this.WhenAnyValue(x => x.SelectedClip).Select(static clip => clip is not null);
         ToggleFavoriteCommand = ReactiveCommand.CreateFromTask(ToggleFavoriteAsync, hasSelection);
+        TogglePinCommand = ReactiveCommand.CreateFromTask(TogglePinAsync, hasSelection);
         DeleteSelectedCommand = ReactiveCommand.CreateFromTask(DeleteSelectedAsync, hasSelection);
         CopySelectedCommand = ReactiveCommand.CreateFromTask(CopySelectedAsync, hasSelection);
         ExportSelectedCommand = ReactiveCommand.CreateFromTask(ExportSelectedAsync, hasSelection);
@@ -174,6 +175,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectAllClipsCommand = ReactiveCommand.Create(SelectAllClips);
         SelectNoClipsCommand = ReactiveCommand.Create(SelectNoClips);
         FavoriteCheckedClipsCommand = ReactiveCommand.CreateFromTask(FavoriteCheckedClipsAsync);
+        PinCheckedClipsCommand = ReactiveCommand.CreateFromTask(PinCheckedClipsAsync);
         DeleteCheckedClipsCommand = ReactiveCommand.CreateFromTask(DeleteCheckedClipsAsync);
         CopyEditedClipCommand = ReactiveCommand.CreateFromTask(CopyEditedClipAsync);
         ApplyTextTransformationCommand = ReactiveCommand.CreateFromTask<TextTransformation>(ApplyTextTransformationAsync);
@@ -225,6 +227,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RefreshCommand.ThrownExceptions
                 .Merge(LoadMoreCommand.ThrownExceptions)
                 .Merge(ToggleFavoriteCommand.ThrownExceptions)
+                .Merge(TogglePinCommand.ThrownExceptions)
                 .Merge(CopySelectedCommand.ThrownExceptions)
                 .Merge(ExportSelectedCommand.ThrownExceptions)
                 .Merge(OpenInEditorCommand.ThrownExceptions)
@@ -232,6 +235,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .Merge(EditSelectedImageCommand.ThrownExceptions)
                 .Merge(DeleteSelectedCommand.ThrownExceptions)
                 .Merge(FavoriteCheckedClipsCommand.ThrownExceptions)
+                .Merge(PinCheckedClipsCommand.ThrownExceptions)
                 .Merge(DeleteCheckedClipsCommand.ThrownExceptions)
                 .Merge(CopyEditedClipCommand.ThrownExceptions)
                 .Merge(SaveSettingsCommand.ThrownExceptions)
@@ -263,6 +267,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ReactiveCommand<Unit, Unit> ToggleFavoriteCommand { get; }
 
+    public ReactiveCommand<Unit, Unit> TogglePinCommand { get; }
+
     public ReactiveCommand<Unit, Unit> CopySelectedCommand { get; }
 
     public ReactiveCommand<Unit, Unit> ExportSelectedCommand { get; }
@@ -284,6 +290,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> SelectNoClipsCommand { get; }
 
     public ReactiveCommand<Unit, Unit> FavoriteCheckedClipsCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> PinCheckedClipsCommand { get; }
 
     public ReactiveCommand<Unit, Unit> DeleteCheckedClipsCommand { get; }
 
@@ -631,6 +639,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string SelectedClipFavoriteButtonLabel => AppText.FavoriteButtonLabel;
 
+    public string SelectedClipPinButtonLabel => IsSelectedClipPinned ? "📌 Unpin" : "📌 Pin";
+
     public string SelectAllButtonLabel => AppText.SelectAllButtonLabel;
 
     public string SelectNoneButtonLabel => AppText.SelectNoneButtonLabel;
@@ -786,6 +796,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsEnableMaxEntryCount ? ParseIntOrDefault(SettingsMaxEntryCount, AppSettings.DefaultMaxEntryCount) : 0d);
 
     public bool IsSelectedClipFavorite => SelectedClip?.IsFavorite == true;
+
+    public bool IsSelectedClipPinned => SelectedClip?.IsPinned == true;
 
     public bool HasSelectedClip => SelectedClip is not null;
 
@@ -1941,6 +1953,49 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         StatusText = AppText.FormatFavoritedClipCount(targetClips.Length);
     }
 
+    private async Task PinCheckedClipsAsync()
+    {
+        var targetClips = GetCheckedOrSelectedClips();
+        if (targetClips.Length == 0)
+        {
+            return;
+        }
+
+        var nextIsPinned = targetClips.Any(static clip => !clip.IsPinned);
+        foreach (var clip in targetClips)
+        {
+            await _clipStoreService.SetPinnedAsync(clip.Id, nextIsPinned);
+            clip.SetPinnedState(nextIsPinned);
+        }
+
+        await RefreshAsync(SelectedClip?.Id ?? targetClips[0].Id);
+        StatusText = nextIsPinned
+            ? $"Pinned {targetClips.Length} clip(s)"
+            : $"Unpinned {targetClips.Length} clip(s)";
+    }
+
+    private async Task TogglePinAsync()
+    {
+        var clip = GetEffectiveSelectedClip();
+        if (clip is null)
+        {
+            return;
+        }
+
+        var nextIsPinned = !clip.IsPinned;
+        await _clipStoreService.SetPinnedAsync(clip.Id, nextIsPinned);
+        clip.SetPinnedState(nextIsPinned);
+        await RefreshAsync(clip.Id);
+    }
+
+    private async Task TogglePinClipAsync(ClipItemViewModel clip)
+    {
+        var nextIsPinned = !clip.IsPinned;
+        await _clipStoreService.SetPinnedAsync(clip.Id, nextIsPinned);
+        clip.SetPinnedState(nextIsPinned);
+        await RefreshAsync(clip.Id);
+    }
+
     private async Task DeleteCheckedClipsAsync()
     {
         var targetClips = GetCheckedOrSelectedClips();
@@ -2401,7 +2456,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private void RaiseSelectionStateProperties()
     {
         this.RaisePropertyChanged(nameof(IsSelectedClipFavorite));
+        this.RaisePropertyChanged(nameof(IsSelectedClipPinned));
         this.RaisePropertyChanged(nameof(SelectedClipFavoriteButtonLabel));
+        this.RaisePropertyChanged(nameof(SelectedClipPinButtonLabel));
         this.RaisePropertyChanged(nameof(HasSelectedClip));
         this.RaisePropertyChanged(nameof(SelectionStateTitle));
         this.RaisePropertyChanged(nameof(ShowEmptySelectionState));
@@ -3277,7 +3334,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private ClipItemViewModel CreateClipItemViewModel(ClipEntry clip, ISet<long>? checkedIds = null)
     {
-        var item = new ClipItemViewModel(clip, CopyClipAsync, ToggleFavoriteClipAsync, DeleteClipAsync, ExportClipAsync)
+        var item = new ClipItemViewModel(clip, CopyClipAsync, ToggleFavoriteClipAsync, DeleteClipAsync, ExportClipAsync, TogglePinClipAsync)
         {
             IsChecked = checkedIds?.Contains(clip.Id) == true
         };

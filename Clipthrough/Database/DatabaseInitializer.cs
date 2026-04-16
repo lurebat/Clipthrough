@@ -126,6 +126,7 @@ public sealed class DatabaseInitializer
         await EnsureClipAggregationColumnsAsync(connection, cancellationToken);
         await EnsureClipPayloadColumnsAsync(connection, cancellationToken);
         await EnsureClipTrackingColumnsAsync(connection, cancellationToken);
+        await EnsureClipPinningColumnsAsync(connection, cancellationToken);
         await BackfillClipAggregationColumnsAsync(connection, cancellationToken);
         await BackfillClipPayloadColumnsAsync(connection, cancellationToken);
         await DeduplicateClipsByHashAsync(connection, cancellationToken);
@@ -263,6 +264,31 @@ public sealed class DatabaseInitializer
         {
             await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN last_pasted_at TEXT;", cancellationToken);
         }
+    }
+
+    private static async Task EnsureClipPinningColumnsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var existingColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "PRAGMA table_info(clips);";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                existingColumns.Add(reader.GetString(1));
+            }
+        }
+
+        if (!existingColumns.Contains("pinned_at"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN pinned_at TEXT;", cancellationToken);
+        }
+
+        await ExecuteNonQueryAsync(
+            connection,
+            "CREATE INDEX IF NOT EXISTS idx_clips_pinned_at ON clips(pinned_at) WHERE pinned_at IS NOT NULL;",
+            cancellationToken);
     }
 
     private static async Task BackfillClipPayloadColumnsAsync(SqliteConnection connection, CancellationToken cancellationToken)

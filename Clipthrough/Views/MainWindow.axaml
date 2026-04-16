@@ -107,7 +107,7 @@
                 <Grid RowDefinitions="Auto,*,Auto"
                       RowSpacing="10"
                       Margin="12">
-                    <Grid ColumnDefinitions="Auto,Auto,Auto,Auto"
+                    <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
                           ColumnSpacing="4"
                           HorizontalAlignment="Left">
                         <Button Classes="secondary compact"
@@ -122,8 +122,14 @@
                                 Command="{Binding FavoriteCheckedClipsCommand}"
                                 IsEnabled="{Binding HasCheckedOrSelectedClip}"
                                 Content="{Binding FavoriteSelectedButtonLabel}" />
+                        <Button Classes="secondary compact"
+                                 Grid.Column="3"
+                                Command="{Binding PinCheckedClipsCommand}"
+                                IsEnabled="{Binding HasCheckedOrSelectedClip}"
+                                ToolTip.Tip="Pin checked/selected clips to the top"
+                                Content="📌 Pin" />
                         <Button Classes="destructive compact"
-                                Grid.Column="3"
+                                Grid.Column="4"
                                 Command="{Binding DeleteCheckedClipsCommand}"
                                 IsEnabled="{Binding HasCheckedOrSelectedClip}"
                                 Content="{Binding DeleteButtonLabel}" />
@@ -159,6 +165,8 @@
                                                 <Separator />
                                                 <MenuItem Header="{Binding FavoriteActionLabel}"
                                                           Command="{Binding ToggleFavoriteCommand}" />
+                                                <MenuItem Header="{Binding PinActionLabel}"
+                                                          Command="{Binding TogglePinCommand}" />
                                                 <MenuItem Header="{Binding ExportLabel}"
                                                           Command="{Binding ExportCommand}" />
                                                 <MenuItem Header="Transform ▾">
@@ -315,6 +323,11 @@
                                                                IsVisible="{Binding IsFavorite}"
                                                                VerticalAlignment="Center"
                                                                FontSize="10" />
+                                                    <TextBlock Text="{Binding PinMarker}"
+                                                               IsVisible="{Binding IsPinned}"
+                                                               VerticalAlignment="Center"
+                                                               FontSize="10"
+                                                               ToolTip.Tip="Pinned" />
                                                 </WrapPanel>
                                             </StackPanel>
                                         </Grid>
@@ -526,6 +539,12 @@
                                     Classes.active="{Binding IsSelectedClipFavorite}"
                                     IsEnabled="{Binding HasSelectedClip}"
                                     Content="{Binding SelectedClipFavoriteButtonLabel}" />
+
+                            <Button Classes="secondary compact"
+                                    Command="{Binding TogglePinCommand}"
+                                    IsEnabled="{Binding HasSelectedClip}"
+                                    ToolTip.Tip="Pin/Unpin this clip"
+                                    Content="{Binding SelectedClipPinButtonLabel}" />
 
                             <Button Classes="destructive compact"
                                     Command="{Binding DeleteSelectedCommand}"

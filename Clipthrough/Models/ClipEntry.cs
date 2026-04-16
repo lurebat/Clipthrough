@@ -51,6 +51,10 @@ public sealed class ClipEntry
 
     public DateTimeOffset? LastPastedAt { get; set; }
 
+    public DateTimeOffset? PinnedAt { get; set; }
+
+    public bool IsPinned => PinnedAt.HasValue;
+
     public IReadOnlyList<SensitivityMatch> SensitivityMatches { get; set; } = Array.Empty<SensitivityMatch>();
 }
 

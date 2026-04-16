@@ -12,6 +12,8 @@ public interface IClipStoreService
 
     Task SetFavoriteAsync(long clipId, bool isFavorite, CancellationToken cancellationToken = default);
 
+    Task SetPinnedAsync(long clipId, bool isPinned, CancellationToken cancellationToken = default);
+
     Task DeleteAsync(long clipId, CancellationToken cancellationToken = default);
 
     Task ClearSensitivityAsync(long clipId, CancellationToken cancellationToken = default);

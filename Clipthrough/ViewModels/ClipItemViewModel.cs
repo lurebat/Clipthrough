@@ -74,7 +74,8 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         Func<ClipItemViewModel, Task>? copyHandler = null,
         Func<ClipItemViewModel, Task>? toggleFavoriteHandler = null,
         Func<ClipItemViewModel, Task>? deleteHandler = null,
-        Func<ClipItemViewModel, Task>? exportHandler = null)
+        Func<ClipItemViewModel, Task>? exportHandler = null,
+        Func<ClipItemViewModel, Task>? togglePinHandler = null)
     {
         Clip = clip;
         SourceAppIconImage = ClipBitmapFactory.TryLoad(clip.SourceAppIconBytes);
@@ -111,6 +112,14 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
                     await exportHandler(this);
                 }
             });
+        TogglePinCommand = ReactiveCommand.CreateFromTask(
+            async () =>
+            {
+                if (togglePinHandler is not null)
+                {
+                    await togglePinHandler(this);
+                }
+            });
     }
 
     public ClipEntry Clip { get; }
@@ -124,6 +133,8 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> DeleteCommand { get; }
 
     public ReactiveCommand<Unit, Unit> ExportCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> TogglePinCommand { get; }
 
     public bool IsChecked
     {
@@ -257,6 +268,12 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     public bool IsFavorite => Clip.IsFavorite;
 
+    public bool IsPinned => Clip.IsPinned;
+
+    public string PinMarker => IsPinned ? "📌" : string.Empty;
+
+    public string PinActionLabel => IsPinned ? "Unpin" : "Pin";
+
     public bool IsSensitive => Clip.IsSensitive;
 
     public string HighestSeverity => Clip.SensitivityMatches
@@ -351,7 +368,7 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     public IBrush PastedChipForeground => s_pastedFg;
 
     public string PastedMarker => HasBeenPasted
-        ? (Clip.PasteCount > 1 ? $"📌 Pasted ×{Clip.PasteCount}" : "📌 Pasted")
+        ? (Clip.PasteCount > 1 ? $"✓ Pasted ×{Clip.PasteCount}" : "✓ Pasted")
         : string.Empty;
 
     public void SetFavoriteState(bool isFavorite)
@@ -368,6 +385,20 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(RowBorderThickness));
         this.RaisePropertyChanged(nameof(FavoriteMarker));
         this.RaisePropertyChanged(nameof(FavoriteActionLabel));
+    }
+
+    public void SetPinnedState(bool isPinned)
+    {
+        var now = isPinned ? DateTimeOffset.UtcNow : (DateTimeOffset?)null;
+        if (Clip.PinnedAt.HasValue == isPinned)
+        {
+            return;
+        }
+
+        Clip.PinnedAt = now;
+        this.RaisePropertyChanged(nameof(IsPinned));
+        this.RaisePropertyChanged(nameof(PinMarker));
+        this.RaisePropertyChanged(nameof(PinActionLabel));
     }
 
     public void Dispose()
