@@ -2230,12 +2230,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        // Password is correct — store in memory and proceed
-        await _storageOptionsService.SaveAsync(new StorageOptions
-        {
-            DatabasePath = _storageOptionsService.Current.DatabasePath,
-            DatabasePassword = password,
-        });
+        // Password is correct — store in memory only (never persist to disk)
+        _storageOptionsService.SetInMemoryPassword(password);
 
         PasswordPromptError = string.Empty;
         PasswordPromptInput = string.Empty;

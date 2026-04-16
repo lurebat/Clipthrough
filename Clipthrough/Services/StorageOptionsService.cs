@@ -148,6 +148,15 @@ public sealed class StorageOptionsService : IStorageOptionsService
         return new SqliteConnection(builder.ToString());
     }
 
+    public void SetInMemoryPassword(string password)
+    {
+        Current = new StorageOptions
+        {
+            DatabasePath = Current.DatabasePath,
+            DatabasePassword = password,
+        }.Normalize();
+    }
+
     private StorageOptions LoadFromDisk()
     {
         try

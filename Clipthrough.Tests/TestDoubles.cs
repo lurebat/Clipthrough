@@ -40,6 +40,15 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
         return Task.CompletedTask;
     }
 
+    public void SetInMemoryPassword(string password)
+    {
+        Current = new StorageOptions
+        {
+            DatabasePath = Current.DatabasePath,
+            DatabasePassword = password,
+        }.Normalize();
+    }
+
     public void SetHasSavedConfig(bool value) => _hasSavedConfig = value;
 }
 
