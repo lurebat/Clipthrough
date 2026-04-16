@@ -1,0 +1,356 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Clipthrough.ViewModels"
+        x:Class="Clipthrough.Views.SettingsWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="{Binding SettingsTitleText}"
+        Width="960"
+        Height="720"
+        MinWidth="720"
+        MinHeight="480"
+        ShowInTaskbar="True"
+        WindowStartupLocation="CenterOwner">
+
+    <Grid RowDefinitions="Auto,*,Auto"
+          RowSpacing="12"
+          Margin="16">
+
+        <TextBox Grid.Row="0"
+                 Watermark="Filter settings (e.g. hotkey, theme, database)…"
+                 Text="{Binding SettingsFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+        <ScrollViewer Grid.Row="1"
+                      HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Spacing="10">
+                <!-- Behavior -->
+                <Expander IsVisible="{Binding IsSettingsSectionBehaviorVisible}"
+                          IsExpanded="{Binding IsSettingsSectionBehaviorExpanded, Mode=TwoWay}">
+                    <Expander.Header>
+                        <TextBlock Text="{Binding SettingsBehaviorTitle}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold" />
+                    </Expander.Header>
+                    <StackPanel Spacing="12"
+                                Margin="8,10,0,0">
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="detail-label"
+                                       Text="{Binding SettingsThemeModeLabel}" />
+                            <ComboBox ItemsSource="{Binding ThemeModeOptions}"
+                                      SelectedItem="{Binding SettingsThemeMode}" />
+                        </StackPanel>
+                        <CheckBox Content="{Binding SettingsCloseToTrayLabel}"
+                                  IsChecked="{Binding SettingsCloseToTray}" />
+                        <CheckBox Content="{Binding SettingsMinimizeToTrayLabel}"
+                                  IsChecked="{Binding SettingsMinimizeToTray}" />
+                        <CheckBox Content="{Binding SettingsStartWithWindowsLabel}"
+                                  IsChecked="{Binding SettingsStartWithWindows}" />
+                    </StackPanel>
+                </Expander>
+
+                <!-- Local hotkeys -->
+                <Expander IsVisible="{Binding IsSettingsSectionLocalHotkeysVisible}"
+                          IsExpanded="{Binding IsSettingsSectionLocalHotkeysExpanded, Mode=TwoWay}">
+                    <Expander.Header>
+                        <TextBlock Text="{Binding SettingsLocalHotkeysTitle}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold" />
+                    </Expander.Header>
+                    <Grid ColumnDefinitions="Auto,260,*"
+                          RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                          ColumnSpacing="12"
+                          RowSpacing="10"
+                          Margin="8,10,0,0">
+                        <CheckBox Content="{Binding SettingsEnableShortcutLabel}"
+                                  IsChecked="{Binding SettingsEnableToggleRegexHotkey}" />
+                        <TextBlock Grid.Column="1" VerticalAlignment="Center"
+                                   Text="{Binding SettingsRegexHotkeyLabel}" />
+                        <TextBox Grid.Column="2"
+                                 Text="{Binding SettingsToggleRegexHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <CheckBox Grid.Row="1" Content="{Binding SettingsEnableShortcutLabel}"
+                                  IsChecked="{Binding SettingsEnableToggleFavoritesHotkey}" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" VerticalAlignment="Center"
+                                   Text="{Binding SettingsFavoritesHotkeyLabel}" />
+                        <TextBox Grid.Row="1" Grid.Column="2"
+                                 Text="{Binding SettingsToggleFavoritesHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <CheckBox Grid.Row="2" Content="{Binding SettingsEnableShortcutLabel}"
+                                  IsChecked="{Binding SettingsEnableToggleSensitiveHotkey}" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" VerticalAlignment="Center"
+                                   Text="{Binding SettingsSensitiveHotkeyLabel}" />
+                        <TextBox Grid.Row="2" Grid.Column="2"
+                                 Text="{Binding SettingsToggleSensitiveHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <CheckBox Grid.Row="3" Content="{Binding SettingsEnableShortcutLabel}"
+                                  IsChecked="{Binding SettingsEnableToggleCaseSensitiveHotkey}" />
+                        <TextBlock Grid.Row="3" Grid.Column="1" VerticalAlignment="Center"
+                                   Text="{Binding SettingsCaseSensitiveHotkeyLabel}" />
+                        <TextBox Grid.Row="3" Grid.Column="2"
+                                 Text="{Binding SettingsToggleCaseSensitiveHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <CheckBox Grid.Row="4" Content="{Binding SettingsEnableShortcutLabel}"
+                                  IsChecked="{Binding SettingsEnableToggleWildcardHotkey}" />
+                        <TextBlock Grid.Row="4" Grid.Column="1" VerticalAlignment="Center"
+                                   Text="{Binding SettingsWildcardHotkeyLabel}" />
+                        <TextBox Grid.Row="4" Grid.Column="2"
+                                 Text="{Binding SettingsToggleWildcardHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <CheckBox Grid.Row="5" Content="{Binding SettingsEnableShortcutLabel}"
+                                  IsChecked="{Binding SettingsEnableToggleWholeWordHotkey}" />
+                        <TextBlock Grid.Row="5" Grid.Column="1" VerticalAlignment="Center"
+                                   Text="{Binding SettingsWholeWordHotkeyLabel}" />
+                        <TextBox Grid.Row="5" Grid.Column="2"
+                                 Text="{Binding SettingsToggleWholeWordHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <CheckBox Grid.Row="6" Content="{Binding SettingsEnableShortcutLabel}"
+                                  IsChecked="{Binding SettingsEnableTogglePastedHotkey}" />
+                        <TextBlock Grid.Row="6" Grid.Column="1" VerticalAlignment="Center"
+                                   Text="{Binding SettingsPastedHotkeyLabel}" />
+                        <TextBox Grid.Row="6" Grid.Column="2"
+                                 Text="{Binding SettingsTogglePastedHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    </Grid>
+                </Expander>
+
+                <!-- Global hotkey + paste-sized hotkeys -->
+                <Expander IsVisible="{Binding IsSettingsSectionGlobalHotkeyVisible}"
+                          IsExpanded="{Binding IsSettingsSectionGlobalHotkeyExpanded, Mode=TwoWay}">
+                    <Expander.Header>
+                        <TextBlock Text="{Binding SettingsGlobalHotkeyTitle}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold" />
+                    </Expander.Header>
+                    <Grid ColumnDefinitions="Auto,260,*"
+                          RowDefinitions="Auto,Auto,Auto,Auto"
+                          ColumnSpacing="12"
+                          RowSpacing="10"
+                          Margin="8,10,0,0">
+                        <CheckBox Content="{Binding SettingsEnableShortcutLabel}"
+                                  IsChecked="{Binding SettingsEnableToggleWindowHotkey}" />
+                        <TextBlock Grid.Column="1" VerticalAlignment="Center"
+                                   Text="{Binding SettingsToggleWindowHotkeyLabel}" />
+                        <TextBox Grid.Column="2"
+                                 Text="{Binding SettingsToggleWindowHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <TextBlock Grid.Row="1" Grid.Column="1" VerticalAlignment="Center"
+                                   Text="{Binding SettingsClipLimitLabel}" />
+                        <TextBox Grid.Row="1" Grid.Column="2"
+                                 Text="{Binding SettingsMaxClipSizeKilobytes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <CheckBox Grid.Row="2" Content="{Binding SettingsEnableShortcutLabel}"
+                                  IsChecked="{Binding SettingsEnableIncrementalPasteHotkey}" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" VerticalAlignment="Center"
+                                   Text="{Binding SettingsIncrementalPasteHotkeyLabel}" />
+                        <TextBox Grid.Row="2" Grid.Column="2"
+                                 Text="{Binding SettingsIncrementalPasteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <CheckBox Grid.Row="3" Content="{Binding SettingsEnableShortcutLabel}"
+                                  IsChecked="{Binding SettingsEnableDecrementalPasteHotkey}" />
+                        <TextBlock Grid.Row="3" Grid.Column="1" VerticalAlignment="Center"
+                                   Text="{Binding SettingsDecrementalPasteHotkeyLabel}" />
+                        <TextBox Grid.Row="3" Grid.Column="2"
+                                 Text="{Binding SettingsDecrementalPasteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    </Grid>
+                </Expander>
+
+                <!-- Storage -->
+                <Expander IsVisible="{Binding IsSettingsSectionStorageVisible}"
+                          IsExpanded="{Binding IsSettingsSectionStorageExpanded, Mode=TwoWay}">
+                    <Expander.Header>
+                        <TextBlock Text="{Binding SettingsStorageTitle}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold" />
+                    </Expander.Header>
+                    <StackPanel Spacing="12" Margin="8,10,0,0">
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="detail-label"
+                                       Text="{Binding SettingsDatabasePathLabel}" />
+                            <Grid ColumnDefinitions="*,Auto"
+                                  ColumnSpacing="8">
+                                <TextBox Text="{Binding SettingsDatabasePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <Button Grid.Column="1"
+                                        Classes="secondary compact"
+                                        Command="{Binding BrowseDatabasePathCommand}"
+                                        CommandParameter="{Binding $parent[Window]}"
+                                        Content="{Binding SettingsBrowseDatabasePathButtonLabel}" />
+                            </Grid>
+                        </StackPanel>
+
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="detail-label"
+                                       Text="{Binding SettingsDatabasePasswordLabel}" />
+                            <TextBox Text="{Binding SettingsDatabasePassword, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     PasswordChar="*"
+                                     RevealPassword="{Binding IsDatabasePasswordVisible}" />
+                            <CheckBox Content="{Binding SettingsShowPasswordLabel}"
+                                      IsChecked="{Binding IsDatabasePasswordVisible}" />
+                        </StackPanel>
+
+                        <TextBlock Classes="body-muted"
+                                   Text="{Binding SettingsStorageHintText}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </Expander>
+
+                <!-- Tools -->
+                <Expander IsVisible="{Binding IsSettingsSectionToolsVisible}"
+                          IsExpanded="{Binding IsSettingsSectionToolsExpanded, Mode=TwoWay}">
+                    <Expander.Header>
+                        <TextBlock Text="{Binding SettingsToolsTitle}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold" />
+                    </Expander.Header>
+                    <StackPanel Spacing="12" Margin="8,10,0,0">
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="detail-label"
+                                       Text="{Binding SettingsExternalEditorPathLabel}" />
+                            <TextBox Text="{Binding SettingsExternalEditorPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="detail-label"
+                                       Text="{Binding SettingsExternalDiffToolPathLabel}" />
+                            <TextBox Text="{Binding SettingsExternalDiffToolPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBlock Classes="body-muted"
+                                       FontSize="11"
+                                       TextWrapping="Wrap"
+                                       Text="Full path to a diff executable. Invoked as: tool.exe &quot;left-file&quot; &quot;right-file&quot;. Works with WinMerge, Beyond Compare, VS Code (use code --diff wrapper), Meld, KDiff3, etc." />
+                        </StackPanel>
+                    </StackPanel>
+                </Expander>
+
+                <!-- Retention -->
+                <Expander IsVisible="{Binding IsSettingsSectionRetentionVisible}"
+                          IsExpanded="{Binding IsSettingsSectionRetentionExpanded, Mode=TwoWay}">
+                    <Expander.Header>
+                        <TextBlock Text="{Binding SettingsRetentionTitle}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold" />
+                    </Expander.Header>
+                    <Grid ColumnDefinitions="Auto,260,*"
+                          RowDefinitions="Auto,Auto"
+                          ColumnSpacing="12"
+                          RowSpacing="10"
+                          Margin="8,10,0,0">
+                        <CheckBox Content="{Binding SettingsEnableShortcutLabel}"
+                                  IsChecked="{Binding SettingsEnableNormalClipLifetime}" />
+                        <TextBlock Grid.Column="1" VerticalAlignment="Center"
+                                   Text="{Binding SettingsNormalClipLifetimeLabel}" />
+                        <TextBox Grid.Column="2"
+                                 Text="{Binding SettingsNormalClipLifetimeDays, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <CheckBox Grid.Row="1" Content="{Binding SettingsEnableShortcutLabel}"
+                                  IsChecked="{Binding SettingsEnableSensitiveClipLifetime}" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" VerticalAlignment="Center"
+                                   Text="{Binding SettingsSensitiveClipLifetimeLabel}" />
+                        <TextBox Grid.Row="1" Grid.Column="2"
+                                 Text="{Binding SettingsSensitiveClipLifetimeMinutes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    </Grid>
+                </Expander>
+
+                <!-- Capacity -->
+                <Expander IsVisible="{Binding IsSettingsSectionCapacityVisible}"
+                          IsExpanded="{Binding IsSettingsSectionCapacityExpanded, Mode=TwoWay}">
+                    <Expander.Header>
+                        <TextBlock Text="{Binding SettingsCapacityTitle}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold" />
+                    </Expander.Header>
+                    <Grid ColumnDefinitions="Auto,260,*"
+                          RowDefinitions="Auto,Auto"
+                          ColumnSpacing="12"
+                          RowSpacing="10"
+                          Margin="8,10,0,0">
+                        <CheckBox Content="{Binding SettingsEnableShortcutLabel}"
+                                  IsChecked="{Binding SettingsEnableMaxLibrarySize}" />
+                        <TextBlock Grid.Column="1" VerticalAlignment="Center"
+                                   Text="{Binding SettingsMaxLibrarySizeLabel}" />
+                        <TextBox Grid.Column="2"
+                                 Text="{Binding SettingsMaxLibrarySizeMegabytes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <CheckBox Grid.Row="1" Content="{Binding SettingsEnableShortcutLabel}"
+                                  IsChecked="{Binding SettingsEnableMaxEntryCount}" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" VerticalAlignment="Center"
+                                   Text="{Binding SettingsMaxEntryCountLabel}" />
+                        <TextBox Grid.Row="1" Grid.Column="2"
+                                 Text="{Binding SettingsMaxEntryCount, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    </Grid>
+                </Expander>
+
+                <!-- Sensitivity rules -->
+                <Expander IsVisible="{Binding IsSettingsSectionSensitivityVisible}"
+                          IsExpanded="{Binding IsSettingsSectionSensitivityExpanded, Mode=TwoWay}">
+                    <Expander.Header>
+                        <Grid ColumnDefinitions="*,Auto"
+                              MinWidth="500">
+                            <TextBlock Text="{Binding SettingsSensitivityTitle}"
+                                       FontSize="16"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center" />
+                            <Button Grid.Column="1"
+                                    Classes="secondary compact"
+                                    Command="{Binding AddSensitivityRuleCommand}"
+                                    Content="{Binding SettingsAddRuleButtonLabel}" />
+                        </Grid>
+                    </Expander.Header>
+                    <ItemsControl ItemsSource="{Binding SensitivityRules}"
+                                  Margin="8,10,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:SensitivityRuleEditorViewModel">
+                                <Expander IsExpanded="{Binding IsExpanded}">
+                                    <Expander.Header>
+                                        <Grid ColumnDefinitions="*,Auto,Auto"
+                                              ColumnSpacing="8">
+                                            <TextBlock Text="{Binding HeaderText}" />
+                                            <TextBlock Grid.Column="1"
+                                                       Classes="body-muted"
+                                                       Text="{Binding SummaryText}" />
+                                            <Button Grid.Column="2"
+                                                    Classes="destructive compact"
+                                                    IsVisible="{Binding CanRemove}"
+                                                    Command="{Binding RemoveCommand}"
+                                                    Content="{Binding $parent[Window].DataContext.DeleteButtonLabel}" />
+                                        </Grid>
+                                    </Expander.Header>
+                                    <Grid ColumnDefinitions="*,*"
+                                          ColumnSpacing="10"
+                                          RowDefinitions="Auto,Auto,Auto">
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Classes="detail-label"
+                                                       Text="{Binding $parent[Window].DataContext.SettingsRuleNameLabel}" />
+                                            <TextBox Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Spacing="4">
+                                            <TextBlock Classes="detail-label"
+                                                       Text="{Binding $parent[Window].DataContext.SettingsRuleSeverityLabel}" />
+                                            <ComboBox ItemsSource="{Binding $parent[Window].DataContext.SensitivitySeverityOptions}"
+                                                      SelectedItem="{Binding Severity}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Spacing="4">
+                                            <TextBlock Classes="detail-label"
+                                                       Text="{Binding $parent[Window].DataContext.SettingsRulePatternLabel}" />
+                                            <TextBox Text="{Binding Pattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                        <CheckBox Grid.Row="2"
+                                                  Content="{Binding $parent[Window].DataContext.SettingsRuleEnabledLabel}"
+                                                  IsChecked="{Binding IsEnabled}" />
+                                    </Grid>
+                                </Expander>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Expander>
+            </StackPanel>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="2"
+                    Orientation="Horizontal"
+                    Spacing="10"
+                    HorizontalAlignment="Right">
+            <Button Classes="secondary compact"
+                    Click="OnCancelClick"
+                    Content="{Binding SettingsCancelButtonLabel}" />
+            <Button Classes="primary compact"
+                    Click="OnSaveClick"
+                    Content="{Binding SettingsSaveButtonLabel}" />
+        </StackPanel>
+    </Grid>
+</Window>

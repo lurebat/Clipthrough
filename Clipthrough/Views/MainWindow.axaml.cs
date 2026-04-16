@@ -18,6 +18,8 @@ public partial class MainWindow : Window
     private ScrollViewer? m_clipListScrollViewer;
     private SessionLogsViewModel? m_subscribedSessionLogs;
     private SessionLogsWindow? m_sessionLogsWindow;
+    private MainWindowViewModel? m_subscribedViewModel;
+    private SettingsWindow? m_settingsWindow;
 
     public MainWindow()
     {
@@ -86,6 +88,19 @@ public partial class MainWindow : Window
             m_sessionLogsWindow.Closing -= OnSessionLogsWindowClosing;
             try { m_sessionLogsWindow.Close(); } catch { }
             m_sessionLogsWindow = null;
+        }
+
+        if (m_subscribedViewModel is not null)
+        {
+            m_subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            m_subscribedViewModel = null;
+        }
+
+        if (m_settingsWindow is not null)
+        {
+            m_settingsWindow.Closing -= OnSettingsWindowClosing;
+            try { m_settingsWindow.Close(); } catch { }
+            m_settingsWindow = null;
         }
 
         if (m_clipListScrollViewer is null)
@@ -417,11 +432,71 @@ public partial class MainWindow : Window
             m_subscribedSessionLogs = null;
         }
 
+        if (m_subscribedViewModel is not null)
+        {
+            m_subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            m_subscribedViewModel = null;
+        }
+
         if (DataContext is MainWindowViewModel viewModel)
         {
             m_subscribedSessionLogs = viewModel.SessionLogs;
             m_subscribedSessionLogs.PropertyChanged += OnSessionLogsPropertyChanged;
             UpdateSessionLogsWindowVisibility(m_subscribedSessionLogs.IsOpen);
+
+            m_subscribedViewModel = viewModel;
+            m_subscribedViewModel.PropertyChanged += OnViewModelPropertyChanged;
+            UpdateSettingsWindowVisibility(viewModel.IsSettingsOpen);
+        }
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainWindowViewModel.IsSettingsOpen) && sender is MainWindowViewModel vm)
+        {
+            Dispatcher.UIThread.Post(() => UpdateSettingsWindowVisibility(vm.IsSettingsOpen));
+        }
+    }
+
+    private void UpdateSettingsWindowVisibility(bool open)
+    {
+        if (open)
+        {
+            if (m_settingsWindow is null)
+            {
+                m_settingsWindow = new SettingsWindow
+                {
+                    DataContext = m_subscribedViewModel,
+                };
+                m_settingsWindow.Closing += OnSettingsWindowClosing;
+                m_settingsWindow.Show(this);
+            }
+            else
+            {
+                m_settingsWindow.Activate();
+            }
+        }
+        else if (m_settingsWindow is not null)
+        {
+            var window = m_settingsWindow;
+            m_settingsWindow = null;
+            window.Closing -= OnSettingsWindowClosing;
+            try { window.Close(); } catch { }
+        }
+    }
+
+    private void OnSettingsWindowClosing(object? sender, WindowClosingEventArgs e)
+    {
+        if (sender is Window window)
+        {
+            window.Closing -= OnSettingsWindowClosing;
+        }
+
+        m_settingsWindow = null;
+
+        if (m_subscribedViewModel is not null && m_subscribedViewModel.IsSettingsOpen)
+        {
+            m_subscribedViewModel.CloseSettingsCommand.Execute().Subscribe();
         }
     }
 
