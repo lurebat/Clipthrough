@@ -14,6 +14,8 @@ Clipthrough is an Avalonia desktop clipboard history app focused on rich clipboa
 - SQLite database with optional encryption password, retention policies, and size caps
 - Clip export with original payload, rendered text, and metadata
 - Top menu bar and an in-app Help window
+- **AI transforms** — send text clips to any OpenAI-compatible chat-completions endpoint with a custom instruction; result saved as a new clip (`Edit → AI transform…`, `Ctrl+I`). Configure base URL, API key and model in Settings, or fall back to `OPENAI_BASE_URL` / `OPENAI_API_KEY` environment variables.
+- **User scripting** — write C# scripts that transform clip text. Scripts live in settings; `Edit → Run script` lists them. `Edit → Load default scripts` seeds JSON quote/unquote/minify/pretty, URL encode/decode, Base64 encode/decode, and a couple of whitespace helpers.
 - Windows publish artifact via GitHub Actions, plus a tagged-release workflow
 
 ## Development

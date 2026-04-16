@@ -37,6 +37,8 @@ shortcuts, and pluggable source attribution.
 - **Theming**: use class selectors (`Classes="surface-panel"`) from `ModernTheme.axaml`. Brushes come from `DynamicResource`s so they respect dark/light mode.
 - **Persistence**: schema changes go in `Data/ClipSchema.cs` with an idempotent migration (ADD COLUMN IF NOT EXISTS, etc.). Bump version only when required.
 - **Hotkeys**: global hotkeys are registered via `ISystemInteractionService.TryRegisterGlobalHotKey` which on Windows uses `RegisterHotKey` + `Win32Properties.AddWndProcHookCallback`. Never hold a managed `WndProc` delegate yourself — use the Avalonia helper to avoid GC crashes.
+- **AI transforms** (`IAiTransformService` / `AiTransformService`): OpenAI-compatible chat-completions client. Base URL + API key + model come from `AppSettings.Ai*` with env-var fallback (`OPENAI_BASE_URL`, `OPENAI_API_KEY`). Service has a test-friendly ctor taking an `HttpClient`.
+- **User scripting** (`IScriptingService` / `ScriptingService`): Roslyn `CSharpScript` wrapper. Scripts get a `Input` global (string) and return any value, coerced to string. Default scripts come from `ScriptingService.GetDefaultScripts()` and are appended to `AppSettings.UserScripts` by the `LoadDefaultScripts` command.
 
 ## Validation
 
