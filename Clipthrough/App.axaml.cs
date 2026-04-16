@@ -138,6 +138,7 @@ public partial class App : Application
         services.AddSingleton<IClipSampleDataService, ClipSampleDataService>();
         services.AddSingleton<IClipboardMonitorService, ClipboardMonitorService>();
         services.AddSingleton<IAiTransformService, AiTransformService>();
+        services.AddSingleton<IScriptingService, ScriptingService>();
         services.AddSingleton<MainWindowViewModel>();
 
         return services.BuildServiceProvider();

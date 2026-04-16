@@ -1,4 +1,6 @@
-﻿namespace Clipthrough.Models;
+﻿using System.Linq;
+
+namespace Clipthrough.Models;
 
 public sealed record AppSettings
 {
@@ -126,6 +128,8 @@ public sealed record AppSettings
 
     public string AiModel { get; init; } = string.Empty;
 
+    public System.Collections.Generic.IReadOnlyList<UserScript> UserScripts { get; init; } = System.Array.Empty<UserScript>();
+
     public static AppSettings Default { get; } = new();
 
     public AppSettings Normalize() => this with
@@ -175,6 +179,10 @@ public sealed record AppSettings
         AiBaseUrl = AiBaseUrl?.Trim() ?? string.Empty,
         AiApiKey = AiApiKey?.Trim() ?? string.Empty,
         AiModel = AiModel?.Trim() ?? string.Empty,
+        UserScripts = (UserScripts ?? System.Array.Empty<UserScript>())
+            .Where(s => s is not null && !string.IsNullOrWhiteSpace(s.Name) && !string.IsNullOrWhiteSpace(s.Code))
+            .Select(s => new UserScript { Name = s.Name.Trim(), Code = s.Code })
+            .ToList(),
     };
 
     private static string NormalizeHotkey(string? value, string fallback)

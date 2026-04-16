@@ -38,6 +38,16 @@
                 <MenuItem Header="Toggle _pin" Command="{Binding TogglePinCommand}" />
                 <Separator />
                 <MenuItem Header="_AI transform…" Command="{Binding OpenAiPromptCommand}" InputGesture="Ctrl+I" />
+                <MenuItem Header="Run _script" ItemsSource="{Binding UserScripts}">
+                    <MenuItem.ItemContainerTheme>
+                        <ControlTheme TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+                            <Setter Property="Header" Value="{Binding Name, DataType=models:UserScript}" />
+                            <Setter Property="Command" Value="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).ApplyUserScriptCommand}" />
+                            <Setter Property="CommandParameter" Value="{Binding}" />
+                        </ControlTheme>
+                    </MenuItem.ItemContainerTheme>
+                </MenuItem>
+                <MenuItem Header="Load _default scripts" Command="{Binding LoadDefaultScriptsCommand}" />
             </MenuItem>
             <MenuItem Header="_View">
                 <MenuItem Header="Show session _logs" Command="{Binding SessionLogs.OpenCommand}" />

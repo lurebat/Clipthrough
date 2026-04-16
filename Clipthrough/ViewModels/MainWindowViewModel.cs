@@ -55,6 +55,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly IImageEditorService _imageEditorService;
     private readonly ISearchHistoryService _searchHistoryService;
     private readonly IAiTransformService _aiTransformService;
+    private readonly IScriptingService _scriptingService;
     private readonly DatabaseInitializer _databaseInitializer;
     private readonly CompositeDisposable _subscriptions = new();
     private readonly Dictionary<long, (ClipEntry Clip, CancellationTokenSource Cts)> _pendingDeletes = new();
@@ -143,7 +144,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _editedClipBaseline = string.Empty;
     private long? _checkedSelectionAnchorId;
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, DatabaseInitializer databaseInitializer)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, DatabaseInitializer databaseInitializer)
     {
         _clipStoreService = clipStoreService;
         _clipboardMonitorService = clipboardMonitorService;
@@ -157,6 +158,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _imageEditorService = imageEditorService;
         _searchHistoryService = searchHistoryService;
         _aiTransformService = aiTransformService;
+        _scriptingService = scriptingService;
         _databaseInitializer = databaseInitializer;
         SessionLogs = new SessionLogsViewModel(sessionLogService);
         ContentTypeOptions =
@@ -200,8 +202,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OpenAiPromptCommand = ReactiveCommand.Create(OpenAiPrompt);
         SubmitAiPromptCommand = ReactiveCommand.CreateFromTask(SubmitAiPromptAsync);
         CancelAiPromptCommand = ReactiveCommand.Create(CancelAiPrompt);
+        ApplyUserScriptCommand = ReactiveCommand.CreateFromTask<UserScript>(ApplyUserScriptAsync);
+        LoadDefaultScriptsCommand = ReactiveCommand.CreateFromTask(LoadDefaultScriptsAsync);
 
         _settingsService.SettingsChanged += OnSettingsChanged;
+        SyncUserScripts(_settingsService.Current);
 
         _subscriptions.Add(
             Observable.Merge(
@@ -313,6 +318,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> CopyEditedClipCommand { get; }
 
     public ReactiveCommand<TextTransformation, Unit> ApplyTextTransformationCommand { get; }
+
+    public ReactiveCommand<UserScript, Unit> ApplyUserScriptCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> LoadDefaultScriptsCommand { get; }
+
+    public ObservableCollection<UserScript> UserScripts { get; } = new();
 
     public ReactiveCommand<Unit, Unit> AddSensitivityRuleCommand { get; }
 
@@ -2190,6 +2201,82 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private async Task ApplyUserScriptAsync(UserScript? script)
+    {
+        if (script is null || string.IsNullOrWhiteSpace(script.Code))
+        {
+            return;
+        }
+
+        var checkedClips = Clips.Where(static c => c.IsChecked).ToList();
+        var targets = checkedClips.Count > 0
+            ? checkedClips
+            : SelectedClip is not null ? new List<ClipItemViewModel> { SelectedClip } : new List<ClipItemViewModel>();
+
+        var transformed = 0;
+        foreach (var target in targets)
+        {
+            if (target.Clip.ContentType != ContentType.Text && target.Clip.ContentType != ContentType.RichText)
+            {
+                continue;
+            }
+
+            var source = target.Clip.Content ?? string.Empty;
+            string result;
+            try
+            {
+                result = await _scriptingService.EvaluateAsync(script.Code, source);
+            }
+            catch (Exception ex)
+            {
+                StatusText = $"Script '{script.Name}' failed: {ex.Message}";
+                return;
+            }
+
+            if (string.Equals(result, source, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
+            await _clipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentBytes = textBytes,
+                ContentText = result,
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                SourceApp = target.SourceApp,
+                SourceAppPath = target.Clip.SourceAppPath,
+                SourceAppIconBytes = target.Clip.SourceAppIconBytes,
+                IncrementExistingCopyCount = false,
+            });
+            transformed++;
+        }
+
+        if (transformed > 0)
+        {
+            StatusText = transformed == 1
+                ? $"Applied '{script.Name}'"
+                : $"Applied '{script.Name}' to {transformed} clips";
+        }
+    }
+
+    private async Task LoadDefaultScriptsAsync()
+    {
+        var existing = _settingsService.Current.UserScripts?.ToList() ?? new List<UserScript>();
+        var names = new HashSet<string>(existing.Select(s => s.Name), StringComparer.OrdinalIgnoreCase);
+        foreach (var def in ScriptingService.GetDefaultScripts())
+        {
+            if (names.Add(def.Name))
+            {
+                existing.Add(def);
+            }
+        }
+
+        await _settingsService.SaveAsync(_settingsService.Current with { UserScripts = existing });
+        StatusText = "Loaded default scripts";
+    }
+
     private async Task CommitEditedClipOnSelectionChangeAsync()
     {
         if (_suppressEditAutoSave)
@@ -3100,9 +3187,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             LoadSettingsDraft(settings);
         }
 
+        SyncUserScripts(settings);
         UpdateSelectedClipPresentation();
         RaiseSelectionStateProperties();
         this.RaisePropertyChanged(nameof(IsCompareAvailable));
+    }
+
+    private void SyncUserScripts(AppSettings settings)
+    {
+        UserScripts.Clear();
+        foreach (var s in settings.UserScripts)
+        {
+            UserScripts.Add(s);
+        }
     }
 
     private async Task StartDatabaseAsync()
