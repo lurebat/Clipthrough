@@ -20,6 +20,8 @@ public sealed class ClipSearchFilters
 
     public bool PastedOnly { get; init; }
 
+    public bool UseFuzzy { get; init; }
+
     public int Limit { get; init; } = 200;
 
     public int Offset { get; init; }

@@ -90,6 +90,10 @@ public sealed record AppSettings
 
     public ViewModels.ContentDisplayMode LastContentDisplayMode { get; init; } = ViewModels.ContentDisplayMode.Rendered;
 
+    public bool UseFuzzyClipSearch { get; init; }
+
+    public bool UseFuzzySettingsSearch { get; init; } = true;
+
     public static AppSettings Default { get; } = new();
 
     public AppSettings Normalize() => this with

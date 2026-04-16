@@ -94,6 +94,10 @@
                 <CheckBox Classes="filter-toggle compact-toggle"
                           IsChecked="{Binding ShowPastedOnly}"
                           Content="{Binding PastedFilterLabel}" />
+                <CheckBox Classes="filter-toggle compact-toggle"
+                          IsChecked="{Binding UseFuzzyClipSearch}"
+                          ToolTip.Tip="Fuzzy: tolerate small typos and match prefixes (OR between tokens)"
+                          Content="Fuzzy" />
             </WrapPanel>
             </Grid>
         </Border>

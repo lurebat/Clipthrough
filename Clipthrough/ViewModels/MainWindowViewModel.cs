@@ -202,7 +202,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 this.WhenAnyValue(
                         x => x.UseWildcardSearch,
                         x => x.WholeWordSearch,
-                        x => x.ShowPastedOnly)
+                        x => x.ShowPastedOnly,
+                        x => x.UseFuzzyClipSearch)
                     .Select(static _ => Unit.Default))
                 .Skip(1)
                 .Throttle(TimeSpan.FromMilliseconds(300), RxApp.MainThreadScheduler)
@@ -1285,6 +1286,31 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private bool _settingsUseFuzzySearch = AppSettings.Default.UseFuzzySettingsSearch;
+
+    public bool SettingsUseFuzzySearch
+    {
+        get => _settingsUseFuzzySearch;
+        set
+        {
+            if (_settingsUseFuzzySearch == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _settingsUseFuzzySearch, value);
+            RaiseSettingsSectionVisibility();
+        }
+    }
+
+    private bool _useFuzzyClipSearch = AppSettings.Default.UseFuzzyClipSearch;
+
+    public bool UseFuzzyClipSearch
+    {
+        get => _useFuzzyClipSearch;
+        set => this.RaiseAndSetIfChanged(ref _useFuzzyClipSearch, value);
+    }
+
     private bool _isSettingsSectionBehaviorExpanded = true;
     private bool _isSettingsSectionLocalHotkeysExpanded = true;
     private bool _isSettingsSectionGlobalHotkeyExpanded = true;
@@ -1360,7 +1386,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return true;
         }
 
-        return keywords.Contains(_settingsFilter.Trim(), StringComparison.OrdinalIgnoreCase);
+        var filter = _settingsFilter.Trim();
+        if (keywords.Contains(filter, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return SettingsUseFuzzySearch && Clipthrough.Services.FuzzyMatcher.SettingsMatch(keywords, filter);
     }
 
     public bool IsSettingsSectionBehaviorVisible => MatchesFilter(_behaviorKeywords);
@@ -2319,6 +2351,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         CaseSensitive = CaseSensitiveSearch,
         UseWildcard = UseWildcardSearch,
         WholeWord = WholeWordSearch,
+        UseFuzzy = UseFuzzyClipSearch && !UseRegexSearch && !UseWildcardSearch && !WholeWordSearch,
         Limit = PageSize,
         Offset = offset,
     };
@@ -2803,6 +2836,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             MaxLibrarySizeMegabytes = maxLibrarySizeMegabytes,
             EnableMaxEntryCount = SettingsEnableMaxEntryCount,
             MaxEntryCount = maxEntryCount,
+            UseFuzzyClipSearch = UseFuzzyClipSearch,
+            UseFuzzySettingsSearch = SettingsUseFuzzySearch,
         };
 
         await _storageOptionsService.SaveAsync(storageOptions);
@@ -2862,6 +2897,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsDecrementalPasteHotkey = settings.DecrementalPasteHotkey;
         SettingsExternalEditorPath = settings.ExternalEditorPath;
         SettingsExternalDiffToolPath = settings.ExternalDiffToolPath;
+        SettingsUseFuzzySearch = settings.UseFuzzySettingsSearch;
+        UseFuzzyClipSearch = settings.UseFuzzyClipSearch;
         IsDatabasePasswordVisible = false;
     }
 

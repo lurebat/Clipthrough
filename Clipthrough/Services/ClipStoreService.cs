@@ -632,7 +632,7 @@ public sealed class ClipStoreService : IClipStoreService
     {
         if (hasSearch && !filters.UseRegex)
         {
-            command.Parameters.AddWithValue("$search", BuildFtsExpression(filters.SearchText));
+            command.Parameters.AddWithValue("$search", BuildFtsExpression(filters.SearchText, filters.UseFuzzy));
         }
 
         if (filters.ContentType is { } contentType)
@@ -644,15 +644,42 @@ public sealed class ClipStoreService : IClipStoreService
         command.Parameters.AddWithValue("$offset", filters.Offset);
     }
 
-    private static string BuildFtsExpression(string searchText)
+    private static string BuildFtsExpression(string searchText, bool useFuzzy = false)
     {
         var tokens = searchText
-            .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(static token => token.Replace("\"", "\"\"", StringComparison.Ordinal))
-            .Select(static token => $"\"{token}\"*");
+            .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        var expression = string.Join(" AND ", tokens);
-        return string.IsNullOrWhiteSpace(expression) ? "*" : expression;
+        if (tokens.Length == 0)
+        {
+            return "*";
+        }
+
+        string Quote(string t) => "\"" + t.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"*";
+
+        if (!useFuzzy)
+        {
+            return string.Join(" AND ", tokens.Select(Quote));
+        }
+
+        // Fuzzy: OR between tokens and between 1-char deletion variants so that
+        // "exammple" can still match "example". Each token becomes
+        // ("tok"* OR "tk"* OR "ok"* OR ...).
+        var parts = new List<string>();
+        foreach (var token in tokens)
+        {
+            var variants = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { token };
+            if (token.Length > 3)
+            {
+                for (var i = 0; i < token.Length; i++)
+                {
+                    variants.Add(token.Remove(i, 1));
+                }
+            }
+
+            parts.Add("(" + string.Join(" OR ", variants.Select(Quote)) + ")");
+        }
+
+        return string.Join(" AND ", parts);
     }
 
     private static ClipEntry ReadClip(SqliteDataReader reader)
@@ -777,7 +804,7 @@ public sealed class ClipStoreService : IClipStoreService
         command.CommandText = sql;
         if (hasSearch && !filters.UseRegex)
         {
-            command.Parameters.AddWithValue("$search", BuildFtsExpression(filters.SearchText));
+            command.Parameters.AddWithValue("$search", BuildFtsExpression(filters.SearchText, filters.UseFuzzy));
         }
 
         if (filters.ContentType is { } contentType)
