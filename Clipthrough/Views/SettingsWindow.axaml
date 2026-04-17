@@ -126,7 +126,7 @@
                                    TextWrapping="Wrap"
                                    Text="Global hotkeys work from anywhere on the desktop. Incremental paste cycles backward through your clipboard history — press once to paste the previous clip, press again for the one before that, and so on. Decremental paste cycles the other way. Clipthrough puts the clip on the clipboard and synthesizes Ctrl+V into the currently-focused window, so make sure the target window has focus when you press the hotkey." />
                         <Grid ColumnDefinitions="Auto,260,*"
-                              RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                              RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                               ColumnSpacing="12"
                               RowSpacing="10">
                         <CheckBox Content="{Binding SettingsEnableShortcutLabel}"
@@ -135,58 +135,53 @@
                                    Text="{Binding SettingsToggleWindowHotkeyLabel}" />
                         <ctrl:HotkeyBox Grid.Column="2" Hotkey="{Binding SettingsToggleWindowHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
+                        <CheckBox Grid.Row="1" Content="{Binding SettingsEnableShortcutLabel}"
+                                  IsChecked="{Binding SettingsEnableIncrementalPasteHotkey}" />
                         <TextBlock Grid.Row="1" Grid.Column="1" VerticalAlignment="Center"
-                                   Text="{Binding SettingsClipLimitLabel}" />
-                        <TextBox Grid.Row="1" Grid.Column="2"
-                                 Text="{Binding SettingsMaxClipSizeKilobytes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                   Text="{Binding SettingsIncrementalPasteHotkeyLabel}" />
+                        <ctrl:HotkeyBox Grid.Row="1" Grid.Column="2" Hotkey="{Binding SettingsIncrementalPasteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="2" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableIncrementalPasteHotkey}" />
+                                  IsChecked="{Binding SettingsEnableDecrementalPasteHotkey}" />
                         <TextBlock Grid.Row="2" Grid.Column="1" VerticalAlignment="Center"
-                                   Text="{Binding SettingsIncrementalPasteHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="2" Grid.Column="2" Hotkey="{Binding SettingsIncrementalPasteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                   Text="{Binding SettingsDecrementalPasteHotkeyLabel}" />
+                        <ctrl:HotkeyBox Grid.Row="2" Grid.Column="2" Hotkey="{Binding SettingsDecrementalPasteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="3" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableDecrementalPasteHotkey}" />
+                                  IsChecked="{Binding SettingsEnableCopyAndFavoriteHotkey}" />
                         <TextBlock Grid.Row="3" Grid.Column="1" VerticalAlignment="Center"
-                                   Text="{Binding SettingsDecrementalPasteHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="3" Grid.Column="2" Hotkey="{Binding SettingsDecrementalPasteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                   Text="{Binding SettingsCopyAndFavoriteHotkeyLabel}" />
+                        <ctrl:HotkeyBox Grid.Row="3" Grid.Column="2" Hotkey="{Binding SettingsCopyAndFavoriteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="4" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableCopyAndFavoriteHotkey}" />
+                                  IsChecked="{Binding SettingsEnableCopyAndSensitiveHotkey}" />
                         <TextBlock Grid.Row="4" Grid.Column="1" VerticalAlignment="Center"
-                                   Text="{Binding SettingsCopyAndFavoriteHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="4" Grid.Column="2" Hotkey="{Binding SettingsCopyAndFavoriteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                   Text="{Binding SettingsCopyAndSensitiveHotkeyLabel}" />
+                        <ctrl:HotkeyBox Grid.Row="4" Grid.Column="2" Hotkey="{Binding SettingsCopyAndSensitiveHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="5" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableCopyAndSensitiveHotkey}" />
+                                  IsChecked="{Binding SettingsEnableCopyWithoutSavingHotkey}" />
                         <TextBlock Grid.Row="5" Grid.Column="1" VerticalAlignment="Center"
-                                   Text="{Binding SettingsCopyAndSensitiveHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="5" Grid.Column="2" Hotkey="{Binding SettingsCopyAndSensitiveHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                   Text="{Binding SettingsCopyWithoutSavingHotkeyLabel}" />
+                        <ctrl:HotkeyBox Grid.Row="5" Grid.Column="2" Hotkey="{Binding SettingsCopyWithoutSavingHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="6" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableCopyWithoutSavingHotkey}" />
+                                  IsChecked="{Binding SettingsEnablePasteAndDeleteHotkey}" />
                         <TextBlock Grid.Row="6" Grid.Column="1" VerticalAlignment="Center"
-                                   Text="{Binding SettingsCopyWithoutSavingHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="6" Grid.Column="2" Hotkey="{Binding SettingsCopyWithoutSavingHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                   Text="{Binding SettingsPasteAndDeleteHotkeyLabel}" />
+                        <ctrl:HotkeyBox Grid.Row="6" Grid.Column="2" Hotkey="{Binding SettingsPasteAndDeleteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="7" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnablePasteAndDeleteHotkey}" />
+                                  IsChecked="{Binding SettingsEnablePasteAndFavoriteHotkey}" />
                         <TextBlock Grid.Row="7" Grid.Column="1" VerticalAlignment="Center"
-                                   Text="{Binding SettingsPasteAndDeleteHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="7" Grid.Column="2" Hotkey="{Binding SettingsPasteAndDeleteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                   Text="{Binding SettingsPasteAndFavoriteHotkeyLabel}" />
+                        <ctrl:HotkeyBox Grid.Row="7" Grid.Column="2" Hotkey="{Binding SettingsPasteAndFavoriteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="8" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnablePasteAndFavoriteHotkey}" />
-                        <TextBlock Grid.Row="8" Grid.Column="1" VerticalAlignment="Center"
-                                   Text="{Binding SettingsPasteAndFavoriteHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="8" Grid.Column="2" Hotkey="{Binding SettingsPasteAndFavoriteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-
-                        <CheckBox Grid.Row="9" Content="{Binding SettingsEnableShortcutLabel}"
                                   IsChecked="{Binding SettingsEnablePasteAsPlainTextHotkey}" />
-                        <TextBlock Grid.Row="9" Grid.Column="1" VerticalAlignment="Center"
+                        <TextBlock Grid.Row="8" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsPasteAsPlainTextHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="9" Grid.Column="2" Hotkey="{Binding SettingsPasteAsPlainTextHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <ctrl:HotkeyBox Grid.Row="8" Grid.Column="2" Hotkey="{Binding SettingsPasteAsPlainTextHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </Grid>
                     </StackPanel>
                 </Expander>
@@ -268,7 +263,7 @@
                                    FontWeight="SemiBold" />
                     </Expander.Header>
                     <Grid ColumnDefinitions="Auto,260,*"
-                          RowDefinitions="Auto,Auto"
+                          RowDefinitions="Auto,Auto,Auto"
                           ColumnSpacing="12"
                           RowSpacing="10"
                           Margin="8,10,0,0">
@@ -285,6 +280,11 @@
                                    Text="{Binding SettingsMaxEntryCountLabel}" />
                         <TextBox Grid.Row="1" Grid.Column="2"
                                  Text="{Binding SettingsMaxEntryCount, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <TextBlock Grid.Row="2" Grid.Column="1" VerticalAlignment="Center"
+                                   Text="{Binding SettingsClipLimitLabel}" />
+                        <TextBox Grid.Row="2" Grid.Column="2"
+                                 Text="{Binding SettingsMaxClipSizeKilobytes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                     </Grid>
                 </Expander>
 

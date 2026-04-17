@@ -1934,11 +1934,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // When non-empty, the section shows only if its keyword blob contains the filter.
     private static readonly string _behaviorKeywords = "theme dark light tray minimize close start windows startup behavior appearance";
     private static readonly string _localHotkeyKeywords = "hotkey shortcut local regex favorite sensitive case wildcard whole word pasted toggle";
-    private static readonly string _globalHotkeyKeywords = "hotkey shortcut global toggle window show hide incremental decremental paste size limit clip";
+    private static readonly string _globalHotkeyKeywords = "hotkey shortcut global toggle window show hide incremental decremental paste";
     private static readonly string _storageKeywords = "storage database path password encryption sqlite file location";
     private static readonly string _toolsKeywords = "tools external editor diff winmerge beyond compare vscode meld kdiff";
     private static readonly string _retentionKeywords = "retention lifetime expiry expire clips days normal sensitive minutes age";
-    private static readonly string _capacityKeywords = "capacity size library entries count limit max megabytes";
+    private static readonly string _capacityKeywords = "capacity size library entries count limit max megabytes clip kb kilobytes";
     private static readonly string _sensitivityKeywords = "sensitivity rules pattern regex severity warn block name enabled";
     private static readonly string _aiKeywords = "ai openai chatgpt gpt model api key base url prompt transform";
     private static readonly string _updatesKeywords = "update updates auto-update velopack feed url release version";

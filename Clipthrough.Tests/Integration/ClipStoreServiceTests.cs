@@ -475,4 +475,45 @@ public sealed class ClipStoreServiceTests
         Assert.Single(claimedAgain);
         Assert.Equal(c1.Id, claimedAgain[0].ClipId);
     }
+
+    [Fact]
+    public async Task InitializeAsync_IsIdempotent_AndSurvivesLegacySchema()
+    {
+        // Regression: prior build shipped a bug where Schema DDL referenced the new
+        // embedding_status column in a CREATE INDEX before the migration added it,
+        // causing startup failure on any pre-existing database.
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+        await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "persist me",
+            ContentBytes = Encoding.UTF8.GetBytes("persist me"),
+            SourceApp = "Editor",
+            IncrementExistingCopyCount = true,
+        });
+
+        // Drop the column + table + index to simulate a pre-embedding DB, then re-initialize.
+        await using (var conn = scope.ConnectionFactory.CreateConnection())
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                DROP INDEX IF EXISTS idx_clips_embedding_status;
+                DROP TABLE IF EXISTS clip_embeddings;
+                ALTER TABLE clips DROP COLUMN embedding_status;
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Re-running InitializeAsync must add the column + table + index without error.
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        var coverage = await scope.ClipStoreService.GetEmbeddingCoverageAsync();
+        Assert.Equal(1, coverage.EligibleTotal);
+        Assert.Equal(0, coverage.Embedded);
+    }
 }

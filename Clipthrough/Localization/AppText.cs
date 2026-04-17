@@ -38,7 +38,7 @@ public static class AppText
         [nameof(SettingsTitleText)] = "Settings",
         [nameof(SettingsDescriptionText)] = "Adjust shortcuts, tray behavior, storage, sensitivity rules, retention, and archive capacity.",
         [nameof(SettingsLocalHotkeysTitle)] = "Local shortcuts",
-        [nameof(SettingsGlobalHotkeyTitle)] = "Global shortcut and capture limits",
+        [nameof(SettingsGlobalHotkeyTitle)] = "Global shortcuts",
         [nameof(SettingsStorageTitle)] = "Database storage",
         [nameof(SettingsBehaviorTitle)] = "Window behavior",
         [nameof(SettingsRetentionTitle)] = "Retention",

@@ -44,16 +44,7 @@ public sealed class DatabaseInitializer
             ocr_attempted_at TEXT,
             ocr_error    TEXT,
             source_clip_id INTEGER,
-            transform_kind TEXT,
-            embedding_status TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS clip_embeddings (
-            clip_id       INTEGER PRIMARY KEY REFERENCES clips(id) ON DELETE CASCADE,
-            model_version TEXT NOT NULL,
-            dimensions    INTEGER NOT NULL,
-            vector        BLOB NOT NULL,
-            created_at    TEXT NOT NULL
+            transform_kind TEXT
         );
 
         CREATE VIRTUAL TABLE IF NOT EXISTS clips_fts USING fts5(
@@ -88,7 +79,6 @@ public sealed class DatabaseInitializer
         CREATE INDEX IF NOT EXISTS idx_clips_content_type ON clips(content_type);
         CREATE INDEX IF NOT EXISTS idx_clips_is_favorite ON clips(is_favorite) WHERE is_favorite = 1;
         CREATE INDEX IF NOT EXISTS idx_clips_is_sensitive ON clips(is_sensitive) WHERE is_sensitive = 1;
-        CREATE INDEX IF NOT EXISTS idx_clips_embedding_status ON clips(embedding_status) WHERE embedding_status IS NOT NULL;
 
         CREATE TABLE IF NOT EXISTS app_metadata (
             key   TEXT PRIMARY KEY,
