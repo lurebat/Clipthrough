@@ -124,6 +124,16 @@ public sealed record AppSettings
 
     public bool UseFuzzySettingsSearch { get; init; } = true;
 
+    // Persisted last-session filter toggle states
+    public bool LastShowFavoritesOnly { get; init; }
+    public bool LastShowSensitiveOnly { get; init; }
+    public bool LastShowPastedOnly { get; init; }
+    public bool LastUseRegexSearch { get; init; }
+    public bool LastCaseSensitiveSearch { get; init; }
+    public bool LastUseWildcardSearch { get; init; }
+    public bool LastWholeWordSearch { get; init; }
+    public ContentType? LastContentTypeFilter { get; init; }
+
     public bool EnableAi { get; init; }
 
     public string AiBaseUrl { get; init; } = string.Empty;
@@ -205,6 +215,14 @@ public sealed record AppSettings
         ExternalDiffToolPath = ExternalDiffToolPath?.Trim() ?? string.Empty,
         LastContentDisplayMode = LastContentDisplayMode,
         LastImageViewMode = LastImageViewMode,
+        LastShowFavoritesOnly = LastShowFavoritesOnly,
+        LastShowSensitiveOnly = LastShowSensitiveOnly,
+        LastShowPastedOnly = LastShowPastedOnly,
+        LastUseRegexSearch = LastUseRegexSearch,
+        LastCaseSensitiveSearch = LastCaseSensitiveSearch,
+        LastUseWildcardSearch = LastUseWildcardSearch,
+        LastWholeWordSearch = LastWholeWordSearch,
+        LastContentTypeFilter = LastContentTypeFilter,
         AiBaseUrl = AiBaseUrl?.Trim() ?? string.Empty,
         AiApiKey = AiApiKey?.Trim() ?? string.Empty,
         AiModel = AiModel?.Trim() ?? string.Empty,

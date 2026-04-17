@@ -305,6 +305,54 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _settingsService.SettingsChanged += OnSettingsChanged;
         SyncUserScripts(_settingsService.Current);
 
+        // Restore persisted filter toggles
+        var savedFilters = _settingsService.Current;
+        _showFavoritesOnly = savedFilters.LastShowFavoritesOnly;
+        _showSensitiveOnly = savedFilters.LastShowSensitiveOnly;
+        _showPastedOnly = savedFilters.LastShowPastedOnly;
+        _useRegexSearch = savedFilters.LastUseRegexSearch;
+        _caseSensitiveSearch = savedFilters.LastCaseSensitiveSearch;
+        _useWildcardSearch = savedFilters.LastUseWildcardSearch;
+        _wholeWordSearch = savedFilters.LastWholeWordSearch;
+        if (savedFilters.LastContentTypeFilter is { } savedType)
+        {
+            var match = ContentTypeOptions.FirstOrDefault(o => o.Value == savedType);
+            if (match is not null) _selectedContentTypeOption = match;
+        }
+
+        // Persist filter toggles on change (debounced)
+        _subscriptions.Add(
+            this.WhenAnyValue(
+                    x => x.ShowFavoritesOnly,
+                    x => x.ShowSensitiveOnly,
+                    x => x.ShowPastedOnly,
+                    x => x.UseRegexSearch,
+                    x => x.CaseSensitiveSearch,
+                    x => x.UseWildcardSearch,
+                    x => x.WholeWordSearch,
+                    x => x.SelectedContentTypeOption,
+                    (_, _, _, _, _, _, _, _) => Unit.Default)
+                .Skip(1)
+                .Throttle(TimeSpan.FromMilliseconds(500), RxSchedulers.MainThreadScheduler)
+                .Subscribe(async _ =>
+                {
+                    try
+                    {
+                        await _settingsService.SaveAsync(_settingsService.Current with
+                        {
+                            LastShowFavoritesOnly = ShowFavoritesOnly,
+                            LastShowSensitiveOnly = ShowSensitiveOnly,
+                            LastShowPastedOnly = ShowPastedOnly,
+                            LastUseRegexSearch = UseRegexSearch,
+                            LastCaseSensitiveSearch = CaseSensitiveSearch,
+                            LastUseWildcardSearch = UseWildcardSearch,
+                            LastWholeWordSearch = WholeWordSearch,
+                            LastContentTypeFilter = SelectedContentTypeOption.Value,
+                        });
+                    }
+                    catch { /* non-fatal persistence */ }
+                }));
+
         _subscriptions.Add(
             Observable.Merge(
                 this.WhenAnyValue(

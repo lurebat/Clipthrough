@@ -106,47 +106,66 @@
                 </UniformGrid>
             </Grid>
 
-            <WrapPanel Grid.Row="1"
-                       Orientation="Horizontal"
-                       ItemSpacing="8"
-                       LineSpacing="4">
-                <CheckBox Classes="filter-toggle compact-toggle"
-                          IsChecked="{Binding ShowFavoritesOnly}"
-                          ToolTip.Tip="{Binding FavoritesFilterTooltip}"
-                          Content="{Binding FavoritesFilterLabel}" />
-                <CheckBox Classes="filter-toggle compact-toggle"
-                          IsChecked="{Binding ShowSensitiveOnly}"
-                          ToolTip.Tip="{Binding SensitiveFilterTooltip}"
-                          Content="{Binding SensitiveFilterLabel}" />
-                <CheckBox Classes="filter-toggle compact-toggle"
-                          IsChecked="{Binding UseRegexSearch}"
-                          ToolTip.Tip="{Binding RegexFilterTooltip}"
-                          Content="{Binding RegexFilterLabel}" />
-                <CheckBox Classes="filter-toggle compact-toggle"
-                          IsChecked="{Binding CaseSensitiveSearch}"
-                          ToolTip.Tip="{Binding CaseSensitiveFilterTooltip}"
-                          Content="{Binding CaseSensitiveFilterLabel}" />
-                <CheckBox Classes="filter-toggle compact-toggle"
-                          IsChecked="{Binding UseWildcardSearch}"
-                          ToolTip.Tip="{Binding WildcardFilterTooltip}"
-                          Content="{Binding WildcardFilterLabel}" />
-                <CheckBox Classes="filter-toggle compact-toggle"
-                          IsChecked="{Binding WholeWordSearch}"
-                          ToolTip.Tip="{Binding WholeWordFilterTooltip}"
-                          Content="{Binding WholeWordFilterLabel}" />
-                <CheckBox Classes="filter-toggle compact-toggle"
-                          IsChecked="{Binding ShowPastedOnly}"
-                          ToolTip.Tip="{Binding PastedFilterTooltip}"
-                          Content="{Binding PastedFilterLabel}" />
-                <CheckBox Classes="filter-toggle compact-toggle"
-                          IsChecked="{Binding UseFuzzyClipSearch}"
-                          ToolTip.Tip="Fuzzy: tolerate small typos and match prefixes (OR between tokens)"
-                          Content="Fuzzy" />
-                <CheckBox Classes="filter-toggle compact-toggle"
-                          IsChecked="{Binding UseSemanticClipSearch}"
-                          ToolTip.Tip="Semantic: rank by meaning (ignored with regex/wildcard/whole-word)"
-                          Content="Semantic" />
-            </WrapPanel>
+            <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                <!-- Category filters: which clips to show -->
+                <WrapPanel Grid.Column="0"
+                           Orientation="Horizontal"
+                           ItemSpacing="8"
+                           LineSpacing="4"
+                           ToolTip.Tip="Category filters — which clips to show">
+                    <CheckBox Classes="filter-toggle compact-toggle"
+                              IsChecked="{Binding ShowFavoritesOnly}"
+                              ToolTip.Tip="{Binding FavoritesFilterTooltip}"
+                              Content="{Binding FavoritesFilterLabel}" />
+                    <CheckBox Classes="filter-toggle compact-toggle"
+                              IsChecked="{Binding ShowSensitiveOnly}"
+                              ToolTip.Tip="{Binding SensitiveFilterTooltip}"
+                              Content="{Binding SensitiveFilterLabel}" />
+                    <CheckBox Classes="filter-toggle compact-toggle"
+                              IsChecked="{Binding ShowPastedOnly}"
+                              ToolTip.Tip="{Binding PastedFilterTooltip}"
+                              Content="{Binding PastedFilterLabel}" />
+                </WrapPanel>
+
+                <Border Grid.Column="1"
+                        HorizontalAlignment="Left"
+                        Width="1"
+                        Margin="4,2"
+                        Background="{DynamicResource SystemBaseLowColor}"
+                        Opacity="0.4" />
+
+                <!-- Search modifier filters: how the search works -->
+                <WrapPanel Grid.Column="2"
+                           Orientation="Horizontal"
+                           ItemSpacing="8"
+                           LineSpacing="4"
+                           ToolTip.Tip="Search modifiers — how the filter text is matched">
+                    <CheckBox Classes="filter-toggle compact-toggle"
+                              IsChecked="{Binding UseRegexSearch}"
+                              ToolTip.Tip="{Binding RegexFilterTooltip}"
+                              Content="{Binding RegexFilterLabel}" />
+                    <CheckBox Classes="filter-toggle compact-toggle"
+                              IsChecked="{Binding CaseSensitiveSearch}"
+                              ToolTip.Tip="{Binding CaseSensitiveFilterTooltip}"
+                              Content="{Binding CaseSensitiveFilterLabel}" />
+                    <CheckBox Classes="filter-toggle compact-toggle"
+                              IsChecked="{Binding UseWildcardSearch}"
+                              ToolTip.Tip="{Binding WildcardFilterTooltip}"
+                              Content="{Binding WildcardFilterLabel}" />
+                    <CheckBox Classes="filter-toggle compact-toggle"
+                              IsChecked="{Binding WholeWordSearch}"
+                              ToolTip.Tip="{Binding WholeWordFilterTooltip}"
+                              Content="{Binding WholeWordFilterLabel}" />
+                    <CheckBox Classes="filter-toggle compact-toggle"
+                              IsChecked="{Binding UseFuzzyClipSearch}"
+                              ToolTip.Tip="Fuzzy: tolerate small typos and match prefixes (OR between tokens)"
+                              Content="Fuzzy" />
+                    <CheckBox Classes="filter-toggle compact-toggle"
+                              IsChecked="{Binding UseSemanticClipSearch}"
+                              ToolTip.Tip="Semantic: rank by meaning (ignored with regex/wildcard/whole-word)"
+                              Content="Semantic" />
+                </WrapPanel>
+            </Grid>
             </Grid>
         </Border>
 

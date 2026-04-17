@@ -625,9 +625,13 @@ public partial class MainWindow : Window
             return true;
         }
 
-        // Alt+1..9 is intentionally NOT handled here so Alt remains available for
-        // menu access keys (Alt+F, Alt+E, etc.). Use Ctrl+1..9 to copy a clip, or
-        // arrow keys / clicks to select.
+        // Alt+digit doesn't conflict with menu access keys (which use Alt+letter).
+        if (modifiers == KeyModifiers.Alt)
+        {
+            viewModel.SelectClipByIndex(index);
+            return true;
+        }
+
         return false;
     }
 
