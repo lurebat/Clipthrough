@@ -33,6 +33,8 @@ public partial class App : Application
     private IAppNotificationService? _notificationService;
     private IAiTransformService? _aiTransformService;
     private IScriptingService? _scriptingService;
+    private Clipthrough.Services.Search.IEmbeddingWorker? _embeddingWorker;
+    private IDisposable? _embeddingWorkerCaptureSubscription;
     private IDisposable? _notificationSubscription;
     private bool _isExitRequested;
     private bool _hasShownTrayNotification;
@@ -81,6 +83,11 @@ public partial class App : Application
             _notificationSubscription = _notificationService.Notifications
                 .ObserveOn(RxApp.MainThreadScheduler)
                 .Subscribe(OnNotificationPublished);
+
+            _embeddingWorker = Services.GetRequiredService<Clipthrough.Services.Search.IEmbeddingWorker>();
+            _embeddingWorker.Start();
+            _embeddingWorkerCaptureSubscription = _clipboardMonitorService.CapturedClips
+                .Subscribe(_ => _embeddingWorker.Poke());
 
             StartApplicationAsync(mainWindowViewModel);
         }
@@ -148,6 +155,8 @@ public partial class App : Application
         services.AddSingleton<IOcrService, OcrService>();
         services.AddSingleton<IBackgroundOcrQueue, BackgroundOcrQueue>();
         services.AddSingleton<IBackgroundJobIndicator, BackgroundJobIndicator>();
+        services.AddSingleton<Clipthrough.Services.Search.IEmbeddingService, Clipthrough.Services.Search.EmbeddingService>();
+        services.AddSingleton<Clipthrough.Services.Search.IEmbeddingWorker, Clipthrough.Services.Search.EmbeddingWorker>();
         services.AddSingleton<IRemoteControlService, RemoteControlService>();
         services.AddSingleton<MainWindowViewModel>();
 
@@ -209,8 +218,11 @@ public partial class App : Application
 
         _notificationSubscription?.Dispose();
         _notificationSubscription = null;
+        _embeddingWorkerCaptureSubscription?.Dispose();
+        _embeddingWorkerCaptureSubscription = null;
         _systemInteractionService?.UnregisterAllGlobalHotKeys();
         _ = Services.GetService<IBackgroundOcrQueue>()?.StopAsync();
+        _ = Services.GetService<Clipthrough.Services.Search.IEmbeddingWorker>()?.StopAsync();
         _trayIcon?.Dispose();
         _trayIcon = null;
     }
