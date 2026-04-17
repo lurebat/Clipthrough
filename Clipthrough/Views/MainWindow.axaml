@@ -28,14 +28,14 @@
               RowSpacing="6"
               Margin="8">
         <Menu Grid.Row="0">
-            <MenuItem Header="_File">
+            <MenuItem Header="File">
                 <MenuItem Header="_Settings…"
                           Command="{Binding OpenSettingsCommand}"
                           InputGesture="Ctrl+," />
                 <Separator />
                 <MenuItem Header="E_xit" Command="{Binding ExitApplicationCommand}" />
             </MenuItem>
-            <MenuItem Header="_Edit">
+            <MenuItem Header="Edit">
                 <MenuItem Header="_Copy selected" Command="{Binding CopySelectedCommand}" />
                 <MenuItem Header="_Delete selected" Command="{Binding DeleteSelectedCommand}" />
                 <Separator />
@@ -50,10 +50,10 @@
                           Command="{Binding RunOcrOnSelectedImageCommand}"
                           IsEnabled="{Binding CanRunOcr}" />
             </MenuItem>
-            <MenuItem Header="_View">
+            <MenuItem Header="View">
                 <MenuItem Header="Show session _logs" Command="{Binding SessionLogs.OpenCommand}" />
             </MenuItem>
-            <MenuItem Header="_Help">
+            <MenuItem Header="Help">
                 <MenuItem Header="_User guide" Command="{Binding OpenHelpCommand}" />
             </MenuItem>
         </Menu>

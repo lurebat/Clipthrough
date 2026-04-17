@@ -128,6 +128,8 @@ public sealed record AppSettings
 
     public string AiModel { get; init; } = string.Empty;
 
+    public string AiReasoningEffort { get; init; } = string.Empty;
+
     public System.Collections.Generic.IReadOnlyList<UserScript> UserScripts { get; init; } = System.Array.Empty<UserScript>();
 
     public System.Collections.Generic.IReadOnlyList<AiPreset> AiPresets { get; init; } = System.Array.Empty<AiPreset>();
@@ -199,6 +201,7 @@ public sealed record AppSettings
         AiBaseUrl = AiBaseUrl?.Trim() ?? string.Empty,
         AiApiKey = AiApiKey?.Trim() ?? string.Empty,
         AiModel = AiModel?.Trim() ?? string.Empty,
+        AiReasoningEffort = NormalizeReasoningEffort(AiReasoningEffort),
         UserScripts = (UserScripts ?? System.Array.Empty<UserScript>())
             .Where(s => s is not null && !string.IsNullOrWhiteSpace(s.Name) && !string.IsNullOrWhiteSpace(s.Code))
             .Select(s => new UserScript { Name = s.Name.Trim(), Code = s.Code })
@@ -234,6 +237,16 @@ public sealed record AppSettings
 
     private static int NormalizeInt(int value, int fallback, int min, int max)
         => value < min || value > max ? fallback : value;
+
+    private static string NormalizeReasoningEffort(string? value)
+    {
+        var trimmed = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return trimmed switch
+        {
+            "minimal" or "low" or "medium" or "high" => trimmed,
+            _ => string.Empty,
+        };
+    }
 }
 
 

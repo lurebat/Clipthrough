@@ -156,6 +156,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _settingsAiBaseUrl = AppSettings.Default.AiBaseUrl;
     private string _settingsAiApiKey = AppSettings.Default.AiApiKey;
     private string _settingsAiModel = AppSettings.Default.AiModel;
+    private string _settingsAiReasoningEffort = AppSettings.Default.AiReasoningEffort;
     private bool _settingsEnableAutoUpdate = AppSettings.Default.EnableAutoUpdate;
     private string _settingsUpdateFeedUrl = AppSettings.Default.UpdateFeedUrl;
     private string _settingsOcrLanguages = AppSettings.Default.OcrLanguages;
@@ -1448,6 +1449,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => this.RaiseAndSetIfChanged(ref _settingsAiModel, value);
     }
 
+    public string SettingsAiReasoningEffort
+    {
+        get => _settingsAiReasoningEffort;
+        set => this.RaiseAndSetIfChanged(ref _settingsAiReasoningEffort, value);
+    }
+
+    public System.Collections.Generic.IReadOnlyList<string> AiReasoningEffortOptions { get; } = new[] { "", "minimal", "low", "medium", "high" };
+
     public bool SettingsEnableAutoUpdate
     {
         get => _settingsEnableAutoUpdate;
@@ -2327,6 +2336,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         StatusText = AppText.FormatExportedClipStatus(exportResult.PrimaryPath);
     }
 
+    private static string ExtractExecutablePath(string template)
+    {
+        if (string.IsNullOrWhiteSpace(template))
+        {
+            return string.Empty;
+        }
+        var trimmed = template.TrimStart();
+        if (trimmed.StartsWith('"'))
+        {
+            var end = trimmed.IndexOf('"', 1);
+            return end > 0 ? trimmed.Substring(1, end - 1) : trimmed.Substring(1);
+        }
+        var space = trimmed.IndexOf(' ');
+        return space > 0 ? trimmed.Substring(0, space) : trimmed;
+    }
+
     private async Task OpenInEditorAsync()
     {
         if (SelectedClip is null)
@@ -2341,11 +2366,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 "No external editor configured",
                 "Set an editor path in Settings → Tools, or the clip will open with the OS default.");
         }
-        else if (!System.IO.File.Exists(editorPath))
+        else if (!System.IO.File.Exists(ExtractExecutablePath(editorPath)))
         {
             _notificationService.PublishError(
                 "External editor not found",
-                $"'{editorPath}' does not exist. Update the path in Settings → Tools.");
+                $"'{ExtractExecutablePath(editorPath)}' does not exist. Update the path in Settings → Tools.");
             return;
         }
 
@@ -2414,11 +2439,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 "Set a diff tool path in Settings → Tools (e.g. WinMerge, Beyond Compare, VS Code).");
             return;
         }
-        if (!System.IO.File.Exists(diffToolPath))
+        if (!System.IO.File.Exists(ExtractExecutablePath(diffToolPath)))
         {
             _notificationService.PublishError(
                 "Diff tool not found",
-                $"'{diffToolPath}' does not exist. Update the path in Settings → Tools.");
+                $"'{ExtractExecutablePath(diffToolPath)}' does not exist. Update the path in Settings → Tools.");
             return;
         }
 
@@ -3752,6 +3777,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             AiBaseUrl = (SettingsAiBaseUrl ?? string.Empty).Trim(),
             AiApiKey = (SettingsAiApiKey ?? string.Empty).Trim(),
             AiModel = (SettingsAiModel ?? string.Empty).Trim(),
+            AiReasoningEffort = (SettingsAiReasoningEffort ?? string.Empty).Trim(),
             EnableAutoUpdate = SettingsEnableAutoUpdate,
             UpdateFeedUrl = (SettingsUpdateFeedUrl ?? string.Empty).Trim(),
             OcrLanguages = (SettingsOcrLanguages ?? string.Empty).Trim(),
@@ -3873,6 +3899,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsAiBaseUrl = settings.AiBaseUrl;
         SettingsAiApiKey = settings.AiApiKey;
         SettingsAiModel = settings.AiModel;
+        SettingsAiReasoningEffort = settings.AiReasoningEffort;
         SettingsEnableAutoUpdate = settings.EnableAutoUpdate;
         SettingsUpdateFeedUrl = settings.UpdateFeedUrl;
         SettingsOcrLanguages = settings.OcrLanguages;

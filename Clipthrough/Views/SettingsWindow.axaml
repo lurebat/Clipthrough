@@ -499,6 +499,11 @@
                             <TextBox Watermark="gpt-4o-mini"
                                      Text="{Binding SettingsAiModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </StackPanel>
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="detail-label" Text="Reasoning effort (only used by reasoning models; blank = off)" />
+                            <ComboBox ItemsSource="{Binding AiReasoningEffortOptions}"
+                                      SelectedItem="{Binding SettingsAiReasoningEffort, Mode=TwoWay}" />
+                        </StackPanel>
                     </StackPanel>
                 </Expander>
 

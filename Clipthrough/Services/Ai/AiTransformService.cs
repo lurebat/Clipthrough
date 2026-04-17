@@ -60,16 +60,25 @@ public sealed class AiTransformService : IAiTransformService, IDisposable
         }
 
         var endpoint = baseUrl.TrimEnd('/') + "/chat/completions";
+        var reasoning = (_settings.Current.AiReasoningEffort ?? string.Empty).Trim();
+        var payload = new System.Collections.Generic.Dictionary<string, object?>
+        {
+            ["model"] = model,
+            ["messages"] = new[]
+            {
+                new { role = "system", content = systemPrompt ?? string.Empty },
+                new { role = "user", content = input ?? string.Empty },
+            },
+            ["temperature"] = 0.2,
+        };
+        if (!string.IsNullOrEmpty(reasoning))
+        {
+            payload["reasoning_effort"] = reasoning;
+        }
+
         var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
-            Content = JsonContent.Create(new ChatRequest(
-                model,
-                new[]
-                {
-                    new ChatMessage("system", systemPrompt ?? string.Empty),
-                    new ChatMessage("user", input ?? string.Empty),
-                },
-                Temperature: 0.2)),
+            Content = JsonContent.Create(payload),
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 

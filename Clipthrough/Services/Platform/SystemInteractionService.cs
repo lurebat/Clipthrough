@@ -236,34 +236,134 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
 
     public Task OpenInEditorAsync(string filePath, string editorPath)
     {
-        if (string.IsNullOrWhiteSpace(editorPath) || !File.Exists(editorPath))
+        if (string.IsNullOrWhiteSpace(editorPath))
         {
             return OpenPathAsync(filePath);
         }
 
-        Process.Start(new ProcessStartInfo
+        var (exe, args) = ParseCommandTemplate(editorPath, new[] { ("{file}", filePath) }, fallbackAppend: new[] { filePath });
+        if (!File.Exists(exe))
         {
-            FileName = editorPath,
-            ArgumentList = { filePath },
+            return OpenPathAsync(filePath);
+        }
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = exe,
             UseShellExecute = false,
-        });
+        };
+        foreach (var a in args)
+        {
+            psi.ArgumentList.Add(a);
+        }
+        Process.Start(psi);
         return Task.CompletedTask;
     }
 
     public Task OpenInDiffToolAsync(string leftPath, string rightPath, string diffToolPath)
     {
-        if (string.IsNullOrWhiteSpace(diffToolPath) || !File.Exists(diffToolPath))
+        if (string.IsNullOrWhiteSpace(diffToolPath))
         {
-            throw new FileNotFoundException($"Diff tool not found: {diffToolPath}");
+            throw new FileNotFoundException($"Diff tool not configured.");
         }
 
-        Process.Start(new ProcessStartInfo
+        var (exe, args) = ParseCommandTemplate(diffToolPath,
+            new[] { ("{left}", leftPath), ("{right}", rightPath), ("{file}", leftPath) },
+            fallbackAppend: new[] { leftPath, rightPath });
+        if (!File.Exists(exe))
         {
-            FileName = diffToolPath,
-            ArgumentList = { leftPath, rightPath },
+            throw new FileNotFoundException($"Diff tool not found: {exe}");
+        }
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = exe,
             UseShellExecute = false,
-        });
+        };
+        foreach (var a in args)
+        {
+            psi.ArgumentList.Add(a);
+        }
+        Process.Start(psi);
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Parses a command template like 'C:\path\code.exe --diff {left} {right}'.
+    /// Honors double-quoted path segments. If no placeholder in <paramref name="substitutions"/>
+    /// appears in the template, the paths in <paramref name="fallbackAppend"/> are appended
+    /// as additional arguments.
+    /// </summary>
+    private static (string Executable, System.Collections.Generic.List<string> Args) ParseCommandTemplate(
+        string template,
+        (string Token, string Value)[] substitutions,
+        string[] fallbackAppend)
+    {
+        var tokens = TokenizeCommandLine(template);
+        if (tokens.Count == 0)
+        {
+            return (template, new System.Collections.Generic.List<string>(fallbackAppend));
+        }
+
+        var exe = tokens[0];
+        var args = new System.Collections.Generic.List<string>();
+        var anyPlaceholderSeen = false;
+        for (var i = 1; i < tokens.Count; i++)
+        {
+            var t = tokens[i];
+            foreach (var (token, value) in substitutions)
+            {
+                if (t.Contains(token, StringComparison.Ordinal))
+                {
+                    t = t.Replace(token, value, StringComparison.Ordinal);
+                    anyPlaceholderSeen = true;
+                }
+            }
+            args.Add(t);
+        }
+
+        if (!anyPlaceholderSeen)
+        {
+            args.AddRange(fallbackAppend);
+        }
+
+        return (exe, args);
+    }
+
+    private static System.Collections.Generic.List<string> TokenizeCommandLine(string input)
+    {
+        var result = new System.Collections.Generic.List<string>();
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return result;
+        }
+
+        var sb = new System.Text.StringBuilder();
+        var inQuotes = false;
+        for (var i = 0; i < input.Length; i++)
+        {
+            var c = input[i];
+            if (c == '"')
+            {
+                inQuotes = !inQuotes;
+                continue;
+            }
+            if (!inQuotes && char.IsWhiteSpace(c))
+            {
+                if (sb.Length > 0)
+                {
+                    result.Add(sb.ToString());
+                    sb.Clear();
+                }
+                continue;
+            }
+            sb.Append(c);
+        }
+        if (sb.Length > 0)
+        {
+            result.Add(sb.ToString());
+        }
+        return result;
     }
 
     public void SimulatePasteKeystroke()
