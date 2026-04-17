@@ -202,6 +202,12 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     public bool HasMultipleCopies => Clip.CopyCount > 1;
 
+    public bool IsTextClip => Clip.ContentType == ContentType.Text || Clip.ContentType == ContentType.RichText;
+
+    public bool IsImageClip => Clip.ContentType == ContentType.Image;
+
+    public bool CanTransform => IsTextClip && !string.IsNullOrEmpty(Clip.Content);
+
     public string CopyCountDisplay => AppText.FormatCopyCount(Clip.CopyCount);
 
     public string CopyCountCompact => AppText.FormatCopyCountCompact(Clip.CopyCount);

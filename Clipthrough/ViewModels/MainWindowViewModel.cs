@@ -551,6 +551,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool HasCheckedOrSelectedClip => HasCheckedClips || HasSelectedClip;
 
+    public bool HasTransformableTarget
+    {
+        get
+        {
+            var checkedClips = Clips.Where(static c => c.IsChecked).ToList();
+            if (checkedClips.Count > 0)
+            {
+                return checkedClips.Any(c => c.CanTransform);
+            }
+            return SelectedClip?.CanTransform == true;
+        }
+    }
+
+    public bool HasSelectedImageClip => SelectedClip?.IsImageClip == true;
+
+    public bool CanRunOcr => HasSelectedImageClip && _ocrService.IsAvailable;
+
     public bool IsCompareAvailable => !string.IsNullOrWhiteSpace(_settingsService.Current.ExternalDiffToolPath);
 
     public ClipItemViewModel? SelectedClip
@@ -1001,6 +1018,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string SelectedClipCapturedAtText => SelectedClip?.CapturedAtDisplay ?? AppText.NotAvailable;
 
     public string SelectedClipCopyCountText => SelectedClip?.CopyCountDisplay ?? AppText.NotAvailable;
+
+    public bool HasSelectedClipMultipleCopies => SelectedClip?.HasMultipleCopies == true;
 
     public string SelectedClipByteSizeText => SelectedClip?.ByteSizeDisplay ?? AppText.FormatByteCount(0);
 
@@ -2202,21 +2221,49 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        var text = EditedClipText ?? string.Empty;
+        var contentType = SelectedClip.Clip.ContentType;
+        var isRich = contentType == ContentType.RichText;
+
+        // Put on clipboard (suppressed so we don't race our own capture)
         _clipboardMonitorService.SuppressNext();
-        if (SelectedClip.Clip.ContentType == ContentType.RichText && _contentDisplayMode == ContentDisplayMode.Raw)
+        if (isRich && _contentDisplayMode == ContentDisplayMode.Raw)
         {
-            var renderedText = ClipDisplayFormatter.RenderRichContent(EditedClipText);
-            await _systemInteractionService.CopyRichContentAsync(EditedClipText, renderedText, SelectedClip.Clip.ContentFormat);
+            var renderedText = ClipDisplayFormatter.RenderRichContent(text);
+            await _systemInteractionService.CopyRichContentAsync(text, renderedText, SelectedClip.Clip.ContentFormat);
         }
         else
         {
-            await _systemInteractionService.CopyTextAsync(EditedClipText);
+            await _systemInteractionService.CopyTextAsync(text);
         }
 
-        _editedClipBaseline = EditedClipText;
+        // Also persist a brand-new clip entry so "Copy as new" is visible in history
+        ClipEntry? captured = null;
+        if (!string.IsNullOrEmpty(text))
+        {
+            var bytes = System.Text.Encoding.UTF8.GetBytes(text);
+            captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentBytes = bytes,
+                ContentText = text,
+                ContentType = isRich ? ContentType.RichText : ContentType.Text,
+                ContentFormat = isRich ? SelectedClip.Clip.ContentFormat : ClipContentFormat.PlainText,
+                SourceApp = SelectedClip.SourceApp,
+                SourceAppPath = SelectedClip.Clip.SourceAppPath,
+                SourceAppIconBytes = SelectedClip.Clip.SourceAppIconBytes,
+                SourceWindowTitle = SelectedClip.Clip.SourceWindowTitle,
+                IncrementExistingCopyCount = false,
+            });
+        }
+
+        _editedClipBaseline = text;
         RaiseEditedClipProperties();
         StatusText = AppText.EditedClipCopiedStatus;
         PublishSensitiveCopyNotificationIfNeeded(SelectedClip);
+        if (captured is not null)
+        {
+            await RefreshAsync(captured.Id);
+        }
     }
 
     public async Task CommitEditedClipOnFocusLossAsync() => await CommitEditedClipOnSelectionChangeAsync();
@@ -2830,6 +2877,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(SelectedClipCapturedAtText));
         this.RaisePropertyChanged(nameof(SelectedClipExpiresAtText));
         this.RaisePropertyChanged(nameof(SelectedClipCopyCountText));
+        this.RaisePropertyChanged(nameof(HasSelectedClipMultipleCopies));
         this.RaisePropertyChanged(nameof(SelectedClipByteSizeText));
         this.RaisePropertyChanged(nameof(SelectedClipImageResolutionText));
         this.RaisePropertyChanged(nameof(ShowSelectedImageResolutionCard));
@@ -2866,6 +2914,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(SelectedClipTextIsReadOnly));
         this.RaisePropertyChanged(nameof(IsDisplayModeApplicable));
         this.RaisePropertyChanged(nameof(HasCheckedOrSelectedClip));
+        this.RaisePropertyChanged(nameof(HasTransformableTarget));
+        this.RaisePropertyChanged(nameof(HasSelectedImageClip));
+        this.RaisePropertyChanged(nameof(CanRunOcr));
         RaiseRenderModeProperties();
         RaiseEditedClipProperties();
     }
@@ -3415,10 +3466,33 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             await _settingsService.InitializeAsync();
         }
 
+        await EnsureDefaultScriptsLoadedAsync();
+
         await LoadSensitivityRulesAsync();
         _isDatabaseReady = true;
         _clipboardMonitorService.Start();
         StartMaintenanceLoop();
+    }
+
+    private async Task EnsureDefaultScriptsLoadedAsync()
+    {
+        try
+        {
+            if (_settingsService.Current.UserScripts?.Count > 0)
+            {
+                return;
+            }
+            var defaults = ScriptingService.GetDefaultScripts().ToList();
+            if (defaults.Count == 0)
+            {
+                return;
+            }
+            await _settingsService.SaveAsync(_settingsService.Current with { UserScripts = defaults });
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Failed to seed default scripts: {ex.Message}");
+        }
     }
 
     private async Task UnlockDatabaseAsync()
@@ -3893,6 +3967,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(CheckedClipCount));
         this.RaisePropertyChanged(nameof(CheckedClipSummaryText));
         this.RaisePropertyChanged(nameof(HasCheckedOrSelectedClip));
+        this.RaisePropertyChanged(nameof(HasTransformableTarget));
     }
 
     private void RaiseEditedClipProperties()

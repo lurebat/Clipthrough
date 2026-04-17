@@ -42,19 +42,42 @@
                 <MenuItem Header="Toggle _favorite" Command="{Binding ToggleFavoriteCommand}" />
                 <MenuItem Header="Toggle _pin" Command="{Binding TogglePinCommand}" />
                 <Separator />
-                <MenuItem Header="_AI transform…" Command="{Binding OpenAiPromptCommand}" InputGesture="Ctrl+I" />
-                <MenuItem Header="Run _script" ItemsSource="{Binding UserScripts}">
-                    <MenuItem.ItemContainerTheme>
-                        <ControlTheme TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
-                            <Setter Property="Header" Value="{Binding Name, DataType=models:UserScript}" />
-                            <Setter Property="Command" Value="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).ApplyUserScriptCommand}" />
-                            <Setter Property="CommandParameter" Value="{Binding}" />
-                        </ControlTheme>
-                    </MenuItem.ItemContainerTheme>
+                <MenuItem Header="_Transform"
+                          IsEnabled="{Binding HasTransformableTarget}">
+                    <MenuItem Header="UPPERCASE"
+                              Click="OnTransformMenuClick"
+                              CommandParameter="{x:Static models:TextTransformation.UpperCase}" />
+                    <MenuItem Header="lowercase"
+                              Click="OnTransformMenuClick"
+                              CommandParameter="{x:Static models:TextTransformation.LowerCase}" />
+                    <MenuItem Header="Title Case"
+                              Click="OnTransformMenuClick"
+                              CommandParameter="{x:Static models:TextTransformation.TitleCase}" />
+                    <MenuItem Header="Trim whitespace"
+                              Click="OnTransformMenuClick"
+                              CommandParameter="{x:Static models:TextTransformation.TrimWhitespace}" />
+                    <MenuItem Header="Sort lines"
+                              Click="OnTransformMenuClick"
+                              CommandParameter="{x:Static models:TextTransformation.SortLines}" />
+                    <Separator />
+                    <MenuItem Header="_Scripts"
+                              ItemsSource="{Binding UserScripts}">
+                        <MenuItem.ItemContainerTheme>
+                            <ControlTheme TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+                                <Setter Property="Header" Value="{Binding Name, DataType=models:UserScript}" />
+                                <Setter Property="Command" Value="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).ApplyUserScriptCommand}" />
+                                <Setter Property="CommandParameter" Value="{Binding}" />
+                            </ControlTheme>
+                        </MenuItem.ItemContainerTheme>
+                    </MenuItem>
+                    <MenuItem Header="_AI prompt…"
+                              Click="OnOpenAiPromptClick"
+                              InputGesture="Ctrl+I" />
                 </MenuItem>
-                <MenuItem Header="Load _default scripts" Command="{Binding LoadDefaultScriptsCommand}" />
                 <Separator />
-                <MenuItem Header="Extract text from image (_OCR)" Command="{Binding RunOcrOnSelectedImageCommand}" />
+                <MenuItem Header="Extract text from image (_OCR)"
+                          Command="{Binding RunOcrOnSelectedImageCommand}"
+                          IsEnabled="{Binding CanRunOcr}" />
             </MenuItem>
             <MenuItem Header="_View">
                 <MenuItem Header="Show session _logs" Command="{Binding SessionLogs.OpenCommand}" />
@@ -214,7 +237,8 @@
                                                           Command="{Binding TogglePinCommand}" />
                                                 <MenuItem Header="{Binding ExportLabel}"
                                                           Command="{Binding ExportCommand}" />
-                                                <MenuItem Header="Transform ▾">
+                                                <MenuItem Header="Transform ▾"
+                                                          IsVisible="{Binding CanTransform}">
                                                     <MenuItem Header="UPPERCASE"
                                                               Command="{Binding ApplyTextTransformationCommand}"
                                                               CommandParameter="{x:Static models:TextTransformation.UpperCase}" />
@@ -240,6 +264,9 @@
                                                               Command="{Binding ApplyTextTransformationCommand}"
                                                               CommandParameter="{x:Static models:TextTransformation.RemoveDuplicateLines}" />
                                                 </MenuItem>
+                                                <MenuItem Header="Extract text (OCR)"
+                                                          IsVisible="{Binding IsImageClip}"
+                                                          Command="{Binding #ClipsListBox.DataContext.RunOcrOnSelectedImageCommand}" />
                                                 <Separator IsVisible="{Binding HasAnySourceInfo}" />
                                                 <MenuItem Header="Open source URL"
                                                           IsVisible="{Binding HasSourceUrl}"
@@ -495,7 +522,8 @@
                                     Content="{Binding OpenInEditorButtonLabel}" />
 
                             <Button Classes="secondary compact"
-                                    IsEnabled="{Binding HasCheckedOrSelectedClip}"
+                                    IsEnabled="{Binding HasTransformableTarget}"
+                                    IsVisible="{Binding HasTransformableTarget}"
                                     ToolTip.Tip="Apply a text transformation (works on checked clips when any are selected)">
                                 <Button.Content>Transform ▾</Button.Content>
                                 <Button.Flyout>
@@ -554,9 +582,30 @@
                                         <MenuItem Header="Lines → JSON array"
                                                   Click="OnTransformMenuClick"
                                                   CommandParameter="{x:Static models:TextTransformation.LinesToJsonArray}" />
+                                        <Separator />
+                                        <MenuItem Header="Scripts"
+                                                  ItemsSource="{Binding UserScripts}">
+                                            <MenuItem.ItemContainerTheme>
+                                                <ControlTheme TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+                                                    <Setter Property="Header" Value="{Binding Name, DataType=models:UserScript}" />
+                                                    <Setter Property="Command" Value="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).ApplyUserScriptCommand}" />
+                                                    <Setter Property="CommandParameter" Value="{Binding}" />
+                                                </ControlTheme>
+                                            </MenuItem.ItemContainerTheme>
+                                        </MenuItem>
+                                        <MenuItem Header="AI prompt…"
+                                                  Click="OnOpenAiPromptClick"
+                                                  InputGesture="Ctrl+I" />
                                     </MenuFlyout>
                                 </Button.Flyout>
                             </Button>
+
+                            <Button Classes="secondary compact"
+                                    Command="{Binding RunOcrOnSelectedImageCommand}"
+                                    IsEnabled="{Binding CanRunOcr}"
+                                    IsVisible="{Binding HasSelectedImageClip}"
+                                    ToolTip.Tip="Extract text from this image using Windows OCR"
+                                    Content="Extract text (OCR)" />
 
                             <Button Classes="secondary compact"
                                     Command="{Binding CopyEditedClipCommand}"
@@ -824,7 +873,9 @@
                             </Border>
                             <Border Classes="meta-chip"
                                     Padding="8,2"
-                                    VerticalAlignment="Center">
+                                    VerticalAlignment="Center"
+                                    IsVisible="{Binding HasSelectedClipMultipleCopies}"
+                                    ToolTip.Tip="Number of times this clip was copied (deduplicated entries)">
                                 <TextBlock Classes="body-muted"
                                            FontSize="11"
                                            VerticalAlignment="Center"

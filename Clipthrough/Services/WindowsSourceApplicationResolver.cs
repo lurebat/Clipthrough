@@ -60,6 +60,37 @@ public sealed class WindowsSourceApplicationResolver : ISourceApplicationResolve
         var iconBytes = TryGetProcessIcon(processPath);
         var windowTitle = TryGetWindowTitle(owner);
 
+        // Fallbacks: the clipboard owner is often a hidden helper window with no title
+        // (e.g., Snip & Sketch writing a bitmap). Fall back to the foreground window's
+        // title, then to the main window of the same process.
+        if (string.IsNullOrWhiteSpace(windowTitle))
+        {
+            var fg = GetForegroundWindow();
+            if (fg != IntPtr.Zero && fg != owner)
+            {
+                windowTitle = TryGetWindowTitle(fg);
+            }
+        }
+        if (string.IsNullOrWhiteSpace(windowTitle))
+        {
+            try
+            {
+                var mainHwnd = process.MainWindowHandle;
+                if (mainHwnd != IntPtr.Zero && mainHwnd != owner)
+                {
+                    windowTitle = TryGetWindowTitle(mainHwnd);
+                }
+                if (string.IsNullOrWhiteSpace(windowTitle) && !string.IsNullOrWhiteSpace(process.MainWindowTitle))
+                {
+                    windowTitle = process.MainWindowTitle;
+                }
+            }
+            catch
+            {
+                // best effort
+            }
+        }
+
         return string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(processPath) && iconBytes is null
             ? null
             : new ClipboardSourceApplicationInfo(name, processPath, iconBytes, windowTitle);
@@ -159,6 +190,9 @@ public sealed class WindowsSourceApplicationResolver : ISourceApplicationResolve
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetClipboardOwner();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
