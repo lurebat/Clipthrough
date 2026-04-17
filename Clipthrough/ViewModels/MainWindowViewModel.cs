@@ -3404,7 +3404,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RemoteApiBindAddress = (SettingsRemoteApiBindAddress ?? string.Empty).Trim(),
             UserScripts = SettingsUserScriptDrafts
                 .Select(s => new UserScript { Name = s.Name.Trim(), Code = s.Code })
-                .Where(s => !string.IsNullOrWhiteSpace(s.Name) || !string.IsNullOrWhiteSpace(s.Code))
+                .Where(s => !string.IsNullOrWhiteSpace(s.Name) && !string.IsNullOrWhiteSpace(s.Code))
                 .ToList(),
             MaxClipSizeBytes = maxClipSizeBytes,
             CloseToTray = SettingsCloseToTray,

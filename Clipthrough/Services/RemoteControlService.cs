@@ -39,7 +39,17 @@ public sealed class RemoteControlService : IRemoteControlService
 
     private void OnSettingsChanged(object? sender, AppSettings e)
     {
-        _ = ApplySettingsAsync();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ApplySettingsAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceError($"Remote API restart failed: {ex.Message}");
+            }
+        });
     }
 
     public bool IsRunning => _app is not null;
@@ -300,7 +310,10 @@ public sealed class RemoteControlService : IRemoteControlService
         {
             await _app.StopAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"Kestrel stop failed: {ex.Message}");
+        }
         await _app.DisposeAsync().ConfigureAwait(false);
         _app = null;
         _baseUrl = null;

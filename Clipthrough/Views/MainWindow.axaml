@@ -53,12 +53,51 @@
                     <MenuItem Header="Title Case"
                               Click="OnTransformMenuClick"
                               CommandParameter="{x:Static models:TextTransformation.TitleCase}" />
+                    <MenuItem Header="Sentence case"
+                              Click="OnTransformMenuClick"
+                              CommandParameter="{x:Static models:TextTransformation.SentenceCase}" />
+                    <Separator />
+                    <MenuItem Header="UpperCamelCase"
+                              Click="OnTransformMenuClick"
+                              CommandParameter="{x:Static models:TextTransformation.UpperCamelCase}" />
+                    <MenuItem Header="lowerCamelCase"
+                              Click="OnTransformMenuClick"
+                              CommandParameter="{x:Static models:TextTransformation.LowerCamelCase}" />
+                    <MenuItem Header="From camelCase"
+                              Click="OnTransformMenuClick"
+                              CommandParameter="{x:Static models:TextTransformation.FromCamelCase}" />
+                    <Separator />
                     <MenuItem Header="Trim whitespace"
                               Click="OnTransformMenuClick"
                               CommandParameter="{x:Static models:TextTransformation.TrimWhitespace}" />
+                    <MenuItem Header="Collapse whitespace"
+                              Click="OnTransformMenuClick"
+                              CommandParameter="{x:Static models:TextTransformation.CollapseWhitespace}" />
+                    <MenuItem Header="Tabs → Spaces"
+                              Click="OnTransformMenuClick"
+                              CommandParameter="{x:Static models:TextTransformation.TabsToSpaces}" />
+                    <MenuItem Header="Spaces → Tabs"
+                              Click="OnTransformMenuClick"
+                              CommandParameter="{x:Static models:TextTransformation.SpacesToTabs}" />
+                    <MenuItem Header="Normalize line endings"
+                              Click="OnTransformMenuClick"
+                              CommandParameter="{x:Static models:TextTransformation.NormalizeEol}" />
+                    <Separator />
                     <MenuItem Header="Sort lines"
                               Click="OnTransformMenuClick"
                               CommandParameter="{x:Static models:TextTransformation.SortLines}" />
+                    <MenuItem Header="Reverse lines"
+                              Click="OnTransformMenuClick"
+                              CommandParameter="{x:Static models:TextTransformation.ReverseLines}" />
+                    <MenuItem Header="Remove empty lines"
+                              Click="OnTransformMenuClick"
+                              CommandParameter="{x:Static models:TextTransformation.RemoveEmptyLines}" />
+                    <MenuItem Header="Remove duplicate lines"
+                              Click="OnTransformMenuClick"
+                              CommandParameter="{x:Static models:TextTransformation.RemoveDuplicateLines}" />
+                    <MenuItem Header="Lines → JSON array"
+                              Click="OnTransformMenuClick"
+                              CommandParameter="{x:Static models:TextTransformation.LinesToJsonArray}" />
                     <Separator />
                     <MenuItem Header="_Scripts"
                               ItemsSource="{Binding UserScripts}">
@@ -261,21 +300,51 @@
                                                     <MenuItem Header="Title Case"
                                                               Command="{Binding ApplyTextTransformationCommand}"
                                                               CommandParameter="{x:Static models:TextTransformation.TitleCase}" />
+                                                    <MenuItem Header="Sentence case"
+                                                              Command="{Binding ApplyTextTransformationCommand}"
+                                                              CommandParameter="{x:Static models:TextTransformation.SentenceCase}" />
+                                                    <Separator />
+                                                    <MenuItem Header="UpperCamelCase"
+                                                              Command="{Binding ApplyTextTransformationCommand}"
+                                                              CommandParameter="{x:Static models:TextTransformation.UpperCamelCase}" />
+                                                    <MenuItem Header="lowerCamelCase"
+                                                              Command="{Binding ApplyTextTransformationCommand}"
+                                                              CommandParameter="{x:Static models:TextTransformation.LowerCamelCase}" />
+                                                    <MenuItem Header="From camelCase"
+                                                              Command="{Binding ApplyTextTransformationCommand}"
+                                                              CommandParameter="{x:Static models:TextTransformation.FromCamelCase}" />
+                                                    <Separator />
                                                     <MenuItem Header="Trim whitespace"
                                                               Command="{Binding ApplyTextTransformationCommand}"
                                                               CommandParameter="{x:Static models:TextTransformation.TrimWhitespace}" />
                                                     <MenuItem Header="Collapse whitespace"
                                                               Command="{Binding ApplyTextTransformationCommand}"
                                                               CommandParameter="{x:Static models:TextTransformation.CollapseWhitespace}" />
+                                                    <MenuItem Header="Tabs → Spaces"
+                                                              Command="{Binding ApplyTextTransformationCommand}"
+                                                              CommandParameter="{x:Static models:TextTransformation.TabsToSpaces}" />
+                                                    <MenuItem Header="Spaces → Tabs"
+                                                              Command="{Binding ApplyTextTransformationCommand}"
+                                                              CommandParameter="{x:Static models:TextTransformation.SpacesToTabs}" />
+                                                    <MenuItem Header="Normalize line endings"
+                                                              Command="{Binding ApplyTextTransformationCommand}"
+                                                              CommandParameter="{x:Static models:TextTransformation.NormalizeEol}" />
+                                                    <Separator />
                                                     <MenuItem Header="Sort lines"
                                                               Command="{Binding ApplyTextTransformationCommand}"
                                                               CommandParameter="{x:Static models:TextTransformation.SortLines}" />
+                                                    <MenuItem Header="Reverse lines"
+                                                              Command="{Binding ApplyTextTransformationCommand}"
+                                                              CommandParameter="{x:Static models:TextTransformation.ReverseLines}" />
                                                     <MenuItem Header="Remove empty lines"
                                                               Command="{Binding ApplyTextTransformationCommand}"
                                                               CommandParameter="{x:Static models:TextTransformation.RemoveEmptyLines}" />
                                                     <MenuItem Header="Remove duplicate lines"
                                                               Command="{Binding ApplyTextTransformationCommand}"
                                                               CommandParameter="{x:Static models:TextTransformation.RemoveDuplicateLines}" />
+                                                    <MenuItem Header="Lines → JSON array"
+                                                              Command="{Binding ApplyTextTransformationCommand}"
+                                                              CommandParameter="{x:Static models:TextTransformation.LinesToJsonArray}" />
                                                 </MenuItem>
                                                 <MenuItem Header="Extract text (OCR)"
                                                           IsVisible="{Binding IsImageClip}"
