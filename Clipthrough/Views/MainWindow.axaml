@@ -267,6 +267,28 @@
                                                               Command="{Binding ApplyTextTransformationCommand}"
                                                               CommandParameter="{x:Static models:TextTransformation.LinesToJsonArray}" />
                                                 </MenuItem>
+                                                <MenuItem Header="Scripts"
+                                                          ItemsSource="{Binding #ClipsListBox.DataContext.UserScripts}"
+                                                          IsVisible="{Binding CanTransform}">
+                                                    <MenuItem.Styles>
+                                                        <Style Selector="MenuItem" x:DataType="models:UserScript">
+                                                            <Setter Property="Header" Value="{Binding Name}" />
+                                                            <Setter Property="Command" Value="{Binding #ClipsListBox.DataContext.ApplyUserScriptCommand}" />
+                                                            <Setter Property="CommandParameter" Value="{Binding}" />
+                                                        </Style>
+                                                    </MenuItem.Styles>
+                                                </MenuItem>
+                                                <MenuItem Header="AI"
+                                                          ItemsSource="{Binding #ClipsListBox.DataContext.AiMenuEntries}"
+                                                          IsVisible="{Binding CanTransform}">
+                                                    <MenuItem.Styles>
+                                                        <Style Selector="MenuItem" x:DataType="models:AiMenuEntry">
+                                                            <Setter Property="Header" Value="{Binding Label}" />
+                                                            <Setter Property="Command" Value="{Binding #ClipsListBox.DataContext.InvokeAiMenuEntryCommand}" />
+                                                            <Setter Property="CommandParameter" Value="{Binding}" />
+                                                        </Style>
+                                                    </MenuItem.Styles>
+                                                </MenuItem>
                                                 <MenuItem Header="Extract text (OCR)"
                                                           IsVisible="{Binding IsImageClip}"
                                                           Command="{Binding #ClipsListBox.DataContext.RunOcrOnSelectedImageCommand}" />
@@ -518,12 +540,6 @@
                                                  IsChecked="{Binding ShowImageOcrTextToggle, Mode=TwoWay}"
                                                  ToolTip.Tip="{Binding SelectedClipOcrStatusText}" />
                                 </StackPanel>
-                                <Button Classes="secondary compact"
-                                        Content="Run OCR"
-                                        Command="{Binding RunOcrOnSelectedImageCommand}"
-                                        IsEnabled="{Binding CanRunOcr}"
-                                        IsVisible="{Binding ShowSelectedImageRenderer}"
-                                        ToolTip.Tip="Queue OCR for this image" />
                             </StackPanel>
                         </Grid>
 

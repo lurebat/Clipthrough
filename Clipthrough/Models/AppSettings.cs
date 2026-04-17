@@ -22,35 +22,35 @@ public sealed record AppSettings
 
     public bool EnableToggleRegexHotkey { get; init; } = true;
 
-    public string ToggleRegexHotkey { get; init; } = "Alt+R";
+    public string ToggleRegexHotkey { get; init; } = "Ctrl+Shift+R";
 
     public bool EnableToggleFavoritesHotkey { get; init; } = true;
 
-    public string ToggleFavoritesHotkey { get; init; } = "Alt+F";
+    public string ToggleFavoritesHotkey { get; init; } = "Ctrl+Shift+F";
 
     public bool EnableToggleSensitiveHotkey { get; init; } = true;
 
-    public string ToggleSensitiveHotkey { get; init; } = "Alt+S";
+    public string ToggleSensitiveHotkey { get; init; } = "Ctrl+Shift+S";
 
     public bool EnableToggleCaseSensitiveHotkey { get; init; } = true;
 
-    public string ToggleCaseSensitiveHotkey { get; init; } = "Alt+C";
+    public string ToggleCaseSensitiveHotkey { get; init; } = "Ctrl+Shift+A";
 
     public bool EnableToggleWildcardHotkey { get; init; } = true;
 
-    public string ToggleWildcardHotkey { get; init; } = "Alt+W";
+    public string ToggleWildcardHotkey { get; init; } = "Ctrl+Shift+W";
 
     public bool EnableToggleWholeWordHotkey { get; init; } = true;
 
-    public string ToggleWholeWordHotkey { get; init; } = "Alt+H";
+    public string ToggleWholeWordHotkey { get; init; } = "Ctrl+Shift+H";
 
     public bool EnableTogglePastedHotkey { get; init; } = true;
 
-    public string TogglePastedHotkey { get; init; } = "Alt+P";
+    public string TogglePastedHotkey { get; init; } = "Ctrl+Shift+P";
 
     public bool EnableToggleWindowHotkey { get; init; } = true;
 
-    public string ToggleWindowHotkey { get; init; } = "Alt+V";
+    public string ToggleWindowHotkey { get; init; } = "Ctrl+Shift+Space";
 
     public bool EnableIncrementalPasteHotkey { get; init; } = true;
 
@@ -243,7 +243,7 @@ public sealed record AppSettings
         var trimmed = (value ?? string.Empty).Trim().ToLowerInvariant();
         return trimmed switch
         {
-            "minimal" or "low" or "medium" or "high" => trimmed,
+            "none" or "minimal" or "low" or "medium" or "high" => trimmed,
             _ => string.Empty,
         };
     }

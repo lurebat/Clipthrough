@@ -1499,7 +1499,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => this.RaiseAndSetIfChanged(ref _settingsAiReasoningEffort, value);
     }
 
-    public System.Collections.Generic.IReadOnlyList<string> AiReasoningEffortOptions { get; } = new[] { "", "minimal", "low", "medium", "high" };
+    public System.Collections.Generic.IReadOnlyList<string> AiReasoningEffortOptions { get; } = new[] { "", "none", "minimal", "low", "medium", "high" };
 
     public bool SettingsEnableAutoUpdate
     {
