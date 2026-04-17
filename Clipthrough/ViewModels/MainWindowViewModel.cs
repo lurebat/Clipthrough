@@ -1159,6 +1159,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool ShowSelectedImageOcrText => ShowSelectedImageRenderer && _imageViewMode == ImageViewMode.Text;
 
+    public bool ShowSelectedImageOcrEmptyState =>
+        ShowSelectedImageOcrText
+        && !HasSelectedClipOcrText
+        && !IsSelectedClipImageOcrRunning;
+
+    public bool CanRunOcrOnEmptyState => ShowSelectedImageOcrEmptyState && CanRunOcr;
+
     public bool HasSelectedClipOcrText => !string.IsNullOrWhiteSpace(SelectedClip?.Clip.OcrText);
 
     public bool IsSelectedClipImageOcrRunning => SelectedClip?.Clip.ContentType == ContentType.Image
@@ -1213,6 +1220,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             this.RaisePropertyChanged(nameof(ShowSelectedImageEditor));
             this.RaisePropertyChanged(nameof(ShowSelectedImagePlaceholder));
             this.RaisePropertyChanged(nameof(ShowSelectedImageOcrText));
+            this.RaisePropertyChanged(nameof(ShowSelectedImageOcrEmptyState));
+            this.RaisePropertyChanged(nameof(CanRunOcrOnEmptyState));
             PersistImageViewModeInBackground(value);
         }
     }
@@ -5119,6 +5128,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(ShowSelectedImageEditor));
         this.RaisePropertyChanged(nameof(ShowSelectedImagePlaceholder));
         this.RaisePropertyChanged(nameof(ShowSelectedImageOcrText));
+        this.RaisePropertyChanged(nameof(ShowSelectedImageOcrEmptyState));
+        this.RaisePropertyChanged(nameof(CanRunOcrOnEmptyState));
         this.RaisePropertyChanged(nameof(IsImagePreviewMode));
         this.RaisePropertyChanged(nameof(IsImageEditorMode));
         this.RaisePropertyChanged(nameof(IsImageTextMode));

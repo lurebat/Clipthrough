@@ -798,13 +798,43 @@
                                                                   SourceImageBytes="{Binding SelectedClipImageBytes}" />
 
                                 <TextBox Grid.Row="0"
-                                         IsVisible="{Binding ShowSelectedImageOcrText}"
+                                         IsVisible="{Binding HasSelectedClipOcrText}"
                                          Classes="content-viewer"
                                          IsReadOnly="True"
                                          AcceptsReturn="True"
                                          TextWrapping="Wrap"
                                          MinHeight="300"
                                          Text="{Binding SelectedClipOcrText, Mode=OneWay}" />
+
+                                <Border Grid.Row="0"
+                                        IsVisible="{Binding ShowSelectedImageOcrEmptyState}"
+                                        Classes="inset-panel"
+                                        Padding="24"
+                                        MinHeight="300"
+                                        HorizontalAlignment="Stretch"
+                                        VerticalAlignment="Stretch">
+                                    <StackPanel Orientation="Vertical"
+                                                Spacing="12"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center">
+                                        <TextBlock Classes="body-muted"
+                                                   TextAlignment="Center"
+                                                   TextWrapping="Wrap"
+                                                   Text="{Binding SelectedClipOcrStatusText}" />
+                                        <Button Classes="accent"
+                                                HorizontalAlignment="Center"
+                                                Content="Run OCR now"
+                                                Command="{Binding RunOcrOnSelectedImageCommand}"
+                                                IsEnabled="{Binding CanRunOcrOnEmptyState}" />
+                                        <TextBlock Classes="body-muted"
+                                                   TextAlignment="Center"
+                                                   TextWrapping="Wrap"
+                                                   FontSize="11"
+                                                   Opacity="0.7"
+                                                   IsVisible="{Binding !CanRunOcr}"
+                                                   Text="OCR engine unavailable. Configure OCR languages in Settings." />
+                                    </StackPanel>
+                                </Border>
 
                                 <StackPanel Grid.Row="1"
                                             Orientation="Horizontal"
