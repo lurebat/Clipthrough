@@ -554,10 +554,10 @@
         <Setter Property="Foreground" Value="{DynamicResource AppMutedForegroundBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="Padding" Value="8,3" />
-        <Setter Property="FontSize" Value="12" />
-        <Setter Property="MinWidth" Value="0" />
-        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="Padding" Value="14,6" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="MinWidth" Value="72" />
+        <Setter Property="MinHeight" Value="30" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="HorizontalAlignment" Value="Stretch" />
         <Setter Property="VerticalAlignment" Value="Stretch" />

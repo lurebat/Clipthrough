@@ -562,22 +562,44 @@
 
                             <StackPanel Grid.Column="1"
                                         Orientation="Horizontal"
-                                        Spacing="0"
+                                        Spacing="8"
                                         VerticalAlignment="Top"
-                                        HorizontalAlignment="Right"
-                                        IsVisible="{Binding IsDisplayModeApplicable}">
-                                <RadioButton GroupName="DisplayMode"
-                                             Classes="segmented-left"
-                                             IsChecked="{Binding IsRenderedMode}"
-                                             Content="Rendered" />
-                                <RadioButton GroupName="DisplayMode"
-                                             Classes="segmented-center"
-                                             IsChecked="{Binding IsTextualMode}"
-                                             Content="Textual" />
-                                <RadioButton GroupName="DisplayMode"
-                                             Classes="segmented-right"
-                                             IsChecked="{Binding IsRawMode}"
-                                             Content="Raw" />
+                                        HorizontalAlignment="Right">
+                                <StackPanel Orientation="Horizontal"
+                                            Spacing="0"
+                                            IsVisible="{Binding IsDisplayModeApplicable}">
+                                    <RadioButton GroupName="DisplayMode"
+                                                 Classes="segmented-left"
+                                                 IsChecked="{Binding IsRenderedMode}"
+                                                 Content="Rendered" />
+                                    <RadioButton GroupName="DisplayMode"
+                                                 Classes="segmented-center"
+                                                 IsChecked="{Binding IsTextualMode}"
+                                                 Content="Textual" />
+                                    <RadioButton GroupName="DisplayMode"
+                                                 Classes="segmented-right"
+                                                 IsChecked="{Binding IsRawMode}"
+                                                 Content="Raw" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal"
+                                            Spacing="0"
+                                            IsVisible="{Binding ShowSelectedImageRenderer}">
+                                    <RadioButton GroupName="ImagePane"
+                                                 Classes="segmented-left"
+                                                 Content="Image"
+                                                 IsChecked="{Binding !ShowImageOcrTextToggle}" />
+                                    <RadioButton GroupName="ImagePane"
+                                                 Classes="segmented-right"
+                                                 Content="Text (OCR)"
+                                                 IsChecked="{Binding ShowImageOcrTextToggle, Mode=TwoWay}"
+                                                 ToolTip.Tip="{Binding SelectedClipOcrStatusText}" />
+                                </StackPanel>
+                                <Button Classes="secondary compact"
+                                        Content="Run OCR"
+                                        Command="{Binding RunOcrOnSelectedImageCommand}"
+                                        IsEnabled="{Binding CanRunOcr}"
+                                        IsVisible="{Binding ShowSelectedImageRenderer}"
+                                        ToolTip.Tip="Queue OCR for this image" />
                             </StackPanel>
                         </Grid>
 
@@ -686,13 +708,6 @@
                                     </MenuFlyout>
                                 </Button.Flyout>
                             </Button>
-
-                            <Button Classes="secondary compact"
-                                    Command="{Binding RunOcrOnSelectedImageCommand}"
-                                    IsEnabled="{Binding CanRunOcr}"
-                                    IsVisible="{Binding HasSelectedImageClip}"
-                                    ToolTip.Tip="Extract text from this image using Windows OCR"
-                                    Content="Extract text (OCR)" />
 
                             <Button Classes="secondary compact"
                                     Command="{Binding CopyEditedClipCommand}"
@@ -837,27 +852,9 @@
 
                             <Grid IsVisible="{Binding ShowSelectedImageRenderer}"
                                   Margin="14"
-                                  RowDefinitions="Auto,*,Auto"
+                                  RowDefinitions="*,Auto"
                                   RowSpacing="10">
-                                <StackPanel Grid.Row="0"
-                                            Orientation="Horizontal"
-                                            Spacing="6"
-                                            HorizontalAlignment="Center">
-                                    <RadioButton GroupName="ImagePane"
-                                                 Content="Image"
-                                                 IsChecked="{Binding !ShowImageOcrTextToggle}" />
-                                    <RadioButton GroupName="ImagePane"
-                                                 Content="Text (OCR)"
-                                                 IsChecked="{Binding ShowImageOcrTextToggle, Mode=TwoWay}"
-                                                 ToolTip.Tip="Show recognized text for this image" />
-                                    <Button Content="Run OCR"
-                                            Command="{Binding RunOcrOnSelectedImageCommand}"
-                                            ToolTip.Tip="Queue OCR for this image" />
-                                    <TextBlock Classes="body-muted"
-                                               VerticalAlignment="Center"
-                                               Text="{Binding SelectedClipOcrStatusText}" />
-                                </StackPanel>
-                                <Border Grid.Row="1"
+                                <Border Grid.Row="0"
                                         Classes="image-placeholder"
                                          IsVisible="{Binding ShowSelectedImagePlaceholder}">
                                     <StackPanel HorizontalAlignment="Center"
@@ -878,13 +875,13 @@
                                     </StackPanel>
                                 </Border>
 
-                                <controls:EmbeddedImageEditorView Grid.Row="1"
+                                <controls:EmbeddedImageEditorView Grid.Row="0"
                                                                   x:Name="SelectedImageEditor"
                                                                   IsVisible="{Binding ShowSelectedImageEditor}"
                                                                   MinHeight="450"
                                                                   SourceImageBytes="{Binding SelectedClipImageBytes}" />
 
-                                <TextBox Grid.Row="1"
+                                <TextBox Grid.Row="0"
                                          IsVisible="{Binding ShowSelectedImageOcrText}"
                                          Classes="content-viewer"
                                          IsReadOnly="True"
@@ -893,10 +890,15 @@
                                          MinHeight="300"
                                          Text="{Binding SelectedClipOcrText, Mode=OneWay}" />
 
-                                <TextBlock Grid.Row="2"
-                                           Classes="body-muted"
-                                           HorizontalAlignment="Center"
-                                           Text="{Binding SelectedClipImageResolutionText}" />
+                                <StackPanel Grid.Row="1"
+                                            Orientation="Horizontal"
+                                            Spacing="12"
+                                            HorizontalAlignment="Center">
+                                    <TextBlock Classes="body-muted"
+                                               Text="{Binding SelectedClipImageResolutionText}" />
+                                    <TextBlock Classes="body-muted"
+                                               Text="{Binding SelectedClipOcrStatusText}" />
+                                </StackPanel>
                             </Grid>
                         </Grid>
                     </Border>

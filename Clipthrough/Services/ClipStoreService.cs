@@ -239,7 +239,7 @@ public sealed class ClipStoreService : IClipStoreService
             WHERE id = $id
               AND content_type = 'image'
               AND content_bytes IS NOT NULL
-              AND (ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'failed');
+              AND (ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'failed' OR ocr_status = 'rerun');
             """;
         command.Parameters.AddWithValue("$id", clipId);
         var rows = await command.ExecuteNonQueryAsync(cancellationToken);
@@ -251,19 +251,43 @@ public sealed class ClipStoreService : IClipStoreService
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            UPDATE clips
-            SET ocr_text = $text,
-                ocr_status = 'succeeded',
-                ocr_attempted_at = $at,
-                ocr_error = NULL
-            WHERE id = $id;
-            """;
-        command.Parameters.AddWithValue("$id", clipId);
-        command.Parameters.AddWithValue("$text", (object?)ocrText ?? DBNull.Value);
-        command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
-        var rows = await command.ExecuteNonQueryAsync(cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+        int rows;
+        await using (var updateCommand = connection.CreateCommand())
+        {
+            updateCommand.Transaction = transaction;
+            updateCommand.CommandText = """
+                UPDATE clips
+                SET ocr_text = $text,
+                    ocr_status = 'succeeded',
+                    ocr_attempted_at = $at,
+                    ocr_error = NULL
+                WHERE id = $id;
+                """;
+            updateCommand.Parameters.AddWithValue("$id", clipId);
+            updateCommand.Parameters.AddWithValue("$text", (object?)ocrText ?? DBNull.Value);
+            updateCommand.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+            rows = await updateCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        if (rows > 0 && !string.IsNullOrWhiteSpace(ocrText))
+        {
+            var matches = _sensitivityService.Scan(ocrText);
+            if (matches.Count > 0)
+            {
+                await using (var markCommand = connection.CreateCommand())
+                {
+                    markCommand.Transaction = transaction;
+                    markCommand.CommandText = "UPDATE clips SET is_sensitive = 1 WHERE id = $id;";
+                    markCommand.Parameters.AddWithValue("$id", clipId);
+                    await markCommand.ExecuteNonQueryAsync(cancellationToken);
+                }
+                await AddSensitivityMatchesAsync(connection, transaction, clipId, matches, cancellationToken);
+            }
+        }
+
+        await transaction.CommitAsync(cancellationToken);
         return rows > 0;
     }
 
@@ -297,9 +321,51 @@ public sealed class ClipStoreService : IClipStoreService
             SELECT id FROM clips
             WHERE content_type = 'image'
               AND content_bytes IS NOT NULL
-              AND (ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'failed' OR ocr_status = 'running')
+              AND (ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'failed' OR ocr_status = 'running' OR ocr_status = 'rerun')
             ORDER BY COALESCE(last_copied_at, captured_at) DESC
             LIMIT 500;
+            """;
+        var ids = new List<long>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            ids.Add(reader.GetInt64(0));
+        }
+        return ids;
+    }
+
+    public async Task<bool> MarkOcrForRerunAsync(long clipId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE clips
+            SET ocr_status = 'rerun'
+            WHERE id = $id
+              AND content_type = 'image'
+              AND content_bytes IS NOT NULL
+              AND ocr_status = 'succeeded';
+            """;
+        command.Parameters.AddWithValue("$id", clipId);
+        var rows = await command.ExecuteNonQueryAsync(cancellationToken);
+        return rows > 0;
+    }
+
+    public async Task<IReadOnlyList<long>> MarkAllSucceededForRerunAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE clips
+            SET ocr_status = 'rerun'
+            WHERE content_type = 'image'
+              AND content_bytes IS NOT NULL
+              AND ocr_status = 'succeeded'
+            RETURNING id;
             """;
         var ids = new List<long>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);

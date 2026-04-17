@@ -28,6 +28,10 @@ public interface IClipStoreService
 
     Task<System.Collections.Generic.IReadOnlyList<long>> GetPendingOcrClipIdsAsync(CancellationToken cancellationToken = default);
 
+    Task<bool> MarkOcrForRerunAsync(long clipId, CancellationToken cancellationToken = default);
+
+    Task<System.Collections.Generic.IReadOnlyList<long>> MarkAllSucceededForRerunAsync(CancellationToken cancellationToken = default);
+
     Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default);
 
     Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default);

@@ -2720,24 +2720,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         StatusText = "Loaded default scripts";
     }
 
-    private Task RunOcrOnSelectedImageAsync()
+    private async Task RunOcrOnSelectedImageAsync()
     {
         var clip = SelectedClip;
         if (clip is null || clip.Clip.ContentType != ContentType.Image || clip.Clip.ContentBytes is null)
         {
             StatusText = "Select an image clip first";
-            return Task.CompletedTask;
+            return;
         }
 
         if (!_ocrService.IsAvailable)
         {
             StatusText = "No Windows OCR languages installed. Add one in Windows Settings → Time & Language → Language.";
-            return Task.CompletedTask;
+            return;
         }
 
+        await _clipStoreService.MarkOcrForRerunAsync(clip.Clip.Id);
         StatusText = "Queued OCR…";
         _backgroundOcrQueue.Enqueue(clip.Clip.Id);
-        return Task.CompletedTask;
     }
 
     private async Task CommitEditedClipOnSelectionChangeAsync()
@@ -3427,6 +3427,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task SaveSettingsAsync()
     {
+        var previousAutoOcr = _settingsService.Current.AutoOcrImageClips;
+        var previousOcrLanguages = (_settingsService.Current.OcrLanguages ?? string.Empty).Trim();
+
         var localHotkeys = new[]
         {
             new HotkeyDraft(nameof(AppSettings.ToggleRegexHotkey), SettingsEnableToggleRegexHotkey, SettingsToggleRegexHotkey),
@@ -3635,6 +3638,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await _sensitivityService.SaveRulesAsync(sensitivityRules);
         await _clipStoreService.RebuildSensitivityMatchesAsync();
         await ApplyMaintenanceAndRefreshAsync();
+
+        if (_isDatabaseReady && _ocrService.IsAvailable)
+        {
+            var nowAutoOcr = settings.AutoOcrImageClips;
+            var nowOcrLanguages = (settings.OcrLanguages ?? string.Empty).Trim();
+            var languagesChanged = !string.Equals(nowOcrLanguages, previousOcrLanguages, StringComparison.OrdinalIgnoreCase);
+            if (nowAutoOcr && (!previousAutoOcr || languagesChanged))
+            {
+                if (languagesChanged)
+                {
+                    await _clipStoreService.MarkAllSucceededForRerunAsync();
+                }
+                _ = Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync());
+            }
+        }
 
         IsWelcomeOpen = false;
         IsSettingsOpen = false;
