@@ -110,20 +110,15 @@
                         </MenuItem.ItemContainerTheme>
                     </MenuItem>
                     <MenuItem Header="_AI"
-                              InputGesture="Ctrl+I">
-                        <MenuItem Header="Custom prompt…"
-                                  Click="OnOpenAiPromptClick" />
-                        <Separator />
-                        <MenuItem Header="Presets"
-                                  ItemsSource="{Binding AiPresets}">
-                            <MenuItem.ItemContainerTheme>
-                                <ControlTheme TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
-                                    <Setter Property="Header" Value="{Binding Name, DataType=models:AiPreset}" />
-                                    <Setter Property="Command" Value="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).ApplyAiPresetCommand}" />
-                                    <Setter Property="CommandParameter" Value="{Binding}" />
-                                </ControlTheme>
-                            </MenuItem.ItemContainerTheme>
-                        </MenuItem>
+                              InputGesture="Ctrl+I"
+                              ItemsSource="{Binding AiMenuEntries}">
+                        <MenuItem.ItemContainerTheme>
+                            <ControlTheme TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+                                <Setter Property="Header" Value="{Binding Label, DataType=models:AiMenuEntry}" />
+                                <Setter Property="Command" Value="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).InvokeAiMenuEntryCommand}" />
+                                <Setter Property="CommandParameter" Value="{Binding}" />
+                            </ControlTheme>
+                        </MenuItem.ItemContainerTheme>
                     </MenuItem>
                 </MenuItem>
                 <Separator />
@@ -678,21 +673,15 @@
                                                 </ControlTheme>
                                             </MenuItem.ItemContainerTheme>
                                         </MenuItem>
-                                        <MenuItem Header="AI">
-                                            <MenuItem Header="Custom prompt…"
-                                                      Click="OnOpenAiPromptClick"
-                                                      InputGesture="Ctrl+I" />
-                                            <Separator />
-                                            <MenuItem Header="Presets"
-                                                      ItemsSource="{Binding AiPresets}">
-                                                <MenuItem.ItemContainerTheme>
-                                                    <ControlTheme TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
-                                                        <Setter Property="Header" Value="{Binding Name, DataType=models:AiPreset}" />
-                                                        <Setter Property="Command" Value="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).ApplyAiPresetCommand}" />
-                                                        <Setter Property="CommandParameter" Value="{Binding}" />
-                                                    </ControlTheme>
-                                                </MenuItem.ItemContainerTheme>
-                                            </MenuItem>
+                                        <MenuItem Header="AI"
+                                                  ItemsSource="{Binding AiMenuEntries}">
+                                            <MenuItem.ItemContainerTheme>
+                                                <ControlTheme TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+                                                    <Setter Property="Header" Value="{Binding Label, DataType=models:AiMenuEntry}" />
+                                                    <Setter Property="Command" Value="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).InvokeAiMenuEntryCommand}" />
+                                                    <Setter Property="CommandParameter" Value="{Binding}" />
+                                                </ControlTheme>
+                                            </MenuItem.ItemContainerTheme>
                                         </MenuItem>
                                     </MenuFlyout>
                                 </Button.Flyout>

@@ -2,6 +2,7 @@ using Avalonia;
 using ReactiveUI.Avalonia;
 using System;
 using System.Diagnostics;
+using System.Threading;
 using Clipthrough.Diagnostics;
 using Velopack;
 
@@ -9,6 +10,8 @@ namespace Clipthrough;
 
 sealed class Program
 {
+    private const string SingleInstanceMutexName = @"Local\Clipthrough.SingleInstance.v1";
+
     // Initialization code. Don't use any Avalonia, third-party APIs or any
     // SynchronizationContext-reliant code before AppMain is called: things aren't initialized
     // yet and stuff might break.
@@ -18,14 +21,22 @@ sealed class Program
         SQLitePCL.Batteries_V2.Init();
         Clipthrough.Diagnostics.TraceConfiguration.Initialize();
 
+        // Squirrel/Velopack hooks must run even if another copy holds the mutex (install/update may
+        // spawn short-lived processes with --squirrel-* arguments). Let Velopack handle those first.
         try
         {
-            // Must run before any Avalonia/UI work. Handles --squirrel-* hooks, bootstraps logging, and early-exits for install/uninstall events.
             VelopackApp.Build().Run();
         }
         catch (Exception ex)
         {
             Trace.TraceError($"Velopack initialization failed: {ex}");
+        }
+
+        using var singleInstance = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out var createdNew);
+        if (!createdNew)
+        {
+            Trace.TraceWarning("Clipthrough is already running. Exiting this instance.");
+            return;
         }
 
         try
@@ -35,6 +46,10 @@ sealed class Program
         catch (Exception ex)
         {
             Trace.TraceError($"Application terminated unexpectedly: {ex}");
+        }
+        finally
+        {
+            try { singleInstance.ReleaseMutex(); } catch { /* already released on exit */ }
         }
     }
 

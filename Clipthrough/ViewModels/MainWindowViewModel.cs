@@ -217,6 +217,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SubmitAiPromptCommand = ReactiveCommand.CreateFromTask(SubmitAiPromptAsync);
         CancelAiPromptCommand = ReactiveCommand.Create(CancelAiPrompt);
         ApplyAiPresetCommand = ReactiveCommand.CreateFromTask<AiPreset>(ApplyAiPresetAsync);
+        InvokeAiMenuEntryCommand = ReactiveCommand.CreateFromTask<AiMenuEntry>(InvokeAiMenuEntryAsync);
         AddScriptDraftCommand = ReactiveCommand.Create(() =>
         {
             var draft = new UserScriptDraft { Name = "New script", Code = "return input;" };
@@ -242,6 +243,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 StatusText = "Remote API token copied";
             }
         });
+        CopyRemoteApiDocsUrlCommand = ReactiveCommand.CreateFromTask(async () =>
+        {
+            await _systemInteractionService.CopyTextAsync(RemoteApiDocsUrl);
+            StatusText = "Swagger URL copied";
+        });
+        CopyRemoteApiSchemaUrlCommand = ReactiveCommand.CreateFromTask(async () =>
+        {
+            await _systemInteractionService.CopyTextAsync(RemoteApiSchemaUrl);
+            StatusText = "OpenAPI schema URL copied";
+        });
+        OpenRemoteApiDocsUrlCommand = ReactiveCommand.CreateFromTask(async () =>
+            await _systemInteractionService.OpenPathAsync(RemoteApiDocsUrl));
+        OpenRemoteApiSchemaUrlCommand = ReactiveCommand.CreateFromTask(async () =>
+            await _systemInteractionService.OpenPathAsync(RemoteApiSchemaUrl));
 
         _settingsService.SettingsChanged += OnSettingsChanged;
         SyncUserScripts(_settingsService.Current);
@@ -366,6 +381,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, string> GenerateRemoteApiTokenCommand { get; }
 
     public ReactiveCommand<Unit, Unit> CopyRemoteApiTokenCommand { get; }
+    public ReactiveCommand<Unit, Unit> CopyRemoteApiDocsUrlCommand { get; }
+    public ReactiveCommand<Unit, Unit> CopyRemoteApiSchemaUrlCommand { get; }
+    public ReactiveCommand<Unit, Unit> OpenRemoteApiDocsUrlCommand { get; }
+    public ReactiveCommand<Unit, Unit> OpenRemoteApiSchemaUrlCommand { get; }
 
     public ObservableCollection<UserScript> UserScripts { get; } = new();
 
@@ -406,6 +425,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ReactiveCommand<Unit, Unit> AddScriptDraftCommand { get; }
     public ReactiveCommand<UserScriptDraft, Unit> RemoveScriptDraftCommand { get; }
+
+    public System.Collections.ObjectModel.ObservableCollection<AiMenuEntry> AiMenuEntries { get; } = new();
+
+    public ReactiveCommand<AiMenuEntry, Unit> InvokeAiMenuEntryCommand { get; }
 
     public string SearchText
     {
@@ -1347,7 +1370,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public int SettingsRemoteApiPort
     {
         get => _settingsRemoteApiPort;
-        set => this.RaiseAndSetIfChanged(ref _settingsRemoteApiPort, value);
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _settingsRemoteApiPort, value);
+            this.RaisePropertyChanged(nameof(RemoteApiDocsUrl));
+            this.RaisePropertyChanged(nameof(RemoteApiSchemaUrl));
+        }
     }
 
     public string SettingsRemoteApiToken
@@ -1370,6 +1398,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             this.RaiseAndSetIfChanged(ref _settingsRemoteApiBindAddress, value);
             this.RaisePropertyChanged(nameof(RemoteApiBindAddressIsNonLoopback));
+            this.RaisePropertyChanged(nameof(RemoteApiDocsUrl));
+            this.RaisePropertyChanged(nameof(RemoteApiSchemaUrl));
         }
     }
 
@@ -1385,6 +1415,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 || v.Equals("::1", StringComparison.Ordinal));
         }
     }
+
+    private string RemoteApiUrlHost
+    {
+        get
+        {
+            var v = (_settingsRemoteApiBindAddress ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(v)) return "127.0.0.1";
+            if (v.Equals("0.0.0.0", StringComparison.Ordinal) || v.Equals("loopback", StringComparison.OrdinalIgnoreCase))
+                return "127.0.0.1";
+            if (v.Equals("::", StringComparison.Ordinal)) return "[::1]";
+            if (v.Contains(':') && !v.StartsWith("[", StringComparison.Ordinal)) return $"[{v}]";
+            return v;
+        }
+    }
+
+    public string RemoteApiDocsUrl => $"http://{RemoteApiUrlHost}:{_settingsRemoteApiPort}/docs";
+    public string RemoteApiSchemaUrl => $"http://{RemoteApiUrlHost}:{_settingsRemoteApiPort}/openapi/v1.json";
 
     public string SettingsToggleRegexHotkey
     {
@@ -2097,8 +2144,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);
         var editorPath = _settingsService.Current.ExternalEditorPath;
+        if (string.IsNullOrWhiteSpace(editorPath))
+        {
+            _notificationService.PublishWarning(
+                "No external editor configured",
+                "Set an editor path in Settings → Tools, or the clip will open with the OS default.");
+        }
+        else if (!System.IO.File.Exists(editorPath))
+        {
+            _notificationService.PublishError(
+                "External editor not found",
+                $"'{editorPath}' does not exist. Update the path in Settings → Tools.");
+            return;
+        }
+
+        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);
         await _systemInteractionService.OpenInEditorAsync(exportResult.PrimaryPath, editorPath);
         StatusText = $"{AppText.OpenedInEditorStatus}: {Path.GetFileName(exportResult.PrimaryPath)}";
     }
@@ -2148,6 +2209,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (checkedClips.Count < 2)
         {
             StatusText = AppText.CompareNeedsTwoClipsStatus;
+            _notificationService.PublishWarning(
+                "Check two clips to compare",
+                "Use the checkboxes on two clips in the list, then open Compare again.");
             return;
         }
 
@@ -2155,6 +2219,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (string.IsNullOrWhiteSpace(diffToolPath))
         {
             StatusText = AppText.CompareNeedsDiffToolStatus;
+            _notificationService.PublishWarning(
+                "No diff tool configured",
+                "Set a diff tool path in Settings → Tools (e.g. WinMerge, Beyond Compare, VS Code).");
+            return;
+        }
+        if (!System.IO.File.Exists(diffToolPath))
+        {
+            _notificationService.PublishError(
+                "Diff tool not found",
+                $"'{diffToolPath}' does not exist. Update the path in Settings → Tools.");
             return;
         }
 
@@ -2447,16 +2521,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        var previous = StatusText;
+        StatusText = $"Running script '{script.Name}'…";
         try
         {
             await ApplyTransformToTargetsAsync(
-                async (source, ct) => await _scriptingService.EvaluateAsync(script.Code, source, ct),
+                (source, ct) => Task.Run(() => _scriptingService.EvaluateAsync(script.Code, source, ct), ct),
                 $"script '{script.Name}'",
                 multiSummary: count => $"Applied '{script.Name}' to {count} clips");
         }
         catch (Exception ex)
         {
             StatusText = $"Script '{script.Name}' failed: {ex.Message}";
+            _notificationService.PublishError($"Script '{script.Name}' failed", ex.Message);
+            return;
+        }
+
+        if (string.Equals(StatusText, $"Running script '{script.Name}'…", StringComparison.Ordinal))
+        {
+            StatusText = previous;
         }
     }
 
@@ -3596,6 +3679,27 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             AiPresets.Add(p);
         }
+
+        AiMenuEntries.Clear();
+        AiMenuEntries.Add(new AiMenuEntry("Custom prompt…", null, true));
+        foreach (var p in settings.AiPresets)
+        {
+            AiMenuEntries.Add(new AiMenuEntry(p.Name, p, false));
+        }
+    }
+
+    private async Task InvokeAiMenuEntryAsync(AiMenuEntry? entry)
+    {
+        if (entry is null) return;
+        if (entry.IsCustomPrompt)
+        {
+            OpenAiPrompt();
+            return;
+        }
+        if (entry.Preset is { } preset)
+        {
+            await ApplyAiPresetAsync(preset).ConfigureAwait(false);
+        }
     }
 
     private async Task StartDatabaseAsync()
@@ -3666,7 +3770,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         AiPromptInput = preset.Prompt;
         AiPromptError = string.Empty;
+        StatusText = $"Running AI preset '{preset.Name}'…";
         await SubmitAiPromptAsync();
+        if (!string.IsNullOrEmpty(AiPromptError) && !IsAiPromptOpen)
+        {
+            _notificationService.PublishError($"AI preset '{preset.Name}' failed", AiPromptError);
+        }
     }
 
     private async Task UnlockDatabaseAsync()

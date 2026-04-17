@@ -37,8 +37,23 @@ public sealed class SessionLogService : TraceListener, ISessionLogService
     {
         if (!string.IsNullOrWhiteSpace(message))
         {
-            AddEntry(AppNotificationLevel.Information, message);
+            AddEntry(ClassifyMessage(message), message);
         }
+    }
+
+    private static AppNotificationLevel ClassifyMessage(string message)
+    {
+        // Avalonia's LogToTrace routes everything through Trace.WriteLine without a severity.
+        // Default Avalonia log level is Warning, so untyped messages are at least warnings.
+        // Binding failures and explicit "error" wording escalate to Error.
+        if (message.Contains("error occurred", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Exception", StringComparison.Ordinal)
+            || message.Contains("failed", StringComparison.OrdinalIgnoreCase)
+            || message.StartsWith("Error", StringComparison.OrdinalIgnoreCase))
+        {
+            return AppNotificationLevel.Error;
+        }
+        return AppNotificationLevel.Warning;
     }
 
     public override void TraceEvent(TraceEventCache? eventCache, string? source, TraceEventType eventType, int id, string? message)
