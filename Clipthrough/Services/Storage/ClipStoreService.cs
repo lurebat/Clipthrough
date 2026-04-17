@@ -626,7 +626,7 @@ public sealed class ClipStoreService : IClipStoreService
         var contentText = BuildStoredContentText(request);
         var hash = ComputeHash(request.ContentType, request.ContentFormat, request.ContentBytes);
         var matches = _sensitivityService.Scan(contentText);
-        var capturedAt = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+        var capturedAt = (request.CapturedAtOverride ?? DateTimeOffset.UtcNow).ToString("O", CultureInfo.InvariantCulture);
         var byteSize = request.ContentBytes.LongLength;
 
         await using var connection = _connectionFactory.CreateConnection();

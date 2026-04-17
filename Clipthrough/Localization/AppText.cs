@@ -52,6 +52,12 @@ public static class AppText
         [nameof(SettingsDatabasePasswordLabel)] = "Encryption password",
         [nameof(SettingsBrowseDatabasePathButtonLabel)] = "Browse",
         [nameof(SettingsBrowseDatabasePathTitle)] = "Choose database file",
+        [nameof(SettingsClipAngelImportTitle)] = "Import from ClipAngel",
+        [nameof(SettingsClipAngelImportDescription)] = "Import your legacy ClipAngel clipboard history. Pick the encrypted db.sqlite file — Clipthrough will decrypt, read, and add each clip with its original timestamp. Windows only.",
+        [nameof(SettingsClipAngelImportButtonLabel)] = "Import ClipAngel database...",
+        [nameof(SettingsClipAngelImportPickerTitle)] = "Choose ClipAngel db.sqlite",
+        [nameof(ClipAngelImportRunning)] = "Importing ClipAngel clips...",
+        [nameof(ClipAngelImportUnsupported)] = "ClipAngel import requires Windows.",
         [nameof(SettingsRegexHotkeyLabel)] = "Toggle regex",
         [nameof(SettingsFavoritesHotkeyLabel)] = "Toggle favorites",
         [nameof(SettingsSensitiveHotkeyLabel)] = "Toggle sensitive",
@@ -300,6 +306,18 @@ public static class AppText
     public static string SettingsDatabasePasswordLabel => Text(nameof(SettingsDatabasePasswordLabel));
     public static string SettingsBrowseDatabasePathButtonLabel => Text(nameof(SettingsBrowseDatabasePathButtonLabel));
     public static string SettingsBrowseDatabasePathTitle => Text(nameof(SettingsBrowseDatabasePathTitle));
+    public static string SettingsClipAngelImportTitle => Text(nameof(SettingsClipAngelImportTitle));
+    public static string SettingsClipAngelImportDescription => Text(nameof(SettingsClipAngelImportDescription));
+    public static string SettingsClipAngelImportButtonLabel => Text(nameof(SettingsClipAngelImportButtonLabel));
+    public static string SettingsClipAngelImportPickerTitle => Text(nameof(SettingsClipAngelImportPickerTitle));
+    public static string ClipAngelImportRunning => Text(nameof(ClipAngelImportRunning));
+    public static string ClipAngelImportUnsupported => Text(nameof(ClipAngelImportUnsupported));
+    public static string FormatClipAngelImportProgress(int processed, int total) => $"Importing ClipAngel clips... {processed}/{total}";
+    public static string FormatClipAngelImportSuccess(int imported, int skipped, int failed) =>
+        failed == 0 && skipped == 0
+            ? $"ClipAngel import complete: {imported} clips added."
+            : $"ClipAngel import complete: {imported} added, {skipped} skipped, {failed} failed.";
+    public static string FormatClipAngelImportError(string message) => $"ClipAngel import failed: {message}";
     public static string SettingsRegexHotkeyLabel => Text(nameof(SettingsRegexHotkeyLabel));
     public static string SettingsFavoritesHotkeyLabel => Text(nameof(SettingsFavoritesHotkeyLabel));
     public static string SettingsSensitiveHotkeyLabel => Text(nameof(SettingsSensitiveHotkeyLabel));

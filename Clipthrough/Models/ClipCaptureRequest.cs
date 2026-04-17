@@ -31,4 +31,6 @@ public sealed class ClipCaptureRequest
     public long? SourceClipId { get; init; }
 
     public string? TransformKind { get; init; }
+
+    public System.DateTimeOffset? CapturedAtOverride { get; init; }
 }

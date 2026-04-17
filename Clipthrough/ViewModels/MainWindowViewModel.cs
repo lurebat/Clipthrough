@@ -44,6 +44,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     };
 
     private readonly IClipStoreService _clipStoreService;
+    private readonly IClipAngelImportService _clipAngelImportService;
     private readonly IClipboardMonitorService _clipboardMonitorService;
     private readonly IClipSampleDataService _clipSampleDataService;
     private readonly ISettingsService _settingsService;
@@ -177,9 +178,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _editedClipSelectionLength;
     private long? _checkedSelectionAnchorId;
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null, Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, IClipAngelImportService? clipAngelImportService = null, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null, Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null)
     {
         _clipStoreService = clipStoreService;
+        _clipAngelImportService = clipAngelImportService ?? new ClipAngelImportService(clipStoreService);
         _clipboardMonitorService = clipboardMonitorService;
         _clipSampleDataService = clipSampleDataService;
         _settingsService = settingsService;
@@ -237,6 +239,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
         SaveSettingsCommand = ReactiveCommand.CreateFromTask(SaveSettingsAsync);
         BrowseDatabasePathCommand = ReactiveCommand.CreateFromTask<Window?>(BrowseDatabasePathAsync);
+        ImportClipAngelCommand = ReactiveCommand.CreateFromTask<Window?>(ImportClipAngelAsync);
         UnlockDatabaseCommand = ReactiveCommand.CreateFromTask(UnlockDatabaseAsync);
         ExitApplicationCommand = ReactiveCommand.Create(ExitApplication);
         OpenAiPromptCommand = ReactiveCommand.Create(OpenAiPrompt);
@@ -464,6 +467,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> SaveSettingsCommand { get; }
 
     public ReactiveCommand<Window?, Unit> BrowseDatabasePathCommand { get; }
+    public ReactiveCommand<Window?, Unit> ImportClipAngelCommand { get; }
 
     public ReactiveCommand<Unit, Unit> UnlockDatabaseCommand { get; }
 
@@ -914,6 +918,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string SettingsDatabasePasswordLabel => AppText.SettingsDatabasePasswordLabel;
 
     public string SettingsBrowseDatabasePathButtonLabel => AppText.SettingsBrowseDatabasePathButtonLabel;
+
+    public string SettingsClipAngelImportTitle => AppText.SettingsClipAngelImportTitle;
+    public string SettingsClipAngelImportDescription => AppText.SettingsClipAngelImportDescription;
+    public string SettingsClipAngelImportButtonLabel => AppText.SettingsClipAngelImportButtonLabel;
+    public bool IsClipAngelImportSupported => _clipAngelImportService.IsSupported;
 
     public string SettingsShowPasswordLabel => AppText.SettingsShowPasswordLabel;
 
@@ -3961,6 +3970,62 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (!string.IsNullOrWhiteSpace(selectedPath))
         {
             SettingsDatabasePath = selectedPath;
+        }
+    }
+
+    private async Task ImportClipAngelAsync(Window? window)
+    {
+        if (window?.StorageProvider is null)
+            return;
+
+        if (!_clipAngelImportService.IsSupported)
+        {
+            StatusText = AppText.ClipAngelImportUnsupported;
+            return;
+        }
+
+        IStorageFolder? startFolder = null;
+        try
+        {
+            var defaultDir = Environment.ExpandEnvironmentVariables("%LOCALAPPDATA%\\ClipAngel");
+            if (Directory.Exists(defaultDir))
+                startFolder = await window.StorageProvider.TryGetFolderFromPathAsync(defaultDir);
+        }
+        catch { /* best-effort */ }
+
+        var picked = await window.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = AppText.SettingsClipAngelImportPickerTitle,
+            AllowMultiple = false,
+            SuggestedStartLocation = startFolder,
+            FileTypeFilter = [s_databaseFileType],
+        });
+
+        if (picked is null || picked.Count == 0)
+            return;
+
+        var path = picked[0].TryGetLocalPath();
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        StatusText = AppText.ClipAngelImportRunning;
+        IsBusy = true;
+        try
+        {
+            var progress = new Progress<ClipAngelImportProgress>(p =>
+                StatusText = AppText.FormatClipAngelImportProgress(p.Processed, p.Total));
+            var result = await _clipAngelImportService.ImportAsync(path!, progress);
+            StatusText = AppText.FormatClipAngelImportSuccess(result.Imported, result.Skipped, result.Failed);
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            StatusText = AppText.FormatClipAngelImportError(ex.Message);
+            _notificationService.PublishError(AppText.SettingsClipAngelImportTitle, AppText.FormatClipAngelImportError(ex.Message));
+        }
+        finally
+        {
+            IsBusy = false;
         }
     }
 

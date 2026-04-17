@@ -222,6 +222,22 @@
                         <TextBlock Classes="body-muted"
                                    Text="{Binding SettingsStorageHintText}"
                                    TextWrapping="Wrap" />
+
+                        <Border Classes="surface-panel" Padding="12" Margin="0,8,0,0">
+                            <StackPanel Spacing="6">
+                                <TextBlock FontWeight="SemiBold"
+                                           Text="{Binding SettingsClipAngelImportTitle}" />
+                                <TextBlock Classes="body-muted"
+                                           Text="{Binding SettingsClipAngelImportDescription}"
+                                           TextWrapping="Wrap" />
+                                <Button Classes="secondary"
+                                        HorizontalAlignment="Left"
+                                        IsEnabled="{Binding IsClipAngelImportSupported}"
+                                        Command="{Binding ImportClipAngelCommand}"
+                                        CommandParameter="{Binding $parent[Window]}"
+                                        Content="{Binding SettingsClipAngelImportButtonLabel}" />
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </Expander>
 
