@@ -35,6 +35,7 @@ public partial class App : Application
     private IScriptingService? _scriptingService;
     private Clipthrough.Services.Search.IEmbeddingWorker? _embeddingWorker;
     private IDisposable? _embeddingWorkerCaptureSubscription;
+    private IDisposable? _embeddingWorkerBatchSubscription;
     private IDisposable? _notificationSubscription;
     private bool _isExitRequested;
     private bool _hasShownTrayNotification;
@@ -88,6 +89,10 @@ public partial class App : Application
             _embeddingWorker.Start();
             _embeddingWorkerCaptureSubscription = _clipboardMonitorService.CapturedClips
                 .Subscribe(_ => _embeddingWorker.Poke());
+            var semanticSearch = Services.GetRequiredService<Clipthrough.Services.Search.ISemanticSearchService>();
+            _embeddingWorkerBatchSubscription = _embeddingWorker.BatchCompleted
+                .Subscribe((int count) => { _ = semanticSearch.RefreshCacheAsync(); });
+            _ = semanticSearch.RefreshCacheAsync();
 
             StartApplicationAsync(mainWindowViewModel);
         }
@@ -157,6 +162,7 @@ public partial class App : Application
         services.AddSingleton<IBackgroundJobIndicator, BackgroundJobIndicator>();
         services.AddSingleton<Clipthrough.Services.Search.IEmbeddingService, Clipthrough.Services.Search.EmbeddingService>();
         services.AddSingleton<Clipthrough.Services.Search.IEmbeddingWorker, Clipthrough.Services.Search.EmbeddingWorker>();
+        services.AddSingleton<Clipthrough.Services.Search.ISemanticSearchService, Clipthrough.Services.Search.SemanticSearchService>();
         services.AddSingleton<IRemoteControlService, RemoteControlService>();
         services.AddSingleton<MainWindowViewModel>();
 
@@ -220,6 +226,8 @@ public partial class App : Application
         _notificationSubscription = null;
         _embeddingWorkerCaptureSubscription?.Dispose();
         _embeddingWorkerCaptureSubscription = null;
+        _embeddingWorkerBatchSubscription?.Dispose();
+        _embeddingWorkerBatchSubscription = null;
         _systemInteractionService?.UnregisterAllGlobalHotKeys();
         _ = Services.GetService<IBackgroundOcrQueue>()?.StopAsync();
         _ = Services.GetService<Clipthrough.Services.Search.IEmbeddingWorker>()?.StopAsync();

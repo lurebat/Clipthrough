@@ -134,6 +134,10 @@
                           IsChecked="{Binding UseFuzzyClipSearch}"
                           ToolTip.Tip="Fuzzy: tolerate small typos and match prefixes (OR between tokens)"
                           Content="Fuzzy" />
+                <CheckBox Classes="filter-toggle compact-toggle"
+                          IsChecked="{Binding UseSemanticClipSearch}"
+                          ToolTip.Tip="Semantic: rank by meaning (ignored with regex/wildcard/whole-word)"
+                          Content="Semantic" />
             </WrapPanel>
             </Grid>
         </Border>

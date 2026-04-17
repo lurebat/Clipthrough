@@ -59,6 +59,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly IOcrService _ocrService;
     private readonly IBackgroundOcrQueue _backgroundOcrQueue;
     private readonly IBackgroundJobIndicator _jobIndicator;
+    private readonly Clipthrough.Services.Search.ISemanticSearchService? _semanticSearchService;
     private readonly DatabaseInitializer _databaseInitializer;
     private readonly CompositeDisposable _subscriptions = new();
     private readonly Dictionary<long, (ClipEntry Clip, CancellationTokenSource Cts)> _pendingDeletes = new();
@@ -175,7 +176,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _editedClipSelectionLength;
     private long? _checkedSelectionAnchorId;
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null)
     {
         _clipStoreService = clipStoreService;
         _clipboardMonitorService = clipboardMonitorService;
@@ -194,6 +195,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _backgroundOcrQueue = backgroundOcrQueue;
         _jobIndicator = jobIndicator;
         _jobIndicator.Changed += OnJobIndicatorChanged;
+        _semanticSearchService = semanticSearchService;
         _databaseInitializer = databaseInitializer;
         SessionLogs = new SessionLogsViewModel(sessionLogService);
         ContentTypeOptions =
@@ -309,7 +311,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         x => x.UseWildcardSearch,
                         x => x.WholeWordSearch,
                         x => x.ShowPastedOnly,
-                        x => x.UseFuzzyClipSearch)
+                        x => x.UseFuzzyClipSearch,
+                        x => x.UseSemanticClipSearch)
                     .Select(static _ => Unit.Default))
                 .Skip(1)
                 .Throttle(TimeSpan.FromMilliseconds(300), RxApp.MainThreadScheduler)
@@ -1838,6 +1841,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => this.RaiseAndSetIfChanged(ref _useFuzzyClipSearch, value);
     }
 
+    private bool _useSemanticClipSearch = AppSettings.Default.UseSemanticClipSearch;
+
+    public bool UseSemanticClipSearch
+    {
+        get => _useSemanticClipSearch;
+        set => this.RaiseAndSetIfChanged(ref _useSemanticClipSearch, value);
+    }
+
     private bool _isSettingsSectionBehaviorExpanded = true;
     private bool _isSettingsSectionLocalHotkeysExpanded = true;
     private bool _isSettingsSectionGlobalHotkeyExpanded = true;
@@ -2239,6 +2250,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             var filters = BuildFilters(offset: 0);
             var result = await _clipStoreService.SearchAsync(filters);
+            result = await ApplySemanticFusionAsync(filters, result);
             ApplyRefreshResult(result, preferredSelectionId);
 
             if (!string.IsNullOrWhiteSpace(filters.SearchText))
@@ -2250,6 +2262,108 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             IsBusy = false;
         }
+    }
+
+    private async Task<ClipSearchResult> ApplySemanticFusionAsync(ClipSearchFilters filters, ClipSearchResult ftsResult)
+    {
+        if (_semanticSearchService is null)
+        {
+            return ftsResult;
+        }
+        if (!UseSemanticClipSearch)
+        {
+            return ftsResult;
+        }
+        if (string.IsNullOrWhiteSpace(filters.SearchText))
+        {
+            return ftsResult;
+        }
+        // Exact-mode gating: regex/wildcard/whole-word are precise operators; semantic would only dilute.
+        if (filters.UseRegex || filters.UseWildcard || filters.WholeWord)
+        {
+            return ftsResult;
+        }
+        if (!_semanticSearchService.IsReady)
+        {
+            return ftsResult;
+        }
+
+        var topK = Math.Max(filters.Limit * 2, 50);
+        IReadOnlyList<(long ClipId, float Score)> semantic;
+        try
+        {
+            semantic = await _semanticSearchService.QueryAsync(filters.SearchText, topK);
+        }
+        catch
+        {
+            return ftsResult;
+        }
+        if (semantic.Count == 0)
+        {
+            return ftsResult;
+        }
+
+        var ftsIds = new HashSet<long>(ftsResult.Items.Select(c => c.Id));
+        var missingIds = new List<long>();
+        foreach (var hit in semantic)
+        {
+            if (!ftsIds.Contains(hit.ClipId))
+            {
+                missingIds.Add(hit.ClipId);
+            }
+        }
+
+        IReadOnlyList<ClipEntry> extraClips = missingIds.Count > 0
+            ? await _clipStoreService.GetByIdsAsync(missingIds)
+            : Array.Empty<ClipEntry>();
+
+        // Respect non-text filters on semantic-only additions (FTS results already honor them).
+        var extraFiltered = extraClips.Where(c => MatchesNonTextFilters(c, filters)).ToList();
+
+        var allClips = new Dictionary<long, ClipEntry>();
+        foreach (var c in ftsResult.Items) allClips[c.Id] = c;
+        foreach (var c in extraFiltered) allClips[c.Id] = c;
+
+        var ftsRank = new Dictionary<long, int>();
+        for (var i = 0; i < ftsResult.Items.Count; i++) ftsRank[ftsResult.Items[i].Id] = i;
+        var semRank = new Dictionary<long, int>();
+        for (var i = 0; i < semantic.Count; i++) semRank[semantic[i].ClipId] = i;
+
+        const double rrfK = 60.0;
+        var fused = allClips.Values
+            .Select(c =>
+            {
+                double score = 0;
+                if (ftsRank.TryGetValue(c.Id, out var r1)) score += 1.0 / (rrfK + r1);
+                if (semRank.TryGetValue(c.Id, out var r2)) score += 1.0 / (rrfK + r2);
+                return (Clip: c, Score: score);
+            })
+            // Keep pinned entries on top (mirrors FTS ORDER BY pinned_at).
+            .OrderByDescending(t => t.Clip.PinnedAt.HasValue)
+            .ThenByDescending(t => t.Clip.PinnedAt ?? DateTimeOffset.MinValue)
+            .ThenByDescending(t => t.Score)
+            .Take(filters.Limit)
+            .Select(t => t.Clip)
+            .ToList();
+
+        return new ClipSearchResult
+        {
+            Items = fused,
+            TotalMatchingCount = Math.Max(ftsResult.TotalMatchingCount, fused.Count + (extraFiltered.Count - Math.Min(extraFiltered.Count, Math.Max(0, fused.Count - ftsResult.Items.Count)))),
+            TotalClipCount = ftsResult.TotalClipCount,
+            SensitiveClipCount = ftsResult.SensitiveClipCount,
+            TotalStoredBytes = ftsResult.TotalStoredBytes,
+            LastCapturedAt = ftsResult.LastCapturedAt,
+        };
+    }
+
+    private static bool MatchesNonTextFilters(ClipEntry clip, ClipSearchFilters filters)
+    {
+        if (filters.ContentType.HasValue && clip.ContentType != filters.ContentType.Value) return false;
+        if (filters.FavoritesOnly && !clip.IsFavorite) return false;
+        if (filters.SensitiveOnly && !clip.IsSensitive) return false;
+        if (filters.PastedOnly && !clip.IsPasted) return false;
+        return true;
     }
 
     private async Task LoadMoreAsync()
@@ -3962,6 +4076,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             EnableMaxEntryCount = SettingsEnableMaxEntryCount,
             MaxEntryCount = maxEntryCount,
             UseFuzzyClipSearch = UseFuzzyClipSearch,
+            UseSemanticClipSearch = UseSemanticClipSearch,
             UseFuzzySettingsSearch = SettingsUseFuzzySearch,
         };
 
@@ -4076,6 +4191,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedCustomHotkeyDraft = SettingsCustomHotkeyDrafts.FirstOrDefault();
         SettingsUseFuzzySearch = settings.UseFuzzySettingsSearch;
         UseFuzzyClipSearch = settings.UseFuzzyClipSearch;
+        UseSemanticClipSearch = settings.UseSemanticClipSearch;
         IsDatabasePasswordVisible = false;
     }
 

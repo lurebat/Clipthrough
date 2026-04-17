@@ -547,6 +547,52 @@ public sealed class ClipStoreService : IClipStoreService
         return ReadClip(reader);
     }
 
+    public async Task<IReadOnlyList<ClipEntry>> GetByIdsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default)
+    {
+        if (clipIds is null || clipIds.Count == 0)
+        {
+            return Array.Empty<ClipEntry>();
+        }
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var placeholders = new string[clipIds.Count];
+        await using var command = connection.CreateCommand();
+        for (var i = 0; i < clipIds.Count; i++)
+        {
+            var name = $"$id{i}";
+            placeholders[i] = name;
+            command.Parameters.AddWithValue(name, clipIds[i]);
+        }
+
+        command.CommandText = $"""
+            SELECT {ClipSelectColumns}
+            FROM clips c
+            WHERE c.id IN ({string.Join(",", placeholders)});
+            """;
+
+        var map = new Dictionary<long, ClipEntry>(clipIds.Count);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var clip = ReadClip(reader);
+            map[clip.Id] = clip;
+        }
+
+        await LoadSensitivityMatchesAsync(connection, map.Values.ToList(), cancellationToken);
+
+        var ordered = new List<ClipEntry>(map.Count);
+        foreach (var id in clipIds)
+        {
+            if (map.TryGetValue(id, out var entry))
+            {
+                ordered.Add(entry);
+            }
+        }
+        return ordered;
+    }
+
     public async Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default)
     {
         if (offset < 0)

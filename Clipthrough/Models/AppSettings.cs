@@ -118,6 +118,8 @@ public sealed record AppSettings
 
     public bool UseFuzzyClipSearch { get; init; }
 
+    public bool UseSemanticClipSearch { get; init; } = true;
+
     public bool UseFuzzySettingsSearch { get; init; } = true;
 
     public bool EnableAi { get; init; }

@@ -42,6 +42,8 @@ public interface IClipStoreService
 
     Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default);
 
+    Task<System.Collections.Generic.IReadOnlyList<ClipEntry>> GetByIdsAsync(System.Collections.Generic.IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default);
+
     // -------- Semantic embeddings (sem-02) --------
 
     Task<System.Collections.Generic.IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default);
