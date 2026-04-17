@@ -73,6 +73,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _wholeWordSearch;
     private bool _showPastedOnly;
     private ClipItemViewModel? _selectedClip;
+    private int _checkedClipCount;
+    private int _checkedTransformableClipCount;
     private ClipFileItemViewModel? _selectedFileItem;
     private bool _hasMoreResults;
     private bool _isBusy;
@@ -586,10 +588,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get
         {
-            var checkedClips = Clips.Where(static c => c.IsChecked).ToList();
-            if (checkedClips.Count > 0)
+            if (_checkedClipCount > 0)
             {
-                return checkedClips.Any(c => c.CanTransform);
+                return _checkedTransformableClipCount > 0;
             }
             return SelectedClip?.CanTransform == true;
         }
@@ -938,9 +939,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool HasSelectedClipFileItems => SelectedClipFiles.Count > 0;
 
-    public bool HasCheckedClips => Clips.Any(static clip => clip.IsChecked);
+    public bool HasCheckedClips => _checkedClipCount > 0;
 
-    public int CheckedClipCount => Clips.Count(static clip => clip.IsChecked);
+    public int CheckedClipCount => _checkedClipCount;
 
     public string CheckedClipSummaryText => AppText.FormatCheckedClipCount(CheckedClipCount);
 
@@ -2720,6 +2721,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         foreach (var vm in clipVms)
         {
             entries.Add((vm.Id, vm.Clip));
+            DetachClip(vm);
             Clips.Remove(vm);
             vm.Dispose();
         }
@@ -4098,6 +4100,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         Clips.Clear();
+        _checkedClipCount = 0;
+        _checkedTransformableClipCount = 0;
     }
 
     private void UpdateClipDisplayIndices()
@@ -4122,13 +4126,47 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             IsChecked = checkedIds?.Contains(clip.Id) == true
         };
         item.PropertyChanged += OnClipItemPropertyChanged;
+        if (item.IsChecked)
+        {
+            _checkedClipCount++;
+            if (item.CanTransform) _checkedTransformableClipCount++;
+        }
         return item;
+    }
+
+    private void DetachClip(ClipItemViewModel clip)
+    {
+        clip.PropertyChanged -= OnClipItemPropertyChanged;
+        if (clip.IsChecked)
+        {
+            _checkedClipCount = Math.Max(0, _checkedClipCount - 1);
+            if (clip.CanTransform)
+            {
+                _checkedTransformableClipCount = Math.Max(0, _checkedTransformableClipCount - 1);
+            }
+        }
     }
 
     private void OnClipItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(ClipItemViewModel.IsChecked))
         {
+            if (sender is ClipItemViewModel clip)
+            {
+                if (clip.IsChecked)
+                {
+                    _checkedClipCount++;
+                    if (clip.CanTransform) _checkedTransformableClipCount++;
+                }
+                else
+                {
+                    _checkedClipCount = Math.Max(0, _checkedClipCount - 1);
+                    if (clip.CanTransform)
+                    {
+                        _checkedTransformableClipCount = Math.Max(0, _checkedTransformableClipCount - 1);
+                    }
+                }
+            }
             RaiseBulkSelectionProperties();
         }
     }
