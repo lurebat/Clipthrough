@@ -75,7 +75,8 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         Func<ClipItemViewModel, Task>? toggleFavoriteHandler = null,
         Func<ClipItemViewModel, Task>? deleteHandler = null,
         Func<ClipItemViewModel, Task>? exportHandler = null,
-        Func<ClipItemViewModel, Task>? togglePinHandler = null)
+        Func<ClipItemViewModel, Task>? togglePinHandler = null,
+        Func<ClipItemViewModel, TextTransformation, Task>? applyTransformHandler = null)
     {
         Clip = clip;
         SourceAppIconImage = ClipBitmapFactory.TryLoad(clip.SourceAppIconBytes);
@@ -120,6 +121,14 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
                     await togglePinHandler(this);
                 }
             });
+        ApplyTextTransformationCommand = ReactiveCommand.CreateFromTask<TextTransformation>(
+            async t =>
+            {
+                if (applyTransformHandler is not null)
+                {
+                    await applyTransformHandler(this, t);
+                }
+            });
     }
 
     public ClipEntry Clip { get; }
@@ -135,6 +144,8 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> ExportCommand { get; }
 
     public ReactiveCommand<Unit, Unit> TogglePinCommand { get; }
+
+    public ReactiveCommand<TextTransformation, Unit> ApplyTextTransformationCommand { get; }
 
     public bool IsChecked
     {

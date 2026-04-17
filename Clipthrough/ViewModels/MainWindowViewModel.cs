@@ -2234,6 +2234,47 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             multiSummary: count => $"Applied transformation to {count} clips");
     }
 
+    private async Task ApplyTransformationToSingleClipAsync(ClipItemViewModel clip, TextTransformation transformation)
+    {
+        if (clip is null || transformation == TextTransformation.None)
+        {
+            return;
+        }
+
+        if (clip.Clip.ContentType != ContentType.Text && clip.Clip.ContentType != ContentType.RichText)
+        {
+            return;
+        }
+
+        var source = clip.Clip.Content ?? string.Empty;
+        if (string.IsNullOrEmpty(source))
+        {
+            return;
+        }
+
+        var result = TextTransformationService.Apply(transformation, source);
+        if (string.Equals(result, source, StringComparison.Ordinal))
+        {
+            StatusText = "Transformation produced no change";
+            return;
+        }
+
+        var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
+        await _clipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentBytes = textBytes,
+            ContentText = result,
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            SourceApp = clip.SourceApp,
+            SourceAppPath = clip.Clip.SourceAppPath,
+            SourceAppIconBytes = clip.Clip.SourceAppIconBytes,
+            IncrementExistingCopyCount = false,
+        });
+        StatusText = AppText.EditedClipCopiedStatus;
+        await RefreshAsync();
+    }
+
     private async Task ApplyUserScriptAsync(UserScript? script)
     {
         if (script is null || string.IsNullOrWhiteSpace(script.Code))
@@ -3806,7 +3847,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private ClipItemViewModel CreateClipItemViewModel(ClipEntry clip, ISet<long>? checkedIds = null)
     {
-        var item = new ClipItemViewModel(clip, CopyClipAsync, ToggleFavoriteClipAsync, DeleteClipAsync, ExportClipAsync, TogglePinClipAsync)
+        var item = new ClipItemViewModel(
+            clip,
+            CopyClipAsync,
+            ToggleFavoriteClipAsync,
+            DeleteClipAsync,
+            ExportClipAsync,
+            TogglePinClipAsync,
+            ApplyTransformationToSingleClipAsync)
         {
             IsChecked = checkedIds?.Contains(clip.Id) == true
         };
