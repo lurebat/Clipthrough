@@ -50,26 +50,27 @@ public sealed class DatabaseInitializer
             source_app,
             source_window_title,
             source_url,
+            ocr_text,
             content='clips',
             content_rowid='id',
             tokenize='unicode61 remove_diacritics 2'
         );
 
         CREATE TRIGGER IF NOT EXISTS clips_ai AFTER INSERT ON clips BEGIN
-            INSERT INTO clips_fts(rowid, content, source_app, source_window_title, source_url)
-            VALUES (new.id, new.content, new.source_app, new.source_window_title, new.source_url);
+            INSERT INTO clips_fts(rowid, content, source_app, source_window_title, source_url, ocr_text)
+            VALUES (new.id, new.content, new.source_app, new.source_window_title, new.source_url, new.ocr_text);
         END;
 
         CREATE TRIGGER IF NOT EXISTS clips_ad AFTER DELETE ON clips BEGIN
-            INSERT INTO clips_fts(clips_fts, rowid, content, source_app, source_window_title, source_url)
-            VALUES ('delete', old.id, old.content, old.source_app, old.source_window_title, old.source_url);
+            INSERT INTO clips_fts(clips_fts, rowid, content, source_app, source_window_title, source_url, ocr_text)
+            VALUES ('delete', old.id, old.content, old.source_app, old.source_window_title, old.source_url, old.ocr_text);
         END;
 
         CREATE TRIGGER IF NOT EXISTS clips_au AFTER UPDATE ON clips BEGIN
-            INSERT INTO clips_fts(clips_fts, rowid, content, source_app, source_window_title, source_url)
-            VALUES ('delete', old.id, old.content, old.source_app, old.source_window_title, old.source_url);
-            INSERT INTO clips_fts(rowid, content, source_app, source_window_title, source_url)
-            VALUES (new.id, new.content, new.source_app, new.source_window_title, new.source_url);
+            INSERT INTO clips_fts(clips_fts, rowid, content, source_app, source_window_title, source_url, ocr_text)
+            VALUES ('delete', old.id, old.content, old.source_app, old.source_window_title, old.source_url, old.ocr_text);
+            INSERT INTO clips_fts(rowid, content, source_app, source_window_title, source_url, ocr_text)
+            VALUES (new.id, new.content, new.source_app, new.source_window_title, new.source_url, new.ocr_text);
         END;
 
         CREATE INDEX IF NOT EXISTS idx_clips_captured_at ON clips(captured_at DESC);
@@ -508,9 +509,9 @@ public sealed class DatabaseInitializer
         => await ExecuteNonQueryAsync(connection, "INSERT INTO clips_fts(clips_fts) VALUES ('rebuild');", cancellationToken);
 
     /// <summary>
-    /// Detects if the existing FTS table has the old 2-column schema (content, source_app)
-    /// and drops it along with its triggers so the Schema DDL can recreate them with
-    /// the new 4-column schema (content, source_app, source_window_title, source_url).
+    /// Detects if the existing FTS table has an older (2- or 4-column) schema
+    /// and drops it along with its triggers so the Schema DDL can recreate them
+    /// with the current 5-column schema (adds ocr_text).
     /// </summary>
     private static async Task MigrateFtsSchemaIfNeededAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
@@ -535,8 +536,8 @@ public sealed class DatabaseInitializer
             }
         }
 
-        // The new schema has 4 content columns; the old had 2
-        if (columnCount >= 4)
+        // The current schema has 5 content columns; older versions had 2 or 4
+        if (columnCount >= 5)
         {
             return;
         }
