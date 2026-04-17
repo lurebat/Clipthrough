@@ -65,7 +65,7 @@
                                    FontWeight="SemiBold" />
                     </Expander.Header>
                     <Grid ColumnDefinitions="Auto,260,*"
-                          RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                          RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                           ColumnSpacing="12"
                           RowSpacing="10"
                           Margin="8,10,0,0">
@@ -110,6 +110,18 @@
                         <TextBlock Grid.Row="6" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsPastedHotkeyLabel}" />
                         <ctrl:HotkeyBox Grid.Row="6" Grid.Column="2" Hotkey="{Binding SettingsTogglePastedHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <CheckBox Grid.Row="7" Content="{Binding SettingsEnableShortcutLabel}"
+                                  IsChecked="{Binding SettingsEnableToggleFuzzyHotkey}" />
+                        <TextBlock Grid.Row="7" Grid.Column="1" VerticalAlignment="Center"
+                                   Text="Toggle fuzzy search" />
+                        <ctrl:HotkeyBox Grid.Row="7" Grid.Column="2" Hotkey="{Binding SettingsToggleFuzzyHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <CheckBox Grid.Row="8" Content="{Binding SettingsEnableShortcutLabel}"
+                                  IsChecked="{Binding SettingsEnableToggleSemanticHotkey}" />
+                        <TextBlock Grid.Row="8" Grid.Column="1" VerticalAlignment="Center"
+                                   Text="Toggle semantic search" />
+                        <ctrl:HotkeyBox Grid.Row="8" Grid.Column="2" Hotkey="{Binding SettingsToggleSemanticHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                     </Grid>
                 </Expander>
 

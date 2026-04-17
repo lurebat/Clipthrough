@@ -22,31 +22,39 @@ public sealed record AppSettings
 
     public bool EnableToggleRegexHotkey { get; init; } = true;
 
-    public string ToggleRegexHotkey { get; init; } = "Ctrl+Shift+R";
+    public string ToggleRegexHotkey { get; init; } = "Ctrl+R";
 
     public bool EnableToggleFavoritesHotkey { get; init; } = true;
 
-    public string ToggleFavoritesHotkey { get; init; } = "Ctrl+Shift+F";
+    public string ToggleFavoritesHotkey { get; init; } = "Ctrl+D";
 
     public bool EnableToggleSensitiveHotkey { get; init; } = true;
 
-    public string ToggleSensitiveHotkey { get; init; } = "Ctrl+Shift+S";
+    public string ToggleSensitiveHotkey { get; init; } = "Ctrl+L";
 
     public bool EnableToggleCaseSensitiveHotkey { get; init; } = true;
 
-    public string ToggleCaseSensitiveHotkey { get; init; } = "Ctrl+Shift+A";
+    public string ToggleCaseSensitiveHotkey { get; init; } = "Ctrl+K";
 
     public bool EnableToggleWildcardHotkey { get; init; } = true;
 
-    public string ToggleWildcardHotkey { get; init; } = "Ctrl+Shift+W";
+    public string ToggleWildcardHotkey { get; init; } = "Ctrl+M";
 
     public bool EnableToggleWholeWordHotkey { get; init; } = true;
 
-    public string ToggleWholeWordHotkey { get; init; } = "Ctrl+Shift+H";
+    public string ToggleWholeWordHotkey { get; init; } = "Ctrl+E";
 
     public bool EnableTogglePastedHotkey { get; init; } = true;
 
-    public string TogglePastedHotkey { get; init; } = "Ctrl+Shift+P";
+    public string TogglePastedHotkey { get; init; } = "Ctrl+U";
+
+    public bool EnableToggleFuzzyHotkey { get; init; } = true;
+
+    public string ToggleFuzzyHotkey { get; init; } = "Ctrl+T";
+
+    public bool EnableToggleSemanticHotkey { get; init; } = true;
+
+    public string ToggleSemanticHotkey { get; init; } = "Ctrl+J";
 
     public bool EnableToggleWindowHotkey { get; init; } = true;
 
@@ -173,19 +181,23 @@ public sealed record AppSettings
     public AppSettings Normalize() => this with
     {
         EnableToggleRegexHotkey = EnableToggleRegexHotkey,
-        ToggleRegexHotkey = NormalizeHotkey(ToggleRegexHotkey, Default.ToggleRegexHotkey),
+        ToggleRegexHotkey = MigrateFilterHotkey(ToggleRegexHotkey, Default.ToggleRegexHotkey, "Alt+R", "Ctrl+Shift+R"),
         EnableToggleFavoritesHotkey = EnableToggleFavoritesHotkey,
-        ToggleFavoritesHotkey = NormalizeHotkey(ToggleFavoritesHotkey, Default.ToggleFavoritesHotkey),
+        ToggleFavoritesHotkey = MigrateFilterHotkey(ToggleFavoritesHotkey, Default.ToggleFavoritesHotkey, "Alt+F", "Ctrl+Shift+F"),
         EnableToggleSensitiveHotkey = EnableToggleSensitiveHotkey,
-        ToggleSensitiveHotkey = NormalizeHotkey(ToggleSensitiveHotkey, Default.ToggleSensitiveHotkey),
+        ToggleSensitiveHotkey = MigrateFilterHotkey(ToggleSensitiveHotkey, Default.ToggleSensitiveHotkey, "Alt+S", "Ctrl+Shift+S"),
         EnableToggleCaseSensitiveHotkey = EnableToggleCaseSensitiveHotkey,
-        ToggleCaseSensitiveHotkey = NormalizeHotkey(ToggleCaseSensitiveHotkey, Default.ToggleCaseSensitiveHotkey),
+        ToggleCaseSensitiveHotkey = MigrateFilterHotkey(ToggleCaseSensitiveHotkey, Default.ToggleCaseSensitiveHotkey, "Alt+C", "Alt+A", "Ctrl+Shift+A"),
         EnableToggleWildcardHotkey = EnableToggleWildcardHotkey,
-        ToggleWildcardHotkey = NormalizeHotkey(ToggleWildcardHotkey, Default.ToggleWildcardHotkey),
+        ToggleWildcardHotkey = MigrateFilterHotkey(ToggleWildcardHotkey, Default.ToggleWildcardHotkey, "Alt+W", "Ctrl+Shift+W"),
         EnableToggleWholeWordHotkey = EnableToggleWholeWordHotkey,
-        ToggleWholeWordHotkey = NormalizeHotkey(ToggleWholeWordHotkey, Default.ToggleWholeWordHotkey),
+        ToggleWholeWordHotkey = MigrateFilterHotkey(ToggleWholeWordHotkey, Default.ToggleWholeWordHotkey, "Alt+H", "Ctrl+Shift+H"),
         EnableTogglePastedHotkey = EnableTogglePastedHotkey,
-        TogglePastedHotkey = NormalizeHotkey(TogglePastedHotkey, Default.TogglePastedHotkey),
+        TogglePastedHotkey = MigrateFilterHotkey(TogglePastedHotkey, Default.TogglePastedHotkey, "Alt+P", "Ctrl+Shift+P"),
+        EnableToggleFuzzyHotkey = EnableToggleFuzzyHotkey,
+        ToggleFuzzyHotkey = MigrateFilterHotkey(ToggleFuzzyHotkey, Default.ToggleFuzzyHotkey),
+        EnableToggleSemanticHotkey = EnableToggleSemanticHotkey,
+        ToggleSemanticHotkey = MigrateFilterHotkey(ToggleSemanticHotkey, Default.ToggleSemanticHotkey),
         EnableToggleWindowHotkey = EnableToggleWindowHotkey,
         ToggleWindowHotkey = NormalizeHotkey(ToggleWindowHotkey, Default.ToggleWindowHotkey),
         EnableIncrementalPasteHotkey = EnableIncrementalPasteHotkey,
@@ -261,9 +273,33 @@ public sealed record AppSettings
     private static string NormalizeOptionalHotkey(string? value)
         => string.IsNullOrWhiteSpace(value) ? string.Empty : MigrateLegacyAltHotkey(value.Trim(), string.Empty);
 
+    // Filter-toggle hotkeys were originally shipped as bare Alt+<letter> (conflicts with
+    // menu access keys) and later as Ctrl+Shift+<letter>. Both are now considered legacy and
+    // should be migrated to the modern Ctrl+<letter> default so existing installs pick up the
+    // simpler bindings. Any value the user has customised away from those is preserved.
+    private static string MigrateFilterHotkey(string? value, string newDefault, params string[] legacyDefaults)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return newDefault;
+        }
+
+        var trimmed = value.Trim();
+
+        foreach (var legacy in legacyDefaults)
+        {
+            if (string.Equals(trimmed, legacy, System.StringComparison.OrdinalIgnoreCase))
+            {
+                return newDefault;
+            }
+        }
+
+        return MigrateLegacyAltHotkey(trimmed, newDefault);
+    }
+
     // Older builds shipped filter hotkeys as bare `Alt+<Letter>` which collides with Avalonia's
-    // menu access keys. Migrate any such value to the modern Ctrl-based default so upgraded
-    // installs don't permanently keep the conflicting bindings.
+    // menu access keys. Migrate any such value to the modern default so upgraded installs don't
+    // permanently keep the conflicting bindings. Combined gestures like Ctrl+Alt+T are left alone.
     private static string MigrateLegacyAltHotkey(string value, string fallback)
     {
         if (!value.StartsWith("Alt+", System.StringComparison.OrdinalIgnoreCase))
@@ -278,7 +314,7 @@ public sealed record AppSettings
             return value;
         }
 
-        return string.IsNullOrEmpty(fallback) ? "Ctrl+Shift+" + rest : fallback;
+        return string.IsNullOrEmpty(fallback) ? "Ctrl+" + rest : fallback;
     }
 
     private static int NormalizeInt(int value, int fallback, int min, int max)

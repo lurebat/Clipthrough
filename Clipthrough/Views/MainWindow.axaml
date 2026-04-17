@@ -158,11 +158,11 @@
                               Content="{Binding WholeWordFilterLabel}" />
                     <CheckBox Classes="filter-toggle compact-toggle"
                               IsChecked="{Binding UseFuzzyClipSearch}"
-                              ToolTip.Tip="Fuzzy: tolerate small typos and match prefixes (OR between tokens)"
+                              ToolTip.Tip="{Binding FuzzyFilterTooltip}"
                               Content="Fuzzy" />
                     <CheckBox Classes="filter-toggle compact-toggle"
                               IsChecked="{Binding UseSemanticClipSearch}"
-                              ToolTip.Tip="Semantic: rank by meaning (ignored with regex/wildcard/whole-word)"
+                              ToolTip.Tip="{Binding SemanticFilterTooltip}"
                               Content="Semantic" />
                 </WrapPanel>
             </Grid>

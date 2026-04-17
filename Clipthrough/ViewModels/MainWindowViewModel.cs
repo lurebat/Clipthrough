@@ -140,6 +140,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _settingsEnableToggleWholeWordHotkey = AppSettings.Default.EnableToggleWholeWordHotkey;
     private string _settingsTogglePastedHotkey = AppSettings.Default.TogglePastedHotkey;
     private bool _settingsEnableTogglePastedHotkey = AppSettings.Default.EnableTogglePastedHotkey;
+    private string _settingsToggleFuzzyHotkey = AppSettings.Default.ToggleFuzzyHotkey;
+    private bool _settingsEnableToggleFuzzyHotkey = AppSettings.Default.EnableToggleFuzzyHotkey;
+    private string _settingsToggleSemanticHotkey = AppSettings.Default.ToggleSemanticHotkey;
+    private bool _settingsEnableToggleSemanticHotkey = AppSettings.Default.EnableToggleSemanticHotkey;
     private string _settingsIncrementalPasteHotkey = AppSettings.Default.IncrementalPasteHotkey;
     private bool _settingsEnableIncrementalPasteHotkey = AppSettings.Default.EnableIncrementalPasteHotkey;
     private string _settingsDecrementalPasteHotkey = AppSettings.Default.DecrementalPasteHotkey;
@@ -913,6 +917,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _settingsService.Current.EnableToggleWholeWordHotkey, _settingsService.Current.ToggleWholeWordHotkey);
     public string PastedFilterTooltip => BuildFilterTooltip(AppText.PastedFilterLabel,
         _settingsService.Current.EnableTogglePastedHotkey, _settingsService.Current.TogglePastedHotkey);
+    public string FuzzyFilterTooltip => BuildFilterTooltip("Fuzzy: tolerate small typos and match prefixes",
+        _settingsService.Current.EnableToggleFuzzyHotkey, _settingsService.Current.ToggleFuzzyHotkey);
+    public string SemanticFilterTooltip => BuildFilterTooltip("Semantic: rank by meaning (ignored with regex/wildcard/whole-word)",
+        _settingsService.Current.EnableToggleSemanticHotkey, _settingsService.Current.ToggleSemanticHotkey);
 
     public string RefreshButtonLabel => AppText.RefreshButtonLabel;
 
@@ -1867,6 +1875,30 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get => _settingsEnableTogglePastedHotkey;
         set => this.RaiseAndSetIfChanged(ref _settingsEnableTogglePastedHotkey, value);
+    }
+
+    public string SettingsToggleFuzzyHotkey
+    {
+        get => _settingsToggleFuzzyHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsToggleFuzzyHotkey, value);
+    }
+
+    public bool SettingsEnableToggleFuzzyHotkey
+    {
+        get => _settingsEnableToggleFuzzyHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnableToggleFuzzyHotkey, value);
+    }
+
+    public string SettingsToggleSemanticHotkey
+    {
+        get => _settingsToggleSemanticHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsToggleSemanticHotkey, value);
+    }
+
+    public bool SettingsEnableToggleSemanticHotkey
+    {
+        get => _settingsEnableToggleSemanticHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnableToggleSemanticHotkey, value);
     }
 
     public string SettingsIncrementalPasteHotkey
@@ -3837,7 +3869,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             || TryHandleShortcut(e, _settingsService.Current.EnableToggleCaseSensitiveHotkey, _settingsService.Current.ToggleCaseSensitiveHotkey, () => CaseSensitiveSearch = !CaseSensitiveSearch)
             || TryHandleShortcut(e, _settingsService.Current.EnableToggleWildcardHotkey, _settingsService.Current.ToggleWildcardHotkey, () => UseWildcardSearch = !UseWildcardSearch)
             || TryHandleShortcut(e, _settingsService.Current.EnableToggleWholeWordHotkey, _settingsService.Current.ToggleWholeWordHotkey, () => WholeWordSearch = !WholeWordSearch)
-            || TryHandleShortcut(e, _settingsService.Current.EnableTogglePastedHotkey, _settingsService.Current.TogglePastedHotkey, () => ShowPastedOnly = !ShowPastedOnly);
+            || TryHandleShortcut(e, _settingsService.Current.EnableTogglePastedHotkey, _settingsService.Current.TogglePastedHotkey, () => ShowPastedOnly = !ShowPastedOnly)
+            || TryHandleShortcut(e, _settingsService.Current.EnableToggleFuzzyHotkey, _settingsService.Current.ToggleFuzzyHotkey, () => UseFuzzyClipSearch = !UseFuzzyClipSearch)
+            || TryHandleShortcut(e, _settingsService.Current.EnableToggleSemanticHotkey, _settingsService.Current.ToggleSemanticHotkey, () => UseSemanticClipSearch = !UseSemanticClipSearch);
     }
 
     private bool TryHandleShortcut(KeyEventArgs e, bool isEnabled, string hotkeyText, Action action)
@@ -4161,6 +4195,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new HotkeyDraft(nameof(AppSettings.ToggleWildcardHotkey), SettingsEnableToggleWildcardHotkey, SettingsToggleWildcardHotkey),
             new HotkeyDraft(nameof(AppSettings.ToggleWholeWordHotkey), SettingsEnableToggleWholeWordHotkey, SettingsToggleWholeWordHotkey),
             new HotkeyDraft(nameof(AppSettings.TogglePastedHotkey), SettingsEnableTogglePastedHotkey, SettingsTogglePastedHotkey),
+            new HotkeyDraft(nameof(AppSettings.ToggleFuzzyHotkey), SettingsEnableToggleFuzzyHotkey, SettingsToggleFuzzyHotkey),
+            new HotkeyDraft(nameof(AppSettings.ToggleSemanticHotkey), SettingsEnableToggleSemanticHotkey, SettingsToggleSemanticHotkey),
         };
 
         var normalizedHotkeys = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -4337,6 +4373,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ToggleWholeWordHotkey = normalizedHotkeys[nameof(AppSettings.ToggleWholeWordHotkey)],
             EnableTogglePastedHotkey = SettingsEnableTogglePastedHotkey,
             TogglePastedHotkey = normalizedHotkeys[nameof(AppSettings.TogglePastedHotkey)],
+            EnableToggleFuzzyHotkey = SettingsEnableToggleFuzzyHotkey,
+            ToggleFuzzyHotkey = normalizedHotkeys[nameof(AppSettings.ToggleFuzzyHotkey)],
+            EnableToggleSemanticHotkey = SettingsEnableToggleSemanticHotkey,
+            ToggleSemanticHotkey = normalizedHotkeys[nameof(AppSettings.ToggleSemanticHotkey)],
             EnableIncrementalPasteHotkey = SettingsEnableIncrementalPasteHotkey,
             IncrementalPasteHotkey = normalizedIncrementalHotkey,
             EnableDecrementalPasteHotkey = SettingsEnableDecrementalPasteHotkey,
@@ -4461,6 +4501,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsToggleWholeWordHotkey = settings.ToggleWholeWordHotkey;
         SettingsEnableTogglePastedHotkey = settings.EnableTogglePastedHotkey;
         SettingsTogglePastedHotkey = settings.TogglePastedHotkey;
+        SettingsEnableToggleFuzzyHotkey = settings.EnableToggleFuzzyHotkey;
+        SettingsToggleFuzzyHotkey = settings.ToggleFuzzyHotkey;
+        SettingsEnableToggleSemanticHotkey = settings.EnableToggleSemanticHotkey;
+        SettingsToggleSemanticHotkey = settings.ToggleSemanticHotkey;
         SettingsEnableIncrementalPasteHotkey = settings.EnableIncrementalPasteHotkey;
         SettingsIncrementalPasteHotkey = settings.IncrementalPasteHotkey;
         SettingsEnableDecrementalPasteHotkey = settings.EnableDecrementalPasteHotkey;
@@ -4530,6 +4574,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(WildcardFilterTooltip));
         this.RaisePropertyChanged(nameof(WholeWordFilterTooltip));
         this.RaisePropertyChanged(nameof(PastedFilterTooltip));
+        this.RaisePropertyChanged(nameof(FuzzyFilterTooltip));
+        this.RaisePropertyChanged(nameof(SemanticFilterTooltip));
     }
 
     private void SyncUserScripts(AppSettings settings)
