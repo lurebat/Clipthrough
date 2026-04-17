@@ -44,7 +44,16 @@ public sealed class DatabaseInitializer
             ocr_attempted_at TEXT,
             ocr_error    TEXT,
             source_clip_id INTEGER,
-            transform_kind TEXT
+            transform_kind TEXT,
+            embedding_status TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS clip_embeddings (
+            clip_id       INTEGER PRIMARY KEY REFERENCES clips(id) ON DELETE CASCADE,
+            model_version TEXT NOT NULL,
+            dimensions    INTEGER NOT NULL,
+            vector        BLOB NOT NULL,
+            created_at    TEXT NOT NULL
         );
 
         CREATE VIRTUAL TABLE IF NOT EXISTS clips_fts USING fts5(
@@ -79,6 +88,7 @@ public sealed class DatabaseInitializer
         CREATE INDEX IF NOT EXISTS idx_clips_content_type ON clips(content_type);
         CREATE INDEX IF NOT EXISTS idx_clips_is_favorite ON clips(is_favorite) WHERE is_favorite = 1;
         CREATE INDEX IF NOT EXISTS idx_clips_is_sensitive ON clips(is_sensitive) WHERE is_sensitive = 1;
+        CREATE INDEX IF NOT EXISTS idx_clips_embedding_status ON clips(embedding_status) WHERE embedding_status IS NOT NULL;
 
         CREATE TABLE IF NOT EXISTS app_metadata (
             key   TEXT PRIMARY KEY,
@@ -137,6 +147,7 @@ public sealed class DatabaseInitializer
         await EnsureClipPinningColumnsAsync(connection, cancellationToken);
         await EnsureClipOcrColumnsAsync(connection, cancellationToken);
         await EnsureClipLineageColumnsAsync(connection, cancellationToken);
+        await EnsureClipEmbeddingSchemaAsync(connection, cancellationToken);
         await BackfillClipAggregationColumnsAsync(connection, cancellationToken);
         await BackfillClipPayloadColumnsAsync(connection, cancellationToken);
         await DeduplicateClipsByHashAsync(connection, cancellationToken);
@@ -368,6 +379,46 @@ public sealed class DatabaseInitializer
         await ExecuteNonQueryAsync(
             connection,
             "CREATE INDEX IF NOT EXISTS idx_clips_source_clip_id ON clips(source_clip_id) WHERE source_clip_id IS NOT NULL;",
+            cancellationToken);
+    }
+
+    private static async Task EnsureClipEmbeddingSchemaAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var existingColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "PRAGMA table_info(clips);";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                existingColumns.Add(reader.GetString(1));
+            }
+        }
+
+        if (!existingColumns.Contains("embedding_status"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN embedding_status TEXT;", cancellationToken);
+        }
+
+        await ExecuteNonQueryAsync(connection, """
+            CREATE TABLE IF NOT EXISTS clip_embeddings (
+                clip_id       INTEGER PRIMARY KEY REFERENCES clips(id) ON DELETE CASCADE,
+                model_version TEXT NOT NULL,
+                dimensions    INTEGER NOT NULL,
+                vector        BLOB NOT NULL,
+                created_at    TEXT NOT NULL
+            );
+            """, cancellationToken);
+
+        await ExecuteNonQueryAsync(
+            connection,
+            "CREATE INDEX IF NOT EXISTS idx_clips_embedding_status ON clips(embedding_status) WHERE embedding_status IS NOT NULL;",
+            cancellationToken);
+
+        // Stale reclaim: any clip marked 'processing' from a prior crashed run goes back to 'pending'.
+        await ExecuteNonQueryAsync(
+            connection,
+            "UPDATE clips SET embedding_status = 'pending' WHERE embedding_status = 'processing';",
             cancellationToken);
     }
 

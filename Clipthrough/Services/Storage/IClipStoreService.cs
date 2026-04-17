@@ -41,4 +41,18 @@ public interface IClipStoreService
     Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default);
 
     Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default);
+
+    // -------- Semantic embeddings (sem-02) --------
+
+    Task<System.Collections.Generic.IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default);
+
+    Task SaveEmbeddingBatchAsync(System.Collections.Generic.IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion, CancellationToken cancellationToken = default);
+
+    Task<bool> SetEmbeddingFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default);
+
+    Task<System.Collections.Generic.IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default);
+
+    Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default);
+
+    Task<System.Collections.Generic.IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default);
 }

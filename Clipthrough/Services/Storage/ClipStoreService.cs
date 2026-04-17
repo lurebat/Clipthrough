@@ -213,11 +213,40 @@ public sealed class ClipStoreService : IClipStoreService
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE clips SET is_sensitive = $s WHERE id = $id;";
-        command.Parameters.AddWithValue("$s", isSensitive ? 1 : 0);
-        command.Parameters.AddWithValue("$id", clipId);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "UPDATE clips SET is_sensitive = $s WHERE id = $id;";
+            command.Parameters.AddWithValue("$s", isSensitive ? 1 : 0);
+            command.Parameters.AddWithValue("$id", clipId);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        if (isSensitive)
+        {
+            // Purge any embedding and mark excluded so the worker won't re-queue.
+            await using var purge = connection.CreateCommand();
+            purge.Transaction = transaction;
+            purge.CommandText = """
+                DELETE FROM clip_embeddings WHERE clip_id = $id;
+                UPDATE clips SET embedding_status = 'excluded' WHERE id = $id;
+                """;
+            purge.Parameters.AddWithValue("$id", clipId);
+            await purge.ExecuteNonQueryAsync(cancellationToken);
+        }
+        else
+        {
+            // Allow re-embedding: clear excluded status so the worker picks it up again.
+            await using var clear = connection.CreateCommand();
+            clear.Transaction = transaction;
+            clear.CommandText = "UPDATE clips SET embedding_status = NULL WHERE id = $id AND embedding_status = 'excluded';";
+            clear.Parameters.AddWithValue("$id", clipId);
+            await clear.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task MarkPastedAsync(long clipId, CancellationToken cancellationToken = default)
@@ -1258,5 +1287,227 @@ public sealed class ClipStoreService : IClipStoreService
         idCommand.CommandText = "SELECT id FROM sensitivity_rules WHERE name = $name;";
         idCommand.Parameters.AddWithValue("$name", match.RuleName);
         return (long)(await idCommand.ExecuteScalarAsync(cancellationToken) ?? 0L);
+    }
+
+    // ============================ Semantic embeddings (sem-02) ============================
+
+    private const string EmbeddingEligibilityClause = """
+        is_sensitive = 0
+        AND (
+            (content_type IN ('text','richtext','files') AND content IS NOT NULL AND TRIM(content) <> '')
+            OR (content_type = 'image' AND ocr_status = 'succeeded' AND ocr_text IS NOT NULL AND TRIM(ocr_text) <> '')
+        )
+        """;
+
+    private const string EmbeddingTextExpression = "CASE WHEN content_type = 'image' THEN ocr_text ELSE content END";
+
+    public async Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default)
+    {
+        if (batchSize <= 0) return Array.Empty<ClipEmbeddingCandidate>();
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+        var results = new List<ClipEmbeddingCandidate>(batchSize);
+
+        await using (var selectCommand = connection.CreateCommand())
+        {
+            selectCommand.Transaction = transaction;
+            selectCommand.CommandText = $"""
+                SELECT id, ({EmbeddingTextExpression}) AS etext
+                FROM clips
+                WHERE (embedding_status IS NULL OR embedding_status IN ('pending','rerun','failed'))
+                  AND {EmbeddingEligibilityClause}
+                ORDER BY COALESCE(last_copied_at, captured_at) DESC
+                LIMIT $limit;
+                """;
+            selectCommand.Parameters.AddWithValue("$limit", batchSize);
+
+            await using var reader = await selectCommand.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var id = reader.GetInt64(0);
+                var text = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    results.Add(new ClipEmbeddingCandidate(id, text));
+                }
+            }
+        }
+
+        if (results.Count > 0)
+        {
+            await using var claim = connection.CreateCommand();
+            claim.Transaction = transaction;
+            var paramNames = new List<string>(results.Count);
+            for (var i = 0; i < results.Count; i++)
+            {
+                var p = "$id" + i;
+                paramNames.Add(p);
+                claim.Parameters.AddWithValue(p, results[i].ClipId);
+            }
+            claim.CommandText = $"UPDATE clips SET embedding_status = 'processing' WHERE id IN ({string.Join(",", paramNames)});";
+            await claim.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return results;
+    }
+
+    public async Task SaveEmbeddingBatchAsync(IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelVersion);
+        if (records.Count == 0) return;
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+        var now = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+
+        foreach (var record in records)
+        {
+            if (record.Vector is null || record.Vector.Length == 0) continue;
+
+            var bytes = new byte[record.Vector.Length * sizeof(float)];
+            Buffer.BlockCopy(record.Vector, 0, bytes, 0, bytes.Length);
+
+            await using (var upsert = connection.CreateCommand())
+            {
+                upsert.Transaction = transaction;
+                upsert.CommandText = """
+                    INSERT INTO clip_embeddings (clip_id, model_version, dimensions, vector, created_at)
+                    VALUES ($id, $model, $dim, $vec, $at)
+                    ON CONFLICT(clip_id) DO UPDATE SET
+                        model_version = excluded.model_version,
+                        dimensions    = excluded.dimensions,
+                        vector        = excluded.vector,
+                        created_at    = excluded.created_at;
+                    """;
+                upsert.Parameters.AddWithValue("$id", record.ClipId);
+                upsert.Parameters.AddWithValue("$model", modelVersion);
+                upsert.Parameters.AddWithValue("$dim", record.Vector.Length);
+                upsert.Parameters.AddWithValue("$vec", bytes);
+                upsert.Parameters.AddWithValue("$at", now);
+                await upsert.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await using (var status = connection.CreateCommand())
+            {
+                status.Transaction = transaction;
+                status.CommandText = "UPDATE clips SET embedding_status = 'succeeded' WHERE id = $id;";
+                status.Parameters.AddWithValue("$id", record.ClipId);
+                await status.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task<bool> SetEmbeddingFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE clips SET embedding_status = 'failed' WHERE id = $id;";
+        command.Parameters.AddWithValue("$id", clipId);
+        // error message is logged by the caller; no dedicated column yet.
+        _ = error;
+        var rows = await command.ExecuteNonQueryAsync(cancellationToken);
+        return rows > 0;
+    }
+
+    public async Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+        await using (var purge = connection.CreateCommand())
+        {
+            purge.Transaction = transaction;
+            purge.CommandText = "DELETE FROM clip_embeddings;";
+            await purge.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        var ids = new List<long>();
+        await using (var update = connection.CreateCommand())
+        {
+            update.Transaction = transaction;
+            update.CommandText = $"""
+                UPDATE clips
+                SET embedding_status = 'rerun'
+                WHERE {EmbeddingEligibilityClause}
+                RETURNING id;
+                """;
+            await using var reader = await update.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                ids.Add(reader.GetInt64(0));
+            }
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return ids;
+    }
+
+    public async Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT
+                SUM(CASE WHEN {EmbeddingEligibilityClause} THEN 1 ELSE 0 END) AS eligible,
+                SUM(CASE WHEN embedding_status = 'succeeded' THEN 1 ELSE 0 END) AS embedded,
+                SUM(CASE WHEN embedding_status IS NULL OR embedding_status IN ('pending','rerun','processing') THEN 1 ELSE 0 END) AS pending,
+                SUM(CASE WHEN embedding_status = 'failed' THEN 1 ELSE 0 END) AS failed,
+                SUM(CASE WHEN embedding_status = 'excluded' THEN 1 ELSE 0 END) AS excluded
+            FROM clips;
+            """;
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return new EmbeddingCoverage(0, 0, 0, 0, 0);
+        }
+
+        long Get(int i) => reader.IsDBNull(i) ? 0L : reader.GetInt64(i);
+        return new EmbeddingCoverage(Get(0), Get(1), Get(2), Get(3), Get(4));
+    }
+
+    public async Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT e.clip_id, e.model_version, e.dimensions, e.vector
+            FROM clip_embeddings e
+            INNER JOIN clips c ON c.id = e.clip_id
+            WHERE c.is_sensitive = 0;
+            """;
+
+        var result = new List<ClipEmbedding>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var id = reader.GetInt64(0);
+            var model = reader.GetString(1);
+            var dim = reader.GetInt32(2);
+            var blob = (byte[])reader[3];
+            if (blob.Length != dim * sizeof(float)) continue;
+            var vec = new float[dim];
+            Buffer.BlockCopy(blob, 0, vec, 0, blob.Length);
+            result.Add(new ClipEmbedding(id, vec, model));
+        }
+        return result;
     }
 }

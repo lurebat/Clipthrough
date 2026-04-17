@@ -348,4 +348,131 @@ public sealed class ClipStoreServiceTests
         var results = await scope.SearchHistoryService.GetRecentSearchesAsync();
         Assert.Empty(results);
     }
+
+    [Fact]
+    public async Task Embeddings_ClaimSaveAndCoverage_RoundTrip()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        for (var i = 0; i < 3; i++)
+        {
+            await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = $"hello {i}",
+                ContentBytes = Encoding.UTF8.GetBytes($"hello {i}"),
+                SourceApp = "Editor",
+                IncrementExistingCopyCount = true,
+            });
+        }
+
+        var initialCoverage = await scope.ClipStoreService.GetEmbeddingCoverageAsync();
+        Assert.Equal(3, initialCoverage.EligibleTotal);
+        Assert.Equal(0, initialCoverage.Embedded);
+        Assert.Equal(3, initialCoverage.Pending);
+
+        var claimed = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10);
+        Assert.Equal(3, claimed.Count);
+        Assert.All(claimed, c => Assert.False(string.IsNullOrWhiteSpace(c.TextToEmbed)));
+
+        // After claim: none are pending (all processing), none yet succeeded.
+        var claimedCoverage = await scope.ClipStoreService.GetEmbeddingCoverageAsync();
+        Assert.Equal(0, claimedCoverage.Embedded);
+        Assert.Equal(3, claimedCoverage.Pending); // processing counts as pending in coverage
+
+        var records = new System.Collections.Generic.List<ClipEmbeddingRecord>();
+        foreach (var c in claimed)
+        {
+            var vec = new float[8];
+            for (var k = 0; k < vec.Length; k++) vec[k] = 0.35355339f; // L2 norm = 1 for 8 dims
+            records.Add(new ClipEmbeddingRecord(c.ClipId, vec));
+        }
+
+        await scope.ClipStoreService.SaveEmbeddingBatchAsync(records, "test-model-v1");
+
+        var finalCoverage = await scope.ClipStoreService.GetEmbeddingCoverageAsync();
+        Assert.Equal(3, finalCoverage.Embedded);
+        Assert.Equal(0, finalCoverage.Pending);
+
+        var loaded = await scope.ClipStoreService.LoadAllEmbeddingsAsync();
+        Assert.Equal(3, loaded.Count);
+        Assert.All(loaded, e => Assert.Equal(8, e.Vector.Length));
+        Assert.All(loaded, e => Assert.Equal("test-model-v1", e.ModelVersion));
+
+        // Second claim returns nothing (all succeeded).
+        var reclaim = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10);
+        Assert.Empty(reclaim);
+    }
+
+    [Fact]
+    public async Task Embeddings_SensitiveClipExcluded_AndPurgedOnFlag()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "secret stuff",
+            ContentBytes = Encoding.UTF8.GetBytes("secret stuff"),
+            SourceApp = "Editor",
+            IncrementExistingCopyCount = true,
+        });
+        Assert.NotNull(clip);
+
+        var claimed = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10);
+        Assert.Single(claimed);
+        var vec = new float[4] { 0.5f, 0.5f, 0.5f, 0.5f };
+        await scope.ClipStoreService.SaveEmbeddingBatchAsync(
+            new[] { new ClipEmbeddingRecord(clip!.Id, vec) },
+            "test-model-v1");
+
+        Assert.Single(await scope.ClipStoreService.LoadAllEmbeddingsAsync());
+
+        // Mark sensitive: embedding should be purged, clip flagged excluded.
+        await scope.ClipStoreService.SetSensitiveAsync(clip.Id, true);
+
+        Assert.Empty(await scope.ClipStoreService.LoadAllEmbeddingsAsync());
+        var coverage = await scope.ClipStoreService.GetEmbeddingCoverageAsync();
+        Assert.Equal(0, coverage.EligibleTotal);
+        Assert.Equal(1, coverage.Excluded);
+    }
+
+    [Fact]
+    public async Task Embeddings_MarkAllForRerun_PurgesAndRequeues()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        var c1 = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "alpha",
+            ContentBytes = Encoding.UTF8.GetBytes("alpha"),
+            SourceApp = "Editor",
+            IncrementExistingCopyCount = true,
+        });
+
+        var claimed = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10);
+        await scope.ClipStoreService.SaveEmbeddingBatchAsync(
+            new[] { new ClipEmbeddingRecord(c1!.Id, new float[] { 1f, 0f, 0f, 0f }) },
+            "v1");
+
+        Assert.Single(await scope.ClipStoreService.LoadAllEmbeddingsAsync());
+
+        var rerunIds = await scope.ClipStoreService.MarkAllEmbeddingsForRerunAsync();
+        Assert.Contains(c1.Id, rerunIds);
+        Assert.Empty(await scope.ClipStoreService.LoadAllEmbeddingsAsync());
+
+        var claimedAgain = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10);
+        Assert.Single(claimedAgain);
+        Assert.Equal(c1.Id, claimedAgain[0].ClipId);
+    }
 }
