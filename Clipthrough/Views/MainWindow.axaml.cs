@@ -390,16 +390,6 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void OnOpenAiPromptClick(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is not MainWindowViewModel viewModel)
-        {
-            return;
-        }
-        viewModel.OpenAiPromptCommand.Execute().Subscribe();
-        e.Handled = true;
-    }
-
     private bool TryHandleClipIndexShortcut(MainWindowViewModel viewModel, KeyEventArgs e)
     {
         if (viewModel.IsSettingsOpen || viewModel.IsWelcomeOpen || viewModel.SessionLogs.IsOpen)

@@ -204,6 +204,7 @@ public partial class App : Application
         _notificationSubscription?.Dispose();
         _notificationSubscription = null;
         _systemInteractionService?.UnregisterAllGlobalHotKeys();
+        _ = Services.GetService<IBackgroundOcrQueue>()?.StopAsync();
         _trayIcon?.Dispose();
         _trayIcon = null;
     }
