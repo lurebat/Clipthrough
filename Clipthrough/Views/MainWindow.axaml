@@ -542,12 +542,16 @@
                                             IsVisible="{Binding ShowSelectedImageRenderer}">
                                     <RadioButton GroupName="ImagePane"
                                                  Classes="segmented-left"
-                                                 Content="Image"
-                                                 IsChecked="{Binding !ShowImageOcrTextToggle}" />
+                                                 Content="{Binding ImageViewPreviewLabel}"
+                                                 IsChecked="{Binding IsImagePreviewMode, Mode=TwoWay}" />
+                                    <RadioButton GroupName="ImagePane"
+                                                 Classes="segmented-center"
+                                                 Content="{Binding ImageViewEditorLabel}"
+                                                 IsChecked="{Binding IsImageEditorMode, Mode=TwoWay}" />
                                     <RadioButton GroupName="ImagePane"
                                                  Classes="segmented-right"
-                                                 Content="Text (OCR)"
-                                                 IsChecked="{Binding ShowImageOcrTextToggle, Mode=TwoWay}"
+                                                 Content="{Binding ImageViewTextLabel}"
+                                                 IsChecked="{Binding IsImageTextMode, Mode=TwoWay}"
                                                  ToolTip.Tip="{Binding SelectedClipOcrStatusText}" />
                                 </StackPanel>
                             </StackPanel>
@@ -749,6 +753,13 @@
                                                    Text="{Binding SelectedClipImageHint}" />
                                     </StackPanel>
                                 </Border>
+
+                                <Image Grid.Row="0"
+                                       IsVisible="{Binding ShowSelectedImagePreview}"
+                                       Stretch="Uniform"
+                                       HorizontalAlignment="Stretch"
+                                       VerticalAlignment="Stretch"
+                                       Source="{Binding SelectedClipImageBytes, Converter={x:Static conv:ImageBytesToBitmapConverter.Instance}}" />
 
                                 <controls:EmbeddedImageEditorView Grid.Row="0"
                                                                   x:Name="SelectedImageEditor"

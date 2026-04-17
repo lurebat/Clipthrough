@@ -873,6 +873,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string EditImageButtonLabel => AppText.EditImageButtonLabel;
 
+    public string ImageViewPreviewLabel => AppText.ImageViewPreviewLabel;
+
+    public string ImageViewEditorLabel => AppText.ImageViewEditorLabel;
+
+    public string ImageViewTextLabel => AppText.ImageViewTextLabel;
+
     public string ResetImageEditsButtonLabel => AppText.ResetImageEditsButtonLabel;
 
     public string LogsButtonLabel => AppText.LogsButtonLabel;
@@ -1045,11 +1051,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool ShowSelectedImageRenderer => HasSelectedClip && SelectedClip?.Clip.ContentType == ContentType.Image;
 
-    public bool ShowSelectedImageEditor => ShowSelectedImageRenderer && SelectedClip?.Clip.ContentBytes is { Length: > 0 } && !_showSelectedImageOcrText;
+    private bool HasSelectedClipImageBytes => SelectedClip?.Clip.ContentBytes is { Length: > 0 };
 
-    public bool ShowSelectedImagePlaceholder => ShowSelectedImageRenderer && !ShowSelectedImageEditor && !_showSelectedImageOcrText;
+    public bool ShowSelectedImagePreview => ShowSelectedImageRenderer && _imageViewMode == ImageViewMode.Preview && HasSelectedClipImageBytes;
 
-    public bool ShowSelectedImageOcrText => ShowSelectedImageRenderer && _showSelectedImageOcrText;
+    public bool ShowSelectedImageEditor => ShowSelectedImageRenderer && _imageViewMode == ImageViewMode.Editor && HasSelectedClipImageBytes;
+
+    public bool ShowSelectedImagePlaceholder => ShowSelectedImageRenderer && !HasSelectedClipImageBytes && _imageViewMode != ImageViewMode.Text;
+
+    public bool ShowSelectedImageOcrText => ShowSelectedImageRenderer && _imageViewMode == ImageViewMode.Text;
 
     public bool HasSelectedClipOcrText => !string.IsNullOrWhiteSpace(SelectedClip?.Clip.OcrText);
 
@@ -1084,17 +1094,47 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private bool _showSelectedImageOcrText;
-    public bool ShowImageOcrTextToggle
+    private ImageViewMode _imageViewMode = ImageViewMode.Editor;
+
+    public ImageViewMode SelectedImageViewMode
     {
-        get => _showSelectedImageOcrText;
+        get => _imageViewMode;
         set
         {
-            this.RaiseAndSetIfChanged(ref _showSelectedImageOcrText, value);
+            if (_imageViewMode == value)
+            {
+                return;
+            }
+
+            _imageViewMode = value;
+            this.RaisePropertyChanged(nameof(SelectedImageViewMode));
+            this.RaisePropertyChanged(nameof(IsImagePreviewMode));
+            this.RaisePropertyChanged(nameof(IsImageEditorMode));
+            this.RaisePropertyChanged(nameof(IsImageTextMode));
+            this.RaisePropertyChanged(nameof(ShowSelectedImagePreview));
             this.RaisePropertyChanged(nameof(ShowSelectedImageEditor));
             this.RaisePropertyChanged(nameof(ShowSelectedImagePlaceholder));
             this.RaisePropertyChanged(nameof(ShowSelectedImageOcrText));
+            PersistImageViewModeInBackground(value);
         }
+    }
+
+    public bool IsImagePreviewMode
+    {
+        get => _imageViewMode == ImageViewMode.Preview;
+        set { if (value) SelectedImageViewMode = ImageViewMode.Preview; }
+    }
+
+    public bool IsImageEditorMode
+    {
+        get => _imageViewMode == ImageViewMode.Editor;
+        set { if (value) SelectedImageViewMode = ImageViewMode.Editor; }
+    }
+
+    public bool IsImageTextMode
+    {
+        get => _imageViewMode == ImageViewMode.Text;
+        set { if (value) SelectedImageViewMode = ImageViewMode.Text; }
     }
 
     public bool HasSelectedClipFileItems => SelectedClipFiles.Count > 0;
@@ -2224,6 +2264,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var draftSettings = _settingsService.HasSavedSettings ? _settingsService.Current : AppSettings.Default;
             LoadSettingsDraft(draftSettings);
             _contentDisplayMode = draftSettings.LastContentDisplayMode;
+            _imageViewMode = draftSettings.LastImageViewMode;
             RaiseRenderModeProperties();
 
             if (!_storageOptionsService.HasSavedConfig || !_storageOptionsService.DatabaseExists)
@@ -4781,9 +4822,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(ShowSelectedFilesRenderer));
         this.RaisePropertyChanged(nameof(ShowSelectedFilesFallback));
         this.RaisePropertyChanged(nameof(ShowSelectedImageRenderer));
+        this.RaisePropertyChanged(nameof(ShowSelectedImagePreview));
         this.RaisePropertyChanged(nameof(ShowSelectedImageEditor));
         this.RaisePropertyChanged(nameof(ShowSelectedImagePlaceholder));
         this.RaisePropertyChanged(nameof(ShowSelectedImageOcrText));
+        this.RaisePropertyChanged(nameof(IsImagePreviewMode));
+        this.RaisePropertyChanged(nameof(IsImageEditorMode));
+        this.RaisePropertyChanged(nameof(IsImageTextMode));
         this.RaisePropertyChanged(nameof(HasSelectedClipOcrText));
         this.RaisePropertyChanged(nameof(IsSelectedClipImageOcrRunning));
         this.RaisePropertyChanged(nameof(IsSelectedClipImageOcrPending));
@@ -4818,6 +4863,28 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         catch (Exception ex)
         {
             Trace.TraceWarning($"Failed to persist display mode: {ex.Message}");
+        }
+    }
+
+    private async void PersistImageViewModeInBackground(ImageViewMode mode)
+    {
+        try
+        {
+            if (!_settingsService.HasSavedSettings)
+            {
+                return;
+            }
+
+            if (_settingsService.Current.LastImageViewMode == mode)
+            {
+                return;
+            }
+
+            await _settingsService.SaveAsync(_settingsService.Current with { LastImageViewMode = mode });
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Failed to persist image view mode: {ex.Message}");
         }
     }
 

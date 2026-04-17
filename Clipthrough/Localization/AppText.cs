@@ -31,6 +31,9 @@ public static class AppText
         [nameof(CopyAsNewButtonLabel)] = "Copy as new",
         [nameof(EditImageButtonLabel)] = "Edit image",
         [nameof(ResetImageEditsButtonLabel)] = "Reset",
+        [nameof(ImageViewPreviewLabel)] = "Image",
+        [nameof(ImageViewEditorLabel)] = "Editor",
+        [nameof(ImageViewTextLabel)] = "Text (OCR)",
         [nameof(FavoriteBadgeLabel)] = "Favorite",
         [nameof(LogsButtonLabel)] = "Logs",
         [nameof(SettingsButtonLabel)] = "Settings",
@@ -276,6 +279,9 @@ public static class AppText
     public static string CopyAsNewButtonLabel => Text(nameof(CopyAsNewButtonLabel));
     public static string EditImageButtonLabel => Text(nameof(EditImageButtonLabel));
     public static string ResetImageEditsButtonLabel => Text(nameof(ResetImageEditsButtonLabel));
+    public static string ImageViewPreviewLabel => Text(nameof(ImageViewPreviewLabel));
+    public static string ImageViewEditorLabel => Text(nameof(ImageViewEditorLabel));
+    public static string ImageViewTextLabel => Text(nameof(ImageViewTextLabel));
     public static string FavoriteBadgeLabel => Text(nameof(FavoriteBadgeLabel));
     public static string LogsButtonLabel => Text(nameof(LogsButtonLabel));
     public static string SettingsButtonLabel => Text(nameof(SettingsButtonLabel));

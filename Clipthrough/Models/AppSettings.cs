@@ -116,6 +116,8 @@ public sealed record AppSettings
 
     public ViewModels.ContentDisplayMode LastContentDisplayMode { get; init; } = ViewModels.ContentDisplayMode.Rendered;
 
+    public ViewModels.ImageViewMode LastImageViewMode { get; init; } = ViewModels.ImageViewMode.Editor;
+
     public bool UseFuzzyClipSearch { get; init; }
 
     public bool UseSemanticClipSearch { get; init; } = true;
@@ -200,6 +202,7 @@ public sealed record AppSettings
         ExternalEditorPath = ExternalEditorPath?.Trim() ?? string.Empty,
         ExternalDiffToolPath = ExternalDiffToolPath?.Trim() ?? string.Empty,
         LastContentDisplayMode = LastContentDisplayMode,
+        LastImageViewMode = LastImageViewMode,
         AiBaseUrl = AiBaseUrl?.Trim() ?? string.Empty,
         AiApiKey = AiApiKey?.Trim() ?? string.Empty,
         AiModel = AiModel?.Trim() ?? string.Empty,
