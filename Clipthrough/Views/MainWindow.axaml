@@ -466,6 +466,12 @@
                                 <TextBlock Text="{Binding SensitiveClipCountText}"
                                            Foreground="{DynamicResource StatusChipSensitiveFg}" />
                             </Border>
+                            <Border Classes="badge-chip"
+                                    VerticalAlignment="Center"
+                                    IsVisible="{Binding IsSemanticCoverageVisible}"
+                                    ToolTip.Tip="Semantic embedding coverage. Click to refresh.">
+                                <TextBlock Text="{Binding SemanticCoverageText}" />
+                            </Border>
                         </StackPanel>
                     </Border>
                 </Grid>

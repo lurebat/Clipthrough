@@ -60,6 +60,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly IBackgroundOcrQueue _backgroundOcrQueue;
     private readonly IBackgroundJobIndicator _jobIndicator;
     private readonly Clipthrough.Services.Search.ISemanticSearchService? _semanticSearchService;
+    private readonly Clipthrough.Services.Search.IEmbeddingWorker? _embeddingWorker;
     private readonly DatabaseInitializer _databaseInitializer;
     private readonly CompositeDisposable _subscriptions = new();
     private readonly Dictionary<long, (ClipEntry Clip, CancellationTokenSource Cts)> _pendingDeletes = new();
@@ -176,7 +177,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _editedClipSelectionLength;
     private long? _checkedSelectionAnchorId;
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null, Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null)
     {
         _clipStoreService = clipStoreService;
         _clipboardMonitorService = clipboardMonitorService;
@@ -196,6 +197,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _jobIndicator = jobIndicator;
         _jobIndicator.Changed += OnJobIndicatorChanged;
         _semanticSearchService = semanticSearchService;
+        _embeddingWorker = embeddingWorker;
         _databaseInitializer = databaseInitializer;
         SessionLogs = new SessionLogsViewModel(sessionLogService);
         ContentTypeOptions =
@@ -269,6 +271,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ApplyUserScriptCommand = ReactiveCommand.CreateFromTask<UserScript>(ApplyUserScriptAsync);
         LoadDefaultScriptsCommand = ReactiveCommand.CreateFromTask(LoadDefaultScriptsAsync);
         RunOcrOnSelectedImageCommand = ReactiveCommand.CreateFromTask(RunOcrOnSelectedImageAsync);
+        RerunAllEmbeddingsCommand = ReactiveCommand.CreateFromTask(RerunAllEmbeddingsAsync);
+        RefreshSemanticCoverageCommand = ReactiveCommand.CreateFromTask(RefreshSemanticCoverageAsync);
         GenerateRemoteApiTokenCommand = ReactiveCommand.Create(() =>
             SettingsRemoteApiToken = System.Guid.NewGuid().ToString("N"));
         CopyRemoteApiTokenCommand = ReactiveCommand.CreateFromTask(async () =>
@@ -434,6 +438,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> LoadDefaultScriptsCommand { get; }
 
     public ReactiveCommand<Unit, Unit> RunOcrOnSelectedImageCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> RerunAllEmbeddingsCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> RefreshSemanticCoverageCommand { get; }
 
     public ReactiveCommand<Unit, string> GenerateRemoteApiTokenCommand { get; }
 
@@ -1846,7 +1854,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool UseSemanticClipSearch
     {
         get => _useSemanticClipSearch;
-        set => this.RaiseAndSetIfChanged(ref _useSemanticClipSearch, value);
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _useSemanticClipSearch, value);
+            this.RaisePropertyChanged(nameof(IsSemanticCoverageVisible));
+        }
     }
 
     private bool _isSettingsSectionBehaviorExpanded = true;
@@ -1862,6 +1874,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isSettingsSectionOcrExpanded;
     private bool _isSettingsSectionRemoteApiExpanded;
     private bool _isSettingsSectionUserScriptsExpanded;
+    private bool _isSettingsSectionSemanticExpanded;
 
     public bool IsSettingsSectionBehaviorExpanded
     {
@@ -1941,6 +1954,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => this.RaiseAndSetIfChanged(ref _isSettingsSectionUserScriptsExpanded, value);
     }
 
+    public bool IsSettingsSectionSemanticExpanded
+    {
+        get => _isSettingsSectionSemanticExpanded;
+        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionSemanticExpanded, value);
+    }
+
     // Keywords searched by SettingsFilter. When filter is empty the section shows.
     // When non-empty, the section shows only if its keyword blob contains the filter.
     private static readonly string _behaviorKeywords = "theme dark light tray minimize close start windows startup behavior appearance";
@@ -1956,6 +1975,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private static readonly string _ocrKeywords = "ocr image text extract recognition language bcp-47 windows.media.ocr";
     private static readonly string _remoteApiKeywords = "remote api http server kestrel bearer token port bind loopback swagger openapi mcp";
     private static readonly string _userScriptsKeywords = "script scripts user roslyn csharp c# code custom transform";
+    private static readonly string _semanticKeywords = "semantic embedding embeddings similarity vector search meaning ai ml rerun reembed";
 
     private bool MatchesFilter(string keywords)
     {
@@ -1986,6 +2006,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsSettingsSectionOcrVisible => MatchesFilter(_ocrKeywords);
     public bool IsSettingsSectionRemoteApiVisible => MatchesFilter(_remoteApiKeywords);
     public bool IsSettingsSectionUserScriptsVisible => MatchesFilter(_userScriptsKeywords);
+    public bool IsSettingsSectionSemanticVisible => MatchesFilter(_semanticKeywords);
 
     private void RaiseSettingsSectionVisibility()
     {
@@ -2002,6 +2023,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(IsSettingsSectionOcrVisible));
         this.RaisePropertyChanged(nameof(IsSettingsSectionRemoteApiVisible));
         this.RaisePropertyChanged(nameof(IsSettingsSectionUserScriptsVisible));
+        this.RaisePropertyChanged(nameof(IsSettingsSectionSemanticVisible));
 
         // Auto-expand sections that match the current filter, collapse those that don't.
         if (!string.IsNullOrWhiteSpace(_settingsFilter))
@@ -2019,6 +2041,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             IsSettingsSectionOcrExpanded = IsSettingsSectionOcrVisible;
             IsSettingsSectionRemoteApiExpanded = IsSettingsSectionRemoteApiVisible;
             IsSettingsSectionUserScriptsExpanded = IsSettingsSectionUserScriptsVisible;
+            IsSettingsSectionSemanticExpanded = IsSettingsSectionSemanticVisible;
         }
     }
 
@@ -3089,6 +3112,65 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await _clipStoreService.MarkOcrForRerunAsync(clip.Clip.Id);
         StatusText = "Queued OCR…";
         _backgroundOcrQueue.Enqueue(clip.Clip.Id);
+    }
+
+    private string _semanticCoverageText = string.Empty;
+    public string SemanticCoverageText
+    {
+        get => _semanticCoverageText;
+        private set => this.RaiseAndSetIfChanged(ref _semanticCoverageText, value);
+    }
+
+    public bool IsSemanticCoverageVisible => _embeddingWorker is not null && UseSemanticClipSearch && !string.IsNullOrEmpty(SemanticCoverageText);
+
+    private async Task RefreshSemanticCoverageAsync()
+    {
+        if (_embeddingWorker is null)
+        {
+            SemanticCoverageText = string.Empty;
+            this.RaisePropertyChanged(nameof(IsSemanticCoverageVisible));
+            return;
+        }
+        try
+        {
+            var coverage = await _embeddingWorker.GetCoverageAsync();
+            var eligible = coverage.EligibleTotal;
+            if (eligible <= 0)
+            {
+                SemanticCoverageText = "No clips to embed yet";
+            }
+            else
+            {
+                var pct = (int)Math.Round(100.0 * coverage.Embedded / eligible);
+                var suffix = coverage.Failed > 0 ? $" · {coverage.Failed} failed" : string.Empty;
+                SemanticCoverageText = $"Semantic: {coverage.Embedded}/{eligible} ({pct}%){suffix}";
+            }
+        }
+        catch
+        {
+            SemanticCoverageText = string.Empty;
+        }
+        this.RaisePropertyChanged(nameof(IsSemanticCoverageVisible));
+    }
+
+    private async Task RerunAllEmbeddingsAsync()
+    {
+        if (_embeddingWorker is null)
+        {
+            StatusText = "Embedding worker not available";
+            return;
+        }
+        try
+        {
+            await _embeddingWorker.RerunAllAsync();
+            _embeddingWorker.Poke();
+            StatusText = "Queued all clips for re-embedding";
+            await RefreshSemanticCoverageAsync();
+        }
+        catch (Exception ex)
+        {
+            StatusText = AppText.FormatErrorStatus(ex.Message);
+        }
     }
 
     private async Task CommitEditedClipOnSelectionChangeAsync()
@@ -4264,6 +4346,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _backgroundOcrQueue.Start();
         _ = Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync());
         StartMaintenanceLoop();
+        _ = RefreshSemanticCoverageAsync();
+        if (_embeddingWorker is not null)
+        {
+            _subscriptions.Add(_embeddingWorker.BatchCompleted
+                .ObserveOn(RxApp.MainThreadScheduler)
+                .Subscribe((int count) => { _ = RefreshSemanticCoverageAsync(); }));
+        }
     }
 
     private async Task EnsureDefaultScriptsLoadedAsync()
