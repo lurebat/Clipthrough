@@ -1147,6 +1147,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool ShowSelectedFilesFallback => ShowRenderedContent && SelectedClip?.Clip.ContentType == ContentType.Files && !HasSelectedClipFileItems;
 
+    public bool ShowSelectedFilesTextual => HasSelectedClip
+        && SelectedClip?.Clip.ContentType == ContentType.Files
+        && _contentDisplayMode == ContentDisplayMode.Textual
+        && HasSelectedClipFileItems;
+
+    public bool ShowSelectedFilesTextualFallback => HasSelectedClip
+        && SelectedClip?.Clip.ContentType == ContentType.Files
+        && _contentDisplayMode == ContentDisplayMode.Textual
+        && !HasSelectedClipFileItems;
+
     public bool ShowSelectedImageRenderer => HasSelectedClip && SelectedClip?.Clip.ContentType == ContentType.Image;
 
     private bool HasSelectedClipImageBytes => SelectedClip?.Clip.ContentBytes is { Length: > 0 };
@@ -5123,6 +5133,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(ShowSelectedRichTextRenderer));
         this.RaisePropertyChanged(nameof(ShowSelectedFilesRenderer));
         this.RaisePropertyChanged(nameof(ShowSelectedFilesFallback));
+        this.RaisePropertyChanged(nameof(ShowSelectedFilesTextual));
+        this.RaisePropertyChanged(nameof(ShowSelectedFilesTextualFallback));
         this.RaisePropertyChanged(nameof(ShowSelectedImageRenderer));
         this.RaisePropertyChanged(nameof(ShowSelectedImagePreview));
         this.RaisePropertyChanged(nameof(ShowSelectedImageEditor));

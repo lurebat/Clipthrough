@@ -759,6 +759,41 @@
                                      HorizontalContentAlignment="Stretch"
                                      Text="{Binding SelectedClipRawContent}" />
 
+                            <!-- Textual view for Files: each path rendered as a clickable link that opens it -->
+                            <ScrollViewer IsVisible="{Binding ShowSelectedFilesTextual}"
+                                          HorizontalScrollBarVisibility="Disabled"
+                                          VerticalScrollBarVisibility="Auto"
+                                          Padding="14">
+                                <ItemsControl ItemsSource="{Binding SelectedClipFiles}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:ClipFileItemViewModel">
+                                            <Button Background="Transparent"
+                                                    BorderThickness="0"
+                                                    HorizontalAlignment="Stretch"
+                                                    HorizontalContentAlignment="Left"
+                                                    Padding="0,3"
+                                                    Cursor="Hand"
+                                                    Command="{Binding OpenCommand}"
+                                                    IsEnabled="{Binding Exists}"
+                                                    ToolTip.Tip="{Binding FilePath}">
+                                                <TextBlock Text="{Binding FilePath}"
+                                                           TextWrapping="Wrap"
+                                                           Foreground="{DynamicResource SystemAccentColor}"
+                                                           TextDecorations="Underline" />
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+
+                            <TextBox IsVisible="{Binding ShowSelectedFilesTextualFallback}"
+                                     Classes="content-viewer"
+                                     IsReadOnly="True"
+                                     AcceptsReturn="True"
+                                     TextWrapping="Wrap"
+                                     HorizontalContentAlignment="Stretch"
+                                     Text="{Binding SelectedClipRawContent}" />
+
                             <Grid IsVisible="{Binding ShowSelectedImageRenderer}"
                                   Margin="14"
                                   RowDefinitions="*,Auto"
