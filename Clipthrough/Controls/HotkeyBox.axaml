@@ -4,7 +4,7 @@
   <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
     <TextBox Name="PART_Text"
              Grid.Column="0"
-             Watermark="e.g. Ctrl+Shift+V" />
+             PlaceholderText="e.g. Ctrl+Shift+V" />
     <Button Name="PART_Record"
             Grid.Column="1"
             Content="Record"

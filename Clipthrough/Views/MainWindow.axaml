@@ -71,7 +71,7 @@
                 <TextBox x:Name="SearchTextBox"
                          Grid.Column="1"
                          AutomationProperties.Name="Search clips"
-                         Watermark="{Binding SearchWatermark}"
+                         PlaceholderText="{Binding SearchWatermark}"
                          Text="{Binding SearchText}" />
 
                 <UniformGrid Grid.Column="2"
@@ -1265,7 +1265,7 @@
                                 <TextBox Text="{Binding PasswordPromptInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                          PasswordChar="*"
                                          RevealPassword="{Binding IsPasswordPromptPasswordVisible}"
-                                         Watermark="Enter your database password" />
+                                         PlaceholderText="Enter your database password" />
                                 <CheckBox Content="Show password"
                                           IsChecked="{Binding IsPasswordPromptPasswordVisible}" />
                             </StackPanel>
@@ -1318,7 +1318,7 @@
                                      MinHeight="100"
                                      MaxHeight="180"
                                      TextWrapping="Wrap"
-                                     Watermark="e.g. Rewrite this as a formal email, or Convert to JSON"
+                                     PlaceholderText="e.g. Rewrite this as a formal email, or Convert to JSON"
                                      Text="{Binding AiPromptInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             <TextBlock Text="{Binding AiPromptError}"
                                        IsVisible="{Binding AiPromptError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"

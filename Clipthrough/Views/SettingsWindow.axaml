@@ -19,7 +19,7 @@
 
         <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="8">
             <TextBox Grid.Column="0"
-                     Watermark="Filter settings (e.g. hotkey, theme, database)…"
+                     PlaceholderText="Filter settings (e.g. hotkey, theme, database)…"
                      Text="{Binding SettingsFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
             <CheckBox Grid.Column="1"
                       VerticalAlignment="Center"
@@ -485,23 +485,23 @@
                                   IsChecked="{Binding SettingsEnableAi}" />
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label" Text="Base URL (blank = https://api.openai.com/v1)" />
-                            <TextBox Watermark="https://api.openai.com/v1"
+                            <TextBox PlaceholderText="https://api.openai.com/v1"
                                      Text="{Binding SettingsAiBaseUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </StackPanel>
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label" Text="API key (blank = use OPENAI_API_KEY env var)" />
                             <TextBox PasswordChar="*"
-                                     Watermark="sk-…"
+                                     PlaceholderText="sk-…"
                                      Text="{Binding SettingsAiApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </StackPanel>
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label" Text="Model (blank = gpt-4o-mini)" />
-                            <TextBox Watermark="gpt-4o-mini"
+                            <TextBox PlaceholderText="gpt-4o-mini"
                                      Text="{Binding SettingsAiModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </StackPanel>
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label" Text="Image model (used for image→image presets; blank = gpt-image-1)" />
-                            <TextBox Watermark="gpt-image-1"
+                            <TextBox PlaceholderText="gpt-image-1"
                                      Text="{Binding SettingsAiImageModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </StackPanel>
                         <StackPanel Spacing="6">
@@ -551,7 +551,7 @@
                                   IsChecked="{Binding SettingsAutoOcrImageClips, Mode=TwoWay}" />
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label" Text="Languages (BCP-47 tags, separated by + , or space; blank = user profile)" />
-                            <TextBox Watermark="en+he"
+                            <TextBox PlaceholderText="en+he"
                                      Text="{Binding SettingsOcrLanguages, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </StackPanel>
                     </StackPanel>
@@ -577,7 +577,7 @@
                             </StackPanel>
                             <StackPanel Grid.Column="1" Spacing="6">
                                 <TextBlock Classes="detail-label" Text="Bind address" />
-                                <TextBox Watermark="127.0.0.1 (loopback only). Use 0.0.0.0 to expose on LAN."
+                                <TextBox PlaceholderText="127.0.0.1 (loopback only). Use 0.0.0.0 to expose on LAN."
                                          Text="{Binding SettingsRemoteApiBindAddress, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
                         </Grid>
@@ -592,7 +592,7 @@
                                 <TextBox Grid.Column="0"
                                          PasswordChar="•"
                                          RevealPassword="{Binding IsRemoteApiTokenRevealed}"
-                                         Watermark="Paste or generate a token"
+                                         PlaceholderText="Paste or generate a token"
                                          AutomationProperties.Name="Remote API bearer token"
                                          Text="{Binding SettingsRemoteApiToken, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                 <ToggleButton Grid.Column="1" Classes="secondary compact"
@@ -648,7 +648,7 @@
                         <CheckBox Content="Enable auto-update" IsChecked="{Binding SettingsEnableAutoUpdate}" />
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label" Text="Update feed URL (blank = CLIPTHROUGH_UPDATE_FEED env var)" />
-                            <TextBox Watermark="https://github.com/owner/repo/releases/latest/download"
+                            <TextBox PlaceholderText="https://github.com/owner/repo/releases/latest/download"
                                      Text="{Binding SettingsUpdateFeedUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </StackPanel>
                     </StackPanel>

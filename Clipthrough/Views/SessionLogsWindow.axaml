@@ -28,7 +28,7 @@
                     Spacing="10">
             <TextBox Width="420"
                      AutomationProperties.Name="Search logs"
-                     Watermark="{Binding SearchWatermark}"
+                     PlaceholderText="{Binding SearchWatermark}"
                      Text="{Binding SearchText}" />
             <ComboBox Width="160"
                       AutomationProperties.Name="Log level filter"
