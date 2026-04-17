@@ -618,7 +618,7 @@ public partial class MainWindow : Window
         Dispatcher.UIThread.Post(() => Hide());
     }
 
-    private async void OnSearchBoxGotFocus(object? sender, GotFocusEventArgs e)
+    private async void OnSearchBoxGotFocus(object? sender, FocusChangedEventArgs e)
     {
         if (DataContext is MainWindowViewModel viewModel)
         {
