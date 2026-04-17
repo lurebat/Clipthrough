@@ -194,32 +194,6 @@
                     </StackPanel>
                 </Expander>
 
-                <!-- Tools -->
-                <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionToolsVisible}"
-                          IsExpanded="{Binding IsSettingsSectionToolsExpanded, Mode=TwoWay}">
-                    <Expander.Header>
-                        <TextBlock Text="{Binding SettingsToolsTitle}"
-                                   FontSize="16"
-                                   FontWeight="SemiBold" />
-                    </Expander.Header>
-                    <StackPanel Spacing="12" Margin="8,10,0,0">
-                        <StackPanel Spacing="6">
-                            <TextBlock Classes="detail-label"
-                                       Text="{Binding SettingsExternalEditorPathLabel}" />
-                            <TextBox Text="{Binding SettingsExternalEditorPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                        </StackPanel>
-                        <StackPanel Spacing="6">
-                            <TextBlock Classes="detail-label"
-                                       Text="{Binding SettingsExternalDiffToolPathLabel}" />
-                            <TextBox Text="{Binding SettingsExternalDiffToolPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                            <TextBlock Classes="body-muted"
-                                       FontSize="11"
-                                       TextWrapping="Wrap"
-                                       Text="Full path to a diff executable. Invoked as: tool.exe &quot;left-file&quot; &quot;right-file&quot;. Works with WinMerge, Beyond Compare, VS Code (use code --diff wrapper), Meld, KDiff3, etc." />
-                        </StackPanel>
-                    </StackPanel>
-                </Expander>
-
                 <!-- Retention -->
                 <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionRetentionVisible}"
                           IsExpanded="{Binding IsSettingsSectionRetentionExpanded, Mode=TwoWay}">
@@ -342,6 +316,76 @@
                     </ItemsControl>
                 </Expander>
 
+                <!-- Tools -->
+                <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionToolsVisible}"
+                          IsExpanded="{Binding IsSettingsSectionToolsExpanded, Mode=TwoWay}">
+                    <Expander.Header>
+                        <TextBlock Text="{Binding SettingsToolsTitle}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold" />
+                    </Expander.Header>
+                    <StackPanel Spacing="12" Margin="8,10,0,0">
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="detail-label"
+                                       Text="{Binding SettingsExternalEditorPathLabel}" />
+                            <TextBox Text="{Binding SettingsExternalEditorPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="detail-label"
+                                       Text="{Binding SettingsExternalDiffToolPathLabel}" />
+                            <TextBox Text="{Binding SettingsExternalDiffToolPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBlock Classes="body-muted"
+                                       FontSize="11"
+                                       TextWrapping="Wrap"
+                                       Text="Full path to a diff executable. Invoked as: tool.exe &quot;left-file&quot; &quot;right-file&quot;. Works with WinMerge, Beyond Compare, VS Code (use code --diff wrapper), Meld, KDiff3, etc." />
+                        </StackPanel>
+                    </StackPanel>
+                </Expander>
+
+                <Expander Classes="settings-section"
+                          IsVisible="{Binding IsSettingsSectionUserScriptsVisible}"
+                          IsExpanded="{Binding IsSettingsSectionUserScriptsExpanded, Mode=TwoWay}">
+                    <Expander.Header>
+                        <TextBlock Text="User scripts" FontSize="16" FontWeight="SemiBold" />
+                    </Expander.Header>
+                    <StackPanel Spacing="10" Margin="8,10,0,0">
+                        <TextBlock Classes="body-muted" TextWrapping="Wrap"
+                                   Text="User scripts receive the clip text as 'input' (string) and must return a string. C# scripting syntax (Roslyn)." />
+                        <Grid ColumnDefinitions="260,*" ColumnSpacing="12" MinHeight="260">
+                            <DockPanel Grid.Column="0" LastChildFill="True">
+                                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="6" Margin="0,6,0,0">
+                                    <Button Classes="secondary compact"
+                                            Content="Add"
+                                            Command="{Binding AddScriptDraftCommand}" />
+                                    <Button Classes="destructive compact"
+                                            Content="Remove"
+                                            Command="{Binding RemoveScriptDraftCommand}"
+                                            CommandParameter="{Binding SelectedScriptDraft}" />
+                                </StackPanel>
+                                <ListBox ItemsSource="{Binding SettingsUserScriptDrafts}"
+                                         SelectedItem="{Binding SelectedScriptDraft, Mode=TwoWay}">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Name}" />
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </DockPanel>
+                            <StackPanel Grid.Column="1" Spacing="6"
+                                        DataContext="{Binding SelectedScriptDraft}"
+                                        IsEnabled="{Binding Converter={x:Static ObjectConverters.IsNotNull}}">
+                                <TextBlock Classes="detail-label" Text="Name" />
+                                <TextBox Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
+                                <TextBlock Classes="detail-label" Text="Code (C#)" />
+                                <TextBox AcceptsReturn="True"
+                                         MinHeight="220"
+                                         FontFamily="Consolas,Cascadia Code,monospace"
+                                         Text="{Binding Code, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Expander>
+
                 <!-- AI transforms -->
                 <Expander Classes="settings-section"
                           IsVisible="{Binding IsSettingsSectionAiVisible}"
@@ -372,25 +416,6 @@
                             <TextBlock Classes="detail-label" Text="Model (blank = gpt-4o-mini)" />
                             <TextBox Watermark="gpt-4o-mini"
                                      Text="{Binding SettingsAiModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                        </StackPanel>
-                    </StackPanel>
-                </Expander>
-
-                <!-- Updates -->
-                <Expander Classes="settings-section"
-                          IsVisible="{Binding IsSettingsSectionUpdatesVisible}"
-                          IsExpanded="{Binding IsSettingsSectionUpdatesExpanded, Mode=TwoWay}">
-                    <Expander.Header>
-                        <TextBlock Text="Updates" FontSize="16" FontWeight="SemiBold" />
-                    </Expander.Header>
-                    <StackPanel Spacing="10" Margin="8,10,0,0">
-                        <TextBlock Classes="body-muted" TextWrapping="Wrap"
-                                   Text="Clipthrough uses Velopack for auto-updates. When enabled, the app checks the feed URL on launch and downloads any newer build to apply on next restart. Only effective when installed via a Velopack package." />
-                        <CheckBox Content="Enable auto-update" IsChecked="{Binding SettingsEnableAutoUpdate}" />
-                        <StackPanel Spacing="6">
-                            <TextBlock Classes="detail-label" Text="Update feed URL (blank = CLIPTHROUGH_UPDATE_FEED env var)" />
-                            <TextBox Watermark="https://github.com/owner/repo/releases/latest/download"
-                                     Text="{Binding SettingsUpdateFeedUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </StackPanel>
                     </StackPanel>
                 </Expander>
@@ -491,49 +516,25 @@
                     </StackPanel>
                 </Expander>
 
+                <!-- Updates -->
                 <Expander Classes="settings-section"
-                          IsVisible="{Binding IsSettingsSectionUserScriptsVisible}"
-                          IsExpanded="{Binding IsSettingsSectionUserScriptsExpanded, Mode=TwoWay}">
+                          IsVisible="{Binding IsSettingsSectionUpdatesVisible}"
+                          IsExpanded="{Binding IsSettingsSectionUpdatesExpanded, Mode=TwoWay}">
                     <Expander.Header>
-                        <TextBlock Text="User scripts" FontSize="16" FontWeight="SemiBold" />
+                        <TextBlock Text="Updates" FontSize="16" FontWeight="SemiBold" />
                     </Expander.Header>
                     <StackPanel Spacing="10" Margin="8,10,0,0">
                         <TextBlock Classes="body-muted" TextWrapping="Wrap"
-                                   Text="User scripts receive the clip text as 'input' (string) and must return a string. C# scripting syntax (Roslyn)." />
-                        <Grid ColumnDefinitions="260,*" ColumnSpacing="12" MinHeight="260">
-                            <DockPanel Grid.Column="0" LastChildFill="True">
-                                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="6" Margin="0,6,0,0">
-                                    <Button Classes="secondary compact"
-                                            Content="Add"
-                                            Command="{Binding AddScriptDraftCommand}" />
-                                    <Button Classes="destructive compact"
-                                            Content="Remove"
-                                            Command="{Binding RemoveScriptDraftCommand}"
-                                            CommandParameter="{Binding SelectedScriptDraft}" />
-                                </StackPanel>
-                                <ListBox ItemsSource="{Binding SettingsUserScriptDrafts}"
-                                         SelectedItem="{Binding SelectedScriptDraft, Mode=TwoWay}">
-                                    <ListBox.ItemTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding Name}" />
-                                        </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                </ListBox>
-                            </DockPanel>
-                            <StackPanel Grid.Column="1" Spacing="6"
-                                        DataContext="{Binding SelectedScriptDraft}"
-                                        IsEnabled="{Binding Converter={x:Static ObjectConverters.IsNotNull}}">
-                                <TextBlock Classes="detail-label" Text="Name" />
-                                <TextBox Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
-                                <TextBlock Classes="detail-label" Text="Code (C#)" />
-                                <TextBox AcceptsReturn="True"
-                                         MinHeight="220"
-                                         FontFamily="Consolas,Cascadia Code,monospace"
-                                         Text="{Binding Code, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
-                            </StackPanel>
-                        </Grid>
+                                   Text="Clipthrough uses Velopack for auto-updates. When enabled, the app checks the feed URL on launch and downloads any newer build to apply on next restart. Only effective when installed via a Velopack package." />
+                        <CheckBox Content="Enable auto-update" IsChecked="{Binding SettingsEnableAutoUpdate}" />
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="detail-label" Text="Update feed URL (blank = CLIPTHROUGH_UPDATE_FEED env var)" />
+                            <TextBox Watermark="https://github.com/owner/repo/releases/latest/download"
+                                     Text="{Binding SettingsUpdateFeedUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
                     </StackPanel>
                 </Expander>
+
             </StackPanel>
         </ScrollViewer>
 
