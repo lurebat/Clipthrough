@@ -833,7 +833,7 @@
                                                                   SourceImageBytes="{Binding SelectedClipImageBytes}" />
 
                                 <TextBox Grid.Row="0"
-                                         IsVisible="{Binding HasSelectedClipOcrText}"
+                                         IsVisible="{Binding ShowSelectedImageOcrTextBox}"
                                          Classes="content-viewer"
                                          IsReadOnly="True"
                                          AcceptsReturn="True"

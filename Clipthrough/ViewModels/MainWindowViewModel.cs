@@ -1177,10 +1177,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool ShowSelectedImageOcrText => ShowSelectedImageRenderer && _imageViewMode == ImageViewMode.Text;
 
+    public bool ShowSelectedImageOcrTextBox =>
+        ShowSelectedImageOcrText && HasSelectedClipOcrText && !IsSelectedClipImageOcrRunning;
+
     public bool ShowSelectedImageOcrEmptyState =>
         ShowSelectedImageOcrText
         && !HasSelectedClipOcrText
         && !IsSelectedClipImageOcrRunning;
+
+    public bool ShowSelectedImageOcrBusy =>
+        ShowSelectedImageOcrText && IsSelectedClipImageOcrRunning;
 
     public bool CanRunOcrOnEmptyState => ShowSelectedImageOcrEmptyState && CanRunOcr;
 
@@ -1238,7 +1244,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             this.RaisePropertyChanged(nameof(ShowSelectedImageEditor));
             this.RaisePropertyChanged(nameof(ShowSelectedImagePlaceholder));
             this.RaisePropertyChanged(nameof(ShowSelectedImageOcrText));
+            this.RaisePropertyChanged(nameof(ShowSelectedImageOcrTextBox));
             this.RaisePropertyChanged(nameof(ShowSelectedImageOcrEmptyState));
+            this.RaisePropertyChanged(nameof(ShowSelectedImageOcrBusy));
             this.RaisePropertyChanged(nameof(CanRunOcrOnEmptyState));
             PersistImageViewModeInBackground(value);
         }
@@ -5186,7 +5194,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(ShowSelectedImageEditor));
         this.RaisePropertyChanged(nameof(ShowSelectedImagePlaceholder));
         this.RaisePropertyChanged(nameof(ShowSelectedImageOcrText));
+        this.RaisePropertyChanged(nameof(ShowSelectedImageOcrTextBox));
         this.RaisePropertyChanged(nameof(ShowSelectedImageOcrEmptyState));
+        this.RaisePropertyChanged(nameof(ShowSelectedImageOcrBusy));
         this.RaisePropertyChanged(nameof(CanRunOcrOnEmptyState));
         this.RaisePropertyChanged(nameof(IsImagePreviewMode));
         this.RaisePropertyChanged(nameof(IsImageEditorMode));
