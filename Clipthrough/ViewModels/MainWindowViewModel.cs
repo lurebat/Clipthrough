@@ -57,6 +57,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly IAiTransformService _aiTransformService;
     private readonly IScriptingService _scriptingService;
     private readonly IOcrService _ocrService;
+    private readonly IBackgroundOcrQueue _backgroundOcrQueue;
     private readonly DatabaseInitializer _databaseInitializer;
     private readonly CompositeDisposable _subscriptions = new();
     private readonly Dictionary<long, (ClipEntry Clip, CancellationTokenSource Cts)> _pendingDeletes = new();
@@ -146,6 +147,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _settingsEnableAutoUpdate = AppSettings.Default.EnableAutoUpdate;
     private string _settingsUpdateFeedUrl = AppSettings.Default.UpdateFeedUrl;
     private string _settingsOcrLanguages = AppSettings.Default.OcrLanguages;
+    private bool _settingsAutoOcrImageClips = AppSettings.Default.AutoOcrImageClips;
     private bool _settingsEnableRemoteApi = AppSettings.Default.EnableRemoteApi;
     private int _settingsRemoteApiPort = AppSettings.Default.RemoteApiPort;
     private string _settingsRemoteApiToken = AppSettings.Default.RemoteApiToken;
@@ -157,7 +159,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _editedClipSelectionLength;
     private long? _checkedSelectionAnchorId;
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, DatabaseInitializer databaseInitializer)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, DatabaseInitializer databaseInitializer)
     {
         _clipStoreService = clipStoreService;
         _clipboardMonitorService = clipboardMonitorService;
@@ -173,6 +175,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _aiTransformService = aiTransformService;
         _scriptingService = scriptingService;
         _ocrService = ocrService;
+        _backgroundOcrQueue = backgroundOcrQueue;
         _databaseInitializer = databaseInitializer;
         SessionLogs = new SessionLogsViewModel(sessionLogService);
         ContentTypeOptions =
@@ -286,6 +289,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .ObserveOn(RxApp.MainThreadScheduler)
                 .SelectMany(clip => Observable.FromAsync(() => RefreshAsync(clip.Id)))
                 .Subscribe(_ => { }, ex => StatusText = AppText.FormatErrorStatus(ex.Message)));
+
+        _subscriptions.Add(
+            _clipboardMonitorService.CapturedClips
+                .Subscribe(clip =>
+                {
+                    if (clip.ContentType == ContentType.Image
+                        && _ocrService.IsAvailable
+                        && _settingsService.Current.AutoOcrImageClips)
+                    {
+                        _backgroundOcrQueue.Enqueue(clip.Id);
+                    }
+                }));
+
+        _subscriptions.Add(
+            _backgroundOcrQueue.OcrCompleted
+                .ObserveOn(RxApp.MainThreadScheduler)
+                .SelectMany(id => Observable.FromAsync(() => RefreshAsync(id)))
+                .Subscribe(_ => { }, ex => Trace.TraceError($"OCR refresh failed: {ex}")));
 
         _subscriptions.Add(
             _notificationService.Notifications
@@ -956,9 +977,57 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool ShowSelectedImageRenderer => HasSelectedClip && SelectedClip?.Clip.ContentType == ContentType.Image;
 
-    public bool ShowSelectedImageEditor => ShowSelectedImageRenderer && SelectedClip?.Clip.ContentBytes is { Length: > 0 };
+    public bool ShowSelectedImageEditor => ShowSelectedImageRenderer && SelectedClip?.Clip.ContentBytes is { Length: > 0 } && !_showSelectedImageOcrText;
 
-    public bool ShowSelectedImagePlaceholder => ShowSelectedImageRenderer && !ShowSelectedImageEditor;
+    public bool ShowSelectedImagePlaceholder => ShowSelectedImageRenderer && !ShowSelectedImageEditor && !_showSelectedImageOcrText;
+
+    public bool ShowSelectedImageOcrText => ShowSelectedImageRenderer && _showSelectedImageOcrText;
+
+    public bool HasSelectedClipOcrText => !string.IsNullOrWhiteSpace(SelectedClip?.Clip.OcrText);
+
+    public bool IsSelectedClipImageOcrRunning => SelectedClip?.Clip.ContentType == ContentType.Image
+        && string.Equals(SelectedClip?.Clip.OcrStatus, "running", StringComparison.OrdinalIgnoreCase);
+
+    public bool IsSelectedClipImageOcrPending => SelectedClip?.Clip.ContentType == ContentType.Image
+        && (SelectedClip?.Clip.OcrStatus is null
+            || string.Equals(SelectedClip?.Clip.OcrStatus, "pending", StringComparison.OrdinalIgnoreCase));
+
+    public bool IsSelectedClipImageOcrFailed => SelectedClip?.Clip.ContentType == ContentType.Image
+        && string.Equals(SelectedClip?.Clip.OcrStatus, "failed", StringComparison.OrdinalIgnoreCase);
+
+    public string SelectedClipOcrText => SelectedClip?.Clip.OcrText ?? string.Empty;
+
+    public string SelectedClipOcrStatusText
+    {
+        get
+        {
+            var clip = SelectedClip?.Clip;
+            if (clip is null || clip.ContentType != ContentType.Image) return string.Empty;
+            var status = clip.OcrStatus;
+            if (string.IsNullOrEmpty(status)) return "No OCR yet";
+            return status switch
+            {
+                "running" => "OCR running…",
+                "pending" => "OCR queued",
+                "failed" => string.IsNullOrWhiteSpace(clip.OcrError) ? "OCR failed" : $"OCR failed: {clip.OcrError}",
+                "succeeded" => string.IsNullOrWhiteSpace(clip.OcrText) ? "OCR produced no text" : $"OCR: {clip.OcrText.Length} chars",
+                _ => status,
+            };
+        }
+    }
+
+    private bool _showSelectedImageOcrText;
+    public bool ShowImageOcrTextToggle
+    {
+        get => _showSelectedImageOcrText;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _showSelectedImageOcrText, value);
+            this.RaisePropertyChanged(nameof(ShowSelectedImageEditor));
+            this.RaisePropertyChanged(nameof(ShowSelectedImagePlaceholder));
+            this.RaisePropertyChanged(nameof(ShowSelectedImageOcrText));
+        }
+    }
 
     public bool HasSelectedClipFileItems => SelectedClipFiles.Count > 0;
 
@@ -1359,6 +1428,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get => _settingsOcrLanguages;
         set => this.RaiseAndSetIfChanged(ref _settingsOcrLanguages, value);
+    }
+
+    public bool SettingsAutoOcrImageClips
+    {
+        get => _settingsAutoOcrImageClips;
+        set => this.RaiseAndSetIfChanged(ref _settingsAutoOcrImageClips, value);
     }
 
     public bool SettingsEnableRemoteApi
@@ -2645,45 +2720,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         StatusText = "Loaded default scripts";
     }
 
-    private async Task RunOcrOnSelectedImageAsync()
+    private Task RunOcrOnSelectedImageAsync()
     {
         var clip = SelectedClip;
         if (clip is null || clip.Clip.ContentType != ContentType.Image || clip.Clip.ContentBytes is null)
         {
             StatusText = "Select an image clip first";
-            return;
+            return Task.CompletedTask;
         }
 
         if (!_ocrService.IsAvailable)
         {
             StatusText = "No Windows OCR languages installed. Add one in Windows Settings → Time & Language → Language.";
-            return;
+            return Task.CompletedTask;
         }
 
-        StatusText = "Running OCR…";
-        var languages = _settingsService.Current.OcrLanguages;
-        var result = await _ocrService.ExtractTextAsync(clip.Clip.ContentBytes, languages);
-        if (!result.Success || string.IsNullOrWhiteSpace(result.Text))
-        {
-            StatusText = result.Error ?? "OCR produced no text";
-            return;
-        }
-
-        var bytes = System.Text.Encoding.UTF8.GetBytes(result.Text);
-        var captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
-        {
-            ContentBytes = bytes,
-            ContentText = result.Text,
-            ContentType = ContentType.Text,
-            ContentFormat = ClipContentFormat.PlainText,
-            SourceApp = clip.SourceApp,
-            SourceAppPath = clip.Clip.SourceAppPath,
-            SourceAppIconBytes = clip.Clip.SourceAppIconBytes,
-            SourceWindowTitle = clip.Clip.SourceWindowTitle,
-            IncrementExistingCopyCount = false,
-        });
-        StatusText = $"OCR extracted {result.Text.Length} characters";
-        await RefreshAsync(captured?.Id);
+        StatusText = "Queued OCR…";
+        _backgroundOcrQueue.Enqueue(clip.Clip.Id);
+        return Task.CompletedTask;
     }
 
     private async Task CommitEditedClipOnSelectionChangeAsync()
@@ -3545,6 +3599,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             EnableAutoUpdate = SettingsEnableAutoUpdate,
             UpdateFeedUrl = (SettingsUpdateFeedUrl ?? string.Empty).Trim(),
             OcrLanguages = (SettingsOcrLanguages ?? string.Empty).Trim(),
+            AutoOcrImageClips = SettingsAutoOcrImageClips,
             EnableRemoteApi = SettingsEnableRemoteApi,
             RemoteApiPort = SettingsRemoteApiPort,
             RemoteApiToken = (SettingsRemoteApiToken ?? string.Empty).Trim(),
@@ -3634,6 +3689,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsEnableAutoUpdate = settings.EnableAutoUpdate;
         SettingsUpdateFeedUrl = settings.UpdateFeedUrl;
         SettingsOcrLanguages = settings.OcrLanguages;
+        SettingsAutoOcrImageClips = settings.AutoOcrImageClips;
         SettingsEnableRemoteApi = settings.EnableRemoteApi;
         SettingsRemoteApiPort = settings.RemoteApiPort;
         SettingsRemoteApiToken = settings.RemoteApiToken;
@@ -3715,6 +3771,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await LoadSensitivityRulesAsync();
         _isDatabaseReady = true;
         _clipboardMonitorService.Start();
+        _backgroundOcrQueue.Start();
+        _ = Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync());
         StartMaintenanceLoop();
     }
 
@@ -4151,6 +4209,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(ShowSelectedImageRenderer));
         this.RaisePropertyChanged(nameof(ShowSelectedImageEditor));
         this.RaisePropertyChanged(nameof(ShowSelectedImagePlaceholder));
+        this.RaisePropertyChanged(nameof(ShowSelectedImageOcrText));
+        this.RaisePropertyChanged(nameof(HasSelectedClipOcrText));
+        this.RaisePropertyChanged(nameof(IsSelectedClipImageOcrRunning));
+        this.RaisePropertyChanged(nameof(IsSelectedClipImageOcrPending));
+        this.RaisePropertyChanged(nameof(IsSelectedClipImageOcrFailed));
+        this.RaisePropertyChanged(nameof(SelectedClipOcrText));
+        this.RaisePropertyChanged(nameof(SelectedClipOcrStatusText));
         this.RaisePropertyChanged(nameof(ShowCopyEditedClipButton));
         this.RaisePropertyChanged(nameof(IsSelectedClipTextEditable));
         this.RaisePropertyChanged(nameof(SelectedClipTextIsReadOnly));

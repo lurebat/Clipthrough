@@ -141,6 +141,7 @@ public partial class App : Application
         services.AddSingleton<IScriptingService, ScriptingService>();
         services.AddSingleton<IUpdateService, UpdateService>();
         services.AddSingleton<IOcrService, OcrService>();
+        services.AddSingleton<IBackgroundOcrQueue, BackgroundOcrQueue>();
         services.AddSingleton<IRemoteControlService, RemoteControlService>();
         services.AddSingleton<MainWindowViewModel>();
 

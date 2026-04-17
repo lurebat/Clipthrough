@@ -55,6 +55,14 @@ public sealed class ClipEntry
 
     public bool IsPinned => PinnedAt.HasValue;
 
+    public string? OcrText { get; set; }
+
+    public string? OcrStatus { get; set; }
+
+    public DateTimeOffset? OcrAttemptedAt { get; set; }
+
+    public string? OcrError { get; set; }
+
     public IReadOnlyList<SensitivityMatch> SensitivityMatches { get; set; } = Array.Empty<SensitivityMatch>();
 }
 

@@ -37,7 +37,12 @@ public sealed class DatabaseInitializer
             source_url   TEXT,
             is_pasted    INTEGER NOT NULL DEFAULT 0,
             paste_count  INTEGER NOT NULL DEFAULT 0,
-            last_pasted_at TEXT
+            last_pasted_at TEXT,
+            pinned_at    TEXT,
+            ocr_text     TEXT,
+            ocr_status   TEXT,
+            ocr_attempted_at TEXT,
+            ocr_error    TEXT
         );
 
         CREATE VIRTUAL TABLE IF NOT EXISTS clips_fts USING fts5(
@@ -127,6 +132,7 @@ public sealed class DatabaseInitializer
         await EnsureClipPayloadColumnsAsync(connection, cancellationToken);
         await EnsureClipTrackingColumnsAsync(connection, cancellationToken);
         await EnsureClipPinningColumnsAsync(connection, cancellationToken);
+        await EnsureClipOcrColumnsAsync(connection, cancellationToken);
         await BackfillClipAggregationColumnsAsync(connection, cancellationToken);
         await BackfillClipPayloadColumnsAsync(connection, cancellationToken);
         await DeduplicateClipsByHashAsync(connection, cancellationToken);
@@ -288,6 +294,46 @@ public sealed class DatabaseInitializer
         await ExecuteNonQueryAsync(
             connection,
             "CREATE INDEX IF NOT EXISTS idx_clips_pinned_at ON clips(pinned_at) WHERE pinned_at IS NOT NULL;",
+            cancellationToken);
+    }
+
+    private static async Task EnsureClipOcrColumnsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var existingColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "PRAGMA table_info(clips);";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                existingColumns.Add(reader.GetString(1));
+            }
+        }
+
+        if (!existingColumns.Contains("ocr_text"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN ocr_text TEXT;", cancellationToken);
+        }
+
+        if (!existingColumns.Contains("ocr_status"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN ocr_status TEXT;", cancellationToken);
+        }
+
+        if (!existingColumns.Contains("ocr_attempted_at"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN ocr_attempted_at TEXT;", cancellationToken);
+        }
+
+        if (!existingColumns.Contains("ocr_error"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN ocr_error TEXT;", cancellationToken);
+        }
+
+        await ExecuteNonQueryAsync(
+            connection,
+            "CREATE INDEX IF NOT EXISTS idx_clips_ocr_status ON clips(ocr_status) WHERE ocr_status IS NOT NULL;",
             cancellationToken);
     }
 

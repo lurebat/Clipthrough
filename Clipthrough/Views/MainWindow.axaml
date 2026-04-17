@@ -837,10 +837,28 @@
 
                             <Grid IsVisible="{Binding ShowSelectedImageRenderer}"
                                   Margin="14"
-                                  RowDefinitions="*,Auto"
+                                  RowDefinitions="Auto,*,Auto"
                                   RowSpacing="10">
-                                <Border Classes="image-placeholder"
-                                         Grid.RowSpan="1"
+                                <StackPanel Grid.Row="0"
+                                            Orientation="Horizontal"
+                                            Spacing="6"
+                                            HorizontalAlignment="Center">
+                                    <RadioButton GroupName="ImagePane"
+                                                 Content="Image"
+                                                 IsChecked="{Binding !ShowImageOcrTextToggle}" />
+                                    <RadioButton GroupName="ImagePane"
+                                                 Content="Text (OCR)"
+                                                 IsChecked="{Binding ShowImageOcrTextToggle, Mode=TwoWay}"
+                                                 ToolTip.Tip="Show recognized text for this image" />
+                                    <Button Content="Run OCR"
+                                            Command="{Binding RunOcrOnSelectedImageCommand}"
+                                            ToolTip.Tip="Queue OCR for this image" />
+                                    <TextBlock Classes="body-muted"
+                                               VerticalAlignment="Center"
+                                               Text="{Binding SelectedClipOcrStatusText}" />
+                                </StackPanel>
+                                <Border Grid.Row="1"
+                                        Classes="image-placeholder"
                                          IsVisible="{Binding ShowSelectedImagePlaceholder}">
                                     <StackPanel HorizontalAlignment="Center"
                                                 VerticalAlignment="Center"
@@ -860,13 +878,22 @@
                                     </StackPanel>
                                 </Border>
 
-                                <controls:EmbeddedImageEditorView Grid.Row="0"
+                                <controls:EmbeddedImageEditorView Grid.Row="1"
                                                                   x:Name="SelectedImageEditor"
                                                                   IsVisible="{Binding ShowSelectedImageEditor}"
                                                                   MinHeight="450"
                                                                   SourceImageBytes="{Binding SelectedClipImageBytes}" />
 
-                                <TextBlock Grid.Row="1"
+                                <TextBox Grid.Row="1"
+                                         IsVisible="{Binding ShowSelectedImageOcrText}"
+                                         Classes="content-viewer"
+                                         IsReadOnly="True"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         MinHeight="300"
+                                         Text="{Binding SelectedClipOcrText, Mode=OneWay}" />
+
+                                <TextBlock Grid.Row="2"
                                            Classes="body-muted"
                                            HorizontalAlignment="Center"
                                            Text="{Binding SelectedClipImageResolutionText}" />

@@ -430,6 +430,8 @@
                     <StackPanel Spacing="10" Margin="8,10,0,0">
                         <TextBlock Classes="body-muted" TextWrapping="Wrap"
                                    Text="OCR uses the built-in Windows.Media.Ocr engine. Install extra language packs from Windows Settings → Time &amp; Language → Language → Add a language (with the optional OCR feature) to recognize more scripts, then list their BCP-47 tags below (e.g. 'en+he')." />
+                        <CheckBox Content="Automatically run OCR on new image clips in the background"
+                                  IsChecked="{Binding SettingsAutoOcrImageClips, Mode=TwoWay}" />
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label" Text="Languages (BCP-47 tags, separated by + , or space; blank = user profile)" />
                             <TextBox Watermark="en+he"

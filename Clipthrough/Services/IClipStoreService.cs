@@ -20,6 +20,14 @@ public interface IClipStoreService
 
     Task MarkPastedAsync(long clipId, CancellationToken cancellationToken = default);
 
+    Task<bool> TryClaimForOcrAsync(long clipId, CancellationToken cancellationToken = default);
+
+    Task<bool> SetOcrResultAsync(long clipId, string ocrText, CancellationToken cancellationToken = default);
+
+    Task<bool> SetOcrFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default);
+
+    Task<System.Collections.Generic.IReadOnlyList<long>> GetPendingOcrClipIdsAsync(CancellationToken cancellationToken = default);
+
     Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default);
 
     Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default);

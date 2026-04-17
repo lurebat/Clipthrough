@@ -447,7 +447,17 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestAiTransformService(),
             new Clipthrough.Services.ScriptingService(),
             new TestOcrService(),
+            new NoOpBackgroundOcrQueue(),
             scope.DatabaseInitializer);
+    }
+
+    private sealed class NoOpBackgroundOcrQueue : Clipthrough.Services.IBackgroundOcrQueue
+    {
+        public IObservable<long> OcrCompleted { get; } = System.Reactive.Linq.Observable.Empty<long>();
+        public void Start() { }
+        public Task StopAsync() => Task.CompletedTask;
+        public void Enqueue(long clipId) { }
+        public Task EnqueueBacklogAsync(System.Threading.CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private static async Task PrepareInitializedScopeAsync(TemporaryDatabaseScope scope)
