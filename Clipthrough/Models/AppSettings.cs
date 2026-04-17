@@ -132,6 +132,8 @@ public sealed record AppSettings
 
     public System.Collections.Generic.IReadOnlyList<AiPreset> AiPresets { get; init; } = System.Array.Empty<AiPreset>();
 
+    public System.Collections.Generic.IReadOnlyList<CustomHotkeyBinding> CustomHotkeys { get; init; } = System.Array.Empty<CustomHotkeyBinding>();
+
     public bool EnableAutoUpdate { get; init; }
 
     public string UpdateFeedUrl { get; init; } = string.Empty;
@@ -204,6 +206,16 @@ public sealed record AppSettings
         AiPresets = (AiPresets ?? System.Array.Empty<AiPreset>())
             .Where(p => p is not null && !string.IsNullOrWhiteSpace(p.Name) && !string.IsNullOrWhiteSpace(p.Prompt))
             .Select(p => new AiPreset { Name = p.Name.Trim(), Prompt = p.Prompt.Trim() })
+            .ToList(),
+        CustomHotkeys = (CustomHotkeys ?? System.Array.Empty<CustomHotkeyBinding>())
+            .Where(h => h is not null && !string.IsNullOrWhiteSpace(h.Gesture) && !string.IsNullOrWhiteSpace(h.Target))
+            .Select(h => new CustomHotkeyBinding
+            {
+                Id = string.IsNullOrWhiteSpace(h.Id) ? System.Guid.NewGuid().ToString() : h.Id,
+                Gesture = h.Gesture.Trim(),
+                Target = h.Target.Trim(),
+                PasteAfter = h.PasteAfter,
+            })
             .ToList(),
         UpdateFeedUrl = UpdateFeedUrl?.Trim() ?? string.Empty,
         OcrLanguages = string.IsNullOrWhiteSpace(OcrLanguages) ? "en" : OcrLanguages.Trim(),

@@ -245,6 +245,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SettingsUserScriptDrafts.Remove(draft);
             SelectedScriptDraft = SettingsUserScriptDrafts.FirstOrDefault();
         });
+        AddCustomHotkeyDraftCommand = ReactiveCommand.Create(() =>
+        {
+            var draft = new CustomHotkeyDraft { Gesture = "Ctrl+Alt+T", Target = "builtin:UpperCase", PasteAfter = true };
+            SettingsCustomHotkeyDrafts.Add(draft);
+            SelectedCustomHotkeyDraft = draft;
+        });
+        RemoveCustomHotkeyDraftCommand = ReactiveCommand.Create<CustomHotkeyDraft>(draft =>
+        {
+            if (draft is null) return;
+            SettingsCustomHotkeyDrafts.Remove(draft);
+            SelectedCustomHotkeyDraft = SettingsCustomHotkeyDrafts.FirstOrDefault();
+        });
         ApplyUserScriptCommand = ReactiveCommand.CreateFromTask<UserScript>(ApplyUserScriptAsync);
         LoadDefaultScriptsCommand = ReactiveCommand.CreateFromTask(LoadDefaultScriptsAsync);
         RunOcrOnSelectedImageCommand = ReactiveCommand.CreateFromTask(RunOcrOnSelectedImageAsync);
@@ -458,6 +470,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ReactiveCommand<Unit, Unit> AddScriptDraftCommand { get; }
     public ReactiveCommand<UserScriptDraft, Unit> RemoveScriptDraftCommand { get; }
+
+    public System.Collections.ObjectModel.ObservableCollection<CustomHotkeyDraft> SettingsCustomHotkeyDrafts { get; } = new();
+
+    private CustomHotkeyDraft? _selectedCustomHotkeyDraft;
+    public CustomHotkeyDraft? SelectedCustomHotkeyDraft
+    {
+        get => _selectedCustomHotkeyDraft;
+        set => this.RaiseAndSetIfChanged(ref _selectedCustomHotkeyDraft, value);
+    }
+
+    public ReactiveCommand<Unit, Unit> AddCustomHotkeyDraftCommand { get; }
+    public ReactiveCommand<CustomHotkeyDraft, Unit> RemoveCustomHotkeyDraftCommand { get; }
 
     public System.Collections.ObjectModel.ObservableCollection<AiMenuEntry> AiMenuEntries { get; } = new();
 
@@ -3740,6 +3764,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .Select(s => new UserScript { Name = s.Name.Trim(), Code = s.Code })
                 .Where(s => !string.IsNullOrWhiteSpace(s.Name) && !string.IsNullOrWhiteSpace(s.Code))
                 .ToList(),
+            CustomHotkeys = SettingsCustomHotkeyDrafts
+                .Select(d => d.ToBinding())
+                .Where(b => !string.IsNullOrWhiteSpace(b.Gesture) && !string.IsNullOrWhiteSpace(b.Target))
+                .ToList(),
             MaxClipSizeBytes = maxClipSizeBytes,
             CloseToTray = SettingsCloseToTray,
             MinimizeToTray = SettingsMinimizeToTray,
@@ -3859,6 +3887,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SettingsUserScriptDrafts.Add(new UserScriptDraft { Name = s.Name, Code = s.Code });
         }
         SelectedScriptDraft = SettingsUserScriptDrafts.FirstOrDefault();
+        SettingsCustomHotkeyDrafts.Clear();
+        foreach (var h in settings.CustomHotkeys)
+        {
+            SettingsCustomHotkeyDrafts.Add(CustomHotkeyDraft.From(h));
+        }
+        SelectedCustomHotkeyDraft = SettingsCustomHotkeyDrafts.FirstOrDefault();
         SettingsUseFuzzySearch = settings.UseFuzzySettingsSearch;
         UseFuzzyClipSearch = settings.UseFuzzyClipSearch;
         IsDatabasePasswordVisible = false;

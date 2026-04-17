@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
@@ -30,6 +31,8 @@ public partial class App : Application
     private IClipStoreService? _clipStoreService;
     private IClipboardMonitorService? _clipboardMonitorService;
     private IAppNotificationService? _notificationService;
+    private IAiTransformService? _aiTransformService;
+    private IScriptingService? _scriptingService;
     private IDisposable? _notificationSubscription;
     private bool _isExitRequested;
     private bool _hasShownTrayNotification;
@@ -62,6 +65,8 @@ public partial class App : Application
             _clipboardMonitorService = Services.GetRequiredService<IClipboardMonitorService>();
             ApplyThemeMode(_settingsService.Current.ThemeMode);
             _notificationService = Services.GetRequiredService<IAppNotificationService>();
+            _aiTransformService = Services.GetRequiredService<IAiTransformService>();
+            _scriptingService = Services.GetRequiredService<IScriptingService>();
 
             _mainWindow = desktop.MainWindow = new MainWindow
             {
@@ -316,6 +321,24 @@ public partial class App : Application
             _settingsService.Current.EnablePasteAsPlainTextHotkey,
             _settingsService.Current.PasteAsPlainTextHotkey,
             PasteAsPlainText);
+
+        foreach (var binding in _settingsService.Current.CustomHotkeys)
+        {
+            if (string.IsNullOrWhiteSpace(binding.Gesture) || string.IsNullOrWhiteSpace(binding.Target))
+            {
+                continue;
+            }
+            if (!HotkeyGesture.TryParse(binding.Gesture, out var gesture, out _) || gesture is null)
+            {
+                continue;
+            }
+            var localBinding = binding;
+            _systemInteractionService.TryRegisterGlobalHotKey(
+                _mainWindow,
+                "custom-" + localBinding.Id,
+                gesture,
+                () => ExecuteCustomHotkey(localBinding));
+        }
     }
 
     private void TryRegisterExtendedHotkey(string id, bool enabled, string raw, Action callback)
@@ -422,6 +445,66 @@ public partial class App : Application
             _systemInteractionService.SimulatePasteKeystroke();
         }
         catch (Exception ex) { Trace.TraceWarning($"PasteAsPlainText failed: {ex.Message}"); }
+    }
+
+    private async void ExecuteCustomHotkey(CustomHotkeyBinding binding)
+    {
+        if (_clipStoreService is null || _systemInteractionService is null || _clipboardMonitorService is null) return;
+        try
+        {
+            var clip = await _clipStoreService.GetClipAtOffsetAsync(0);
+            if (clip is null || string.IsNullOrEmpty(clip.Content)) return;
+
+            var target = binding.Target ?? string.Empty;
+            var colon = target.IndexOf(':');
+            if (colon <= 0) return;
+            var kind = target.Substring(0, colon);
+            var name = target.Substring(colon + 1);
+            var input = clip.Content;
+            string output;
+
+            switch (kind)
+            {
+                case "builtin":
+                    if (!Enum.TryParse<TextTransformation>(name, ignoreCase: true, out var tx) || tx == TextTransformation.None)
+                    {
+                        return;
+                    }
+                    output = Clipthrough.Services.TextTransformationService.Apply(tx, input);
+                    break;
+                case "script":
+                {
+                    if (_scriptingService is null) return;
+                    var script = _settingsService?.Current.UserScripts.FirstOrDefault(s =>
+                        string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
+                    if (script is null) return;
+                    output = await _scriptingService.EvaluateAsync(script.Code, input);
+                    break;
+                }
+                case "ai":
+                {
+                    if (_aiTransformService is null || !_aiTransformService.IsConfigured) return;
+                    var preset = _settingsService?.Current.AiPresets.FirstOrDefault(p =>
+                        string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+                    if (preset is null) return;
+                    output = await _aiTransformService.TransformAsync(preset.Prompt, input);
+                    break;
+                }
+                default:
+                    return;
+            }
+
+            if (string.IsNullOrEmpty(output)) return;
+
+            _clipboardMonitorService.SuppressNext();
+            await _systemInteractionService.CopyTextAsync(output);
+            if (binding.PasteAfter)
+            {
+                await Task.Delay(120);
+                _systemInteractionService.SimulatePasteKeystroke();
+            }
+        }
+        catch (Exception ex) { Trace.TraceWarning($"ExecuteCustomHotkey failed: {ex.Message}"); }
     }
 
     private void ToggleMainWindowVisibility()

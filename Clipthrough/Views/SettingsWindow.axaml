@@ -422,6 +422,52 @@
                     </StackPanel>
                 </Expander>
 
+                <Expander Classes="settings-section">
+                    <Expander.Header>
+                        <TextBlock Text="Custom hotkey actions" FontSize="16" FontWeight="SemiBold" />
+                    </Expander.Header>
+                    <StackPanel Spacing="10" Margin="8,10,0,0">
+                        <TextBlock Classes="body-muted" TextWrapping="Wrap"
+                                   Text="Bind a global hotkey to a transformation of the most recent clip. Target format: 'builtin:UpperCase' for a built-in text transformation, 'script:MyScript' for a user script by name, or 'ai:MyPreset' for an AI preset by name. When 'Paste after' is checked, the transformed text is pasted into the foreground window." />
+                        <Grid ColumnDefinitions="260,*" ColumnSpacing="12" MinHeight="200">
+                            <DockPanel Grid.Column="0" LastChildFill="True">
+                                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="6" Margin="0,6,0,0">
+                                    <Button Classes="secondary compact"
+                                            Content="Add"
+                                            Command="{Binding AddCustomHotkeyDraftCommand}" />
+                                    <Button Classes="destructive compact"
+                                            Content="Remove"
+                                            Command="{Binding RemoveCustomHotkeyDraftCommand}"
+                                            CommandParameter="{Binding SelectedCustomHotkeyDraft}" />
+                                </StackPanel>
+                                <ListBox ItemsSource="{Binding SettingsCustomHotkeyDrafts}"
+                                         SelectedItem="{Binding SelectedCustomHotkeyDraft, Mode=TwoWay}">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <TextBlock Text="{Binding Gesture}" FontFamily="Consolas,Cascadia Code,monospace" />
+                                                <TextBlock Text="→" Classes="body-muted" />
+                                                <TextBlock Text="{Binding Target}" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </DockPanel>
+                            <StackPanel Grid.Column="1" Spacing="6"
+                                        DataContext="{Binding SelectedCustomHotkeyDraft}"
+                                        IsEnabled="{Binding Converter={x:Static ObjectConverters.IsNotNull}}">
+                                <TextBlock Classes="detail-label" Text="Hotkey gesture (e.g. Ctrl+Alt+U)" />
+                                <TextBox Text="{Binding Gesture, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
+                                <TextBlock Classes="detail-label" Text="Target (builtin:Name | script:Name | ai:Name)" />
+                                <TextBox FontFamily="Consolas,Cascadia Code,monospace"
+                                         Text="{Binding Target, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
+                                <CheckBox Content="Paste after transforming (Ctrl+V into foreground window)"
+                                          IsChecked="{Binding PasteAfter, Mode=TwoWay}" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Expander>
+
                 <!-- AI transforms -->
                 <Expander Classes="settings-section"
                           IsVisible="{Binding IsSettingsSectionAiVisible}"
