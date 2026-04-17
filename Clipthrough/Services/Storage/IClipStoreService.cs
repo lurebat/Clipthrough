@@ -18,6 +18,8 @@ public interface IClipStoreService
 
     Task ClearSensitivityAsync(long clipId, CancellationToken cancellationToken = default);
 
+    Task SetSensitiveAsync(long clipId, bool isSensitive, CancellationToken cancellationToken = default);
+
     Task MarkPastedAsync(long clipId, CancellationToken cancellationToken = default);
 
     Task<bool> TryClaimForOcrAsync(long clipId, CancellationToken cancellationToken = default);

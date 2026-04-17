@@ -207,6 +207,17 @@ public sealed class ClipStoreService : IClipStoreService
         await transaction.CommitAsync(cancellationToken);
     }
 
+    public async Task SetSensitiveAsync(long clipId, bool isSensitive, CancellationToken cancellationToken = default)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE clips SET is_sensitive = $s WHERE id = $id;";
+        command.Parameters.AddWithValue("$s", isSensitive ? 1 : 0);
+        command.Parameters.AddWithValue("$id", clipId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     public async Task MarkPastedAsync(long clipId, CancellationToken cancellationToken = default)
     {
         await using var connection = _connectionFactory.CreateConnection();

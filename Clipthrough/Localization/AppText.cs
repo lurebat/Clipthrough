@@ -75,6 +75,12 @@ public static class AppText
         [nameof(SettingsPastedHotkeyLabel)] = "Toggle pasted only",
         [nameof(SettingsIncrementalPasteHotkeyLabel)] = "Incremental paste",
         [nameof(SettingsDecrementalPasteHotkeyLabel)] = "Decremental paste",
+        [nameof(SettingsCopyAndFavoriteHotkeyLabel)] = "Copy & favorite (mark last clip)",
+        [nameof(SettingsCopyAndSensitiveHotkeyLabel)] = "Copy & mark sensitive",
+        [nameof(SettingsCopyWithoutSavingHotkeyLabel)] = "Copy without saving",
+        [nameof(SettingsPasteAndDeleteHotkeyLabel)] = "Paste & delete top clip",
+        [nameof(SettingsPasteAndFavoriteHotkeyLabel)] = "Paste & favorite top clip",
+        [nameof(SettingsPasteAsPlainTextHotkeyLabel)] = "Paste top clip as plain text",
         [nameof(SettingsToolsTitle)] = "External tools",
         [nameof(SettingsExternalEditorPathLabel)] = "External editor path",
         [nameof(SettingsExternalDiffToolPathLabel)] = "Diff tool path",
@@ -314,6 +320,12 @@ public static class AppText
     public static string SettingsPastedHotkeyLabel => Text(nameof(SettingsPastedHotkeyLabel));
     public static string SettingsIncrementalPasteHotkeyLabel => Text(nameof(SettingsIncrementalPasteHotkeyLabel));
     public static string SettingsDecrementalPasteHotkeyLabel => Text(nameof(SettingsDecrementalPasteHotkeyLabel));
+    public static string SettingsCopyAndFavoriteHotkeyLabel => Text(nameof(SettingsCopyAndFavoriteHotkeyLabel));
+    public static string SettingsCopyAndSensitiveHotkeyLabel => Text(nameof(SettingsCopyAndSensitiveHotkeyLabel));
+    public static string SettingsCopyWithoutSavingHotkeyLabel => Text(nameof(SettingsCopyWithoutSavingHotkeyLabel));
+    public static string SettingsPasteAndDeleteHotkeyLabel => Text(nameof(SettingsPasteAndDeleteHotkeyLabel));
+    public static string SettingsPasteAndFavoriteHotkeyLabel => Text(nameof(SettingsPasteAndFavoriteHotkeyLabel));
+    public static string SettingsPasteAsPlainTextHotkeyLabel => Text(nameof(SettingsPasteAsPlainTextHotkeyLabel));
     public static string SettingsToolsTitle => Text(nameof(SettingsToolsTitle));
     public static string SettingsExternalEditorPathLabel => Text(nameof(SettingsExternalEditorPathLabel));
     public static string SettingsExternalDiffToolPathLabel => Text(nameof(SettingsExternalDiffToolPathLabel));

@@ -138,6 +138,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _settingsEnableIncrementalPasteHotkey = AppSettings.Default.EnableIncrementalPasteHotkey;
     private string _settingsDecrementalPasteHotkey = AppSettings.Default.DecrementalPasteHotkey;
     private bool _settingsEnableDecrementalPasteHotkey = AppSettings.Default.EnableDecrementalPasteHotkey;
+    private string _settingsCopyAndFavoriteHotkey = AppSettings.Default.CopyAndFavoriteHotkey;
+    private bool _settingsEnableCopyAndFavoriteHotkey = AppSettings.Default.EnableCopyAndFavoriteHotkey;
+    private string _settingsCopyAndSensitiveHotkey = AppSettings.Default.CopyAndSensitiveHotkey;
+    private bool _settingsEnableCopyAndSensitiveHotkey = AppSettings.Default.EnableCopyAndSensitiveHotkey;
+    private string _settingsCopyWithoutSavingHotkey = AppSettings.Default.CopyWithoutSavingHotkey;
+    private bool _settingsEnableCopyWithoutSavingHotkey = AppSettings.Default.EnableCopyWithoutSavingHotkey;
+    private string _settingsPasteAndDeleteHotkey = AppSettings.Default.PasteAndDeleteHotkey;
+    private bool _settingsEnablePasteAndDeleteHotkey = AppSettings.Default.EnablePasteAndDeleteHotkey;
+    private string _settingsPasteAndFavoriteHotkey = AppSettings.Default.PasteAndFavoriteHotkey;
+    private bool _settingsEnablePasteAndFavoriteHotkey = AppSettings.Default.EnablePasteAndFavoriteHotkey;
+    private string _settingsPasteAsPlainTextHotkey = AppSettings.Default.PasteAsPlainTextHotkey;
+    private bool _settingsEnablePasteAsPlainTextHotkey = AppSettings.Default.EnablePasteAsPlainTextHotkey;
     private string _settingsExternalEditorPath = AppSettings.Default.ExternalEditorPath;
     private string _settingsExternalDiffToolPath = AppSettings.Default.ExternalDiffToolPath;
     private bool _settingsEnableAi = AppSettings.Default.EnableAi;
@@ -1627,6 +1639,85 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         get => _settingsEnableDecrementalPasteHotkey;
         set => this.RaiseAndSetIfChanged(ref _settingsEnableDecrementalPasteHotkey, value);
     }
+
+    public string SettingsCopyAndFavoriteHotkey
+    {
+        get => _settingsCopyAndFavoriteHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsCopyAndFavoriteHotkey, value);
+    }
+
+    public bool SettingsEnableCopyAndFavoriteHotkey
+    {
+        get => _settingsEnableCopyAndFavoriteHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnableCopyAndFavoriteHotkey, value);
+    }
+
+    public string SettingsCopyAndSensitiveHotkey
+    {
+        get => _settingsCopyAndSensitiveHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsCopyAndSensitiveHotkey, value);
+    }
+
+    public bool SettingsEnableCopyAndSensitiveHotkey
+    {
+        get => _settingsEnableCopyAndSensitiveHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnableCopyAndSensitiveHotkey, value);
+    }
+
+    public string SettingsCopyWithoutSavingHotkey
+    {
+        get => _settingsCopyWithoutSavingHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsCopyWithoutSavingHotkey, value);
+    }
+
+    public bool SettingsEnableCopyWithoutSavingHotkey
+    {
+        get => _settingsEnableCopyWithoutSavingHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnableCopyWithoutSavingHotkey, value);
+    }
+
+    public string SettingsPasteAndDeleteHotkey
+    {
+        get => _settingsPasteAndDeleteHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsPasteAndDeleteHotkey, value);
+    }
+
+    public bool SettingsEnablePasteAndDeleteHotkey
+    {
+        get => _settingsEnablePasteAndDeleteHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnablePasteAndDeleteHotkey, value);
+    }
+
+    public string SettingsPasteAndFavoriteHotkey
+    {
+        get => _settingsPasteAndFavoriteHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsPasteAndFavoriteHotkey, value);
+    }
+
+    public bool SettingsEnablePasteAndFavoriteHotkey
+    {
+        get => _settingsEnablePasteAndFavoriteHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnablePasteAndFavoriteHotkey, value);
+    }
+
+    public string SettingsPasteAsPlainTextHotkey
+    {
+        get => _settingsPasteAsPlainTextHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsPasteAsPlainTextHotkey, value);
+    }
+
+    public bool SettingsEnablePasteAsPlainTextHotkey
+    {
+        get => _settingsEnablePasteAsPlainTextHotkey;
+        set => this.RaiseAndSetIfChanged(ref _settingsEnablePasteAsPlainTextHotkey, value);
+    }
+
+    public string SettingsCopyAndFavoriteHotkeyLabel => AppText.SettingsCopyAndFavoriteHotkeyLabel;
+    public string SettingsCopyAndSensitiveHotkeyLabel => AppText.SettingsCopyAndSensitiveHotkeyLabel;
+    public string SettingsCopyWithoutSavingHotkeyLabel => AppText.SettingsCopyWithoutSavingHotkeyLabel;
+    public string SettingsPasteAndDeleteHotkeyLabel => AppText.SettingsPasteAndDeleteHotkeyLabel;
+    public string SettingsPasteAndFavoriteHotkeyLabel => AppText.SettingsPasteAndFavoriteHotkeyLabel;
+    public string SettingsPasteAsPlainTextHotkeyLabel => AppText.SettingsPasteAsPlainTextHotkeyLabel;
 
     private string _settingsFilter = string.Empty;
 
@@ -3499,12 +3590,38 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             normalizedDecrementalHotkey = parsedDecrementalHotkey!.ToString();
         }
 
+        var extendedHotkeys = new[]
+        {
+            ("copy-and-favorite", SettingsEnableCopyAndFavoriteHotkey, SettingsCopyAndFavoriteHotkey),
+            ("copy-and-sensitive", SettingsEnableCopyAndSensitiveHotkey, SettingsCopyAndSensitiveHotkey),
+            ("copy-without-saving", SettingsEnableCopyWithoutSavingHotkey, SettingsCopyWithoutSavingHotkey),
+            ("paste-and-delete", SettingsEnablePasteAndDeleteHotkey, SettingsPasteAndDeleteHotkey),
+            ("paste-and-favorite", SettingsEnablePasteAndFavoriteHotkey, SettingsPasteAndFavoriteHotkey),
+            ("paste-as-plain-text", SettingsEnablePasteAsPlainTextHotkey, SettingsPasteAsPlainTextHotkey),
+        };
+        var normalizedExtended = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (id, enabled, raw) in extendedHotkeys)
+        {
+            var norm = (raw ?? string.Empty).Trim();
+            if (enabled)
+            {
+                if (!HotkeyGesture.TryParse(norm, out var parsed, out var err) || parsed is null)
+                {
+                    StatusText = AppText.FormatSettingsValidationError(err ?? AppText.SettingsInvalidHotkeyFallback);
+                    return;
+                }
+                norm = parsed.ToString();
+            }
+            normalizedExtended[id] = norm;
+        }
+
         var duplicates = localHotkeys
             .Where(static draft => draft.IsEnabled)
             .Select(draft => normalizedHotkeys[draft.Name])
             .Append(SettingsEnableToggleWindowHotkey ? normalizedGlobalHotkey : string.Empty)
             .Append(SettingsEnableIncrementalPasteHotkey ? normalizedIncrementalHotkey : string.Empty)
             .Append(SettingsEnableDecrementalPasteHotkey ? normalizedDecrementalHotkey : string.Empty)
+            .Concat(extendedHotkeys.Where(h => h.Item2).Select(h => normalizedExtended[h.Item1]))
             .Where(static value => !string.IsNullOrWhiteSpace(value))
             .GroupBy(static value => value, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault(static group => group.Count() > 1);
@@ -3593,6 +3710,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             IncrementalPasteHotkey = normalizedIncrementalHotkey,
             EnableDecrementalPasteHotkey = SettingsEnableDecrementalPasteHotkey,
             DecrementalPasteHotkey = normalizedDecrementalHotkey,
+            EnableCopyAndFavoriteHotkey = SettingsEnableCopyAndFavoriteHotkey,
+            CopyAndFavoriteHotkey = normalizedExtended["copy-and-favorite"],
+            EnableCopyAndSensitiveHotkey = SettingsEnableCopyAndSensitiveHotkey,
+            CopyAndSensitiveHotkey = normalizedExtended["copy-and-sensitive"],
+            EnableCopyWithoutSavingHotkey = SettingsEnableCopyWithoutSavingHotkey,
+            CopyWithoutSavingHotkey = normalizedExtended["copy-without-saving"],
+            EnablePasteAndDeleteHotkey = SettingsEnablePasteAndDeleteHotkey,
+            PasteAndDeleteHotkey = normalizedExtended["paste-and-delete"],
+            EnablePasteAndFavoriteHotkey = SettingsEnablePasteAndFavoriteHotkey,
+            PasteAndFavoriteHotkey = normalizedExtended["paste-and-favorite"],
+            EnablePasteAsPlainTextHotkey = SettingsEnablePasteAsPlainTextHotkey,
+            PasteAsPlainTextHotkey = normalizedExtended["paste-as-plain-text"],
             ExternalEditorPath = SettingsExternalEditorPath.Trim(),
             ExternalDiffToolPath = SettingsExternalDiffToolPath.Trim(),
             EnableAi = SettingsEnableAi,
@@ -3698,6 +3827,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsIncrementalPasteHotkey = settings.IncrementalPasteHotkey;
         SettingsEnableDecrementalPasteHotkey = settings.EnableDecrementalPasteHotkey;
         SettingsDecrementalPasteHotkey = settings.DecrementalPasteHotkey;
+        SettingsEnableCopyAndFavoriteHotkey = settings.EnableCopyAndFavoriteHotkey;
+        SettingsCopyAndFavoriteHotkey = settings.CopyAndFavoriteHotkey;
+        SettingsEnableCopyAndSensitiveHotkey = settings.EnableCopyAndSensitiveHotkey;
+        SettingsCopyAndSensitiveHotkey = settings.CopyAndSensitiveHotkey;
+        SettingsEnableCopyWithoutSavingHotkey = settings.EnableCopyWithoutSavingHotkey;
+        SettingsCopyWithoutSavingHotkey = settings.CopyWithoutSavingHotkey;
+        SettingsEnablePasteAndDeleteHotkey = settings.EnablePasteAndDeleteHotkey;
+        SettingsPasteAndDeleteHotkey = settings.PasteAndDeleteHotkey;
+        SettingsEnablePasteAndFavoriteHotkey = settings.EnablePasteAndFavoriteHotkey;
+        SettingsPasteAndFavoriteHotkey = settings.PasteAndFavoriteHotkey;
+        SettingsEnablePasteAsPlainTextHotkey = settings.EnablePasteAsPlainTextHotkey;
+        SettingsPasteAsPlainTextHotkey = settings.PasteAsPlainTextHotkey;
         SettingsExternalEditorPath = settings.ExternalEditorPath;
         SettingsExternalDiffToolPath = settings.ExternalDiffToolPath;
         SettingsEnableAi = settings.EnableAi;

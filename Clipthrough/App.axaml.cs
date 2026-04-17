@@ -291,6 +291,137 @@ public partial class App : Application
         {
             _systemInteractionService.TryRegisterGlobalHotKey(_mainWindow, "decremental-paste", decHotkey!, DecrementalPaste);
         }
+
+        TryRegisterExtendedHotkey("copy-and-favorite",
+            _settingsService.Current.EnableCopyAndFavoriteHotkey,
+            _settingsService.Current.CopyAndFavoriteHotkey,
+            CopyAndFavorite);
+        TryRegisterExtendedHotkey("copy-and-sensitive",
+            _settingsService.Current.EnableCopyAndSensitiveHotkey,
+            _settingsService.Current.CopyAndSensitiveHotkey,
+            CopyAndSensitive);
+        TryRegisterExtendedHotkey("copy-without-saving",
+            _settingsService.Current.EnableCopyWithoutSavingHotkey,
+            _settingsService.Current.CopyWithoutSavingHotkey,
+            CopyWithoutSaving);
+        TryRegisterExtendedHotkey("paste-and-delete",
+            _settingsService.Current.EnablePasteAndDeleteHotkey,
+            _settingsService.Current.PasteAndDeleteHotkey,
+            PasteAndDelete);
+        TryRegisterExtendedHotkey("paste-and-favorite",
+            _settingsService.Current.EnablePasteAndFavoriteHotkey,
+            _settingsService.Current.PasteAndFavoriteHotkey,
+            PasteAndFavorite);
+        TryRegisterExtendedHotkey("paste-as-plain-text",
+            _settingsService.Current.EnablePasteAsPlainTextHotkey,
+            _settingsService.Current.PasteAsPlainTextHotkey,
+            PasteAsPlainText);
+    }
+
+    private void TryRegisterExtendedHotkey(string id, bool enabled, string raw, Action callback)
+    {
+        if (!enabled || _mainWindow is null || _systemInteractionService is null)
+        {
+            return;
+        }
+        if (HotkeyGesture.TryParse(raw, out var gesture, out _) && gesture is not null)
+        {
+            _systemInteractionService.TryRegisterGlobalHotKey(_mainWindow, id, gesture, callback);
+        }
+    }
+
+    private async void CopyAndFavorite()
+    {
+        if (_clipStoreService is null) return;
+        try
+        {
+            // Give the clipboard monitor a moment to capture the latest clip, then
+            // mark the newest one as favorite.
+            await Task.Delay(150);
+            var clip = await _clipStoreService.GetClipAtOffsetAsync(0);
+            if (clip is not null)
+            {
+                await _clipStoreService.SetFavoriteAsync(clip.Id, true);
+            }
+        }
+        catch (Exception ex) { Trace.TraceWarning($"CopyAndFavorite failed: {ex.Message}"); }
+    }
+
+    private async void CopyAndSensitive()
+    {
+        if (_clipStoreService is null) return;
+        try
+        {
+            await Task.Delay(150);
+            var clip = await _clipStoreService.GetClipAtOffsetAsync(0);
+            if (clip is not null)
+            {
+                await _clipStoreService.SetSensitiveAsync(clip.Id, true);
+            }
+        }
+        catch (Exception ex) { Trace.TraceWarning($"CopyAndSensitive failed: {ex.Message}"); }
+    }
+
+    private void CopyWithoutSaving()
+    {
+        _clipboardMonitorService?.SuppressNext();
+    }
+
+    private async void PasteAndDelete()
+    {
+        if (_clipStoreService is null || _systemInteractionService is null || _clipboardMonitorService is null) return;
+        try
+        {
+            var clip = await _clipStoreService.GetClipAtOffsetAsync(0);
+            if (clip is null) return;
+            _clipboardMonitorService.SuppressNext();
+            if (!string.IsNullOrEmpty(clip.Content))
+            {
+                await _systemInteractionService.CopyTextAsync(clip.Content);
+            }
+            await Task.Delay(120);
+            _systemInteractionService.SimulatePasteKeystroke();
+            await Task.Delay(120);
+            await _clipStoreService.DeleteAsync(clip.Id);
+        }
+        catch (Exception ex) { Trace.TraceWarning($"PasteAndDelete failed: {ex.Message}"); }
+    }
+
+    private async void PasteAndFavorite()
+    {
+        if (_clipStoreService is null || _systemInteractionService is null || _clipboardMonitorService is null) return;
+        try
+        {
+            var clip = await _clipStoreService.GetClipAtOffsetAsync(0);
+            if (clip is null) return;
+            _clipboardMonitorService.SuppressNext();
+            if (!string.IsNullOrEmpty(clip.Content))
+            {
+                await _systemInteractionService.CopyTextAsync(clip.Content);
+            }
+            await _clipStoreService.MarkPastedAsync(clip.Id);
+            await _clipStoreService.SetFavoriteAsync(clip.Id, true);
+            await Task.Delay(120);
+            _systemInteractionService.SimulatePasteKeystroke();
+        }
+        catch (Exception ex) { Trace.TraceWarning($"PasteAndFavorite failed: {ex.Message}"); }
+    }
+
+    private async void PasteAsPlainText()
+    {
+        if (_clipStoreService is null || _systemInteractionService is null || _clipboardMonitorService is null) return;
+        try
+        {
+            var clip = await _clipStoreService.GetClipAtOffsetAsync(0);
+            if (clip is null || string.IsNullOrEmpty(clip.Content)) return;
+            _clipboardMonitorService.SuppressNext();
+            // Always copy the plain-text Content field, regardless of stored HTML/RTF.
+            await _systemInteractionService.CopyTextAsync(clip.Content);
+            await _clipStoreService.MarkPastedAsync(clip.Id);
+            await Task.Delay(120);
+            _systemInteractionService.SimulatePasteKeystroke();
+        }
+        catch (Exception ex) { Trace.TraceWarning($"PasteAsPlainText failed: {ex.Message}"); }
     }
 
     private void ToggleMainWindowVisibility()

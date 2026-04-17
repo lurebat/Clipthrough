@@ -80,9 +80,9 @@ public sealed record AppSettings
 
     public string PasteAndFavoriteHotkey { get; init; } = string.Empty;
 
-    public bool EnablePasteWithTransformHotkey { get; init; }
+    public bool EnablePasteAsPlainTextHotkey { get; init; }
 
-    public string PasteWithTransformHotkey { get; init; } = string.Empty;
+    public string PasteAsPlainTextHotkey { get; init; } = string.Empty;
 
     public int MaxClipSizeBytes { get; init; } = DefaultMaxClipSizeBytes;
 
@@ -182,8 +182,8 @@ public sealed record AppSettings
         PasteAndDeleteHotkey = NormalizeOptionalHotkey(PasteAndDeleteHotkey),
         EnablePasteAndFavoriteHotkey = EnablePasteAndFavoriteHotkey,
         PasteAndFavoriteHotkey = NormalizeOptionalHotkey(PasteAndFavoriteHotkey),
-        EnablePasteWithTransformHotkey = EnablePasteWithTransformHotkey,
-        PasteWithTransformHotkey = NormalizeOptionalHotkey(PasteWithTransformHotkey),
+        EnablePasteAsPlainTextHotkey = EnablePasteAsPlainTextHotkey,
+        PasteAsPlainTextHotkey = NormalizeOptionalHotkey(PasteAsPlainTextHotkey),
         MaxClipSizeBytes = MaxClipSizeBytes < MinMaxClipSizeBytes || MaxClipSizeBytes > MaxMaxClipSizeBytes
             ? DefaultMaxClipSizeBytes
             : MaxClipSizeBytes,
