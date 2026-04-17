@@ -17,6 +17,8 @@ public interface ISystemInteractionService
 
     Task OpenPathAsync(string path);
 
+    Task OpenUrlAsync(string url);
+
     Task OpenContainingDirectoryAsync(string path);
 
     Task OpenInEditorAsync(string filePath, string editorPath);

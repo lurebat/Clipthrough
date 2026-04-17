@@ -117,6 +117,34 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         await clipboard.SetDataAsync(data);
     }
 
+    public Task OpenUrlAsync(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            throw new ArgumentException("URL must not be empty.", nameof(url));
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeMailto))
+        {
+            throw new ArgumentException($"Unsupported URL scheme: {url}", nameof(url));
+        }
+
+        var target = uri.ToString();
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            Process.Start(new ProcessStartInfo { FileName = target, UseShellExecute = true });
+        }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            Process.Start(new ProcessStartInfo { FileName = "open", ArgumentList = { target }, UseShellExecute = false });
+        }
+        else
+        {
+            Process.Start(new ProcessStartInfo { FileName = "xdg-open", ArgumentList = { target }, UseShellExecute = false });
+        }
+
+        return Task.CompletedTask;
+    }
+
     public Task OpenPathAsync(string path)
     {
         var normalizedPath = NormalizePath(path);

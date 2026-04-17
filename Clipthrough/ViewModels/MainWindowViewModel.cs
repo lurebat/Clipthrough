@@ -257,9 +257,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             StatusText = "OpenAPI schema URL copied";
         });
         OpenRemoteApiDocsUrlCommand = ReactiveCommand.CreateFromTask(async () =>
-            await _systemInteractionService.OpenPathAsync(RemoteApiDocsUrl));
+            await _systemInteractionService.OpenUrlAsync(RemoteApiDocsUrl));
         OpenRemoteApiSchemaUrlCommand = ReactiveCommand.CreateFromTask(async () =>
-            await _systemInteractionService.OpenPathAsync(RemoteApiSchemaUrl));
+            await _systemInteractionService.OpenUrlAsync(RemoteApiSchemaUrl));
 
         _settingsService.SettingsChanged += OnSettingsChanged;
         SyncUserScripts(_settingsService.Current);

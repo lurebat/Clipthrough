@@ -229,6 +229,12 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
         return Task.CompletedTask;
     }
 
+    public Task OpenUrlAsync(string url)
+    {
+        LastOpenedPath = url;
+        return Task.CompletedTask;
+    }
+
     public Task OpenContainingDirectoryAsync(string path) => Task.CompletedTask;
 
     public Task OpenInEditorAsync(string filePath, string editorPath)
