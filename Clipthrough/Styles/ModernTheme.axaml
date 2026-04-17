@@ -597,6 +597,10 @@
     <Style Selector="RadioButton.segmented-left:checked, RadioButton.segmented-center:checked, RadioButton.segmented-right:checked">
         <Setter Property="Foreground" Value="White" />
     </Style>
+    <Style Selector="RadioButton.segmented-left:focus-visible /template/ Border#PART_Border, RadioButton.segmented-center:focus-visible /template/ Border#PART_Border, RadioButton.segmented-right:focus-visible /template/ Border#PART_Border">
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+        <Setter Property="BorderThickness" Value="2" />
+    </Style>
     <Style Selector="RadioButton.segmented-left:pointerover /template/ Border#PART_Border, RadioButton.segmented-center:pointerover /template/ Border#PART_Border, RadioButton.segmented-right:pointerover /template/ Border#PART_Border">
         <Setter Property="Background" Value="{DynamicResource SurfaceInteractiveHoverBrush}" />
     </Style>

@@ -385,10 +385,12 @@
                                                            Width="18"
                                                            Height="18"
                                                            Stretch="Uniform"
+                                                           AutomationProperties.Name="{Binding SourceApp}"
                                                            IsVisible="{Binding HasSourceAppIcon}" />
                                                     <TextBlock Text="{Binding TypeGlyph}"
                                                                Foreground="{Binding StateAccentBrush}"
                                                                VerticalAlignment="Center"
+                                                               AutomationProperties.AccessibilityView="Raw"
                                                                IsVisible="{Binding ShowTypeGlyph}" />
                                                 </Grid>
                                             </Border>
@@ -750,6 +752,7 @@
                                         Spacing="10"
                                         MaxWidth="420">
                                 <TextBlock Text="📋"
+                                           AutomationProperties.AccessibilityView="Raw"
                                            FontSize="44"
                                            HorizontalAlignment="Center" />
                                 <TextBlock Classes="panel-title"
@@ -855,6 +858,7 @@
                                                 Spacing="10"
                                                 MaxWidth="420">
                                         <TextBlock Text="🖼"
+                                                   AutomationProperties.AccessibilityView="Raw"
                                                    FontSize="48"
                                                    HorizontalAlignment="Center" />
                                         <TextBlock Classes="panel-title"
