@@ -76,17 +76,51 @@ public sealed class RemoteControlService : IRemoteControlService
     {
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
+
+        var bind = ResolveBindAddress(settings.RemoteApiBindAddress);
         builder.WebHost.ConfigureKestrel(o =>
         {
-            o.ListenLocalhost(settings.RemoteApiPort);
+            if (bind.Equals(System.Net.IPAddress.Loopback))
+            {
+                o.ListenLocalhost(settings.RemoteApiPort);
+            }
+            else if (bind.Equals(System.Net.IPAddress.Any))
+            {
+                o.ListenAnyIP(settings.RemoteApiPort);
+            }
+            else
+            {
+                o.Listen(bind, settings.RemoteApiPort);
+            }
         });
 
+        builder.Services.AddOpenApi();
+
         var app = builder.Build();
+
+        app.MapOpenApi();
+        app.MapGet("/docs", () => Results.Content(BuildDocsHtml(), "text/html"));
 
         var token = settings.RemoteApiToken;
         var tokenBytes = Encoding.UTF8.GetBytes(token);
         app.Use(async (ctx, next) =>
         {
+            // Allow unauthenticated access to health and API documentation only.
+            var path = ctx.Request.Path.Value ?? string.Empty;
+            if (path.Equals("/health", StringComparison.OrdinalIgnoreCase)
+                || path.StartsWith("/openapi", StringComparison.OrdinalIgnoreCase)
+                || path.Equals("/docs", StringComparison.OrdinalIgnoreCase))
+            {
+                await next().ConfigureAwait(false);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                await ctx.Response.WriteAsJsonAsync(new { error = "remote_api_token_not_configured" }).ConfigureAwait(false);
+                return;
+            }
             if (!ctx.Request.Headers.TryGetValue("Authorization", out var header))
             {
                 ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -205,8 +239,56 @@ public sealed class RemoteControlService : IRemoteControlService
 
         await app.StartAsync().ConfigureAwait(false);
         _app = app;
-        _baseUrl = $"http://127.0.0.1:{settings.RemoteApiPort}";
+        var host = bind.Equals(System.Net.IPAddress.Any) ? "0.0.0.0" : bind.ToString();
+        _baseUrl = $"http://{host}:{settings.RemoteApiPort}";
     }
+
+    private static System.Net.IPAddress ResolveBindAddress(string? configured)
+    {
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            return System.Net.IPAddress.Loopback;
+        }
+        var trimmed = configured.Trim();
+        if (trimmed.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("loopback", StringComparison.OrdinalIgnoreCase))
+        {
+            return System.Net.IPAddress.Loopback;
+        }
+        if (trimmed.Equals("*", StringComparison.Ordinal)
+            || trimmed.Equals("0.0.0.0", StringComparison.Ordinal)
+            || trimmed.Equals("any", StringComparison.OrdinalIgnoreCase))
+        {
+            return System.Net.IPAddress.Any;
+        }
+        return System.Net.IPAddress.TryParse(trimmed, out var parsed)
+            ? parsed
+            : System.Net.IPAddress.Loopback;
+    }
+
+    private static string BuildDocsHtml() => """
+<!doctype html>
+<html>
+  <head>
+    <title>Clipthrough API</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist/swagger-ui.css" />
+  </head>
+  <body>
+    <div id="swagger"></div>
+    <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-bundle.js"></script>
+    <script>
+      window.ui = SwaggerUIBundle({
+        url: '/openapi/v1.json',
+        dom_id: '#swagger',
+        deepLinking: true,
+        presets: [SwaggerUIBundle.presets.apis],
+      });
+    </script>
+  </body>
+</html>
+""";
 
     private async Task StopCoreAsync()
     {

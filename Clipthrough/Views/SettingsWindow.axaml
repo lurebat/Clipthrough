@@ -441,8 +441,18 @@
                                         Command="{Binding CopyRemoteApiTokenCommand}" />
                             </Grid>
                         </StackPanel>
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="detail-label" Text="Bind address" />
+                            <TextBox Watermark="127.0.0.1 (loopback only). Use 0.0.0.0 to expose on LAN."
+                                     Text="{Binding SettingsRemoteApiBindAddress, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBlock Classes="body-muted"
+                                       FontSize="11"
+                                       IsVisible="{Binding RemoteApiBindAddressIsNonLoopback}"
+                                       TextWrapping="Wrap"
+                                       Text="⚠ Non-loopback bind: the API will be reachable from other machines on your network. Use a strong token." />
+                        </StackPanel>
                         <TextBlock Classes="body-muted" TextWrapping="Wrap"
-                                   Text="Send requests with header: Authorization: Bearer &lt;token&gt;. Endpoints: GET /clips, GET /clips/{id}, POST /clips, DELETE /clips/{id}, POST /clips/{id}/transform." />
+                                   Text="Send requests with header: Authorization: Bearer &lt;token&gt;. Endpoints: GET /clips, GET /clips/{id}, POST /clips, DELETE /clips/{id}, POST /clips/{id}/transform. Interactive docs: GET /docs (no auth). OpenAPI schema: GET /openapi/v1.json." />
                     </StackPanel>
                 </Expander>
             </StackPanel>

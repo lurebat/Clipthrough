@@ -147,6 +147,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _settingsEnableRemoteApi = AppSettings.Default.EnableRemoteApi;
     private int _settingsRemoteApiPort = AppSettings.Default.RemoteApiPort;
     private string _settingsRemoteApiToken = AppSettings.Default.RemoteApiToken;
+
+    private string _settingsRemoteApiBindAddress = AppSettings.Default.RemoteApiBindAddress;
     private string _editedClipText = string.Empty;
     private string _editedClipBaseline = string.Empty;
     private int _editedClipSelectionStart;
@@ -1322,6 +1324,29 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get => _settingsRemoteApiToken;
         set => this.RaiseAndSetIfChanged(ref _settingsRemoteApiToken, value);
+    }
+
+    public string SettingsRemoteApiBindAddress
+    {
+        get => _settingsRemoteApiBindAddress;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _settingsRemoteApiBindAddress, value);
+            this.RaisePropertyChanged(nameof(RemoteApiBindAddressIsNonLoopback));
+        }
+    }
+
+    public bool RemoteApiBindAddressIsNonLoopback
+    {
+        get
+        {
+            var v = (_settingsRemoteApiBindAddress ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(v)) return false;
+            return !(v.Equals("127.0.0.1", StringComparison.Ordinal)
+                || v.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+                || v.Equals("loopback", StringComparison.OrdinalIgnoreCase)
+                || v.Equals("::1", StringComparison.Ordinal));
+        }
     }
 
     public string SettingsToggleRegexHotkey
@@ -3347,6 +3372,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             EnableRemoteApi = SettingsEnableRemoteApi,
             RemoteApiPort = SettingsRemoteApiPort,
             RemoteApiToken = (SettingsRemoteApiToken ?? string.Empty).Trim(),
+            RemoteApiBindAddress = (SettingsRemoteApiBindAddress ?? string.Empty).Trim(),
             MaxClipSizeBytes = maxClipSizeBytes,
             CloseToTray = SettingsCloseToTray,
             MinimizeToTray = SettingsMinimizeToTray,
@@ -3431,6 +3457,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsEnableRemoteApi = settings.EnableRemoteApi;
         SettingsRemoteApiPort = settings.RemoteApiPort;
         SettingsRemoteApiToken = settings.RemoteApiToken;
+        SettingsRemoteApiBindAddress = settings.RemoteApiBindAddress;
         SettingsUseFuzzySearch = settings.UseFuzzySettingsSearch;
         UseFuzzyClipSearch = settings.UseFuzzyClipSearch;
         IsDatabasePasswordVisible = false;
