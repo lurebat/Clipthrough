@@ -49,6 +49,8 @@ public partial class MainWindow : Window
 
         TryConnectClipListScrollViewer();
 
+        PopulateTransformMenus();
+
         var searchTextBox = this.FindControl<TextBox>("SearchTextBox");
         if (searchTextBox is not null)
         {
@@ -376,6 +378,175 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private static readonly (string Header, TextTransformation? Kind)[] s_transformMenuEntries =
+    {
+        ("UPPERCASE", TextTransformation.UpperCase),
+        ("lowercase", TextTransformation.LowerCase),
+        ("Title Case", TextTransformation.TitleCase),
+        ("Sentence case", TextTransformation.SentenceCase),
+        (string.Empty, null),
+        ("UpperCamelCase", TextTransformation.UpperCamelCase),
+        ("lowerCamelCase", TextTransformation.LowerCamelCase),
+        ("From camelCase", TextTransformation.FromCamelCase),
+        (string.Empty, null),
+        ("Trim whitespace", TextTransformation.TrimWhitespace),
+        ("Collapse whitespace", TextTransformation.CollapseWhitespace),
+        ("Tabs → Spaces", TextTransformation.TabsToSpaces),
+        ("Spaces → Tabs", TextTransformation.SpacesToTabs),
+        ("Normalize line endings", TextTransformation.NormalizeEol),
+        (string.Empty, null),
+        ("Sort lines", TextTransformation.SortLines),
+        ("Reverse lines", TextTransformation.ReverseLines),
+        ("Remove empty lines", TextTransformation.RemoveEmptyLines),
+        ("Remove duplicate lines", TextTransformation.RemoveDuplicateLines),
+        ("Lines → JSON array", TextTransformation.LinesToJsonArray),
+        (string.Empty, null),
+    };
+
+    private readonly System.Collections.Generic.List<MenuItem> m_scriptsRoots = new();
+    private readonly System.Collections.Generic.List<MenuItem> m_aiRoots = new();
+    private System.Collections.Specialized.INotifyCollectionChanged? m_scriptsSubscription;
+    private System.Collections.Specialized.INotifyCollectionChanged? m_aiSubscription;
+
+    private void PopulateTransformMenus()
+    {
+        var editMenu = this.FindControl<MenuItem>("EditTransformMenu");
+        if (editMenu is not null && editMenu.ItemCount == 0)
+        {
+            foreach (var control in BuildTransformMenuItems(includeAccessKeys: true))
+            {
+                editMenu.Items.Add(control);
+            }
+        }
+
+        var flyout = this.FindControl<Button>("ToolbarTransformButton")?.Flyout as MenuFlyout;
+        if (flyout is not null && flyout.Items.Count == 0)
+        {
+            foreach (var control in BuildTransformMenuItems(includeAccessKeys: false))
+            {
+                flyout.Items.Add(control);
+            }
+        }
+
+        RefreshDynamicSubmenus();
+    }
+
+    private System.Collections.Generic.IEnumerable<Control> BuildTransformMenuItems(bool includeAccessKeys)
+    {
+        foreach (var (header, kind) in s_transformMenuEntries)
+        {
+            if (kind is null)
+            {
+                yield return new Separator();
+                continue;
+            }
+
+            var item = new MenuItem
+            {
+                Header = header,
+                CommandParameter = kind.Value,
+            };
+            item.Click += OnTransformMenuClick;
+            yield return item;
+        }
+
+        var scriptsRoot = new MenuItem { Header = includeAccessKeys ? "_Scripts" : "Scripts" };
+        m_scriptsRoots.Add(scriptsRoot);
+        yield return scriptsRoot;
+
+        var aiRoot = new MenuItem { Header = includeAccessKeys ? "_AI" : "AI" };
+        if (includeAccessKeys)
+        {
+            try { aiRoot.InputGesture = KeyGesture.Parse("Ctrl+I"); } catch { }
+        }
+        m_aiRoots.Add(aiRoot);
+        yield return aiRoot;
+    }
+
+    private void RefreshDynamicSubmenus()
+    {
+        if (DataContext is not MainWindowViewModel vm)
+        {
+            return;
+        }
+
+        if (m_scriptsSubscription is not null)
+        {
+            m_scriptsSubscription.CollectionChanged -= OnUserScriptsChanged;
+        }
+        if (m_aiSubscription is not null)
+        {
+            m_aiSubscription.CollectionChanged -= OnAiEntriesChanged;
+        }
+
+        m_scriptsSubscription = vm.UserScripts as System.Collections.Specialized.INotifyCollectionChanged;
+        if (m_scriptsSubscription is not null)
+        {
+            m_scriptsSubscription.CollectionChanged += OnUserScriptsChanged;
+        }
+
+        m_aiSubscription = vm.AiMenuEntries as System.Collections.Specialized.INotifyCollectionChanged;
+        if (m_aiSubscription is not null)
+        {
+            m_aiSubscription.CollectionChanged += OnAiEntriesChanged;
+        }
+
+        RebuildScriptsSubmenus(vm);
+        RebuildAiSubmenus(vm);
+    }
+
+    private void OnUserScriptsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+        {
+            Dispatcher.UIThread.Post(() => RebuildScriptsSubmenus(vm));
+        }
+    }
+
+    private void OnAiEntriesChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+        {
+            Dispatcher.UIThread.Post(() => RebuildAiSubmenus(vm));
+        }
+    }
+
+    private void RebuildScriptsSubmenus(MainWindowViewModel vm)
+    {
+        foreach (var root in m_scriptsRoots)
+        {
+            root.Items.Clear();
+            foreach (var script in vm.UserScripts)
+            {
+                var child = new MenuItem
+                {
+                    Header = script.Name,
+                    Command = vm.ApplyUserScriptCommand,
+                    CommandParameter = script,
+                };
+                root.Items.Add(child);
+            }
+        }
+    }
+
+    private void RebuildAiSubmenus(MainWindowViewModel vm)
+    {
+        foreach (var root in m_aiRoots)
+        {
+            root.Items.Clear();
+            foreach (var entry in vm.AiMenuEntries)
+            {
+                var child = new MenuItem
+                {
+                    Header = entry.Label,
+                    Command = vm.InvokeAiMenuEntryCommand,
+                    CommandParameter = entry,
+                };
+                root.Items.Add(child);
+            }
+        }
+    }
+
     private void OnScriptMenuClick(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not MainWindowViewModel viewModel || sender is not MenuItem mi)
@@ -480,6 +651,7 @@ public partial class MainWindow : Window
             m_subscribedViewModel.PropertyChanged += OnViewModelPropertyChanged;
             m_subscribedViewModel.HelpRequested += OnHelpRequested;
             UpdateSettingsWindowVisibility(viewModel.IsSettingsOpen);
+            RefreshDynamicSubmenus();
         }
     }
 
