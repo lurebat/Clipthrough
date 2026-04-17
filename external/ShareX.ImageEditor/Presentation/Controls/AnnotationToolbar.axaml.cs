@@ -147,7 +147,7 @@ public partial class AnnotationToolbar : UserControl
 
     private void RefreshPlatformColorTracking()
     {
-        SetPlatformSettings(TopLevel.GetTopLevel(this)?.PlatformSettings ?? Application.Current?.PlatformSettings);
+        SetPlatformSettings(this.GetPlatformSettings() ?? TopLevel.GetTopLevel(this)?.GetPlatformSettings() ?? Application.Current?.PlatformSettings);
         UpdateAccentBrushes(_platformSettings?.GetColorValues());
     }
 
