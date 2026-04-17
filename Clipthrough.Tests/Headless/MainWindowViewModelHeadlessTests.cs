@@ -448,6 +448,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new Clipthrough.Services.ScriptingService(),
             new TestOcrService(),
             new NoOpBackgroundOcrQueue(),
+            new Clipthrough.Services.BackgroundJobIndicator(),
             scope.DatabaseInitializer);
     }
 

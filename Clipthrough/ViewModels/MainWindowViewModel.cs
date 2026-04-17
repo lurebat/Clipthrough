@@ -58,6 +58,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly IScriptingService _scriptingService;
     private readonly IOcrService _ocrService;
     private readonly IBackgroundOcrQueue _backgroundOcrQueue;
+    private readonly IBackgroundJobIndicator _jobIndicator;
     private readonly DatabaseInitializer _databaseInitializer;
     private readonly CompositeDisposable _subscriptions = new();
     private readonly Dictionary<long, (ClipEntry Clip, CancellationTokenSource Cts)> _pendingDeletes = new();
@@ -80,6 +81,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _hasMoreResults;
     private bool _isBusy;
     private string _statusText = AppText.LoadingStatus;
+    private bool _hasRunningJobs;
+    private string _runningJobsLabel = string.Empty;
     private int _currentOffset;
     private int _matchingClipCount;
     private int _totalClipCount;
@@ -172,7 +175,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _editedClipSelectionLength;
     private long? _checkedSelectionAnchorId;
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, DatabaseInitializer databaseInitializer)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer)
     {
         _clipStoreService = clipStoreService;
         _clipboardMonitorService = clipboardMonitorService;
@@ -189,6 +192,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _scriptingService = scriptingService;
         _ocrService = ocrService;
         _backgroundOcrQueue = backgroundOcrQueue;
+        _jobIndicator = jobIndicator;
+        _jobIndicator.Changed += OnJobIndicatorChanged;
         _databaseInitializer = databaseInitializer;
         SessionLogs = new SessionLogsViewModel(sessionLogService);
         ContentTypeOptions =
@@ -213,6 +218,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         CompareClipsCommand = ReactiveCommand.CreateFromTask(CompareClipsAsync);
         OpenSelectedClipSourceUrlCommand = ReactiveCommand.CreateFromTask(OpenSelectedClipSourceUrlAsync);
         CopySelectedClipWindowTitleCommand = ReactiveCommand.CreateFromTask(CopySelectedClipWindowTitleAsync);
+        NavigateToLineageSourceCommand = ReactiveCommand.CreateFromTask(NavigateToLineageSourceAsync);
         EditSelectedImageCommand = ReactiveCommand.CreateFromTask(EditSelectedImageAsync);
         SelectAllClipsCommand = ReactiveCommand.Create(SelectAllClips);
         SelectNoClipsCommand = ReactiveCommand.Create(SelectNoClips);
@@ -399,6 +405,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> OpenSelectedClipSourceUrlCommand { get; }
 
     public ReactiveCommand<Unit, Unit> CopySelectedClipWindowTitleCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> NavigateToLineageSourceCommand { get; }
 
     public ReactiveCommand<Unit, Unit> EditSelectedImageCommand { get; }
 
@@ -743,6 +751,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get => _statusText;
         private set => this.RaiseAndSetIfChanged(ref _statusText, value);
+    }
+
+    public bool HasRunningJobs
+    {
+        get => _hasRunningJobs;
+        private set => this.RaiseAndSetIfChanged(ref _hasRunningJobs, value);
+    }
+
+    public string RunningJobsLabel
+    {
+        get => _runningJobsLabel;
+        private set => this.RaiseAndSetIfChanged(ref _runningJobsLabel, value);
     }
 
     public int MatchingClipCount
@@ -1195,6 +1215,30 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string SelectedClipWindowTitleText => SelectedClip?.SourceWindowTitle ?? string.Empty;
 
     public bool ShowSelectedClipWindowTitle => SelectedClip?.HasSourceWindowTitle == true;
+
+    public bool HasSelectedClipLineage => SelectedClip?.Clip.SourceClipId is not null;
+
+    public string SelectedClipLineageText
+    {
+        get
+        {
+            var clip = SelectedClip?.Clip;
+            if (clip?.SourceClipId is not { } sourceId)
+            {
+                return string.Empty;
+            }
+            var kind = clip.TransformKind;
+            if (string.IsNullOrWhiteSpace(kind))
+            {
+                return $"From clip #{sourceId}";
+            }
+            var pretty = kind.Contains(':') ? kind.Split(':', 2)[1] : kind;
+            var prefix = kind.StartsWith("ai:", StringComparison.Ordinal) ? "AI"
+                : kind.StartsWith("script:", StringComparison.Ordinal) ? "script"
+                : "transform";
+            return $"From clip #{sourceId} via {prefix}: {pretty}";
+        }
+    }
 
     public bool HasSelectedClipSourceUrl => SelectedClip?.HasSourceUrl == true;
 
@@ -2104,10 +2148,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         CancelAllPendingDeletes();
         _clipboardMonitorService.Stop();
         _settingsService.SettingsChanged -= OnSettingsChanged;
+        _jobIndicator.Changed -= OnJobIndicatorChanged;
         SelectedClipFiles.Clear();
         ClearClips();
         SessionLogs.Dispose();
         _subscriptions.Dispose();
+    }
+
+    private void OnJobIndicatorChanged(object? sender, EventArgs e)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            var labels = _jobIndicator.ActiveLabels;
+            HasRunningJobs = labels.Count > 0;
+            RunningJobsLabel = labels.Count switch
+            {
+                0 => string.Empty,
+                1 => labels[0],
+                _ => $"{labels[0]} (+{labels.Count - 1} more)",
+            };
+        });
     }
 
     public async Task InitializeAsync()
@@ -2418,6 +2478,36 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private async Task NavigateToLineageSourceAsync()
+    {
+        if (SelectedClip?.Clip.SourceClipId is not { } sourceId)
+        {
+            return;
+        }
+
+        var existing = Clips.FirstOrDefault(c => c.Clip.Id == sourceId);
+        if (existing is not null)
+        {
+            SelectedClip = existing;
+            return;
+        }
+
+        try
+        {
+            var source = await _clipStoreService.GetByIdAsync(sourceId);
+            if (source is null)
+            {
+                StatusText = $"Clip #{sourceId} no longer exists.";
+                return;
+            }
+            await RefreshAsync(sourceId);
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Failed to load clip #{sourceId}: {ex.Message}";
+        }
+    }
+
     private async Task CompareClipsAsync()
     {
         var checkedClips = Clips.Where(static c => c.IsChecked).Take(2).ToList();
@@ -2684,7 +2774,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await ApplyTransformToTargetsAsync(
             (source, _) => Task.FromResult(TextTransformationService.Apply(transformation, source)),
             $"transformation",
-            multiSummary: count => $"Applied transformation to {count} clips");
+            multiSummary: count => $"Applied transformation to {count} clips",
+            transformKind: $"builtin:{transformation}");
     }
 
     private async Task ApplyTransformationToSingleClipAsync(ClipItemViewModel clip, TextTransformation transformation)
@@ -2724,6 +2815,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SourceAppIconBytes = clip.Clip.SourceAppIconBytes,
             SourceWindowTitle = clip.Clip.SourceWindowTitle,
             IncrementExistingCopyCount = false,
+            SourceClipId = clip.Clip.Id,
+            TransformKind = $"builtin:{transformation}",
         });
         StatusText = AppText.EditedClipCopiedStatus;
         await RefreshAsync(captured?.Id);
@@ -2740,10 +2833,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         StatusText = $"Running script '{script.Name}'…";
         try
         {
-            await ApplyTransformToTargetsAsync(
+            await _jobIndicator.TrackAsync($"Script: {script.Name}", () => ApplyTransformToTargetsAsync(
                 (source, ct) => Task.Run(() => _scriptingService.EvaluateAsync(script.Code, source, ct), ct),
                 $"script '{script.Name}'",
-                multiSummary: count => $"Applied '{script.Name}' to {count} clips");
+                multiSummary: count => $"Applied '{script.Name}' to {count} clips",
+                transformKind: $"script:{script.Name}"));
         }
         catch (Exception ex)
         {
@@ -2761,7 +2855,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private async Task ApplyTransformToTargetsAsync(
         Func<string, CancellationToken, Task<string>> transform,
         string singleLabel,
-        Func<int, string> multiSummary)
+        Func<int, string> multiSummary,
+        string? transformKind = null)
     {
         var checkedClips = Clips.Where(static c => c.IsChecked).ToList();
         var useSelectionSlice = checkedClips.Count == 0
@@ -2825,6 +2920,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 SourceAppIconBytes = target.Clip.SourceAppIconBytes,
                 SourceWindowTitle = target.Clip.SourceWindowTitle,
                 IncrementExistingCopyCount = false,
+                SourceClipId = target.Clip.Id,
+                TransformKind = transformKind,
             });
             if (captured is not null)
             {
@@ -3273,6 +3370,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(SelectedClipExpiresAtText));
         this.RaisePropertyChanged(nameof(SelectedClipCopyCountText));
         this.RaisePropertyChanged(nameof(HasSelectedClipMultipleCopies));
+        this.RaisePropertyChanged(nameof(HasSelectedClipLineage));
+        this.RaisePropertyChanged(nameof(SelectedClipLineageText));
         this.RaisePropertyChanged(nameof(SelectedClipByteSizeText));
         this.RaisePropertyChanged(nameof(SelectedClipImageResolutionText));
         this.RaisePropertyChanged(nameof(ShowSelectedImageResolutionCard));
@@ -3428,17 +3527,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         AiPromptError = string.Empty;
     }
 
-    private async Task SubmitAiPromptAsync()
+    private Task SubmitAiPromptAsync() => SubmitAiPromptAsync(transformKind: "ai:custom", presetLabel: null);
+
+    private Task SubmitAiPromptAsync(string transformKind, string? presetLabel)
     {
         if (IsAiPromptBusy)
         {
-            return;
+            return Task.CompletedTask;
         }
         var prompt = (AiPromptInput ?? string.Empty).Trim();
         if (string.IsNullOrEmpty(prompt))
         {
             AiPromptError = "Please enter a prompt.";
-            return;
+            return Task.CompletedTask;
         }
 
         var checkedClips = Clips.Where(static c => c.IsChecked).ToList();
@@ -3454,95 +3555,148 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (targets.Count == 0)
         {
             AiPromptError = "Select one or more text clips first.";
+            return Task.CompletedTask;
+        }
+
+        var useSelectionSlice = checkedClips.Count == 0
+            && SelectedClip is not null
+            && ReferenceEquals(targets[0], SelectedClip)
+            && EditedClipSelectionLength > 0
+            && EditedClipSelectionStart >= 0
+            && EditedClipSelectionStart + EditedClipSelectionLength <= (EditedClipText?.Length ?? 0);
+        var sliceStart = EditedClipSelectionStart;
+        var sliceLength = EditedClipSelectionLength;
+        var fullEditedText = EditedClipText ?? string.Empty;
+        var selectedClipRef = SelectedClip;
+
+        IsAiPromptOpen = false;
+        AiPromptError = string.Empty;
+        AiPromptInput = string.Empty;
+        StatusText = presetLabel is null ? "AI transform running…" : $"Running AI preset '{presetLabel}'…";
+
+        var label = presetLabel is null
+            ? $"AI: {Shorten(prompt, 40)}"
+            : $"AI: {presetLabel}";
+
+        _ = _jobIndicator.TrackAsync(label, () => RunAiPromptAsync(
+            prompt,
+            targets,
+            useSelectionSlice,
+            sliceStart,
+            sliceLength,
+            fullEditedText,
+            selectedClipRef,
+            transformKind,
+            presetLabel));
+
+        return Task.CompletedTask;
+    }
+
+    private async Task RunAiPromptAsync(
+        string prompt,
+        List<ClipItemViewModel> targets,
+        bool useSelectionSlice,
+        int sliceStart,
+        int sliceLength,
+        string fullEditedText,
+        ClipItemViewModel? selectedClipRef,
+        string transformKind,
+        string? presetLabel)
+    {
+        long? lastCreatedId = null;
+        var produced = 0;
+        Exception? failure = null;
+
+        foreach (var target in targets)
+        {
+            string source;
+            string result;
+            try
+            {
+                if (useSelectionSlice && ReferenceEquals(target, selectedClipRef))
+                {
+                    var slice = fullEditedText.Substring(sliceStart, sliceLength);
+                    var transformedSlice = await _aiTransformService.TransformAsync(prompt, slice);
+                    if (string.IsNullOrEmpty(transformedSlice) || string.Equals(slice, transformedSlice, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+                    source = fullEditedText;
+                    result = fullEditedText.Substring(0, sliceStart)
+                        + transformedSlice
+                        + fullEditedText.Substring(sliceStart + sliceLength);
+                }
+                else
+                {
+                    source = target.Clip.Content ?? string.Empty;
+                    result = await _aiTransformService.TransformAsync(prompt, source);
+                }
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+                break;
+            }
+
+            if (string.IsNullOrEmpty(result) || string.Equals(result, source, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
+            var captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentBytes = textBytes,
+                ContentText = result,
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                SourceApp = target.SourceApp,
+                SourceAppPath = target.Clip.SourceAppPath,
+                SourceAppIconBytes = target.Clip.SourceAppIconBytes,
+                SourceWindowTitle = target.Clip.SourceWindowTitle,
+                IncrementExistingCopyCount = false,
+                SourceClipId = target.Clip.Id,
+                TransformKind = transformKind,
+            });
+            if (captured is not null)
+            {
+                lastCreatedId = captured.Id;
+            }
+            produced++;
+        }
+
+        if (failure is not null)
+        {
+            var title = presetLabel is null ? "AI transform failed" : $"AI preset '{presetLabel}' failed";
+            _notificationService.PublishError(title, failure.Message);
+            StatusText = failure.Message;
             return;
         }
 
-        IsAiPromptBusy = true;
-        AiPromptError = string.Empty;
-        try
+        if (produced > 0)
         {
-            long? lastCreatedId = null;
-            var useSelectionSlice = checkedClips.Count == 0
-                && SelectedClip is not null
-                && EditedClipSelectionLength > 0
-                && EditedClipSelectionStart >= 0
-                && EditedClipSelectionStart + EditedClipSelectionLength <= (EditedClipText?.Length ?? 0);
-
-            var produced = 0;
-            foreach (var target in targets)
-            {
-                string source;
-                string result;
-                try
-                {
-                    if (useSelectionSlice && ReferenceEquals(target, SelectedClip))
-                    {
-                        var full = EditedClipText ?? string.Empty;
-                        var slice = full.Substring(EditedClipSelectionStart, EditedClipSelectionLength);
-                        var transformedSlice = await _aiTransformService.TransformAsync(prompt, slice);
-                        if (string.IsNullOrEmpty(transformedSlice) || string.Equals(slice, transformedSlice, StringComparison.Ordinal))
-                        {
-                            continue;
-                        }
-                        source = full;
-                        result = full.Substring(0, EditedClipSelectionStart)
-                            + transformedSlice
-                            + full.Substring(EditedClipSelectionStart + EditedClipSelectionLength);
-                    }
-                    else
-                    {
-                        source = target.Clip.Content ?? string.Empty;
-                        result = await _aiTransformService.TransformAsync(prompt, source);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    AiPromptError = ex.Message;
-                    return;
-                }
-
-                if (string.IsNullOrEmpty(result) || string.Equals(result, source, StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
-                var captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
-                {
-                    ContentBytes = textBytes,
-                    ContentText = result,
-                    ContentType = ContentType.Text,
-                    ContentFormat = ClipContentFormat.PlainText,
-                    SourceApp = target.SourceApp,
-                    SourceAppPath = target.Clip.SourceAppPath,
-                    SourceAppIconBytes = target.Clip.SourceAppIconBytes,
-                    SourceWindowTitle = target.Clip.SourceWindowTitle,
-                    IncrementExistingCopyCount = false,
-                });
-                if (captured is not null)
-                {
-                    lastCreatedId = captured.Id;
-                }
-                produced++;
-            }
-
-            if (produced > 0)
-            {
-                StatusText = produced == 1
-                    ? "AI transform produced a new clip."
-                    : $"AI transform produced {produced} new clips.";
-                IsAiPromptOpen = false;
-                await RefreshAsync(lastCreatedId);
-            }
-            else
-            {
-                AiPromptError = "AI transform returned no new content. Check the provider or refine the prompt.";
-            }
+            StatusText = produced == 1
+                ? "AI transform produced a new clip."
+                : $"AI transform produced {produced} new clips.";
+            await RefreshAsync(lastCreatedId);
         }
-        finally
+        else
         {
-            IsAiPromptBusy = false;
+            var message = "AI transform returned no new content. Check the provider or refine the prompt.";
+            StatusText = message;
+            _notificationService.PublishWarning(
+                presetLabel is null ? "AI transform" : $"AI preset '{presetLabel}'",
+                message);
         }
+    }
+
+    private static string Shorten(string value, int max)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length <= max)
+        {
+            return value ?? string.Empty;
+        }
+        return value.Substring(0, max) + "…";
     }
 
     private void CloseSettings()
@@ -4048,12 +4202,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         AiPromptInput = preset.Prompt;
         AiPromptError = string.Empty;
-        StatusText = $"Running AI preset '{preset.Name}'…";
-        await SubmitAiPromptAsync();
-        if (!string.IsNullOrEmpty(AiPromptError) && !IsAiPromptOpen)
-        {
-            _notificationService.PublishError($"AI preset '{preset.Name}' failed", AiPromptError);
-        }
+        await SubmitAiPromptAsync(transformKind: $"ai:{preset.Name}", presetLabel: preset.Name);
     }
 
     private async Task UnlockDatabaseAsync()

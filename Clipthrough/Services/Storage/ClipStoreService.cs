@@ -45,7 +45,9 @@ public sealed class ClipStoreService : IClipStoreService
             c.ocr_text,
             c.ocr_status,
             c.ocr_attempted_at,
-            c.ocr_error
+            c.ocr_error,
+            c.source_clip_id,
+            c.transform_kind
         """;
 
     private readonly SqliteConnectionFactory _connectionFactory;
@@ -622,7 +624,9 @@ public sealed class ClipStoreService : IClipStoreService
                         last_copied_at,
                         byte_size,
                         image_width,
-                        image_height)
+                        image_height,
+                        source_clip_id,
+                        transform_kind)
                     VALUES (
                         $content,
                         $contentBytes,
@@ -642,7 +646,9 @@ public sealed class ClipStoreService : IClipStoreService
                         $capturedAt,
                         $byteSize,
                         $imageWidth,
-                        $imageHeight);
+                        $imageHeight,
+                        $sourceClipId,
+                        $transformKind);
                     SELECT last_insert_rowid();
                     """;
                 AddUpsertParameters(insertCommand, request, contentText, hash, matches.Count > 0, capturedAt, byteSize);
@@ -905,6 +911,8 @@ public sealed class ClipStoreService : IClipStoreService
             OcrStatus = reader.IsDBNull(24) ? null : reader.GetString(24),
             OcrAttemptedAt = ParseTimestamp(reader.IsDBNull(25) ? null : reader.GetString(25)),
             OcrError = reader.IsDBNull(26) ? null : reader.GetString(26),
+            SourceClipId = reader.IsDBNull(27) ? null : reader.GetInt64(27),
+            TransformKind = reader.IsDBNull(28) ? null : reader.GetString(28),
         };
     }
 
@@ -1165,6 +1173,8 @@ public sealed class ClipStoreService : IClipStoreService
         command.Parameters.AddWithValue("$byteSize", byteSize);
         command.Parameters.AddWithValue("$imageWidth", request.ImageWidth is { } width ? width : DBNull.Value);
         command.Parameters.AddWithValue("$imageHeight", request.ImageHeight is { } height ? height : DBNull.Value);
+        command.Parameters.AddWithValue("$sourceClipId", request.SourceClipId is { } sourceClipId ? sourceClipId : DBNull.Value);
+        command.Parameters.AddWithValue("$transformKind", string.IsNullOrWhiteSpace(request.TransformKind) ? DBNull.Value : request.TransformKind);
     }
 
     private static string BuildStoredContentText(ClipCaptureRequest request)

@@ -27,4 +27,8 @@ public sealed class ClipCaptureRequest
     public bool IsFavorite { get; init; }
 
     public bool IncrementExistingCopyCount { get; init; } = true;
+
+    public long? SourceClipId { get; init; }
+
+    public string? TransformKind { get; init; }
 }

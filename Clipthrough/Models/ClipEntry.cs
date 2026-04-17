@@ -63,6 +63,10 @@ public sealed class ClipEntry
 
     public string? OcrError { get; set; }
 
+    public long? SourceClipId { get; init; }
+
+    public string? TransformKind { get; init; }
+
     public IReadOnlyList<SensitivityMatch> SensitivityMatches { get; set; } = Array.Empty<SensitivityMatch>();
 }
 
