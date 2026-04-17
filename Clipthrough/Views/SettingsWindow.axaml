@@ -455,6 +455,44 @@
                                    Text="Send requests with header: Authorization: Bearer &lt;token&gt;. Endpoints: GET /clips, GET /clips/{id}, POST /clips, DELETE /clips/{id}, POST /clips/{id}/transform. Interactive docs: GET /docs (no auth). OpenAPI schema: GET /openapi/v1.json." />
                     </StackPanel>
                 </Expander>
+
+                <Expander Header="User scripts" IsExpanded="False">
+                    <StackPanel Spacing="10" Margin="8,10,0,0">
+                        <TextBlock Classes="body-muted" TextWrapping="Wrap"
+                                   Text="User scripts receive the clip text as 'input' (string) and must return a string. C# scripting syntax (Roslyn)." />
+                        <Grid ColumnDefinitions="260,*" ColumnSpacing="12" MinHeight="260">
+                            <DockPanel Grid.Column="0" LastChildFill="True">
+                                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="6" Margin="0,6,0,0">
+                                    <Button Classes="secondary compact"
+                                            Content="Add"
+                                            Command="{Binding AddScriptDraftCommand}" />
+                                    <Button Classes="destructive compact"
+                                            Content="Remove"
+                                            Command="{Binding RemoveScriptDraftCommand}"
+                                            CommandParameter="{Binding SelectedScriptDraft}" />
+                                </StackPanel>
+                                <ListBox ItemsSource="{Binding SettingsUserScriptDrafts}"
+                                         SelectedItem="{Binding SelectedScriptDraft, Mode=TwoWay}">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Name}" />
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </DockPanel>
+                            <StackPanel Grid.Column="1" Spacing="6"
+                                        IsEnabled="{Binding SelectedScriptDraft, Converter={x:Static ObjectConverters.IsNotNull}}">
+                                <TextBlock Classes="detail-label" Text="Name" />
+                                <TextBox Text="{Binding SelectedScriptDraft.Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
+                                <TextBlock Classes="detail-label" Text="Code (C#)" />
+                                <TextBox AcceptsReturn="True"
+                                         MinHeight="220"
+                                         FontFamily="Consolas,Cascadia Code,monospace"
+                                         Text="{Binding SelectedScriptDraft.Code, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Expander>
             </StackPanel>
         </ScrollViewer>
 

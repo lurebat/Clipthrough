@@ -215,6 +215,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SubmitAiPromptCommand = ReactiveCommand.CreateFromTask(SubmitAiPromptAsync);
         CancelAiPromptCommand = ReactiveCommand.Create(CancelAiPrompt);
         ApplyAiPresetCommand = ReactiveCommand.CreateFromTask<AiPreset>(ApplyAiPresetAsync);
+        AddScriptDraftCommand = ReactiveCommand.Create(() =>
+        {
+            var draft = new UserScriptDraft { Name = "New script", Code = "return input;" };
+            SettingsUserScriptDrafts.Add(draft);
+            SelectedScriptDraft = draft;
+        });
+        RemoveScriptDraftCommand = ReactiveCommand.Create<UserScriptDraft>(draft =>
+        {
+            if (draft is null) return;
+            SettingsUserScriptDrafts.Remove(draft);
+            SelectedScriptDraft = SettingsUserScriptDrafts.FirstOrDefault();
+        });
         ApplyUserScriptCommand = ReactiveCommand.CreateFromTask<UserScript>(ApplyUserScriptAsync);
         LoadDefaultScriptsCommand = ReactiveCommand.CreateFromTask(LoadDefaultScriptsAsync);
         RunOcrOnSelectedImageCommand = ReactiveCommand.CreateFromTask(RunOcrOnSelectedImageAsync);
@@ -380,6 +392,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<AiPreset, Unit> ApplyAiPresetCommand { get; }
 
     public System.Collections.ObjectModel.ObservableCollection<AiPreset> AiPresets { get; } = new();
+
+    public System.Collections.ObjectModel.ObservableCollection<UserScriptDraft> SettingsUserScriptDrafts { get; } = new();
+
+    private UserScriptDraft? _selectedScriptDraft;
+    public UserScriptDraft? SelectedScriptDraft
+    {
+        get => _selectedScriptDraft;
+        set => this.RaiseAndSetIfChanged(ref _selectedScriptDraft, value);
+    }
+
+    public ReactiveCommand<Unit, Unit> AddScriptDraftCommand { get; }
+    public ReactiveCommand<UserScriptDraft, Unit> RemoveScriptDraftCommand { get; }
 
     public string SearchText
     {
@@ -3378,6 +3402,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RemoteApiPort = SettingsRemoteApiPort,
             RemoteApiToken = (SettingsRemoteApiToken ?? string.Empty).Trim(),
             RemoteApiBindAddress = (SettingsRemoteApiBindAddress ?? string.Empty).Trim(),
+            UserScripts = SettingsUserScriptDrafts
+                .Select(s => new UserScript { Name = s.Name.Trim(), Code = s.Code })
+                .Where(s => !string.IsNullOrWhiteSpace(s.Name) || !string.IsNullOrWhiteSpace(s.Code))
+                .ToList(),
             MaxClipSizeBytes = maxClipSizeBytes,
             CloseToTray = SettingsCloseToTray,
             MinimizeToTray = SettingsMinimizeToTray,
@@ -3463,6 +3491,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsRemoteApiPort = settings.RemoteApiPort;
         SettingsRemoteApiToken = settings.RemoteApiToken;
         SettingsRemoteApiBindAddress = settings.RemoteApiBindAddress;
+        SettingsUserScriptDrafts.Clear();
+        foreach (var s in settings.UserScripts)
+        {
+            SettingsUserScriptDrafts.Add(new UserScriptDraft { Name = s.Name, Code = s.Code });
+        }
+        SelectedScriptDraft = SettingsUserScriptDrafts.FirstOrDefault();
         SettingsUseFuzzySearch = settings.UseFuzzySettingsSearch;
         UseFuzzyClipSearch = settings.UseFuzzyClipSearch;
         IsDatabasePasswordVisible = false;
