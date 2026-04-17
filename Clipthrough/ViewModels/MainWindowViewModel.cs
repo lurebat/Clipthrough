@@ -214,6 +214,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OpenAiPromptCommand = ReactiveCommand.Create(OpenAiPrompt);
         SubmitAiPromptCommand = ReactiveCommand.CreateFromTask(SubmitAiPromptAsync);
         CancelAiPromptCommand = ReactiveCommand.Create(CancelAiPrompt);
+        ApplyAiPresetCommand = ReactiveCommand.CreateFromTask<AiPreset>(ApplyAiPresetAsync);
         ApplyUserScriptCommand = ReactiveCommand.CreateFromTask<UserScript>(ApplyUserScriptAsync);
         LoadDefaultScriptsCommand = ReactiveCommand.CreateFromTask(LoadDefaultScriptsAsync);
         RunOcrOnSelectedImageCommand = ReactiveCommand.CreateFromTask(RunOcrOnSelectedImageAsync);
@@ -375,6 +376,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> SubmitAiPromptCommand { get; }
 
     public ReactiveCommand<Unit, Unit> CancelAiPromptCommand { get; }
+
+    public ReactiveCommand<AiPreset, Unit> ApplyAiPresetCommand { get; }
+
+    public System.Collections.ObjectModel.ObservableCollection<AiPreset> AiPresets { get; } = new();
 
     public string SearchText
     {
@@ -3471,6 +3476,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         SyncUserScripts(settings);
+        SyncAiPresets(settings);
         UpdateSelectedClipPresentation();
         RaiseSelectionStateProperties();
         this.RaisePropertyChanged(nameof(IsCompareAvailable));
@@ -3482,6 +3488,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         foreach (var s in settings.UserScripts)
         {
             UserScripts.Add(s);
+        }
+    }
+
+    private void SyncAiPresets(AppSettings settings)
+    {
+        AiPresets.Clear();
+        foreach (var p in settings.AiPresets)
+        {
+            AiPresets.Add(p);
         }
     }
 
@@ -3505,21 +3520,55 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         try
         {
-            if (_settingsService.Current.UserScripts?.Count > 0)
+            var current = _settingsService.Current;
+            AppSettings next = current;
+            bool changed = false;
+
+            if (current.UserScripts?.Count == 0)
             {
-                return;
+                var defaults = ScriptingService.GetDefaultScripts().ToList();
+                if (defaults.Count > 0)
+                {
+                    next = next with { UserScripts = defaults };
+                    changed = true;
+                }
             }
-            var defaults = ScriptingService.GetDefaultScripts().ToList();
-            if (defaults.Count == 0)
+
+            if (current.AiPresets?.Count == 0)
             {
-                return;
+                var presets = new List<AiPreset>
+                {
+                    new() { Name = "Fix grammar & spelling", Prompt = "Fix any grammar or spelling mistakes in the text. Preserve the original tone, formatting, and meaning. Return only the corrected text." },
+                    new() { Name = "Rewrite formally", Prompt = "Rewrite the following text in a formal, professional tone suitable for business communication. Keep the meaning unchanged." },
+                    new() { Name = "Summarize", Prompt = "Summarize the following text into 2-4 concise bullet points that capture the main ideas." },
+                    new() { Name = "Explain simply", Prompt = "Explain the following text in plain language a non-expert could understand, without losing key details." },
+                    new() { Name = "Translate to English", Prompt = "Translate the following text to natural, fluent English. Preserve meaning, tone, and formatting. If already in English, return it unchanged." },
+                    new() { Name = "Format JSON", Prompt = "If the input contains JSON, return it pretty-printed with 2-space indentation and stable key ordering. Otherwise return it unchanged." },
+                };
+                next = next with { AiPresets = presets };
+                changed = true;
             }
-            await _settingsService.SaveAsync(_settingsService.Current with { UserScripts = defaults });
+
+            if (changed)
+            {
+                await _settingsService.SaveAsync(next);
+            }
         }
         catch (Exception ex)
         {
-            Trace.TraceWarning($"Failed to seed default scripts: {ex.Message}");
+            Trace.TraceWarning($"Failed to seed defaults: {ex.Message}");
         }
+    }
+
+    private async Task ApplyAiPresetAsync(AiPreset? preset)
+    {
+        if (preset is null || string.IsNullOrWhiteSpace(preset.Prompt))
+        {
+            return;
+        }
+        AiPromptInput = preset.Prompt;
+        AiPromptError = string.Empty;
+        await SubmitAiPromptAsync();
     }
 
     private async Task UnlockDatabaseAsync()

@@ -70,9 +70,22 @@
                             </ControlTheme>
                         </MenuItem.ItemContainerTheme>
                     </MenuItem>
-                    <MenuItem Header="_AI prompt…"
-                              Click="OnOpenAiPromptClick"
-                              InputGesture="Ctrl+I" />
+                    <MenuItem Header="_AI"
+                              InputGesture="Ctrl+I">
+                        <MenuItem Header="Custom prompt…"
+                                  Click="OnOpenAiPromptClick" />
+                        <Separator />
+                        <MenuItem Header="Presets"
+                                  ItemsSource="{Binding AiPresets}">
+                            <MenuItem.ItemContainerTheme>
+                                <ControlTheme TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+                                    <Setter Property="Header" Value="{Binding Name, DataType=models:AiPreset}" />
+                                    <Setter Property="Command" Value="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).ApplyAiPresetCommand}" />
+                                    <Setter Property="CommandParameter" Value="{Binding}" />
+                                </ControlTheme>
+                            </MenuItem.ItemContainerTheme>
+                        </MenuItem>
+                    </MenuItem>
                 </MenuItem>
                 <Separator />
                 <MenuItem Header="Extract text from image (_OCR)"
@@ -593,9 +606,22 @@
                                                 </ControlTheme>
                                             </MenuItem.ItemContainerTheme>
                                         </MenuItem>
-                                        <MenuItem Header="AI prompt…"
-                                                  Click="OnOpenAiPromptClick"
-                                                  InputGesture="Ctrl+I" />
+                                        <MenuItem Header="AI">
+                                            <MenuItem Header="Custom prompt…"
+                                                      Click="OnOpenAiPromptClick"
+                                                      InputGesture="Ctrl+I" />
+                                            <Separator />
+                                            <MenuItem Header="Presets"
+                                                      ItemsSource="{Binding AiPresets}">
+                                                <MenuItem.ItemContainerTheme>
+                                                    <ControlTheme TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+                                                        <Setter Property="Header" Value="{Binding Name, DataType=models:AiPreset}" />
+                                                        <Setter Property="Command" Value="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).ApplyAiPresetCommand}" />
+                                                        <Setter Property="CommandParameter" Value="{Binding}" />
+                                                    </ControlTheme>
+                                                </MenuItem.ItemContainerTheme>
+                                            </MenuItem>
+                                        </MenuItem>
                                     </MenuFlyout>
                                 </Button.Flyout>
                             </Button>
