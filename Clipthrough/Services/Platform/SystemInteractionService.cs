@@ -22,7 +22,7 @@ using Clipthrough.Models;
 using Clipthrough.Presentation;
 using Microsoft.Win32;
 
-namespace Clipthrough.Services;
+namespace Clipthrough.Services.Platform;
 
 public sealed class SystemInteractionService : ISystemInteractionService, IDisposable
 {

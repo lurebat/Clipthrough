@@ -14,7 +14,7 @@ shortcuts, and pluggable source attribution.
 - `Clipthrough/` — application project
   - `Views/` — AXAML windows and controls (MainWindow, SettingsWindow, SessionLogsWindow, HelpWindow)
   - `ViewModels/` — ReactiveUI-based VMs (MainWindowViewModel is the largest)
-  - `Services/` — behavior abstractions (clip store, sensitivity, settings, system interaction, clipboard monitor). Every service has an `I<Name>Service` interface.
+  - `Services/` — behavior abstractions organised into subfolders (`Ai/`, `Capture/`, `Imaging/`, `Ocr/`, `Platform/`, `Remote/`, `Search/`, `Security/`, `Storage/`, `System/`). Every service has an `I<Name>Service` interface. All files keep the flat `Clipthrough.Services` namespace except `Platform/` which uses `Clipthrough.Services.Platform` for OS-specific concrete implementations.
   - `Models/` — POCOs for persisted state, settings, and transient records.
   - `Converters/` — `IValueConverter` implementations used in AXAML bindings.
   - `Styles/` — `ModernTheme.axaml` + class-based selectors.
@@ -68,7 +68,7 @@ The headless filter is there because some Avalonia headless tests hang intermitt
 
 ## Platform considerations
 
-- **Windows** is the primary target. Linux and macOS should build but are not feature-complete. Platform-specific code lives in `Services/SystemInteractionService.cs` under `[SupportedOSPlatform("windows")]` guards.
+- **Windows** is the primary target. Linux and macOS should build but are not feature-complete. Platform-specific code lives in `Services/Platform/SystemInteractionService.cs` under `[SupportedOSPlatform("windows")]` guards.
 - **Async void** is allowed only for event handlers. Prefer `async Task` everywhere else.
 - **P/Invoke**: struct layouts must match Win32 exactly. Prefer `System.Runtime.InteropServices.LibraryImport` on .NET 10 where possible.
 

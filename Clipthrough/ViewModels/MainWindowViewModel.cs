@@ -2524,12 +2524,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         _editedClipBaseline = text;
         RaiseEditedClipProperties();
-        StatusText = AppText.EditedClipCopiedStatus;
         PublishSensitiveCopyNotificationIfNeeded(SelectedClip);
         if (captured is not null)
         {
             await RefreshAsync(captured.Id);
         }
+        StatusText = AppText.EditedClipCopiedStatus;
     }
 
     public async Task CommitEditedClipOnFocusLossAsync() => await CommitEditedClipOnSelectionChangeAsync();

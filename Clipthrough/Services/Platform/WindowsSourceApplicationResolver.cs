@@ -7,7 +7,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 
-namespace Clipthrough.Services;
+namespace Clipthrough.Services.Platform;
 
 [SupportedOSPlatform("windows")]
 public sealed class WindowsSourceApplicationResolver : ISourceApplicationResolver
@@ -203,5 +203,3 @@ public sealed class WindowsSourceApplicationResolver : ISourceApplicationResolve
     [DllImport("user32.dll")]
     private static extern int GetWindowTextLength(IntPtr hWnd);
 }
-
-public sealed record ClipboardSourceApplicationInfo(string? Name, string? Path, byte[]? IconBytes, string? WindowTitle = null);
