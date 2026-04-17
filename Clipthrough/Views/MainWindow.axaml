@@ -21,6 +21,7 @@
     <Window.KeyBindings>
         <KeyBinding Gesture="Ctrl+I" Command="{Binding OpenAiPromptCommand}" />
         <KeyBinding Gesture="Ctrl+OemComma" Command="{Binding OpenSettingsCommand}" />
+        <KeyBinding Gesture="Ctrl+Home" Command="{Binding JumpToTopCommand}" />
     </Window.KeyBindings>
 
     <Grid>
@@ -111,24 +112,31 @@
                        LineSpacing="4">
                 <CheckBox Classes="filter-toggle compact-toggle"
                           IsChecked="{Binding ShowFavoritesOnly}"
+                          ToolTip.Tip="{Binding FavoritesFilterTooltip}"
                           Content="{Binding FavoritesFilterLabel}" />
                 <CheckBox Classes="filter-toggle compact-toggle"
                           IsChecked="{Binding ShowSensitiveOnly}"
+                          ToolTip.Tip="{Binding SensitiveFilterTooltip}"
                           Content="{Binding SensitiveFilterLabel}" />
                 <CheckBox Classes="filter-toggle compact-toggle"
                           IsChecked="{Binding UseRegexSearch}"
+                          ToolTip.Tip="{Binding RegexFilterTooltip}"
                           Content="{Binding RegexFilterLabel}" />
                 <CheckBox Classes="filter-toggle compact-toggle"
                           IsChecked="{Binding CaseSensitiveSearch}"
+                          ToolTip.Tip="{Binding CaseSensitiveFilterTooltip}"
                           Content="{Binding CaseSensitiveFilterLabel}" />
                 <CheckBox Classes="filter-toggle compact-toggle"
                           IsChecked="{Binding UseWildcardSearch}"
+                          ToolTip.Tip="{Binding WildcardFilterTooltip}"
                           Content="{Binding WildcardFilterLabel}" />
                 <CheckBox Classes="filter-toggle compact-toggle"
                           IsChecked="{Binding WholeWordSearch}"
+                          ToolTip.Tip="{Binding WholeWordFilterTooltip}"
                           Content="{Binding WholeWordFilterLabel}" />
                 <CheckBox Classes="filter-toggle compact-toggle"
                           IsChecked="{Binding ShowPastedOnly}"
+                          ToolTip.Tip="{Binding PastedFilterTooltip}"
                           Content="{Binding PastedFilterLabel}" />
                 <CheckBox Classes="filter-toggle compact-toggle"
                           IsChecked="{Binding UseFuzzyClipSearch}"
@@ -443,8 +451,9 @@
                     <Border Grid.Row="2"
                             Classes="inset-panel"
                             Padding="8,6">
-                        <StackPanel Orientation="Horizontal"
-                                    Spacing="8">
+                        <WrapPanel Orientation="Horizontal"
+                                   ItemSpacing="8"
+                                   LineSpacing="4">
                             <Border Classes="badge-chip"
                                     Background="{DynamicResource StatusChipSelectedBg}"
                                     BorderBrush="{DynamicResource StatusChipSelectedBorder}"
@@ -470,9 +479,11 @@
                                     VerticalAlignment="Center"
                                     IsVisible="{Binding IsSemanticCoverageVisible}"
                                     ToolTip.Tip="Semantic embedding coverage. Click to refresh.">
-                                <TextBlock Text="{Binding SemanticCoverageText}" />
+                                <TextBlock Text="{Binding SemanticCoverageText}"
+                                           TextTrimming="CharacterEllipsis"
+                                           MaxWidth="220" />
                             </Border>
-                        </StackPanel>
+                        </WrapPanel>
                     </Border>
                 </Grid>
             </Border>

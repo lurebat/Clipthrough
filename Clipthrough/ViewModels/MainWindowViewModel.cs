@@ -235,6 +235,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ApplyTextTransformationCommand = ReactiveCommand.CreateFromTask<TextTransformation>(ApplyTextTransformationAsync);
         AddSensitivityRuleCommand = ReactiveCommand.Create(AddSensitivityRule);
         OpenSettingsCommand = ReactiveCommand.Create(OpenSettings);
+        JumpToTopCommand = ReactiveCommand.Create(() => { if (Clips.Count > 0) SelectedClip = Clips[0]; });
         OpenHelpCommand = ReactiveCommand.Create(OpenHelp);
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
         SaveSettingsCommand = ReactiveCommand.CreateFromTask(SaveSettingsAsync);
@@ -468,6 +469,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ReactiveCommand<Window?, Unit> BrowseDatabasePathCommand { get; }
     public ReactiveCommand<Window?, Unit> ImportClipAngelCommand { get; }
+    public ReactiveCommand<Unit, Unit> JumpToTopCommand { get; }
 
     public ReactiveCommand<Unit, Unit> UnlockDatabaseCommand { get; }
 
@@ -846,6 +848,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string RegexFilterLabel => AppText.RegexFilterLabel;
 
+    private string BuildFilterTooltip(string label, bool enabled, string hotkey)
+        => enabled && !string.IsNullOrWhiteSpace(hotkey) ? $"{label} ({hotkey})" : label;
+
+    public string FavoritesFilterTooltip => BuildFilterTooltip(AppText.FavoritesFilterLabel,
+        _settingsService.Current.EnableToggleFavoritesHotkey, _settingsService.Current.ToggleFavoritesHotkey);
+    public string SensitiveFilterTooltip => BuildFilterTooltip(AppText.SensitiveFilterLabel,
+        _settingsService.Current.EnableToggleSensitiveHotkey, _settingsService.Current.ToggleSensitiveHotkey);
+    public string RegexFilterTooltip => BuildFilterTooltip(AppText.RegexFilterLabel,
+        _settingsService.Current.EnableToggleRegexHotkey, _settingsService.Current.ToggleRegexHotkey);
+    public string CaseSensitiveFilterTooltip => BuildFilterTooltip(AppText.CaseSensitiveFilterLabel,
+        _settingsService.Current.EnableToggleCaseSensitiveHotkey, _settingsService.Current.ToggleCaseSensitiveHotkey);
+    public string WildcardFilterTooltip => BuildFilterTooltip(AppText.WildcardFilterLabel,
+        _settingsService.Current.EnableToggleWildcardHotkey, _settingsService.Current.ToggleWildcardHotkey);
+    public string WholeWordFilterTooltip => BuildFilterTooltip(AppText.WholeWordFilterLabel,
+        _settingsService.Current.EnableToggleWholeWordHotkey, _settingsService.Current.ToggleWholeWordHotkey);
+    public string PastedFilterTooltip => BuildFilterTooltip(AppText.PastedFilterLabel,
+        _settingsService.Current.EnableTogglePastedHotkey, _settingsService.Current.TogglePastedHotkey);
+
     public string RefreshButtonLabel => AppText.RefreshButtonLabel;
 
     public string RawToggleLabel => AppText.RawToggleLabel;
@@ -923,6 +943,27 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string SettingsClipAngelImportDescription => AppText.SettingsClipAngelImportDescription;
     public string SettingsClipAngelImportButtonLabel => AppText.SettingsClipAngelImportButtonLabel;
     public bool IsClipAngelImportSupported => _clipAngelImportService.IsSupported;
+
+    private bool _isImportingClipAngel;
+    public bool IsImportingClipAngel
+    {
+        get => _isImportingClipAngel;
+        private set => this.RaiseAndSetIfChanged(ref _isImportingClipAngel, value);
+    }
+
+    private int _clipAngelImportProcessed;
+    public int ClipAngelImportProcessed
+    {
+        get => _clipAngelImportProcessed;
+        private set => this.RaiseAndSetIfChanged(ref _clipAngelImportProcessed, value);
+    }
+
+    private int _clipAngelImportTotal;
+    public int ClipAngelImportTotal
+    {
+        get => _clipAngelImportTotal;
+        private set => this.RaiseAndSetIfChanged(ref _clipAngelImportTotal, value);
+    }
 
     public string SettingsShowPasswordLabel => AppText.SettingsShowPasswordLabel;
 
@@ -2022,7 +2063,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private static readonly string _behaviorKeywords = "theme dark light tray minimize close start windows startup behavior appearance";
     private static readonly string _localHotkeyKeywords = "hotkey shortcut local regex favorite sensitive case wildcard whole word pasted toggle";
     private static readonly string _globalHotkeyKeywords = "hotkey shortcut global toggle window show hide incremental decremental paste";
-    private static readonly string _storageKeywords = "storage database path password encryption sqlite file location";
+    private static readonly string _storageKeywords = "storage database path password encryption sqlite file location clipangel import legacy migration";
     private static readonly string _toolsKeywords = "tools external editor diff winmerge beyond compare vscode meld kdiff";
     private static readonly string _retentionKeywords = "retention lifetime expiry expire clips days normal sensitive minutes age";
     private static readonly string _capacityKeywords = "capacity size library entries count limit max megabytes clip kb kilobytes";
@@ -4010,12 +4051,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         StatusText = AppText.ClipAngelImportRunning;
         IsBusy = true;
+        IsImportingClipAngel = true;
+        ClipAngelImportProcessed = 0;
+        ClipAngelImportTotal = 0;
         try
         {
             var progress = new Progress<ClipAngelImportProgress>(p =>
-                StatusText = AppText.FormatClipAngelImportProgress(p.Processed, p.Total));
+            {
+                ClipAngelImportProcessed = p.Processed;
+                ClipAngelImportTotal = p.Total;
+                StatusText = AppText.FormatClipAngelImportProgress(p.Processed, p.Total);
+            });
             var result = await _clipAngelImportService.ImportAsync(path!, progress);
-            StatusText = AppText.FormatClipAngelImportSuccess(result.Imported, result.Skipped, result.Failed);
+            var msg = AppText.FormatClipAngelImportSuccess(result.Imported, result.Skipped, result.Failed);
+            StatusText = msg;
+            _notificationService.PublishInfo(AppText.SettingsClipAngelImportTitle, msg);
             await RefreshAsync();
         }
         catch (Exception ex)
@@ -4026,6 +4076,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         finally
         {
             IsBusy = false;
+            IsImportingClipAngel = false;
         }
     }
 
@@ -4405,6 +4456,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         UpdateSelectedClipPresentation();
         RaiseSelectionStateProperties();
         this.RaisePropertyChanged(nameof(IsCompareAvailable));
+        this.RaisePropertyChanged(nameof(FavoritesFilterTooltip));
+        this.RaisePropertyChanged(nameof(SensitiveFilterTooltip));
+        this.RaisePropertyChanged(nameof(RegexFilterTooltip));
+        this.RaisePropertyChanged(nameof(CaseSensitiveFilterTooltip));
+        this.RaisePropertyChanged(nameof(WildcardFilterTooltip));
+        this.RaisePropertyChanged(nameof(WholeWordFilterTooltip));
+        this.RaisePropertyChanged(nameof(PastedFilterTooltip));
     }
 
     private void SyncUserScripts(AppSettings settings)

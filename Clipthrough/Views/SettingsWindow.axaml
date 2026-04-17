@@ -236,6 +236,11 @@
                                         Command="{Binding ImportClipAngelCommand}"
                                         CommandParameter="{Binding $parent[Window]}"
                                         Content="{Binding SettingsClipAngelImportButtonLabel}" />
+                                <ProgressBar Minimum="0"
+                                             Maximum="{Binding ClipAngelImportTotal}"
+                                             Value="{Binding ClipAngelImportProcessed}"
+                                             IsVisible="{Binding IsImportingClipAngel}"
+                                             Height="6" />
                             </StackPanel>
                         </Border>
                     </StackPanel>

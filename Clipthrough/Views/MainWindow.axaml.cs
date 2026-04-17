@@ -215,17 +215,38 @@ public partial class MainWindow : Window
             return false;
         }
 
-        // Check for printable key
-        if (e.Key is < Key.A or > Key.Z and < Key.D0 or > Key.D9
-            and < Key.NumPad0 or > Key.NumPad9
-            and not Key.Space and not Key.OemMinus and not Key.OemPlus
-            and not Key.OemPeriod and not Key.OemComma)
+        // Translate the key into a printable character (letters/digits only; shift handled naturally)
+        char? typed = null;
+        if (e.Key >= Key.A && e.Key <= Key.Z)
+        {
+            var letter = (char)('a' + (e.Key - Key.A));
+            typed = (e.KeyModifiers & KeyModifiers.Shift) == KeyModifiers.Shift ? char.ToUpperInvariant(letter) : letter;
+        }
+        else if (e.Key >= Key.D0 && e.Key <= Key.D9 && (e.KeyModifiers & KeyModifiers.Shift) == 0)
+        {
+            typed = (char)('0' + (e.Key - Key.D0));
+        }
+        else if (e.Key >= Key.NumPad0 && e.Key <= Key.NumPad9)
+        {
+            typed = (char)('0' + (e.Key - Key.NumPad0));
+        }
+        else if (e.Key == Key.Space)
+        {
+            typed = ' ';
+        }
+
+        if (typed is null)
         {
             return false;
         }
 
         searchTextBox.Focus();
-        return false; // Let the key event propagate to the now-focused search box
+        if (DataContext is MainWindowViewModel vm)
+        {
+            vm.SearchText = (vm.SearchText ?? string.Empty) + typed.Value;
+            searchTextBox.CaretIndex = vm.SearchText.Length;
+        }
+        return true;
     }
 
     private void OnClipsListDoubleTapped(object? sender, TappedEventArgs e)
@@ -604,12 +625,9 @@ public partial class MainWindow : Window
             return true;
         }
 
-        if (modifiers == KeyModifiers.Alt)
-        {
-            viewModel.SelectClipByIndex(index);
-            return true;
-        }
-
+        // Alt+1..9 is intentionally NOT handled here so Alt remains available for
+        // menu access keys (Alt+F, Alt+E, etc.). Use Ctrl+1..9 to copy a clip, or
+        // arrow keys / clicks to select.
         return false;
     }
 
