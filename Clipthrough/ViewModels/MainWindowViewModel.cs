@@ -319,12 +319,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         x => x.UseSemanticClipSearch)
                     .Select(static _ => Unit.Default))
                 .Skip(1)
-                .Throttle(TimeSpan.FromMilliseconds(300), RxApp.MainThreadScheduler)
+                .Throttle(TimeSpan.FromMilliseconds(300), RxSchedulers.MainThreadScheduler)
                 .InvokeCommand(RefreshCommand));
 
         _subscriptions.Add(
             _clipboardMonitorService.CapturedClips
-                .ObserveOn(RxApp.MainThreadScheduler)
+                .ObserveOn(RxSchedulers.MainThreadScheduler)
                 .SelectMany(clip => Observable.FromAsync(() => RefreshAsync(clip.Id)))
                 .Subscribe(_ => { }, ex => StatusText = AppText.FormatErrorStatus(ex.Message)));
 
@@ -342,17 +342,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         _subscriptions.Add(
             _backgroundOcrQueue.OcrCompleted
-                .ObserveOn(RxApp.MainThreadScheduler)
+                .ObserveOn(RxSchedulers.MainThreadScheduler)
                 .SelectMany(id => Observable.FromAsync(() => RefreshAsync(id)))
                 .Subscribe(_ => { }, ex => Trace.TraceError($"OCR refresh failed: {ex}")));
 
         _subscriptions.Add(
             _notificationService.Notifications
-                .ObserveOn(RxApp.MainThreadScheduler)
+                .ObserveOn(RxSchedulers.MainThreadScheduler)
                 .Subscribe(ShowNotification));
 
         _subscriptions.Add(
-            Observable.Interval(TimeSpan.FromSeconds(10), RxApp.MainThreadScheduler)
+            Observable.Interval(TimeSpan.FromSeconds(10), RxSchedulers.MainThreadScheduler)
                 .Subscribe(_ => RefreshLastCaptureSummary()));
 
         _subscriptions.Add(
@@ -373,7 +373,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .Merge(SaveSettingsCommand.ThrownExceptions)
                 .Merge(BrowseDatabasePathCommand.ThrownExceptions)
                 .Merge(UnlockDatabaseCommand.ThrownExceptions)
-                .ObserveOn(RxApp.MainThreadScheduler)
+                .ObserveOn(RxSchedulers.MainThreadScheduler)
                 .Subscribe(ex => StatusText = AppText.FormatErrorStatus(ex.Message)));
     }
 
@@ -4350,7 +4350,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (_embeddingWorker is not null)
         {
             _subscriptions.Add(_embeddingWorker.BatchCompleted
-                .ObserveOn(RxApp.MainThreadScheduler)
+                .ObserveOn(RxSchedulers.MainThreadScheduler)
                 .Subscribe((int count) => { _ = RefreshSemanticCoverageAsync(); }));
         }
     }
@@ -4627,9 +4627,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         var maintenanceSubscription = new SerialDisposable();
-        maintenanceSubscription.Disposable = Observable.Interval(TimeSpan.FromMinutes(1), RxApp.TaskpoolScheduler)
+        maintenanceSubscription.Disposable = Observable.Interval(TimeSpan.FromMinutes(1), RxSchedulers.TaskpoolScheduler)
             .SelectMany(_ => Observable.FromAsync(() => ApplyMaintenanceAndRefreshAsync(false)))
-            .ObserveOn(RxApp.MainThreadScheduler)
+            .ObserveOn(RxSchedulers.MainThreadScheduler)
             .Subscribe(_ => { }, ex => StatusText = AppText.FormatErrorStatus(ex.Message));
         _subscriptions.Add(maintenanceSubscription);
     }
@@ -5054,8 +5054,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         if (!notification.IsPersistent)
         {
-            var removal = Observable.Timer(TimeSpan.FromSeconds(6), RxApp.MainThreadScheduler)
-                .ObserveOn(RxApp.MainThreadScheduler)
+            var removal = Observable.Timer(TimeSpan.FromSeconds(6), RxSchedulers.MainThreadScheduler)
+                .ObserveOn(RxSchedulers.MainThreadScheduler)
                 .Subscribe(_ => RemoveNotification(item));
             _subscriptions.Add(removal);
         }

@@ -13,5 +13,5 @@ public static class TestAppBuilder
     public static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<Clipthrough.App>()
             .UseHeadless(new AvaloniaHeadlessPlatformOptions())
-            .UseReactiveUI();
+            .UseReactiveUI(_ => { });
 }

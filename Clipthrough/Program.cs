@@ -60,7 +60,7 @@ sealed class Program
             .UsePlatformDetect()
             .WithInterFont()
             .LogToTrace()
-            .UseReactiveUI()
+            .UseReactiveUI(_ => { })
             .With(new SkiaOptions
             {
                 MaxGpuResourceSizeBytes = 256 * 1024 * 1024,

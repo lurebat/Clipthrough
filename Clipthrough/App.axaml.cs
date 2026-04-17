@@ -82,7 +82,7 @@ public partial class App : Application
             desktop.MainWindow.PropertyChanged += OnMainWindowPropertyChanged;
             _settingsService.SettingsChanged += OnSettingsChanged;
             _notificationSubscription = _notificationService.Notifications
-                .ObserveOn(RxApp.MainThreadScheduler)
+                .ObserveOn(RxSchedulers.MainThreadScheduler)
                 .Subscribe(OnNotificationPublished);
 
             _embeddingWorker = Services.GetRequiredService<Clipthrough.Services.Search.IEmbeddingWorker>();
