@@ -132,6 +132,8 @@ public sealed record AppSettings
 
     public string AiModel { get; init; } = string.Empty;
 
+    public string AiImageModel { get; init; } = string.Empty;
+
     public string AiReasoningEffort { get; init; } = string.Empty;
 
     public System.Collections.Generic.IReadOnlyList<UserScript> UserScripts { get; init; } = System.Array.Empty<UserScript>();
@@ -206,6 +208,7 @@ public sealed record AppSettings
         AiBaseUrl = AiBaseUrl?.Trim() ?? string.Empty,
         AiApiKey = AiApiKey?.Trim() ?? string.Empty,
         AiModel = AiModel?.Trim() ?? string.Empty,
+        AiImageModel = AiImageModel?.Trim() ?? string.Empty,
         AiReasoningEffort = NormalizeReasoningEffort(AiReasoningEffort),
         UserScripts = (UserScripts ?? System.Array.Empty<UserScript>())
             .Where(s => s is not null && !string.IsNullOrWhiteSpace(s.Name) && !string.IsNullOrWhiteSpace(s.Code))
@@ -213,7 +216,7 @@ public sealed record AppSettings
             .ToList(),
         AiPresets = (AiPresets ?? System.Array.Empty<AiPreset>())
             .Where(p => p is not null && !string.IsNullOrWhiteSpace(p.Name) && !string.IsNullOrWhiteSpace(p.Prompt))
-            .Select(p => new AiPreset { Name = p.Name.Trim(), Prompt = p.Prompt.Trim() })
+            .Select(p => new AiPreset { Name = p.Name.Trim(), Prompt = p.Prompt.Trim(), Kind = p.Kind })
             .ToList(),
         CustomHotkeys = (CustomHotkeys ?? System.Array.Empty<CustomHotkeyBinding>())
             .Where(h => h is not null && !string.IsNullOrWhiteSpace(h.Gesture) && !string.IsNullOrWhiteSpace(h.Target))

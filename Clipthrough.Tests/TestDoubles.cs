@@ -364,6 +364,10 @@ internal sealed class TestAiTransformService : IAiTransformService
     public bool IsConfigured => false;
     public Task<string> TransformAsync(string systemPrompt, string input, CancellationToken cancellationToken = default)
         => Task.FromResult(input);
+    public Task<string> DescribeImageAsync(string systemPrompt, byte[] imageBytes, string mediaType, CancellationToken cancellationToken = default)
+        => Task.FromResult(string.Empty);
+    public Task<byte[]> EditImageAsync(string prompt, byte[] imageBytes, string mediaType, CancellationToken cancellationToken = default)
+        => Task.FromResult(imageBytes);
 }
 
 internal sealed class TestOcrService : IOcrService

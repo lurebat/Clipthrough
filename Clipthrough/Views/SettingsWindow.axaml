@@ -500,6 +500,11 @@
                                      Text="{Binding SettingsAiModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </StackPanel>
                         <StackPanel Spacing="6">
+                            <TextBlock Classes="detail-label" Text="Image model (used for image→image presets; blank = gpt-image-1)" />
+                            <TextBox Watermark="gpt-image-1"
+                                     Text="{Binding SettingsAiImageModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                        <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label" Text="Reasoning effort (only used by reasoning models; blank = off)" />
                             <ComboBox ItemsSource="{Binding AiReasoningEffortOptions}"
                                       SelectedItem="{Binding SettingsAiReasoningEffort, Mode=TwoWay}" />
