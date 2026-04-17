@@ -130,6 +130,8 @@ public sealed record AppSettings
 
     public System.Collections.Generic.IReadOnlyList<UserScript> UserScripts { get; init; } = System.Array.Empty<UserScript>();
 
+    public System.Collections.Generic.IReadOnlyList<AiPreset> AiPresets { get; init; } = System.Array.Empty<AiPreset>();
+
     public bool EnableAutoUpdate { get; init; }
 
     public string UpdateFeedUrl { get; init; } = string.Empty;
@@ -141,6 +143,8 @@ public sealed record AppSettings
     public int RemoteApiPort { get; init; } = 53117;
 
     public string RemoteApiToken { get; init; } = string.Empty;
+
+    public string RemoteApiBindAddress { get; init; } = "127.0.0.1";
 
     public static AppSettings Default { get; } = new();
 
@@ -195,11 +199,16 @@ public sealed record AppSettings
             .Where(s => s is not null && !string.IsNullOrWhiteSpace(s.Name) && !string.IsNullOrWhiteSpace(s.Code))
             .Select(s => new UserScript { Name = s.Name.Trim(), Code = s.Code })
             .ToList(),
+        AiPresets = (AiPresets ?? System.Array.Empty<AiPreset>())
+            .Where(p => p is not null && !string.IsNullOrWhiteSpace(p.Name) && !string.IsNullOrWhiteSpace(p.Prompt))
+            .Select(p => new AiPreset { Name = p.Name.Trim(), Prompt = p.Prompt.Trim() })
+            .ToList(),
         UpdateFeedUrl = UpdateFeedUrl?.Trim() ?? string.Empty,
         OcrLanguages = string.IsNullOrWhiteSpace(OcrLanguages) ? "en" : OcrLanguages.Trim(),
         EnableRemoteApi = EnableRemoteApi,
         RemoteApiPort = RemoteApiPort <= 0 || RemoteApiPort > 65535 ? 53117 : RemoteApiPort,
         RemoteApiToken = EnableRemoteApi ? (RemoteApiToken?.Trim() ?? string.Empty) : string.Empty,
+        RemoteApiBindAddress = string.IsNullOrWhiteSpace(RemoteApiBindAddress) ? "127.0.0.1" : RemoteApiBindAddress.Trim(),
     };
 
     private static string NormalizeHotkey(string? value, string fallback)

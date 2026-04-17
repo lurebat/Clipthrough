@@ -2260,7 +2260,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
-        await _clipStoreService.CaptureAsync(new ClipCaptureRequest
+        var captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
         {
             ContentBytes = textBytes,
             ContentText = result,
@@ -2269,10 +2269,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SourceApp = clip.SourceApp,
             SourceAppPath = clip.Clip.SourceAppPath,
             SourceAppIconBytes = clip.Clip.SourceAppIconBytes,
+            SourceWindowTitle = clip.Clip.SourceWindowTitle,
             IncrementExistingCopyCount = false,
         });
         StatusText = AppText.EditedClipCopiedStatus;
-        await RefreshAsync();
+        await RefreshAsync(captured?.Id);
     }
 
     private async Task ApplyUserScriptAsync(UserScript? script)
@@ -2312,6 +2313,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             : SelectedClip is not null ? new List<ClipItemViewModel> { SelectedClip } : new List<ClipItemViewModel>();
 
         var transformed = 0;
+        long? lastCreatedId = null;
         foreach (var target in targets)
         {
             if (target.Clip.ContentType != ContentType.Text && target.Clip.ContentType != ContentType.RichText)
@@ -2350,7 +2352,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
 
             var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
-            await _clipStoreService.CaptureAsync(new ClipCaptureRequest
+            var captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
             {
                 ContentBytes = textBytes,
                 ContentText = result,
@@ -2359,8 +2361,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 SourceApp = target.SourceApp,
                 SourceAppPath = target.Clip.SourceAppPath,
                 SourceAppIconBytes = target.Clip.SourceAppIconBytes,
+                SourceWindowTitle = target.Clip.SourceWindowTitle,
                 IncrementExistingCopyCount = false,
             });
+            if (captured is not null)
+            {
+                lastCreatedId = captured.Id;
+            }
             transformed++;
         }
 
@@ -2369,6 +2376,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             StatusText = transformed == 1
                 ? (useSelectionSlice ? $"Applied {singleLabel} to selection" : AppText.EditedClipCopiedStatus)
                 : multiSummary(transformed);
+            await RefreshAsync(lastCreatedId);
         }
     }
 
@@ -2401,7 +2409,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         if (!_ocrService.IsAvailable)
         {
-            StatusText = "Tesseract not found — install it or set the path in Settings → OCR";
+            StatusText = "No Windows OCR languages installed. Add one in Windows Settings → Time & Language → Language.";
             return;
         }
 
@@ -2415,7 +2423,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         var bytes = System.Text.Encoding.UTF8.GetBytes(result.Text);
-        await _clipStoreService.CaptureAsync(new ClipCaptureRequest
+        var captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
         {
             ContentBytes = bytes,
             ContentText = result.Text,
@@ -2424,9 +2432,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SourceApp = clip.SourceApp,
             SourceAppPath = clip.Clip.SourceAppPath,
             SourceAppIconBytes = clip.Clip.SourceAppIconBytes,
+            SourceWindowTitle = clip.Clip.SourceWindowTitle,
             IncrementExistingCopyCount = false,
         });
         StatusText = $"OCR extracted {result.Text.Length} characters";
+        await RefreshAsync(captured?.Id);
     }
 
     private async Task CommitEditedClipOnSelectionChangeAsync()
@@ -3005,6 +3015,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         AiPromptError = string.Empty;
         try
         {
+            long? lastCreatedId = null;
             var useSelectionSlice = checkedClips.Count == 0
                 && SelectedClip is not null
                 && EditedClipSelectionLength > 0
@@ -3050,7 +3061,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 }
 
                 var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
-                await _clipStoreService.CaptureAsync(new ClipCaptureRequest
+                var captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
                 {
                     ContentBytes = textBytes,
                     ContentText = result,
@@ -3059,8 +3070,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     SourceApp = target.SourceApp,
                     SourceAppPath = target.Clip.SourceAppPath,
                     SourceAppIconBytes = target.Clip.SourceAppIconBytes,
+                    SourceWindowTitle = target.Clip.SourceWindowTitle,
                     IncrementExistingCopyCount = false,
                 });
+                if (captured is not null)
+                {
+                    lastCreatedId = captured.Id;
+                }
                 produced++;
             }
 
@@ -3069,12 +3085,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 StatusText = produced == 1
                     ? "AI transform produced a new clip."
                     : $"AI transform produced {produced} new clips.";
+                IsAiPromptOpen = false;
+                await RefreshAsync(lastCreatedId);
             }
             else
             {
-                StatusText = "AI transform returned no new content.";
+                AiPromptError = "AI transform returned no new content. Check the provider or refine the prompt.";
             }
-            IsAiPromptOpen = false;
         }
         finally
         {

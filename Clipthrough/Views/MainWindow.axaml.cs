@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel;
 using System.Linq;
+using System.Reactive.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -8,6 +9,7 @@ using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Clipthrough.Controls;
+using Clipthrough.Models;
 using Clipthrough.ViewModels;
 
 namespace Clipthrough.Views;
@@ -357,6 +359,44 @@ public partial class MainWindow : Window
     {
         var imageEditor = this.FindControl<EmbeddedImageEditorView>("SelectedImageEditor");
         imageEditor?.Reset();
+        e.Handled = true;
+    }
+
+    private void OnTransformMenuClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel || sender is not MenuItem mi)
+        {
+            return;
+        }
+        if (mi.CommandParameter is not TextTransformation t || t == TextTransformation.None)
+        {
+            return;
+        }
+        viewModel.ApplyTextTransformationCommand.Execute(t).Subscribe();
+        e.Handled = true;
+    }
+
+    private void OnScriptMenuClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel || sender is not MenuItem mi)
+        {
+            return;
+        }
+        if (mi.CommandParameter is not UserScript script)
+        {
+            return;
+        }
+        viewModel.ApplyUserScriptCommand.Execute(script).Subscribe();
+        e.Handled = true;
+    }
+
+    private void OnOpenAiPromptClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+        viewModel.OpenAiPromptCommand.Execute().Subscribe();
         e.Handled = true;
     }
 
