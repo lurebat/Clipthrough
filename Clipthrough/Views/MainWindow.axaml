@@ -151,6 +151,7 @@
 
                 <TextBox x:Name="SearchTextBox"
                          Grid.Column="1"
+                         AutomationProperties.Name="Search clips"
                          Watermark="{Binding SearchWatermark}"
                          Text="{Binding SearchText}" />
 
@@ -264,6 +265,7 @@
 
                         <ListBox x:Name="ClipsListBox"
                                   Classes="clip-list"
+                                  AutomationProperties.Name="Clipboard history"
                                   ItemsSource="{Binding Clips}"
                                   SelectedItem="{Binding SelectedClip, Mode=TwoWay}"
                                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
@@ -289,7 +291,7 @@
                                                           Command="{Binding TogglePinCommand}" />
                                                 <MenuItem Header="{Binding ExportLabel}"
                                                           Command="{Binding ExportCommand}" />
-                                                <MenuItem Header="Transform ▾"
+                                                <MenuItem Header="Transform"
                                                           IsVisible="{Binding CanTransform}">
                                                     <MenuItem Header="UPPERCASE"
                                                               Command="{Binding ApplyTextTransformationCommand}"
@@ -372,7 +374,7 @@
                                                        Foreground="{Binding DisplayIndexForeground}"
                                                        VerticalAlignment="Center"
                                                        FontSize="11"
-                                                       Width="18"
+                                                       MinWidth="18"
                                                        TextAlignment="Center" />
 
                                             <Border Grid.Column="2"
@@ -604,7 +606,6 @@
                                     Content="{Binding OpenInEditorButtonLabel}" />
 
                             <Button Classes="secondary compact"
-                                    IsEnabled="{Binding HasTransformableTarget}"
                                     IsVisible="{Binding HasTransformableTarget}"
                                     ToolTip.Tip="Apply a text transformation (works on checked clips when any are selected)">
                                 <Button.Content>Transform ▾</Button.Content>
@@ -1350,7 +1351,7 @@
 
         <!-- AI Prompt Panel -->
         <Border IsVisible="{Binding IsAiPromptOpen}"
-                Background="#80000000">
+                Background="{DynamicResource ModalBackdropBrush}">
             <Border Classes="hero-surface"
                     Padding="24"
                     MaxWidth="560"

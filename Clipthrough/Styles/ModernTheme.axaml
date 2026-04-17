@@ -41,6 +41,8 @@
                     <SolidColorBrush x:Key="FavoriteBadgeFg" Color="#FCD34D" />
                     <SolidColorBrush x:Key="SensitiveBadgeBg" Color="#2D1421" />
                     <SolidColorBrush x:Key="SensitiveBadgeBorder" Color="#7F1D3A" />
+                    <SolidColorBrush x:Key="SensitiveBadgeFg" Color="#FECDD3" />
+                    <SolidColorBrush x:Key="ModalBackdropBrush" Color="#B0000000" />
                     <SolidColorBrush x:Key="StatusChipSelectedBg" Color="#1E1444" />
                     <SolidColorBrush x:Key="StatusChipSelectedBorder" Color="#5B21B6" />
                     <SolidColorBrush x:Key="StatusChipSelectedFg" Color="#C4B5FD" />
@@ -92,6 +94,8 @@
                     <SolidColorBrush x:Key="FavoriteBadgeFg" Color="#92400E" />
                     <SolidColorBrush x:Key="SensitiveBadgeBg" Color="#FCE7F3" />
                     <SolidColorBrush x:Key="SensitiveBadgeBorder" Color="#DB2777" />
+                    <SolidColorBrush x:Key="SensitiveBadgeFg" Color="#9D174D" />
+                    <SolidColorBrush x:Key="ModalBackdropBrush" Color="#60475569" />
                     <SolidColorBrush x:Key="StatusChipSelectedBg" Color="#EDE9FE" />
                     <SolidColorBrush x:Key="StatusChipSelectedBorder" Color="#7C3AED" />
                     <SolidColorBrush x:Key="StatusChipSelectedFg" Color="#5B21B6" />

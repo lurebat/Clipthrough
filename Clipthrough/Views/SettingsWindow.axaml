@@ -343,7 +343,9 @@
                 </Expander>
 
                 <!-- AI transforms -->
-                <Expander Classes="settings-section" IsExpanded="False">
+                <Expander Classes="settings-section"
+                          IsVisible="{Binding IsSettingsSectionAiVisible}"
+                          IsExpanded="{Binding IsSettingsSectionAiExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="AI transforms"
                                    FontSize="16"
@@ -375,7 +377,9 @@
                 </Expander>
 
                 <!-- Updates -->
-                <Expander Classes="settings-section" IsExpanded="False">
+                <Expander Classes="settings-section"
+                          IsVisible="{Binding IsSettingsSectionUpdatesVisible}"
+                          IsExpanded="{Binding IsSettingsSectionUpdatesExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="Updates" FontSize="16" FontWeight="SemiBold" />
                     </Expander.Header>
@@ -392,7 +396,9 @@
                 </Expander>
 
                 <!-- OCR -->
-                <Expander Classes="settings-section" IsExpanded="False">
+                <Expander Classes="settings-section"
+                          IsVisible="{Binding IsSettingsSectionOcrVisible}"
+                          IsExpanded="{Binding IsSettingsSectionOcrExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="OCR" FontSize="16" FontWeight="SemiBold" />
                     </Expander.Header>
@@ -408,7 +414,9 @@
                 </Expander>
 
                 <!-- Remote API -->
-                <Expander Classes="settings-section" IsExpanded="False">
+                <Expander Classes="settings-section"
+                          IsVisible="{Binding IsSettingsSectionRemoteApiVisible}"
+                          IsExpanded="{Binding IsSettingsSectionRemoteApiExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="Remote API" FontSize="16" FontWeight="SemiBold" />
                     </Expander.Header>
@@ -424,18 +432,23 @@
                         </StackPanel>
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label" Text="Bearer token" />
-                            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+                            <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="6">
                                 <TextBox Grid.Column="0"
                                          PasswordChar="•"
-                                         RevealPassword="True"
+                                         RevealPassword="{Binding IsRemoteApiTokenRevealed}"
                                          Watermark="Paste or generate a token"
                                          AutomationProperties.Name="Remote API bearer token"
                                          Text="{Binding SettingsRemoteApiToken, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                <Button Grid.Column="1" Classes="secondary compact"
+                                <ToggleButton Grid.Column="1" Classes="secondary compact"
+                                              IsChecked="{Binding IsRemoteApiTokenRevealed, Mode=TwoWay}"
+                                              AutomationProperties.Name="Reveal bearer token"
+                                              ToolTip.Tip="Reveal / hide token"
+                                              Content="👁" />
+                                <Button Grid.Column="2" Classes="secondary compact"
                                         Content="Generate"
                                         AutomationProperties.Name="Generate a random bearer token"
                                         Command="{Binding GenerateRemoteApiTokenCommand}" />
-                                <Button Grid.Column="2" Classes="secondary compact"
+                                <Button Grid.Column="3" Classes="secondary compact"
                                         Content="Copy"
                                         AutomationProperties.Name="Copy bearer token to clipboard"
                                         Command="{Binding CopyRemoteApiTokenCommand}" />
@@ -456,7 +469,12 @@
                     </StackPanel>
                 </Expander>
 
-                <Expander Header="User scripts" IsExpanded="False">
+                <Expander Classes="settings-section"
+                          IsVisible="{Binding IsSettingsSectionUserScriptsVisible}"
+                          IsExpanded="{Binding IsSettingsSectionUserScriptsExpanded, Mode=TwoWay}">
+                    <Expander.Header>
+                        <TextBlock Text="User scripts" FontSize="16" FontWeight="SemiBold" />
+                    </Expander.Header>
                     <StackPanel Spacing="10" Margin="8,10,0,0">
                         <TextBlock Classes="body-muted" TextWrapping="Wrap"
                                    Text="User scripts receive the clip text as 'input' (string) and must return a string. C# scripting syntax (Roslyn)." />

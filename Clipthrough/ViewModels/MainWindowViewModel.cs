@@ -1355,6 +1355,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => this.RaiseAndSetIfChanged(ref _settingsRemoteApiToken, value);
     }
 
+    private bool _isRemoteApiTokenRevealed;
+    public bool IsRemoteApiTokenRevealed
+    {
+        get => _isRemoteApiTokenRevealed;
+        set => this.RaiseAndSetIfChanged(ref _isRemoteApiTokenRevealed, value);
+    }
+
     public string SettingsRemoteApiBindAddress
     {
         get => _settingsRemoteApiBindAddress;
@@ -1548,6 +1555,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isSettingsSectionRetentionExpanded = true;
     private bool _isSettingsSectionCapacityExpanded = true;
     private bool _isSettingsSectionSensitivityExpanded = true;
+    private bool _isSettingsSectionAiExpanded;
+    private bool _isSettingsSectionUpdatesExpanded;
+    private bool _isSettingsSectionOcrExpanded;
+    private bool _isSettingsSectionRemoteApiExpanded;
+    private bool _isSettingsSectionUserScriptsExpanded;
 
     public bool IsSettingsSectionBehaviorExpanded
     {
@@ -1597,6 +1609,36 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => this.RaiseAndSetIfChanged(ref _isSettingsSectionSensitivityExpanded, value);
     }
 
+    public bool IsSettingsSectionAiExpanded
+    {
+        get => _isSettingsSectionAiExpanded;
+        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionAiExpanded, value);
+    }
+
+    public bool IsSettingsSectionUpdatesExpanded
+    {
+        get => _isSettingsSectionUpdatesExpanded;
+        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionUpdatesExpanded, value);
+    }
+
+    public bool IsSettingsSectionOcrExpanded
+    {
+        get => _isSettingsSectionOcrExpanded;
+        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionOcrExpanded, value);
+    }
+
+    public bool IsSettingsSectionRemoteApiExpanded
+    {
+        get => _isSettingsSectionRemoteApiExpanded;
+        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionRemoteApiExpanded, value);
+    }
+
+    public bool IsSettingsSectionUserScriptsExpanded
+    {
+        get => _isSettingsSectionUserScriptsExpanded;
+        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionUserScriptsExpanded, value);
+    }
+
     // Keywords searched by SettingsFilter. When filter is empty the section shows.
     // When non-empty, the section shows only if its keyword blob contains the filter.
     private static readonly string _behaviorKeywords = "theme dark light tray minimize close start windows startup behavior appearance";
@@ -1607,6 +1649,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private static readonly string _retentionKeywords = "retention lifetime expiry expire clips days normal sensitive minutes age";
     private static readonly string _capacityKeywords = "capacity size library entries count limit max megabytes";
     private static readonly string _sensitivityKeywords = "sensitivity rules pattern regex severity warn block name enabled";
+    private static readonly string _aiKeywords = "ai openai chatgpt gpt model api key base url prompt transform";
+    private static readonly string _updatesKeywords = "update updates auto-update velopack feed url release version";
+    private static readonly string _ocrKeywords = "ocr image text extract recognition language bcp-47 windows.media.ocr";
+    private static readonly string _remoteApiKeywords = "remote api http server kestrel bearer token port bind loopback swagger openapi mcp";
+    private static readonly string _userScriptsKeywords = "script scripts user roslyn csharp c# code custom transform";
 
     private bool MatchesFilter(string keywords)
     {
@@ -1632,6 +1679,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsSettingsSectionRetentionVisible => MatchesFilter(_retentionKeywords);
     public bool IsSettingsSectionCapacityVisible => MatchesFilter(_capacityKeywords);
     public bool IsSettingsSectionSensitivityVisible => MatchesFilter(_sensitivityKeywords);
+    public bool IsSettingsSectionAiVisible => MatchesFilter(_aiKeywords);
+    public bool IsSettingsSectionUpdatesVisible => MatchesFilter(_updatesKeywords);
+    public bool IsSettingsSectionOcrVisible => MatchesFilter(_ocrKeywords);
+    public bool IsSettingsSectionRemoteApiVisible => MatchesFilter(_remoteApiKeywords);
+    public bool IsSettingsSectionUserScriptsVisible => MatchesFilter(_userScriptsKeywords);
 
     private void RaiseSettingsSectionVisibility()
     {
@@ -1643,6 +1695,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(IsSettingsSectionRetentionVisible));
         this.RaisePropertyChanged(nameof(IsSettingsSectionCapacityVisible));
         this.RaisePropertyChanged(nameof(IsSettingsSectionSensitivityVisible));
+        this.RaisePropertyChanged(nameof(IsSettingsSectionAiVisible));
+        this.RaisePropertyChanged(nameof(IsSettingsSectionUpdatesVisible));
+        this.RaisePropertyChanged(nameof(IsSettingsSectionOcrVisible));
+        this.RaisePropertyChanged(nameof(IsSettingsSectionRemoteApiVisible));
+        this.RaisePropertyChanged(nameof(IsSettingsSectionUserScriptsVisible));
 
         // Auto-expand sections that match the current filter, collapse those that don't.
         if (!string.IsNullOrWhiteSpace(_settingsFilter))
@@ -1655,6 +1712,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             IsSettingsSectionRetentionExpanded = IsSettingsSectionRetentionVisible;
             IsSettingsSectionCapacityExpanded = IsSettingsSectionCapacityVisible;
             IsSettingsSectionSensitivityExpanded = IsSettingsSectionSensitivityVisible;
+            IsSettingsSectionAiExpanded = IsSettingsSectionAiVisible;
+            IsSettingsSectionUpdatesExpanded = IsSettingsSectionUpdatesVisible;
+            IsSettingsSectionOcrExpanded = IsSettingsSectionOcrVisible;
+            IsSettingsSectionRemoteApiExpanded = IsSettingsSectionRemoteApiVisible;
+            IsSettingsSectionUserScriptsExpanded = IsSettingsSectionUserScriptsVisible;
         }
     }
 

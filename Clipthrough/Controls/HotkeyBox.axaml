@@ -14,6 +14,7 @@
             Grid.Column="2"
             Content="✕"
             Width="32"
+            AutomationProperties.Name="Clear hotkey"
             ToolTip.Tip="Clear"
             Classes="secondary" />
   </Grid>
