@@ -256,10 +256,30 @@ public sealed record AppSettings
     };
 
     private static string NormalizeHotkey(string? value, string fallback)
-        => string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+        => string.IsNullOrWhiteSpace(value) ? fallback : MigrateLegacyAltHotkey(value.Trim(), fallback);
 
     private static string NormalizeOptionalHotkey(string? value)
-        => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+        => string.IsNullOrWhiteSpace(value) ? string.Empty : MigrateLegacyAltHotkey(value.Trim(), string.Empty);
+
+    // Older builds shipped filter hotkeys as bare `Alt+<Letter>` which collides with Avalonia's
+    // menu access keys. Migrate any such value to the modern Ctrl-based default so upgraded
+    // installs don't permanently keep the conflicting bindings.
+    private static string MigrateLegacyAltHotkey(string value, string fallback)
+    {
+        if (!value.StartsWith("Alt+", System.StringComparison.OrdinalIgnoreCase))
+        {
+            return value;
+        }
+
+        var rest = value.Substring(4);
+        if (rest.Length == 0
+            || rest.Contains('+', System.StringComparison.Ordinal))
+        {
+            return value;
+        }
+
+        return string.IsNullOrEmpty(fallback) ? "Ctrl+Shift+" + rest : fallback;
+    }
 
     private static int NormalizeInt(int value, int fallback, int min, int max)
         => value < min || value > max ? fallback : value;
