@@ -34,6 +34,8 @@ public interface IClipStoreService
 
     Task<System.Collections.Generic.IReadOnlyList<long>> MarkAllSucceededForRerunAsync(CancellationToken cancellationToken = default);
 
+    Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default);
+
     Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default);
 
     Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default);

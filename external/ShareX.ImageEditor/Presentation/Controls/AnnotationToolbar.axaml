@@ -15,14 +15,11 @@
         </ResourceDictionary>
     </UserControl.Resources>
 
-    <StackPanel Orientation="Vertical" Spacing="0">
-        <Border Padding="4"
-                Background="{DynamicResource ShareX.Brush.Background.Toolbar}"
-                BorderBrush="{DynamicResource ShareX.Brush.Border}"
-                BorderThickness="1"
-                CornerRadius="0,0,4,4"
-                HorizontalAlignment="Center">
-                <WrapPanel Orientation="Horizontal">
+    <Border Padding="4"
+            Background="Transparent"
+            BorderThickness="0"
+            HorizontalAlignment="Center">
+        <controls:CenteredWrapPanel RowSpacing="4">
                     <StackPanel Orientation="Horizontal"
                                 Spacing="4"
                                 IsVisible="{ReflectionBinding ImageEditorMode}">
@@ -244,109 +241,99 @@
                                 ToolTip.Tip="Delete all (Shift+Delete)"
                                 Content="{x:Static theming:EditorIcons.ActionClearAll}"/>
                     </StackPanel>
-                </WrapPanel>
-        </Border>
 
-        <Border Padding="4,0,4,4"
-                Margin="0,-1,0,0"
-                Background="{DynamicResource ShareX.Brush.Background.Toolbar}"
-                BorderBrush="{DynamicResource ShareX.Brush.Border}"
-                BorderThickness="1,0,1,1"
-                CornerRadius="0,0,4,4"
-                HorizontalAlignment="Center"
-                IsVisible="{Binding ShowToolOptionsSeparator}">
-            <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                          VerticalScrollBarVisibility="Disabled">
-                <StackPanel Orientation="Horizontal"
-                            Spacing="4">
-                <Border Background="Transparent"
-                        Width="40"
-                        Height="40"
-                        VerticalAlignment="Center"
-                        HorizontalAlignment="Center"
-                        ToolTip.Tip="{Binding ActiveToolName}">
-                    <TextBlock Text="{Binding ActiveToolIcon}"
-                               FontFamily="{DynamicResource ShareX.FontFamily.Icon}"
-                               FontSize="18"
-                               FontWeight="Normal"
-                               Foreground="{DynamicResource ShareX.Brush.Separator}"
-                               VerticalAlignment="Center"
-                               HorizontalAlignment="Center"
-                               TextAlignment="Center"
-                               Width="24"/>
-                </Border>
+                    <Border Width="1"
+                            Margin="4,0"
+                            Background="{DynamicResource ShareX.Brush.Separator}"
+                            IsVisible="{Binding ShowToolOptionsSeparator}"/>
 
-                <controls:ColorPickerDropdown x:Name="StrokeColorPicker"
-                                              SelectedColor="{Binding SelectedColorBrush, Mode=TwoWay}"
-                                              Height="40"
-                                              IsVisible="{Binding ShowBorderColor}"
-                                              ShowBorderHole="True"
-                                              ToolTip.Tip="Border color"/>
+                    <Border Background="Transparent"
+                            Width="40"
+                            Height="40"
+                            VerticalAlignment="Center"
+                            HorizontalAlignment="Center"
+                            ToolTip.Tip="{Binding ActiveToolName}"
+                            IsVisible="{Binding ShowToolOptionsSeparator}">
+                        <TextBlock Text="{Binding ActiveToolIcon}"
+                                   FontFamily="{DynamicResource ShareX.FontFamily.Icon}"
+                                   FontSize="18"
+                                   FontWeight="Normal"
+                                   Foreground="{DynamicResource ShareX.Brush.Separator}"
+                                   VerticalAlignment="Center"
+                                   HorizontalAlignment="Center"
+                                   TextAlignment="Center"
+                                   Width="24"/>
+                    </Border>
 
-                <controls:ColorPickerDropdown x:Name="FillColorPicker"
-                                              SelectedColor="{Binding FillColorBrush, Mode=TwoWay}"
-                                              Height="40"
-                                              IsVisible="{Binding ShowFillColor}"
-                                              ToolTip.Tip="Fill color"/>
+                    <controls:ColorPickerDropdown x:Name="StrokeColorPicker"
+                                                  SelectedColor="{Binding SelectedColorBrush, Mode=TwoWay}"
+                                                  Height="40"
+                                                  IsVisible="{Binding ShowBorderColor}"
+                                                  ShowBorderHole="True"
+                                                  ToolTip.Tip="Border color"/>
 
-                <controls:ColorPickerDropdown x:Name="TextColorPicker"
-                                              SelectedColor="{Binding TextColorBrush, Mode=TwoWay}"
-                                              Height="40"
-                                              IsVisible="{Binding ShowTextColor}"
-                                              ShowTextLabel="True"
-                                              ToolTip.Tip="Text color"/>
+                    <controls:ColorPickerDropdown x:Name="FillColorPicker"
+                                                  SelectedColor="{Binding FillColorBrush, Mode=TwoWay}"
+                                                  Height="40"
+                                                  IsVisible="{Binding ShowFillColor}"
+                                                  ToolTip.Tip="Fill color"/>
 
-                <controls:WidthPickerDropdown x:Name="StrokeWidthPicker"
-                                              SelectedWidth="{Binding StrokeWidth, Mode=TwoWay}"
-                                              Height="40"
-                                              IsVisible="{Binding ShowThickness}"
-                                              ToolTip.Tip="Thickness"/>
+                    <controls:ColorPickerDropdown x:Name="TextColorPicker"
+                                                  SelectedColor="{Binding TextColorBrush, Mode=TwoWay}"
+                                                  Height="40"
+                                                  IsVisible="{Binding ShowTextColor}"
+                                                  ShowTextLabel="True"
+                                                  ToolTip.Tip="Text color"/>
 
-                <controls:CornerRadiusPickerDropdown x:Name="CornerRadiusPicker"
-                                                     SelectedCornerRadius="{Binding CornerRadius, Mode=TwoWay}"
+                    <controls:WidthPickerDropdown x:Name="StrokeWidthPicker"
+                                                  SelectedWidth="{Binding StrokeWidth, Mode=TwoWay}"
+                                                  Height="40"
+                                                  IsVisible="{Binding ShowThickness}"
+                                                  ToolTip.Tip="Thickness"/>
+
+                    <controls:CornerRadiusPickerDropdown x:Name="CornerRadiusPicker"
+                                                         SelectedCornerRadius="{Binding CornerRadius, Mode=TwoWay}"
+                                                         Height="40"
+                                                         IsVisible="{Binding ShowCornerRadius}"
+                                                         ToolTip.Tip="Corner radius"/>
+
+                    <controls:FontSizePickerDropdown x:Name="FontSizePicker"
+                                                     SelectedFontSize="{Binding FontSize, Mode=TwoWay}"
                                                      Height="40"
-                                                     IsVisible="{Binding ShowCornerRadius}"
-                                                     ToolTip.Tip="Corner radius"/>
+                                                     IsVisible="{Binding ShowFontSize}"
+                                                     ToolTip.Tip="Font size"/>
 
-                <controls:FontSizePickerDropdown x:Name="FontSizePicker"
-                                                 SelectedFontSize="{Binding FontSize, Mode=TwoWay}"
-                                                 Height="40"
-                                                 IsVisible="{Binding ShowFontSize}"
-                                                 ToolTip.Tip="Font size"/>
+                    <controls:StrengthSlider x:Name="EffectStrengthSlider"
+                                             SelectedStrength="{Binding EffectStrength, Mode=TwoWay}"
+                                             Maximum="{Binding EffectStrengthMaximum}"
+                                             IsVisible="{Binding ShowStrength}"
+                                             ToolTip.Tip="Effect strength"/>
 
-                <controls:StrengthSlider x:Name="EffectStrengthSlider"
-                                         SelectedStrength="{Binding EffectStrength, Mode=TwoWay}"
-                                         Maximum="{Binding EffectStrengthMaximum}"
-                                         IsVisible="{Binding ShowStrength}"
-                                         ToolTip.Tip="Effect strength"/>
-
-                <Button Classes="editor-button toolbar-button"
-                        Classes.active="{Binding TextBold}"
-                        Click="OnTextBoldClick"
-                        IsVisible="{Binding ShowTextStyle}"
-                        ToolTip.Tip="Toggle bold"
-                        Content="{x:Static theming:EditorIcons.FormatBold}"/>
-                <Button Classes="editor-button toolbar-button"
-                        Classes.active="{Binding TextItalic}"
-                        Click="OnTextItalicClick"
-                        IsVisible="{Binding ShowTextStyle}"
-                        ToolTip.Tip="Toggle italic"
-                        Content="{x:Static theming:EditorIcons.FormatItalic}"/>
-                <Button Classes="editor-button toolbar-button"
-                        Classes.active="{Binding TextUnderline}"
-                        Click="OnTextUnderlineClick"
-                        IsVisible="{Binding ShowTextStyle}"
-                        ToolTip.Tip="Toggle underline"
-                        Content="{x:Static theming:EditorIcons.FormatUnderline}"/>
-                <Button x:Name="ShadowToggleButton"
-                        Classes="editor-button toolbar-button"
-                        Classes.active="{Binding ShadowEnabled}"
-                        Click="OnShadowClick"
-                        IsVisible="{Binding ShowShadow}"
-                        ToolTip.Tip="Toggle shadow"
-                        Content="{x:Static theming:EditorIcons.MenuTheme}"/>
-                </StackPanel>
-            </ScrollViewer>
-        </Border>
-    </StackPanel>
+                    <Button Classes="editor-button toolbar-button"
+                            Classes.active="{Binding TextBold}"
+                            Click="OnTextBoldClick"
+                            IsVisible="{Binding ShowTextStyle}"
+                            ToolTip.Tip="Toggle bold"
+                            Content="{x:Static theming:EditorIcons.FormatBold}"/>
+                    <Button Classes="editor-button toolbar-button"
+                            Classes.active="{Binding TextItalic}"
+                            Click="OnTextItalicClick"
+                            IsVisible="{Binding ShowTextStyle}"
+                            ToolTip.Tip="Toggle italic"
+                            Content="{x:Static theming:EditorIcons.FormatItalic}"/>
+                    <Button Classes="editor-button toolbar-button"
+                            Classes.active="{Binding TextUnderline}"
+                            Click="OnTextUnderlineClick"
+                            IsVisible="{Binding ShowTextStyle}"
+                            ToolTip.Tip="Toggle underline"
+                            Content="{x:Static theming:EditorIcons.FormatUnderline}"/>
+                    <Button x:Name="ShadowToggleButton"
+                            Classes="editor-button toolbar-button"
+                            Classes.active="{Binding ShadowEnabled}"
+                            Click="OnShadowClick"
+                            IsVisible="{Binding ShowShadow}"
+                            ToolTip.Tip="Toggle shadow"
+                            Content="{x:Static theming:EditorIcons.MenuTheme}"/>
+        </controls:CenteredWrapPanel>
+    </Border>
 </UserControl>

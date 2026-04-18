@@ -455,6 +455,7 @@ public sealed class MainWindowViewModelHeadlessTests
     private sealed class NoOpBackgroundOcrQueue : Clipthrough.Services.IBackgroundOcrQueue
     {
         public IObservable<long> OcrCompleted { get; } = System.Reactive.Linq.Observable.Empty<long>();
+        public IObservable<System.Reactive.Unit> QueueChanged { get; } = System.Reactive.Linq.Observable.Empty<System.Reactive.Unit>();
         public void Start() { }
         public Task StopAsync() => Task.CompletedTask;
         public void Enqueue(long clipId) { }

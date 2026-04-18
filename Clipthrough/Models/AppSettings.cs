@@ -120,6 +120,8 @@ public sealed record AppSettings
 
     public string ExternalEditorPath { get; init; } = string.Empty;
 
+    public string ExternalImageEditorPath { get; init; } = string.Empty;
+
     public string ExternalDiffToolPath { get; init; } = string.Empty;
 
     public ViewModels.ContentDisplayMode LastContentDisplayMode { get; init; } = ViewModels.ContentDisplayMode.Rendered;
@@ -224,6 +226,7 @@ public sealed record AppSettings
         MaxLibrarySizeMegabytes = NormalizeInt(MaxLibrarySizeMegabytes, DefaultMaxLibrarySizeMegabytes, MinMaxLibrarySizeMegabytes, MaxMaxLibrarySizeMegabytes),
         MaxEntryCount = NormalizeInt(MaxEntryCount, DefaultMaxEntryCount, MinMaxEntryCount, MaxMaxEntryCount),
         ExternalEditorPath = ExternalEditorPath?.Trim() ?? string.Empty,
+        ExternalImageEditorPath = ExternalImageEditorPath?.Trim() ?? string.Empty,
         ExternalDiffToolPath = ExternalDiffToolPath?.Trim() ?? string.Empty,
         LastContentDisplayMode = LastContentDisplayMode,
         LastImageViewMode = LastImageViewMode,

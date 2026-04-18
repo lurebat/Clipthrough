@@ -52,6 +52,12 @@
                     <SolidColorBrush x:Key="StatusChipSensitiveBg" Color="#2D1421" />
                     <SolidColorBrush x:Key="StatusChipSensitiveBorder" Color="#7F1D3A" />
                     <SolidColorBrush x:Key="StatusChipSensitiveFg" Color="#FECDD3" />
+                    <SolidColorBrush x:Key="StatusChipSemanticBg" Color="#14243B" />
+                    <SolidColorBrush x:Key="StatusChipSemanticBorder" Color="#2563EB" />
+                    <SolidColorBrush x:Key="StatusChipSemanticFg" Color="#BFDBFE" />
+                    <SolidColorBrush x:Key="StatusChipOcrBg" Color="#2B1A08" />
+                    <SolidColorBrush x:Key="StatusChipOcrBorder" Color="#D97706" />
+                    <SolidColorBrush x:Key="StatusChipOcrFg" Color="#FCD34D" />
                     <SolidColorBrush x:Key="HtmlRendererBackground" Color="#1E293B" />
                     <SolidColorBrush x:Key="HtmlRendererForeground" Color="#E2E8F0" />
                 </ResourceDictionary>
@@ -105,6 +111,12 @@
                     <SolidColorBrush x:Key="StatusChipSensitiveBg" Color="#FCE7F3" />
                     <SolidColorBrush x:Key="StatusChipSensitiveBorder" Color="#DB2777" />
                     <SolidColorBrush x:Key="StatusChipSensitiveFg" Color="#9D174D" />
+                    <SolidColorBrush x:Key="StatusChipSemanticBg" Color="#DBEAFE" />
+                    <SolidColorBrush x:Key="StatusChipSemanticBorder" Color="#2563EB" />
+                    <SolidColorBrush x:Key="StatusChipSemanticFg" Color="#1D4ED8" />
+                    <SolidColorBrush x:Key="StatusChipOcrBg" Color="#FEF3C7" />
+                    <SolidColorBrush x:Key="StatusChipOcrBorder" Color="#D97706" />
+                    <SolidColorBrush x:Key="StatusChipOcrFg" Color="#92400E" />
                     <SolidColorBrush x:Key="HtmlRendererBackground" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="HtmlRendererForeground" Color="#0F172A" />
                 </ResourceDictionary>

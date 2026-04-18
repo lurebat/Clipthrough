@@ -38,7 +38,7 @@
                          Grid.Column="0"
                          Classes="effect-search"
                          Text="{Binding SearchText, Mode=TwoWay}"
-                         Watermark="{Binding SearchWatermark}"
+                         PlaceholderText="{Binding SearchWatermark}"
                          IsEnabled="{Binding !IsLoading}"/>
                 <ComboBox Grid.Column="1"
                           ItemsSource="{Binding GroupOptions}"

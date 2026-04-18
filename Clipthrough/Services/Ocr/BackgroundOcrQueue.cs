@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
+using System.Reactive;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -22,6 +23,7 @@ public sealed class BackgroundOcrQueue : IBackgroundOcrQueue, IDisposable
     });
     private readonly ConcurrentDictionary<long, byte> _inflight = new();
     private readonly Subject<long> _completed = new();
+    private readonly Subject<Unit> _queueChanged = new();
     private readonly CancellationTokenSource _cts = new();
     private Task? _worker;
     private bool _started;
@@ -35,6 +37,8 @@ public sealed class BackgroundOcrQueue : IBackgroundOcrQueue, IDisposable
     }
 
     public IObservable<long> OcrCompleted => _completed.AsObservable();
+
+    public IObservable<Unit> QueueChanged => _queueChanged.AsObservable();
 
     public void Start()
     {
@@ -79,7 +83,11 @@ public sealed class BackgroundOcrQueue : IBackgroundOcrQueue, IDisposable
         if (!_channel.Writer.TryWrite(clipId))
         {
             _inflight.TryRemove(clipId, out _);
+            _queueChanged.OnNext(Unit.Default);
+            return;
         }
+
+        _queueChanged.OnNext(Unit.Default);
     }
 
     public async Task EnqueueBacklogAsync(CancellationToken cancellationToken = default)
@@ -119,6 +127,7 @@ public sealed class BackgroundOcrQueue : IBackgroundOcrQueue, IDisposable
                 finally
                 {
                     _inflight.TryRemove(clipId, out _);
+                    _queueChanged.OnNext(Unit.Default);
                 }
             }
         }
@@ -190,5 +199,6 @@ public sealed class BackgroundOcrQueue : IBackgroundOcrQueue, IDisposable
         _cts.Cancel();
         _cts.Dispose();
         _completed.Dispose();
+        _queueChanged.Dispose();
     }
 }

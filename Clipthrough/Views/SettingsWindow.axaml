@@ -398,6 +398,19 @@
                             <TextBlock Classes="detail-label"
                                        Text="{Binding SettingsExternalEditorPathLabel}" />
                             <TextBox Text="{Binding SettingsExternalEditorPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBlock Classes="body-muted"
+                                       FontSize="11"
+                                       TextWrapping="Wrap"
+                                       Text="Optional. Leave empty to open text and file clips with the OS default app or picker." />
+                        </StackPanel>
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="detail-label"
+                                       Text="{Binding SettingsExternalImageEditorPathLabel}" />
+                            <TextBox Text="{Binding SettingsExternalImageEditorPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBlock Classes="body-muted"
+                                       FontSize="11"
+                                       TextWrapping="Wrap"
+                                       Text="Optional override for image clips. Leave empty to reuse the default editor path above, or fall back to the OS default if both are empty." />
                         </StackPanel>
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label"
@@ -446,10 +459,9 @@
                                 <TextBlock Classes="detail-label" Text="Name" />
                                 <TextBox Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
                                 <TextBlock Classes="detail-label" Text="Code (C#)" />
-                                <TextBox AcceptsReturn="True"
-                                         MinHeight="220"
-                                         FontFamily="Consolas,Cascadia Code,monospace"
-                                         Text="{Binding Code, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
+                                <ctrl:SyntaxTextEditor MinHeight="220"
+                                                       SyntaxHint=".cs"
+                                                       Text="{Binding Code, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
                             </StackPanel>
                         </Grid>
                     </StackPanel>

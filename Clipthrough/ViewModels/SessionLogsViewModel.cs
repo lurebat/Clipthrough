@@ -41,7 +41,9 @@ public sealed class SessionLogsViewModel : ViewModelBase, IDisposable
                 .Subscribe(_ => RefreshVisibleSessionLogs()));
 
         _subscriptions.Add(
-            sessionLogService.Entries.Subscribe(AddEntry));
+            sessionLogService.Entries
+                .ObserveOn(RxSchedulers.MainThreadScheduler)
+                .Subscribe(AddEntry));
 
         foreach (var entry in sessionLogService.Snapshot())
         {

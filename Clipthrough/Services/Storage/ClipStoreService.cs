@@ -376,6 +376,38 @@ public sealed class ClipStoreService : IClipStoreService
         return ids;
     }
 
+    public async Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                COUNT(*) AS eligible_total,
+                COALESCE(SUM(CASE WHEN ocr_status = 'succeeded' THEN 1 ELSE 0 END), 0) AS succeeded_count,
+                COALESCE(SUM(CASE WHEN ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'rerun' THEN 1 ELSE 0 END), 0) AS pending_count,
+                COALESCE(SUM(CASE WHEN ocr_status = 'running' THEN 1 ELSE 0 END), 0) AS running_count,
+                COALESCE(SUM(CASE WHEN ocr_status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_count
+            FROM clips
+            WHERE content_type = 'image'
+              AND content_bytes IS NOT NULL;
+            """;
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return new OcrCoverage(0, 0, 0, 0, 0);
+        }
+
+        return new OcrCoverage(
+            reader.GetInt64(0),
+            reader.GetInt64(1),
+            reader.GetInt64(2),
+            reader.GetInt64(3),
+            reader.GetInt64(4));
+    }
+
     public async Task<bool> MarkOcrForRerunAsync(long clipId, CancellationToken cancellationToken = default)
     {
         await using var connection = _connectionFactory.CreateConnection();

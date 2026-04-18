@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
+using Avalonia.Threading;
 using Clipthrough.Models;
 
 namespace Clipthrough.Services;
@@ -95,7 +96,13 @@ public sealed class SessionLogService : TraceListener, ISessionLogService
             _entries.Add(entry);
         }
 
-        _entriesSubject.OnNext(entry);
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            _entriesSubject.OnNext(entry);
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() => _entriesSubject.OnNext(entry));
     }
 
     private static AppNotificationLevel ToLevel(TraceEventType eventType) => eventType switch

@@ -102,6 +102,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isWelcomeOpen;
     private bool _isPasswordPromptOpen;
     private bool _isAiPromptOpen;
+    private AiPresetKind _aiPromptKind = AiPresetKind.TextToText;
     private string _aiPromptInput = string.Empty;
     private string _aiPromptError = string.Empty;
     private bool _isAiPromptBusy;
@@ -161,6 +162,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _settingsPasteAsPlainTextHotkey = AppSettings.Default.PasteAsPlainTextHotkey;
     private bool _settingsEnablePasteAsPlainTextHotkey = AppSettings.Default.EnablePasteAsPlainTextHotkey;
     private string _settingsExternalEditorPath = AppSettings.Default.ExternalEditorPath;
+    private string _settingsExternalImageEditorPath = AppSettings.Default.ExternalImageEditorPath;
     private string _settingsExternalDiffToolPath = AppSettings.Default.ExternalDiffToolPath;
     private bool _settingsEnableAi = AppSettings.Default.EnableAi;
     private string _settingsAiBaseUrl = AppSettings.Default.AiBaseUrl;
@@ -241,6 +243,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OpenSettingsCommand = ReactiveCommand.Create(OpenSettings);
         JumpToTopCommand = ReactiveCommand.Create(() => { if (Clips.Count > 0) SelectedClip = Clips[0]; });
         OpenHelpCommand = ReactiveCommand.Create(OpenHelp);
+        OpenAboutCommand = ReactiveCommand.Create(OpenAbout);
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
         SaveSettingsCommand = ReactiveCommand.CreateFromTask(SaveSettingsAsync);
         BrowseDatabasePathCommand = ReactiveCommand.CreateFromTask<Window?>(BrowseDatabasePathAsync);
@@ -509,11 +512,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ObservableCollection<UserScript> UserScripts { get; } = new();
 
+    public ObservableCollection<UserScript> VisibleUserScripts { get; } = new();
+
     public ReactiveCommand<Unit, Unit> AddSensitivityRuleCommand { get; }
 
     public ReactiveCommand<Unit, Unit> OpenSettingsCommand { get; }
 
     public ReactiveCommand<Unit, Unit> OpenHelpCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> OpenAboutCommand { get; }
 
     public ReactiveCommand<Unit, Unit> CloseSettingsCommand { get; }
 
@@ -562,6 +569,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<CustomHotkeyDraft, Unit> RemoveCustomHotkeyDraftCommand { get; }
 
     public System.Collections.ObjectModel.ObservableCollection<AiMenuEntry> AiMenuEntries { get; } = new();
+
+    public System.Collections.ObjectModel.ObservableCollection<AiMenuEntry> VisibleAiMenuEntries { get; } = new();
 
     public ReactiveCommand<AiMenuEntry, Unit> InvokeAiMenuEntryCommand { get; }
 
@@ -753,6 +762,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return SelectedClip?.CanAiTransform == true;
         }
     }
+
+    public bool HasTextTransformTarget => GetCheckedOrSelectedClips().Any(static clip => clip.CanTransform);
+
+    public bool HasImageTransformTarget => GetCheckedOrSelectedClips().Any(static clip =>
+        clip.IsImageClip && clip.Clip.ContentBytes is { Length: > 0 });
 
     public bool HasSelectedImageClip => SelectedClip?.IsImageClip == true;
 
@@ -1076,6 +1090,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string SettingsDecrementalPasteHotkeyLabel => AppText.SettingsDecrementalPasteHotkeyLabel;
     public string SettingsToolsTitle => AppText.SettingsToolsTitle;
     public string SettingsExternalEditorPathLabel => AppText.SettingsExternalEditorPathLabel;
+    public string SettingsExternalImageEditorPathLabel => AppText.SettingsExternalImageEditorPathLabel;
     public string SettingsExternalDiffToolPathLabel => AppText.SettingsExternalDiffToolPathLabel;
     public string OpenInEditorButtonLabel => AppText.OpenInEditorButtonLabel;
     public string CompareClipsButtonLabel => AppText.CompareClipsButtonLabel;
@@ -1652,6 +1667,29 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         get => _isAiPromptBusy;
         private set => this.RaiseAndSetIfChanged(ref _isAiPromptBusy, value);
     }
+
+    public string AiPromptTitle => _aiPromptKind switch
+    {
+        AiPresetKind.ImageToText => "Describe what you want to extract from the image",
+        AiPresetKind.ImageToImage => "Describe how you want to change the image",
+        _ => "Describe what you want",
+    };
+
+    public string AiPromptDescription => _aiPromptKind switch
+    {
+        AiPresetKind.ImageToText => "The selected image clip will be sent to your AI provider. The response text is saved as a new clip.",
+        AiPresetKind.ImageToImage => "The selected image clip will be sent to your AI provider. The generated image is copied back as a new clip.",
+        _ => "The selected or checked text clips will be sent to your AI provider. The result is saved as a new clip.",
+    };
+
+    public string AiPromptPlaceholder => _aiPromptKind switch
+    {
+        AiPresetKind.ImageToText => "e.g. Extract all visible text, or Describe the UI and the main warning",
+        AiPresetKind.ImageToImage => "e.g. Remove the background, or Clean up and sharpen this screenshot",
+        _ => "e.g. Rewrite this as a formal email, or Convert to JSON",
+    };
+
+    public string AiPromptApplyLabel => _aiPromptKind == AiPresetKind.ImageToImage ? "Generate" : "Apply";
 
     public bool SettingsEnableAi
     {
@@ -2256,6 +2294,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => this.RaiseAndSetIfChanged(ref _settingsExternalEditorPath, value);
     }
 
+    public string SettingsExternalImageEditorPath
+    {
+        get => _settingsExternalImageEditorPath;
+        set => this.RaiseAndSetIfChanged(ref _settingsExternalImageEditorPath, value);
+    }
+
     public string SettingsExternalDiffToolPath
     {
         get => _settingsExternalDiffToolPath;
@@ -2762,17 +2806,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var editorPath = _settingsService.Current.ExternalEditorPath;
-        if (string.IsNullOrWhiteSpace(editorPath))
-        {
-            _notificationService.PublishWarning(
-                "No external editor configured",
-                "Set an editor path in Settings → Tools, or the clip will open with the OS default.");
-        }
-        else if (!System.IO.File.Exists(ExtractExecutablePath(editorPath)))
+        var editorPath = ResolveExternalEditorPath(SelectedClip);
+        if (!string.IsNullOrWhiteSpace(editorPath) && !System.IO.File.Exists(ExtractExecutablePath(editorPath)))
         {
             _notificationService.PublishError(
-                "External editor not found",
+                "Configured editor not found",
                 $"'{ExtractExecutablePath(editorPath)}' does not exist. Update the path in Settings → Tools.");
             return;
         }
@@ -3329,6 +3367,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool IsSemanticCoverageVisible => _embeddingWorker is not null && UseSemanticClipSearch && !string.IsNullOrEmpty(SemanticCoverageText);
 
+    private string _ocrCoverageText = string.Empty;
+    public string OcrCoverageText
+    {
+        get => _ocrCoverageText;
+        private set => this.RaiseAndSetIfChanged(ref _ocrCoverageText, value);
+    }
+
+    public bool IsOcrCoverageVisible => _ocrService.IsAvailable && !string.IsNullOrEmpty(OcrCoverageText);
+
     private async Task RefreshSemanticCoverageAsync()
     {
         if (_embeddingWorker is null)
@@ -3357,6 +3404,53 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SemanticCoverageText = string.Empty;
         }
         this.RaisePropertyChanged(nameof(IsSemanticCoverageVisible));
+    }
+
+    private async Task RefreshOcrCoverageAsync()
+    {
+        if (!_ocrService.IsAvailable)
+        {
+            OcrCoverageText = string.Empty;
+            this.RaisePropertyChanged(nameof(IsOcrCoverageVisible));
+            return;
+        }
+
+        try
+        {
+            var coverage = await _clipStoreService.GetOcrCoverageAsync();
+            if (coverage.EligibleTotal <= 0)
+            {
+                OcrCoverageText = "No images to OCR yet";
+            }
+            else
+            {
+                var pct = (int)Math.Round(100.0 * coverage.Succeeded / coverage.EligibleTotal);
+                var suffixParts = new List<string>();
+                if (coverage.Pending > 0)
+                {
+                    suffixParts.Add($"{coverage.Pending} queued");
+                }
+                if (coverage.Running > 0)
+                {
+                    suffixParts.Add($"{coverage.Running} running");
+                }
+                if (coverage.Failed > 0)
+                {
+                    suffixParts.Add($"{coverage.Failed} failed");
+                }
+
+                var suffix = suffixParts.Count > 0
+                    ? $" · {string.Join(" · ", suffixParts)}"
+                    : string.Empty;
+                OcrCoverageText = $"OCR: {coverage.Succeeded}/{coverage.EligibleTotal} ({pct}%){suffix}";
+            }
+        }
+        catch
+        {
+            OcrCoverageText = string.Empty;
+        }
+
+        this.RaisePropertyChanged(nameof(IsOcrCoverageVisible));
     }
 
     private async Task RerunAllEmbeddingsAsync()
@@ -3811,8 +3905,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(IsDisplayModeApplicable));
         this.RaisePropertyChanged(nameof(HasCheckedOrSelectedClip));
         this.RaisePropertyChanged(nameof(HasTransformableTarget));
+        this.RaisePropertyChanged(nameof(HasTextTransformTarget));
+        this.RaisePropertyChanged(nameof(HasImageTransformTarget));
         this.RaisePropertyChanged(nameof(HasSelectedImageClip));
         this.RaisePropertyChanged(nameof(CanRunOcr));
+        RefreshVisibleTransformMenus();
         RaiseRenderModeProperties();
         RaiseEditedClipProperties();
     }
@@ -3911,15 +4008,29 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         HelpRequested?.Invoke(this, EventArgs.Empty);
     }
 
+    private void OpenAbout()
+    {
+        AboutRequested?.Invoke(this, EventArgs.Empty);
+    }
+
     public event EventHandler? HelpRequested;
 
+    public event EventHandler? AboutRequested;
+
     private void OpenAiPrompt()
+    {
+        OpenAiPrompt(ResolveDefaultAiPromptKind());
+    }
+
+    private void OpenAiPrompt(AiPresetKind kind)
     {
         if (!_aiTransformService.IsConfigured)
         {
             StatusText = "AI is not configured. Enable it in Settings → AI and set an API key (or OPENAI_API_KEY env var).";
             return;
         }
+
+        SetAiPromptKind(kind);
         AiPromptError = string.Empty;
         AiPromptInput = string.Empty;
         IsAiPromptOpen = true;
@@ -3931,7 +4042,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         AiPromptError = string.Empty;
     }
 
-    private Task SubmitAiPromptAsync() => SubmitAiPromptAsync(transformKind: "ai:custom", presetLabel: null);
+    private Task SubmitAiPromptAsync() => SubmitAiPromptAsync(transformKind: GetCustomAiTransformKind(_aiPromptKind), presetLabel: null);
 
     private Task SubmitAiPromptAsync(string transformKind, string? presetLabel)
     {
@@ -3946,6 +4057,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return Task.CompletedTask;
         }
 
+        return _aiPromptKind switch
+        {
+            AiPresetKind.ImageToText => SubmitImageAiPromptAsync(prompt, transformKind, presetLabel, toImage: false),
+            AiPresetKind.ImageToImage => SubmitImageAiPromptAsync(prompt, transformKind, presetLabel, toImage: true),
+            _ => SubmitTextAiPromptAsync(prompt, transformKind, presetLabel),
+        };
+    }
+
+    private Task SubmitTextAiPromptAsync(string prompt, string transformKind, string? presetLabel)
+    {
+        IsAiPromptBusy = true;
+
         var checkedClips = Clips.Where(static c => c.IsChecked).ToList();
         var targets = checkedClips.Count > 0
             ? checkedClips
@@ -3958,6 +4081,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         if (targets.Count == 0)
         {
+            IsAiPromptBusy = false;
             AiPromptError = "Select one or more text clips first.";
             return Task.CompletedTask;
         }
@@ -3996,6 +4120,34 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return Task.CompletedTask;
     }
 
+    private Task SubmitImageAiPromptAsync(string prompt, string transformKind, string? presetLabel, bool toImage)
+    {
+        IsAiPromptBusy = true;
+
+        var clip = GetEffectiveSelectedClip();
+        if (clip is null || clip.Clip.ContentType != ContentType.Image || clip.Clip.ContentBytes is not { Length: > 0 } imageBytes)
+        {
+            IsAiPromptBusy = false;
+            AiPromptError = "Select an image clip first.";
+            return Task.CompletedTask;
+        }
+
+        IsAiPromptOpen = false;
+        AiPromptError = string.Empty;
+        AiPromptInput = string.Empty;
+
+        QueueImageAiTransform(
+            prompt,
+            clip,
+            imageBytes,
+            ResolveImageMediaType(clip.Clip.ContentFormat),
+            transformKind,
+            presetLabel,
+            toImage);
+
+        return Task.CompletedTask;
+    }
+
     private async Task RunAiPromptAsync(
         string prompt,
         List<ClipItemViewModel> targets,
@@ -4010,87 +4162,193 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         long? lastCreatedId = null;
         var produced = 0;
         Exception? failure = null;
-
-        foreach (var target in targets)
+        try
         {
-            string source;
-            string result;
-            try
+            foreach (var target in targets)
             {
-                if (useSelectionSlice && ReferenceEquals(target, selectedClipRef))
+                string source;
+                string result;
+                try
                 {
-                    var slice = fullEditedText.Substring(sliceStart, sliceLength);
-                    var transformedSlice = await _aiTransformService.TransformAsync(prompt, slice);
-                    if (string.IsNullOrEmpty(transformedSlice) || string.Equals(slice, transformedSlice, StringComparison.Ordinal))
+                    if (useSelectionSlice && ReferenceEquals(target, selectedClipRef))
                     {
-                        continue;
+                        var slice = fullEditedText.Substring(sliceStart, sliceLength);
+                        var transformedSlice = await _aiTransformService.TransformAsync(prompt, slice);
+                        if (string.IsNullOrEmpty(transformedSlice) || string.Equals(slice, transformedSlice, StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+                        source = fullEditedText;
+                        result = fullEditedText.Substring(0, sliceStart)
+                            + transformedSlice
+                            + fullEditedText.Substring(sliceStart + sliceLength);
                     }
-                    source = fullEditedText;
-                    result = fullEditedText.Substring(0, sliceStart)
-                        + transformedSlice
-                        + fullEditedText.Substring(sliceStart + sliceLength);
+                    else
+                    {
+                        source = target.Clip.Content ?? string.Empty;
+                        result = await _aiTransformService.TransformAsync(prompt, source);
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    source = target.Clip.Content ?? string.Empty;
-                    result = await _aiTransformService.TransformAsync(prompt, source);
+                    failure = ex;
+                    break;
                 }
-            }
-            catch (Exception ex)
-            {
-                failure = ex;
-                break;
+
+                if (string.IsNullOrEmpty(result) || string.Equals(result, source, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
+                var captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
+                {
+                    ContentBytes = textBytes,
+                    ContentText = result,
+                    ContentType = ContentType.Text,
+                    ContentFormat = ClipContentFormat.PlainText,
+                    SourceApp = target.SourceApp,
+                    SourceAppPath = target.Clip.SourceAppPath,
+                    SourceAppIconBytes = target.Clip.SourceAppIconBytes,
+                    SourceWindowTitle = target.Clip.SourceWindowTitle,
+                    IncrementExistingCopyCount = false,
+                    SourceClipId = target.Clip.Id,
+                    TransformKind = transformKind,
+                });
+                if (captured is not null)
+                {
+                    lastCreatedId = captured.Id;
+                }
+                produced++;
             }
 
-            if (string.IsNullOrEmpty(result) || string.Equals(result, source, StringComparison.Ordinal))
+            if (failure is not null)
             {
-                continue;
+                var title = presetLabel is null ? "AI transform failed" : $"AI preset '{presetLabel}' failed";
+                _notificationService.PublishError(title, failure.Message);
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => StatusText = failure.Message);
+                return;
             }
 
-            var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
+            if (produced > 0)
+            {
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    StatusText = produced == 1
+                        ? "AI transform produced a new clip."
+                        : $"AI transform produced {produced} new clips.";
+                });
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () => await RefreshAsync(lastCreatedId));
+            }
+            else
+            {
+                var message = "AI transform returned no new content. Check the provider or refine the prompt.";
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => StatusText = message);
+                _notificationService.PublishWarning(
+                    presetLabel is null ? "AI transform" : $"AI preset '{presetLabel}'",
+                    message);
+            }
+        }
+        finally
+        {
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => IsAiPromptBusy = false);
+        }
+    }
+
+    private void QueueImageAiTransform(
+        string prompt,
+        ClipItemViewModel clip,
+        byte[] imageBytes,
+        string mediaType,
+        string transformKind,
+        string? presetLabel,
+        bool toImage)
+    {
+        var label = presetLabel is null
+            ? $"AI: {Shorten(prompt, 40)}"
+            : $"AI: {presetLabel}";
+
+        StatusText = presetLabel is null
+            ? (toImage ? "AI image edit running…" : "AI image prompt running…")
+            : $"Running AI preset '{presetLabel}'…";
+
+        _ = _jobIndicator.TrackAsync(label, () => RunImagePromptAsync(
+            prompt,
+            clip,
+            imageBytes,
+            mediaType,
+            transformKind,
+            presetLabel,
+            toImage));
+    }
+
+    private async Task RunImagePromptAsync(
+        string prompt,
+        ClipItemViewModel clip,
+        byte[] imageBytes,
+        string mediaType,
+        string transformKind,
+        string? presetLabel,
+        bool toImage)
+    {
+        var actionLabel = presetLabel is null
+            ? (toImage ? "AI image edit" : "AI image prompt")
+            : $"AI preset '{presetLabel}'";
+
+        try
+        {
+            if (toImage)
+            {
+                var result = await _aiTransformService.EditImageAsync(prompt, imageBytes, mediaType).ConfigureAwait(false);
+                if (result is not { Length: > 0 })
+                {
+                    await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => StatusText = "AI image edit returned no data.");
+                    return;
+                }
+
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () => await CopyEditedImageAsync(result));
+                return;
+            }
+
+            var text = await _aiTransformService.DescribeImageAsync(prompt, imageBytes, mediaType).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => StatusText = "AI image description was empty.");
+                return;
+            }
+
+            var textBytes = System.Text.Encoding.UTF8.GetBytes(text);
             var captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
             {
                 ContentBytes = textBytes,
-                ContentText = result,
+                ContentText = text,
                 ContentType = ContentType.Text,
                 ContentFormat = ClipContentFormat.PlainText,
-                SourceApp = target.SourceApp,
-                SourceAppPath = target.Clip.SourceAppPath,
-                SourceAppIconBytes = target.Clip.SourceAppIconBytes,
-                SourceWindowTitle = target.Clip.SourceWindowTitle,
+                SourceApp = clip.SourceApp,
+                SourceAppPath = clip.Clip.SourceAppPath,
+                SourceAppIconBytes = clip.Clip.SourceAppIconBytes,
+                SourceWindowTitle = clip.Clip.SourceWindowTitle,
                 IncrementExistingCopyCount = false,
-                SourceClipId = target.Clip.Id,
+                SourceClipId = clip.Clip.Id,
                 TransformKind = transformKind,
             });
-            if (captured is not null)
+
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
-                lastCreatedId = captured.Id;
-            }
-            produced++;
+                StatusText = presetLabel is null
+                    ? "AI image prompt produced a new clip."
+                    : $"AI preset '{presetLabel}' produced a new clip.";
+            });
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () => await RefreshAsync(captured?.Id));
         }
-
-        if (failure is not null)
+        catch (Exception ex)
         {
-            var title = presetLabel is null ? "AI transform failed" : $"AI preset '{presetLabel}' failed";
-            _notificationService.PublishError(title, failure.Message);
-            StatusText = failure.Message;
-            return;
+            _notificationService.PublishError($"{actionLabel} failed", ex.Message);
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => StatusText = ex.Message);
         }
-
-        if (produced > 0)
+        finally
         {
-            StatusText = produced == 1
-                ? "AI transform produced a new clip."
-                : $"AI transform produced {produced} new clips.";
-            await RefreshAsync(lastCreatedId);
-        }
-        else
-        {
-            var message = "AI transform returned no new content. Check the provider or refine the prompt.";
-            StatusText = message;
-            _notificationService.PublishWarning(
-                presetLabel is null ? "AI transform" : $"AI preset '{presetLabel}'",
-                message);
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => IsAiPromptBusy = false);
         }
     }
 
@@ -4402,6 +4660,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             EnablePasteAsPlainTextHotkey = SettingsEnablePasteAsPlainTextHotkey,
             PasteAsPlainTextHotkey = normalizedExtended["paste-as-plain-text"],
             ExternalEditorPath = SettingsExternalEditorPath.Trim(),
+            ExternalImageEditorPath = SettingsExternalImageEditorPath.Trim(),
             ExternalDiffToolPath = SettingsExternalDiffToolPath.Trim(),
             EnableAi = SettingsEnableAi,
             AiBaseUrl = (SettingsAiBaseUrl ?? string.Empty).Trim(),
@@ -4530,6 +4789,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsEnablePasteAsPlainTextHotkey = settings.EnablePasteAsPlainTextHotkey;
         SettingsPasteAsPlainTextHotkey = settings.PasteAsPlainTextHotkey;
         SettingsExternalEditorPath = settings.ExternalEditorPath;
+        SettingsExternalImageEditorPath = settings.ExternalImageEditorPath;
         SettingsExternalDiffToolPath = settings.ExternalDiffToolPath;
         SettingsEnableAi = settings.EnableAi;
         SettingsAiBaseUrl = settings.AiBaseUrl;
@@ -4593,6 +4853,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             UserScripts.Add(s);
         }
+
+        RefreshVisibleTransformMenus();
     }
 
     private void SyncAiPresets(AppSettings settings)
@@ -4605,6 +4867,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         AiMenuEntries.Clear();
         AiMenuEntries.Add(new AiMenuEntry("Custom prompt…", null, true, AiPresetKind.TextToText));
+        AiMenuEntries.Add(new AiMenuEntry("🖼→📝 Custom prompt…", null, true, AiPresetKind.ImageToText));
+        AiMenuEntries.Add(new AiMenuEntry("🖼→🖼 Custom prompt…", null, true, AiPresetKind.ImageToImage));
         foreach (var p in settings.AiPresets)
         {
             var label = p.Kind switch
@@ -4615,6 +4879,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             };
             AiMenuEntries.Add(new AiMenuEntry(label, p, false, p.Kind));
         }
+
+        RefreshVisibleTransformMenus();
     }
 
     private async Task InvokeAiMenuEntryAsync(AiMenuEntry? entry)
@@ -4622,7 +4888,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (entry is null) return;
         if (entry.IsCustomPrompt)
         {
-            OpenAiPrompt();
+            OpenAiPrompt(entry.Kind);
             return;
         }
         if (entry.Preset is { } preset)
@@ -4648,6 +4914,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _ = Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync());
         StartMaintenanceLoop();
         _ = RefreshSemanticCoverageAsync();
+        _ = RefreshOcrCoverageAsync();
+        _subscriptions.Add(_backgroundOcrQueue.QueueChanged
+            .Throttle(TimeSpan.FromMilliseconds(150), RxSchedulers.TaskpoolScheduler)
+            .ObserveOn(RxSchedulers.MainThreadScheduler)
+            .Subscribe(__ =>
+            {
+                _ = RefreshOcrCoverageAsync();
+            }));
         if (_embeddingWorker is not null)
         {
             _subscriptions.Add(_embeddingWorker.BatchCompleted
@@ -4760,62 +5034,62 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var mediaType = ResolveImageMediaType(clip.Clip.ContentFormat);
-        var label = $"AI: {preset.Name}";
-        StatusText = $"Running AI preset '{preset.Name}'…";
-
-        _ = _jobIndicator.TrackAsync(label, async () =>
-        {
-            try
-            {
-                if (toImage)
-                {
-                    var result = await _aiTransformService.EditImageAsync(preset.Prompt, imageBytes, mediaType).ConfigureAwait(false);
-                    if (result is not { Length: > 0 })
-                    {
-                        StatusText = "AI image edit returned no data.";
-                        return;
-                    }
-                    await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () => await CopyEditedImageAsync(result));
-                }
-                else
-                {
-                    var text = await _aiTransformService.DescribeImageAsync(preset.Prompt, imageBytes, mediaType).ConfigureAwait(false);
-                    if (string.IsNullOrWhiteSpace(text))
-                    {
-                        StatusText = "AI image description was empty.";
-                        return;
-                    }
-
-                    var textBytes = System.Text.Encoding.UTF8.GetBytes(text);
-                    var captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
-                    {
-                        ContentBytes = textBytes,
-                        ContentText = text,
-                        ContentType = ContentType.Text,
-                        ContentFormat = ClipContentFormat.PlainText,
-                        SourceApp = clip.SourceApp,
-                        SourceAppPath = clip.Clip.SourceAppPath,
-                        SourceAppIconBytes = clip.Clip.SourceAppIconBytes,
-                        SourceWindowTitle = clip.Clip.SourceWindowTitle,
-                        IncrementExistingCopyCount = false,
-                        SourceClipId = clip.Clip.Id,
-                        TransformKind = $"ai:{preset.Name}",
-                    });
-
-                    StatusText = $"AI preset '{preset.Name}' produced a new clip.";
-                    await RefreshAsync(captured?.Id);
-                }
-            }
-            catch (Exception ex)
-            {
-                _notificationService.PublishError($"AI preset '{preset.Name}' failed", ex.Message);
-                StatusText = ex.Message;
-            }
-        });
+        QueueImageAiTransform(
+            preset.Prompt,
+            clip,
+            imageBytes,
+            ResolveImageMediaType(clip.Clip.ContentFormat),
+            $"ai:{preset.Name}",
+            preset.Name,
+            toImage);
     }
 
     private static string ResolveImageMediaType(ClipContentFormat format) => "image/png";
+
+    private AiPresetKind ResolveDefaultAiPromptKind()
+    {
+        var targets = GetCheckedOrSelectedClips();
+        if (targets.Any(static clip => clip.CanTransform))
+        {
+            return AiPresetKind.TextToText;
+        }
+
+        return targets.Any(static clip => clip.IsImageClip && clip.Clip.ContentBytes is { Length: > 0 })
+            ? AiPresetKind.ImageToText
+            : AiPresetKind.TextToText;
+    }
+
+    private void SetAiPromptKind(AiPresetKind kind)
+    {
+        if (_aiPromptKind == kind)
+        {
+            return;
+        }
+
+        _aiPromptKind = kind;
+        this.RaisePropertyChanged(nameof(AiPromptTitle));
+        this.RaisePropertyChanged(nameof(AiPromptDescription));
+        this.RaisePropertyChanged(nameof(AiPromptPlaceholder));
+        this.RaisePropertyChanged(nameof(AiPromptApplyLabel));
+    }
+
+    private static string GetCustomAiTransformKind(AiPresetKind kind) => kind switch
+    {
+        AiPresetKind.ImageToText => "ai:image-to-text:custom",
+        AiPresetKind.ImageToImage => "ai:image-to-image:custom",
+        _ => "ai:custom",
+    };
+
+    private string ResolveExternalEditorPath(ClipItemViewModel clip)
+    {
+        var settings = _settingsService.Current;
+        if (clip.Clip.ContentType == ContentType.Image && !string.IsNullOrWhiteSpace(settings.ExternalImageEditorPath))
+        {
+            return settings.ExternalImageEditorPath;
+        }
+
+        return settings.ExternalEditorPath;
+    }
 
     private async Task UnlockDatabaseAsync()
     {
@@ -5365,6 +5639,35 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(CheckedClipSummaryText));
         this.RaisePropertyChanged(nameof(HasCheckedOrSelectedClip));
         this.RaisePropertyChanged(nameof(HasTransformableTarget));
+        this.RaisePropertyChanged(nameof(HasTextTransformTarget));
+        this.RaisePropertyChanged(nameof(HasImageTransformTarget));
+        RefreshVisibleTransformMenus();
+    }
+
+    private void RefreshVisibleTransformMenus()
+    {
+        var targets = GetCheckedOrSelectedClips();
+        var hasTextTargets = targets.Any(static clip => clip.CanTransform);
+        var hasImageTargets = targets.Any(static clip => clip.IsImageClip && clip.Clip.ContentBytes is { Length: > 0 });
+
+        ReplaceVisibleCollection(
+            VisibleUserScripts,
+            hasTextTargets ? UserScripts : []);
+
+        ReplaceVisibleCollection(
+            VisibleAiMenuEntries,
+            AiMenuEntries.Where(entry =>
+                (entry.Kind == AiPresetKind.TextToText && hasTextTargets)
+                || (entry.Kind is AiPresetKind.ImageToText or AiPresetKind.ImageToImage && hasImageTargets)));
+    }
+
+    private static void ReplaceVisibleCollection<T>(ObservableCollection<T> target, IEnumerable<T> source)
+    {
+        target.Clear();
+        foreach (var item in source)
+        {
+            target.Add(item);
+        }
     }
 
     private void RaiseEditedClipProperties()

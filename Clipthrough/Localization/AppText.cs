@@ -38,6 +38,10 @@ public static class AppText
         [nameof(LogsButtonLabel)] = "Logs",
         [nameof(SettingsButtonLabel)] = "Settings",
         [nameof(CloseButtonLabel)] = "Close",
+        [nameof(AboutWindowTitle)] = "Clipthrough - About",
+        [nameof(AboutWindowDescription)] = "Clipboard history with search, transforms, OCR, and AI.",
+        [nameof(AboutWindowVersionLabel)] = "Version",
+        [nameof(AboutWindowCloseHint)] = "Press Esc to close.",
         [nameof(SettingsTitleText)] = "Settings",
         [nameof(SettingsDescriptionText)] = "Adjust shortcuts, tray behavior, storage, sensitivity rules, retention, and archive capacity.",
         [nameof(SettingsLocalHotkeysTitle)] = "Local shortcuts",
@@ -91,7 +95,8 @@ public static class AppText
         [nameof(SettingsPasteAndFavoriteHotkeyLabel)] = "Paste & favorite top clip",
         [nameof(SettingsPasteAsPlainTextHotkeyLabel)] = "Paste top clip as plain text",
         [nameof(SettingsToolsTitle)] = "External tools",
-        [nameof(SettingsExternalEditorPathLabel)] = "External editor path",
+        [nameof(SettingsExternalEditorPathLabel)] = "External editor path (text/files)",
+        [nameof(SettingsExternalImageEditorPathLabel)] = "External image editor path",
         [nameof(SettingsExternalDiffToolPathLabel)] = "Diff tool path",
         [nameof(OpenInEditorButtonLabel)] = "Editor",
         [nameof(CompareClipsButtonLabel)] = "Compare",
@@ -292,6 +297,10 @@ public static class AppText
     public static string LogsButtonLabel => Text(nameof(LogsButtonLabel));
     public static string SettingsButtonLabel => Text(nameof(SettingsButtonLabel));
     public static string CloseButtonLabel => Text(nameof(CloseButtonLabel));
+    public static string AboutWindowTitle => Text(nameof(AboutWindowTitle));
+    public static string AboutWindowDescription => Text(nameof(AboutWindowDescription));
+    public static string AboutWindowVersionLabel => Text(nameof(AboutWindowVersionLabel));
+    public static string AboutWindowCloseHint => Text(nameof(AboutWindowCloseHint));
     public static string SettingsTitleText => Text(nameof(SettingsTitleText));
     public static string SettingsDescriptionText => Text(nameof(SettingsDescriptionText));
     public static string SettingsLocalHotkeysTitle => Text(nameof(SettingsLocalHotkeysTitle));
@@ -352,6 +361,7 @@ public static class AppText
     public static string SettingsPasteAsPlainTextHotkeyLabel => Text(nameof(SettingsPasteAsPlainTextHotkeyLabel));
     public static string SettingsToolsTitle => Text(nameof(SettingsToolsTitle));
     public static string SettingsExternalEditorPathLabel => Text(nameof(SettingsExternalEditorPathLabel));
+    public static string SettingsExternalImageEditorPathLabel => Text(nameof(SettingsExternalImageEditorPathLabel));
     public static string SettingsExternalDiffToolPathLabel => Text(nameof(SettingsExternalDiffToolPathLabel));
     public static string OpenInEditorButtonLabel => Text(nameof(OpenInEditorButtonLabel));
     public static string CompareClipsButtonLabel => Text(nameof(CompareClipsButtonLabel));

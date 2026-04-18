@@ -98,6 +98,7 @@ public partial class MainWindow : Window
         {
             m_subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
             m_subscribedViewModel.HelpRequested -= OnHelpRequested;
+            m_subscribedViewModel.AboutRequested -= OnAboutRequested;
             m_subscribedViewModel = null;
         }
 
@@ -431,9 +432,13 @@ public partial class MainWindow : Window
 
     private void PopulateTransformMenus()
     {
+        m_scriptsRoots.Clear();
+        m_aiRoots.Clear();
+
         var editMenu = this.FindControl<MenuItem>("EditTransformMenu");
-        if (editMenu is not null && editMenu.ItemCount == 0)
+        if (editMenu is not null)
         {
+            editMenu.Items.Clear();
             foreach (var control in BuildTransformMenuItems(includeAccessKeys: true))
             {
                 editMenu.Items.Add(control);
@@ -441,8 +446,9 @@ public partial class MainWindow : Window
         }
 
         var flyout = this.FindControl<Button>("ToolbarTransformButton")?.Flyout as MenuFlyout;
-        if (flyout is not null && flyout.Items.Count == 0)
+        if (flyout is not null)
         {
+            flyout.Items.Clear();
             foreach (var control in BuildTransformMenuItems(includeAccessKeys: false))
             {
                 flyout.Items.Add(control);
@@ -454,34 +460,56 @@ public partial class MainWindow : Window
 
     private System.Collections.Generic.IEnumerable<Control> BuildTransformMenuItems(bool includeAccessKeys)
     {
-        foreach (var (header, kind) in s_transformMenuEntries)
+        var vm = DataContext as MainWindowViewModel;
+        var controls = new System.Collections.Generic.List<Control>();
+        var showTextTransforms = vm?.HasTextTransformTarget ?? false;
+        var showScripts = vm?.VisibleUserScripts.Count > 0;
+        var showAi = vm?.VisibleAiMenuEntries.Count > 0;
+
+        if (showTextTransforms)
         {
-            if (kind is null)
+            foreach (var (header, kind) in s_transformMenuEntries)
             {
-                yield return new Separator();
-                continue;
+                if (kind is null)
+                {
+                    controls.Add(new Separator());
+                    continue;
+                }
+
+                var item = new MenuItem
+                {
+                    Header = header,
+                    CommandParameter = kind.Value,
+                };
+                item.Click += OnTransformMenuClick;
+                controls.Add(item);
             }
-
-            var item = new MenuItem
-            {
-                Header = header,
-                CommandParameter = kind.Value,
-            };
-            item.Click += OnTransformMenuClick;
-            yield return item;
         }
 
-        var scriptsRoot = new MenuItem { Header = includeAccessKeys ? "_Scripts" : "Scripts" };
-        m_scriptsRoots.Add(scriptsRoot);
-        yield return scriptsRoot;
-
-        var aiRoot = new MenuItem { Header = includeAccessKeys ? "_AI" : "AI" };
-        if (includeAccessKeys)
+        if (showScripts)
         {
-            try { aiRoot.InputGesture = KeyGesture.Parse("Ctrl+I"); } catch { }
+            var scriptsRoot = new MenuItem { Header = includeAccessKeys ? "_Scripts" : "Scripts" };
+            m_scriptsRoots.Add(scriptsRoot);
+            controls.Add(scriptsRoot);
         }
-        m_aiRoots.Add(aiRoot);
-        yield return aiRoot;
+
+        if (showAi)
+        {
+            var aiRoot = new MenuItem { Header = includeAccessKeys ? "_AI" : "AI" };
+            if (includeAccessKeys)
+            {
+                try { aiRoot.InputGesture = KeyGesture.Parse("Ctrl+I"); } catch { }
+            }
+            m_aiRoots.Add(aiRoot);
+            controls.Add(aiRoot);
+        }
+
+        while (controls.Count > 0 && controls[^1] is Separator)
+        {
+            controls.RemoveAt(controls.Count - 1);
+        }
+
+        return controls;
     }
 
     private void RefreshDynamicSubmenus()
@@ -518,17 +546,17 @@ public partial class MainWindow : Window
 
     private void OnUserScriptsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel vm)
+        if (DataContext is MainWindowViewModel)
         {
-            Dispatcher.UIThread.Post(() => RebuildScriptsSubmenus(vm));
+            Dispatcher.UIThread.Post(PopulateTransformMenus);
         }
     }
 
     private void OnAiEntriesChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel vm)
+        if (DataContext is MainWindowViewModel)
         {
-            Dispatcher.UIThread.Post(() => RebuildAiSubmenus(vm));
+            Dispatcher.UIThread.Post(PopulateTransformMenus);
         }
     }
 
@@ -537,7 +565,7 @@ public partial class MainWindow : Window
         foreach (var root in m_scriptsRoots)
         {
             root.Items.Clear();
-            foreach (var script in vm.UserScripts)
+            foreach (var script in vm.VisibleUserScripts)
             {
                 var child = new MenuItem
                 {
@@ -555,7 +583,7 @@ public partial class MainWindow : Window
         foreach (var root in m_aiRoots)
         {
             root.Items.Clear();
-            foreach (var entry in vm.AiMenuEntries)
+            foreach (var entry in vm.VisibleAiMenuEntries)
             {
                 var child = new MenuItem
                 {
@@ -672,8 +700,9 @@ public partial class MainWindow : Window
             m_subscribedViewModel = viewModel;
             m_subscribedViewModel.PropertyChanged += OnViewModelPropertyChanged;
             m_subscribedViewModel.HelpRequested += OnHelpRequested;
+            m_subscribedViewModel.AboutRequested += OnAboutRequested;
             UpdateSettingsWindowVisibility(viewModel.IsSettingsOpen);
-            RefreshDynamicSubmenus();
+            PopulateTransformMenus();
         }
     }
 
@@ -686,11 +715,26 @@ public partial class MainWindow : Window
         });
     }
 
+    private void OnAboutRequested(object? sender, EventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var window = new AboutWindow();
+            window.Show(this);
+        });
+    }
+
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(MainWindowViewModel.IsSettingsOpen) && sender is MainWindowViewModel vm)
         {
             Dispatcher.UIThread.Post(() => UpdateSettingsWindowVisibility(vm.IsSettingsOpen));
+            return;
+        }
+
+        if (e.PropertyName == nameof(MainWindowViewModel.HasTextTransformTarget))
+        {
+            Dispatcher.UIThread.Post(PopulateTransformMenus);
         }
     }
 

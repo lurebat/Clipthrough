@@ -59,13 +59,13 @@ sealed class Program
         var builder = AppBuilder.Configure<App>()
             .UsePlatformDetect()
             .WithInterFont()
-            .LogToTrace()
             .UseReactiveUI(_ => { })
             .With(new SkiaOptions
             {
                 MaxGpuResourceSizeBytes = 256 * 1024 * 1024,
             });
 #if DEBUG
+        builder = builder.LogToTrace();
         builder = builder.WithDeveloperTools();
 #endif
         return builder;

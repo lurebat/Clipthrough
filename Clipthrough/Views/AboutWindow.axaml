@@ -1,0 +1,44 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="using:Clipthrough.Localization"
+        xmlns:pres="using:Clipthrough.Presentation"
+        x:Class="Clipthrough.Views.AboutWindow"
+        Title="{x:Static loc:AppText.AboutWindowTitle}"
+        Width="460"
+        Height="280"
+        MinWidth="420"
+        MinHeight="240"
+        Background="{DynamicResource AppBackgroundBrush}"
+        ShowInTaskbar="True"
+        WindowStartupLocation="CenterOwner">
+
+    <Border Padding="24">
+        <StackPanel Spacing="12"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center">
+            <TextBlock FontSize="28"
+                       FontWeight="SemiBold"
+                       HorizontalAlignment="Center"
+                       Text="{x:Static pres:AppIdentity.ProductName}" />
+            <TextBlock Classes="body-muted"
+                       HorizontalAlignment="Center"
+                       Text="{x:Static loc:AppText.AboutWindowDescription}" />
+            <Border Classes="surface-panel"
+                    Padding="16"
+                    HorizontalAlignment="Center">
+                <StackPanel Spacing="6">
+                    <TextBlock Classes="eyebrow"
+                               HorizontalAlignment="Center"
+                               Text="{x:Static loc:AppText.AboutWindowVersionLabel}" />
+                    <TextBlock FontSize="20"
+                               FontWeight="SemiBold"
+                               HorizontalAlignment="Center"
+                               Text="{x:Static pres:AppIdentity.DisplayVersion}" />
+                </StackPanel>
+            </Border>
+            <TextBlock Classes="body-muted"
+                       HorizontalAlignment="Center"
+                       Text="{x:Static loc:AppText.AboutWindowCloseHint}" />
+        </StackPanel>
+    </Border>
+</Window>

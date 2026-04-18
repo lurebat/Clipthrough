@@ -56,6 +56,7 @@
             </MenuItem>
             <MenuItem Header="Help">
                 <MenuItem Header="_User guide" Command="{Binding OpenHelpCommand}" />
+                <MenuItem Header="_About" Command="{Binding OpenAboutCommand}" />
             </MenuItem>
         </Menu>
         <Border Grid.Row="1"
@@ -299,7 +300,7 @@
                                                               CommandParameter="{x:Static models:TextTransformation.LinesToJsonArray}" />
                                                 </MenuItem>
                                                 <MenuItem Header="Scripts"
-                                                          ItemsSource="{Binding #ClipsListBox.DataContext.UserScripts}"
+                                                          ItemsSource="{Binding #ClipsListBox.DataContext.VisibleUserScripts}"
                                                           IsVisible="{Binding CanTransform}">
                                                     <MenuItem.Styles>
                                                         <Style Selector="MenuItem" x:DataType="models:UserScript">
@@ -310,7 +311,7 @@
                                                     </MenuItem.Styles>
                                                 </MenuItem>
                                                 <MenuItem Header="AI"
-                                                          ItemsSource="{Binding #ClipsListBox.DataContext.AiMenuEntries}"
+                                                          ItemsSource="{Binding #ClipsListBox.DataContext.VisibleAiMenuEntries}"
                                                           IsVisible="{Binding CanAiTransform}">
                                                     <MenuItem.Styles>
                                                         <Style Selector="MenuItem" x:DataType="models:AiMenuEntry">
@@ -497,10 +498,24 @@
                             <Border Classes="badge-chip"
                                     VerticalAlignment="Center"
                                     IsVisible="{Binding IsSemanticCoverageVisible}"
+                                    Background="{DynamicResource StatusChipSemanticBg}"
+                                    BorderBrush="{DynamicResource StatusChipSemanticBorder}"
                                     ToolTip.Tip="Semantic embedding coverage. Click to refresh.">
                                 <TextBlock Text="{Binding SemanticCoverageText}"
+                                           Foreground="{DynamicResource StatusChipSemanticFg}"
                                            TextTrimming="CharacterEllipsis"
                                            MaxWidth="220" />
+                            </Border>
+                            <Border Classes="badge-chip"
+                                    VerticalAlignment="Center"
+                                    IsVisible="{Binding IsOcrCoverageVisible}"
+                                    Background="{DynamicResource StatusChipOcrBg}"
+                                    BorderBrush="{DynamicResource StatusChipOcrBorder}"
+                                    ToolTip.Tip="Background OCR coverage for image clips.">
+                                <TextBlock Text="{Binding OcrCoverageText}"
+                                           Foreground="{DynamicResource StatusChipOcrFg}"
+                                           TextTrimming="CharacterEllipsis"
+                                           MaxWidth="240" />
                             </Border>
                         </WrapPanel>
                     </Border>
@@ -1400,11 +1415,11 @@
                       RowSpacing="12">
                     <StackPanel Spacing="4">
                         <TextBlock Classes="eyebrow" Text="AI transform" />
-                        <TextBlock Classes="hero-title" FontSize="18" Text="Describe what you want" />
+                        <TextBlock Classes="hero-title" FontSize="18" Text="{Binding AiPromptTitle}" />
                         <TextBlock Classes="body-muted"
                                    FontSize="11"
                                    TextWrapping="Wrap"
-                                   Text="The selected or checked text clips will be sent to your AI provider. The result is saved as a new clip." />
+                                   Text="{Binding AiPromptDescription}" />
                     </StackPanel>
 
                     <Border Grid.Row="1" Classes="surface-panel" Padding="12">
@@ -1413,7 +1428,7 @@
                                      MinHeight="100"
                                      MaxHeight="180"
                                      TextWrapping="Wrap"
-                                     PlaceholderText="e.g. Rewrite this as a formal email, or Convert to JSON"
+                                     PlaceholderText="{Binding AiPromptPlaceholder}"
                                      Text="{Binding AiPromptInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             <TextBlock Text="{Binding AiPromptError}"
                                        IsVisible="{Binding AiPromptError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
@@ -1431,7 +1446,7 @@
                                 Classes="primary"
                                 Command="{Binding SubmitAiPromptCommand}"
                                 IsEnabled="{Binding !IsAiPromptBusy}"
-                                Content="Apply" />
+                                Content="{Binding AiPromptApplyLabel}" />
                     </Grid>
                 </Grid>
             </Border>
