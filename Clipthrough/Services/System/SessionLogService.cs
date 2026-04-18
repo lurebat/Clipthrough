@@ -10,6 +10,12 @@ namespace Clipthrough.Services;
 
 public sealed class SessionLogService : TraceListener, ISessionLogService
 {
+    private static readonly string[] s_ignoredFrameworkMessageFragments =
+    [
+        "PlatformImpl is null, couldn't handle input.",
+        "windows::UI::Composition::ICompositor5.RequestCommitAsync timed out, force-triggering next tick",
+    ];
+
     private readonly object _gate = new();
     private readonly List<SessionLogEntry> _entries = [];
     private readonly Subject<SessionLogEntry> _entriesSubject = new();
@@ -36,7 +42,7 @@ public sealed class SessionLogService : TraceListener, ISessionLogService
 
     public override void WriteLine(string? message)
     {
-        if (!string.IsNullOrWhiteSpace(message))
+        if (!string.IsNullOrWhiteSpace(message) && !ShouldIgnoreMessage(message))
         {
             AddEntry(ClassifyMessage(message), message);
         }
@@ -59,7 +65,7 @@ public sealed class SessionLogService : TraceListener, ISessionLogService
 
     public override void TraceEvent(TraceEventCache? eventCache, string? source, TraceEventType eventType, int id, string? message)
     {
-        if (!string.IsNullOrWhiteSpace(message))
+        if (!string.IsNullOrWhiteSpace(message) && !ShouldIgnoreMessage(message))
         {
             AddEntry(ToLevel(eventType), message);
         }
@@ -76,11 +82,16 @@ public sealed class SessionLogService : TraceListener, ISessionLogService
             ? string.Format(format, args)
             : format;
 
-        if (!string.IsNullOrWhiteSpace(message))
+        if (!string.IsNullOrWhiteSpace(message) && !ShouldIgnoreMessage(message))
         {
             AddEntry(ToLevel(eventType), message);
         }
     }
+
+    private static bool ShouldIgnoreMessage(string message)
+        => Array.Exists(
+            s_ignoredFrameworkMessageFragments,
+            fragment => message.Contains(fragment, StringComparison.Ordinal));
 
     private void AddEntry(AppNotificationLevel level, string message)
     {
