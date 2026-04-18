@@ -4,7 +4,7 @@ Guidance for AI coding agents working on Clipthrough.
 
 ## What this repo is
 
-Clipthrough is a cross-platform clipboard manager built with Avalonia 11.3 and
+Clipthrough is a cross-platform clipboard manager built with Avalonia 12 and
 .NET 10. It captures clipboard events, stores them in SQLite, and surfaces them
 through a rich history UI with sensitivity rules, text transformations, paste
 shortcuts, and pluggable source attribution.
@@ -12,7 +12,7 @@ shortcuts, and pluggable source attribution.
 ## Project structure
 
 - `Clipthrough/` — application project
-  - `Views/` — AXAML windows and controls (MainWindow, SettingsWindow, SessionLogsWindow, HelpWindow)
+  - `Views/` — AXAML windows and controls (MainWindow, SettingsWindow, SessionLogsWindow, HelpWindow, AboutWindow)
   - `ViewModels/` — ReactiveUI-based VMs (MainWindowViewModel is the largest)
   - `Services/` — behavior abstractions organised into subfolders (`Ai/`, `Capture/`, `Imaging/`, `Ocr/`, `Platform/`, `Remote/`, `Search/`, `Security/`, `Storage/`, `System/`). Every service has an `I<Name>Service` interface. All files keep the flat `Clipthrough.Services` namespace except `Platform/` which uses `Clipthrough.Services.Platform` for OS-specific concrete implementations.
   - `Models/` — POCOs for persisted state, settings, and transient records.
@@ -38,7 +38,10 @@ shortcuts, and pluggable source attribution.
 - **Persistence**: schema changes go in `Data/ClipSchema.cs` with an idempotent migration (ADD COLUMN IF NOT EXISTS, etc.). Bump version only when required.
 - **Hotkeys**: global hotkeys are registered via `ISystemInteractionService.TryRegisterGlobalHotKey` which on Windows uses `RegisterHotKey` + `Win32Properties.AddWndProcHookCallback`. Never hold a managed `WndProc` delegate yourself — use the Avalonia helper to avoid GC crashes.
 - **AI transforms** (`IAiTransformService` / `AiTransformService`): OpenAI-compatible chat-completions client. Base URL + API key + model come from `AppSettings.Ai*` with env-var fallback (`OPENAI_BASE_URL`, `OPENAI_API_KEY`). Service has a test-friendly ctor taking an `HttpClient`.
+- **Image AI transforms**: image clips can use AI presets/prompts in both image-to-text and image-to-image modes. Keep prompt UX and command routing aligned with the selected clip type.
 - **User scripting** (`IScriptingService` / `ScriptingService`): Roslyn `CSharpScript` wrapper. Scripts get a `Input` global (string) and return any value, coerced to string. Default scripts come from `ScriptingService.GetDefaultScripts()` and are appended to `AppSettings.UserScripts` by the `LoadDefaultScripts` command.
+- **Remote API** (`IRemoteControlService` / `RemoteControlService`): optional local HTTP API with bearer-token auth, Swagger/OpenAPI at `/docs` and `/openapi/v1.json`, and endpoint reference in `.github/copilot-cli-skills/clipthrough-remote-api.md`. Keep the skill file in sync with the actual API contract when endpoints or DTOs change.
+- **Session logs** (`ISessionLogService` / `SessionLogService`): user-facing session logs are fed from `Trace`. Preserve real app warnings/errors, but avoid surfacing known benign framework noise that would drown out actionable entries.
 
 ## Validation
 
@@ -90,3 +93,4 @@ The headless filter is there because some Avalonia headless tests hang intermitt
 - `README.md`: user-facing. Keep setup, feature list, and screenshots current when behavior changes.
 - `AGENTS.md` (this file): developer/agent guidance. Update when architecture or conventions change.
 - `CONTRIBUTING.md`: PR and style guidance.
+- `.github/copilot-cli-skills/clipthrough-remote-api.md`: agent-facing reference for the local Remote API. Update it whenever the API surface, auth rules, or DTOs change.
