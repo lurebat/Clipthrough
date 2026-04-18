@@ -99,6 +99,7 @@ public partial class MainWindow : Window
             m_subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
             m_subscribedViewModel.HelpRequested -= OnHelpRequested;
             m_subscribedViewModel.AboutRequested -= OnAboutRequested;
+            m_subscribedViewModel.Dispose();
             m_subscribedViewModel = null;
         }
 

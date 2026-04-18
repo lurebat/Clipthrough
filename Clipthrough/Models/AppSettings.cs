@@ -58,7 +58,7 @@ public sealed record AppSettings
 
     public bool EnableToggleWindowHotkey { get; init; } = true;
 
-    public string ToggleWindowHotkey { get; init; } = "Ctrl+Shift+Space";
+    public string ToggleWindowHotkey { get; init; } = "Alt+V";
 
     public bool EnableIncrementalPasteHotkey { get; init; } = true;
 
@@ -142,6 +142,8 @@ public sealed record AppSettings
     public bool LastCaseSensitiveSearch { get; init; }
     public bool LastUseWildcardSearch { get; init; }
     public bool LastWholeWordSearch { get; init; }
+    public bool LastUseFuzzyClipSearch { get; init; }
+    public bool LastUseSemanticClipSearch { get; init; } = true;
     public ContentType? LastContentTypeFilter { get; init; }
 
     public bool EnableAi { get; init; }
@@ -201,7 +203,7 @@ public sealed record AppSettings
         EnableToggleSemanticHotkey = EnableToggleSemanticHotkey,
         ToggleSemanticHotkey = MigrateFilterHotkey(ToggleSemanticHotkey, Default.ToggleSemanticHotkey),
         EnableToggleWindowHotkey = EnableToggleWindowHotkey,
-        ToggleWindowHotkey = NormalizeHotkey(ToggleWindowHotkey, Default.ToggleWindowHotkey),
+        ToggleWindowHotkey = MigrateFilterHotkey(ToggleWindowHotkey, Default.ToggleWindowHotkey, "Ctrl+Shift+Space"),
         EnableIncrementalPasteHotkey = EnableIncrementalPasteHotkey,
         IncrementalPasteHotkey = NormalizeHotkey(IncrementalPasteHotkey, Default.IncrementalPasteHotkey),
         EnableDecrementalPasteHotkey = EnableDecrementalPasteHotkey,
@@ -228,7 +230,7 @@ public sealed record AppSettings
         ExternalEditorPath = ExternalEditorPath?.Trim() ?? string.Empty,
         ExternalImageEditorPath = ExternalImageEditorPath?.Trim() ?? string.Empty,
         ExternalDiffToolPath = ExternalDiffToolPath?.Trim() ?? string.Empty,
-        LastContentDisplayMode = LastContentDisplayMode,
+        LastContentDisplayMode = NormalizeContentDisplayMode(LastContentDisplayMode),
         LastImageViewMode = LastImageViewMode,
         LastShowFavoritesOnly = LastShowFavoritesOnly,
         LastShowSensitiveOnly = LastShowSensitiveOnly,
@@ -237,6 +239,8 @@ public sealed record AppSettings
         LastCaseSensitiveSearch = LastCaseSensitiveSearch,
         LastUseWildcardSearch = LastUseWildcardSearch,
         LastWholeWordSearch = LastWholeWordSearch,
+        LastUseFuzzyClipSearch = LastUseFuzzyClipSearch,
+        LastUseSemanticClipSearch = LastUseSemanticClipSearch,
         LastContentTypeFilter = LastContentTypeFilter,
         AiBaseUrl = AiBaseUrl?.Trim() ?? string.Empty,
         AiApiKey = AiApiKey?.Trim() ?? string.Empty,
@@ -275,6 +279,11 @@ public sealed record AppSettings
 
     private static string NormalizeOptionalHotkey(string? value)
         => string.IsNullOrWhiteSpace(value) ? string.Empty : MigrateLegacyAltHotkey(value.Trim(), string.Empty);
+
+    private static ViewModels.ContentDisplayMode NormalizeContentDisplayMode(ViewModels.ContentDisplayMode value)
+        => value == ViewModels.ContentDisplayMode.WebView
+            ? ViewModels.ContentDisplayMode.Rendered
+            : value;
 
     // Filter-toggle hotkeys were originally shipped as bare Alt+<letter> (conflicts with
     // menu access keys) and later as Ctrl+Shift+<letter>. Both are now considered legacy and

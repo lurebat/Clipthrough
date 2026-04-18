@@ -54,9 +54,9 @@ public sealed class MainWindowHeadlessTests
     }
 
     [AvaloniaFact]
-    public void RichContentView_LoadsInsideHeadlessWindow()
+    public void RichWebContentView_LoadsInsideHeadlessWindow()
     {
-        var view = new RichContentView
+        var view = new RichWebContentView
         {
             ContentFormat = ClipContentFormat.Html,
             Markup = "<p>Hello <strong>headless</strong> world</p>",
@@ -73,7 +73,7 @@ public sealed class MainWindowHeadlessTests
     }
 
     [AvaloniaFact]
-    public void RichContentView_UsesRichEditorForRtf()
+    public void RichWebContentView_ConvertsRtfBeforeRendering()
     {
         var rtf = @"{\rtf1\ansi{\colortbl ;\red255\green0\blue0;}\cf1 hello}";
 
@@ -81,7 +81,7 @@ public sealed class MainWindowHeadlessTests
         var html = Clipthrough.Presentation.RtfToHtmlConverter.Convert(rtf);
         Assert.Contains("hello", html);
 
-        var view = new RichContentView
+        var view = new RichWebContentView
         {
             ContentFormat = ClipContentFormat.Rtf,
             Markup = rtf,
@@ -94,12 +94,7 @@ public sealed class MainWindowHeadlessTests
         window.Show();
         Dispatcher.UIThread.RunJobs();
 
-        // In headless mode, HtmlLabel may not render; TextEditor fallback is valid
         Assert.NotNull(view.Content);
-        var typeName = view.Content!.GetType().FullName;
-        Assert.True(
-            typeName == "Avalonia.Controls.ScrollViewer"
-            || typeName == "AvaloniaEdit.TextEditor",
-            $"Expected ScrollViewer (wrapping HtmlLabel) or fallback TextEditor, got: {typeName}");
     }
+
 }

@@ -4,6 +4,7 @@ obj/
 riderModule.iml
 /_ReSharper.Caches/
 .idea/
+artifacts/
 artifacts/external/ShareX/
 Clipthrough.Tests/artifacts/
 Clipthrough.Tests/testobj/

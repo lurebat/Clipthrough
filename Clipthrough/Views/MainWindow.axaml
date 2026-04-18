@@ -705,9 +705,10 @@
                                       SelectionLength="{Binding EditedClipSelectionLength, Mode=TwoWay}"
                                       Text="{Binding EditedClipText, Mode=TwoWay}" />
 
-                            <controls:RichContentView IsVisible="{Binding ShowSelectedRichTextRenderer}"
-                                                       Markup="{Binding EditedClipText, Mode=OneWay}"
-                                                       ContentFormat="{Binding SelectedClipContentFormat}" />
+                            <controls:RichWebContentView IsVisible="{Binding ShowSelectedRichTextRenderer}"
+                                                          Markup="{Binding EditedClipText, Mode=TwoWay}"
+                                                          IsReadOnly="{Binding SelectedClipRenderedContentIsReadOnly}"
+                                                          ContentFormat="{Binding SelectedClipContentFormat}" />
 
                             <Grid IsVisible="{Binding ShowSelectedFilesRenderer}"
                                   Margin="14">

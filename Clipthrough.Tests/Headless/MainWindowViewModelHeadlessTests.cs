@@ -121,7 +121,7 @@ public sealed class MainWindowViewModelHeadlessTests
     }
 
     [AvaloniaFact]
-    public async Task RichContent_IsViewOnlyForHtml()
+    public async Task RichContent_RenderedMode_IsEditableForHtml()
     {
         using var scope = new TemporaryDatabaseScope();
         await PrepareInitializedScopeAsync(scope);
@@ -139,7 +139,8 @@ public sealed class MainWindowViewModelHeadlessTests
 
         Assert.True(viewModel.ShowSelectedRichTextRenderer);
         Assert.False(viewModel.IsSelectedClipTextEditable);
-        Assert.False(viewModel.ShowCopyEditedClipButton);
+        Assert.True(viewModel.CanEditSelectedRichTextInRenderedMode);
+        Assert.True(viewModel.ShowCopyEditedClipButton);
     }
 
     [AvaloniaFact]
@@ -161,6 +162,61 @@ public sealed class MainWindowViewModelHeadlessTests
 
         Assert.True(viewModel.ShowSelectedRichTextRenderer);
         Assert.False(viewModel.IsSelectedClipTextEditable);
+        Assert.False(viewModel.ShowCopyEditedClipButton);
+    }
+
+    [AvaloniaFact]
+    public async Task HtmlRichContent_RenderedMode_EnablesCopyAsNewEditing()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+
+        await viewModel.InitializeAsync();
+
+        const string originalMarkup = "<p><strong>original</strong></p>";
+        var clip = await CaptureRichTextClipAsync(scope.ClipStoreService, originalMarkup, ClipContentFormat.Html);
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        viewModel.SelectedContentDisplayMode = ContentDisplayMode.Rendered;
+        viewModel.EditedClipText = "<p><em>edited</em></p>";
+
+        Assert.True(viewModel.ShowSelectedRichTextRenderer);
+        Assert.True(viewModel.CanEditSelectedRichTextInRenderedMode);
+        Assert.True(viewModel.ShowCopyEditedClipButton);
+
+        await viewModel.CopyEditedClipCommand.Execute().ToTask();
+
+        Assert.Equal("<p><em>edited</em></p>", systemInteraction.LastCopiedRichContent);
+        Assert.Equal(ClipContentFormat.Html, systemInteraction.LastCopiedRichContentFormat);
+        Assert.Equal(AppText.EditedClipCopiedStatus, viewModel.StatusText);
+    }
+
+    [AvaloniaFact]
+    public async Task RtfRichContent_RenderedMode_RemainsReadOnly()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+
+        await viewModel.InitializeAsync();
+
+        const string rtf = @"{\rtf1\ansi{\colortbl ;\red255\green0\blue0;}\cf1 original}";
+        var clip = await CaptureRichTextClipAsync(scope.ClipStoreService, rtf, ClipContentFormat.Rtf);
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        viewModel.SelectedContentDisplayMode = ContentDisplayMode.Rendered;
+
+        Assert.True(viewModel.ShowSelectedRichTextRenderer);
+        Assert.False(viewModel.CanEditSelectedRichTextInRenderedMode);
         Assert.False(viewModel.ShowCopyEditedClipButton);
     }
 
@@ -282,6 +338,80 @@ public sealed class MainWindowViewModelHeadlessTests
 
         Assert.True(viewModel.IsWelcomeOpen);
         Assert.Equal(AppText.WelcomeStatusText, viewModel.StatusText);
+    }
+
+    [AvaloniaFact]
+    public async Task InitializeAsync_RestoresPersistedFiltersAfterSettingsLoad()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        scope.StorageOptionsService.SetHasSavedConfig(true);
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrentOnInitialize(AppSettings.Default with
+        {
+            LastShowFavoritesOnly = true,
+            LastShowSensitiveOnly = true,
+            LastShowPastedOnly = true,
+            LastUseRegexSearch = true,
+            LastCaseSensitiveSearch = true,
+            LastUseWildcardSearch = true,
+            LastWholeWordSearch = true,
+            LastUseFuzzyClipSearch = true,
+            LastUseSemanticClipSearch = false,
+            LastContentTypeFilter = ContentType.Image,
+        });
+
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+
+        await viewModel.InitializeAsync();
+
+        Assert.True(viewModel.ShowFavoritesOnly);
+        Assert.True(viewModel.ShowSensitiveOnly);
+        Assert.True(viewModel.ShowPastedOnly);
+        Assert.True(viewModel.UseRegexSearch);
+        Assert.True(viewModel.CaseSensitiveSearch);
+        Assert.True(viewModel.UseWildcardSearch);
+        Assert.True(viewModel.WholeWordSearch);
+        Assert.True(viewModel.UseFuzzyClipSearch);
+        Assert.False(viewModel.UseSemanticClipSearch);
+        Assert.Equal(ContentType.Image, viewModel.SelectedContentTypeOption.Value);
+    }
+
+    [AvaloniaFact]
+    public void Dispose_PersistsCurrentFilterStateImmediately()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+
+        viewModel.ShowFavoritesOnly = true;
+        viewModel.ShowSensitiveOnly = true;
+        viewModel.ShowPastedOnly = true;
+        viewModel.UseRegexSearch = true;
+        viewModel.CaseSensitiveSearch = true;
+        viewModel.UseWildcardSearch = true;
+        viewModel.WholeWordSearch = true;
+        viewModel.UseFuzzyClipSearch = true;
+        viewModel.UseSemanticClipSearch = false;
+        viewModel.SelectedContentTypeOption = viewModel.ContentTypeOptions[2];
+
+        viewModel.Dispose();
+
+        Assert.True(scope.SettingsService.Current.LastShowFavoritesOnly);
+        Assert.True(scope.SettingsService.Current.LastShowSensitiveOnly);
+        Assert.True(scope.SettingsService.Current.LastShowPastedOnly);
+        Assert.True(scope.SettingsService.Current.LastUseRegexSearch);
+        Assert.True(scope.SettingsService.Current.LastCaseSensitiveSearch);
+        Assert.True(scope.SettingsService.Current.LastUseWildcardSearch);
+        Assert.True(scope.SettingsService.Current.LastWholeWordSearch);
+        Assert.True(scope.SettingsService.Current.LastUseFuzzyClipSearch);
+        Assert.False(scope.SettingsService.Current.LastUseSemanticClipSearch);
+        Assert.Equal(ContentType.Image, scope.SettingsService.Current.LastContentTypeFilter);
+        Assert.True(scope.SettingsService.SaveCallCount > 0);
     }
 
     [AvaloniaFact]

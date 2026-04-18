@@ -54,18 +54,32 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
 
 internal sealed class TestSettingsService : ISettingsService
 {
+    private AppSettings? _initializeCurrent;
+
     public AppSettings Current { get; private set; } = AppSettings.Default;
+
+    public int SaveCallCount { get; private set; }
 
     public bool HasSavedSettings { get; private set; }
 
     public event EventHandler<AppSettings>? SettingsChanged;
 
-    public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        if (_initializeCurrent is not null)
+        {
+            Current = _initializeCurrent;
+            SettingsChanged?.Invoke(this, Current);
+        }
+
+        return Task.CompletedTask;
+    }
 
     public Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
     {
         Current = settings.Normalize();
         HasSavedSettings = true;
+        SaveCallCount++;
         SettingsChanged?.Invoke(this, Current);
         return Task.CompletedTask;
     }
@@ -74,6 +88,13 @@ internal sealed class TestSettingsService : ISettingsService
     {
         Current = settings.Normalize();
         SettingsChanged?.Invoke(this, Current);
+    }
+
+    public void SetCurrentOnInitialize(AppSettings settings)
+    {
+        _initializeCurrent = settings.Normalize();
+        HasSavedSettings = true;
+        Current = AppSettings.Default;
     }
 
     public void SetHasSavedSettings(bool value) => HasSavedSettings = value;

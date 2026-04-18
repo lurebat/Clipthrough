@@ -312,20 +312,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _settingsService.SettingsChanged += OnSettingsChanged;
         SyncUserScripts(_settingsService.Current);
 
-        // Restore persisted filter toggles
-        var savedFilters = _settingsService.Current;
-        _showFavoritesOnly = savedFilters.LastShowFavoritesOnly;
-        _showSensitiveOnly = savedFilters.LastShowSensitiveOnly;
-        _showPastedOnly = savedFilters.LastShowPastedOnly;
-        _useRegexSearch = savedFilters.LastUseRegexSearch;
-        _caseSensitiveSearch = savedFilters.LastCaseSensitiveSearch;
-        _useWildcardSearch = savedFilters.LastUseWildcardSearch;
-        _wholeWordSearch = savedFilters.LastWholeWordSearch;
-        if (savedFilters.LastContentTypeFilter is { } savedType)
-        {
-            var match = ContentTypeOptions.FirstOrDefault(o => o.Value == savedType);
-            if (match is not null) _selectedContentTypeOption = match;
-        }
+        ApplyPersistedFilters(_settingsService.Current, notify: false);
 
         // Persist filter toggles on change (debounced)
         _subscriptions.Add(
@@ -337,27 +324,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     x => x.CaseSensitiveSearch,
                     x => x.UseWildcardSearch,
                     x => x.WholeWordSearch,
+                    x => x.UseFuzzyClipSearch,
+                    x => x.UseSemanticClipSearch,
                     x => x.SelectedContentTypeOption,
-                    (_, _, _, _, _, _, _, _) => Unit.Default)
+                    (_, _, _, _, _, _, _, _, _, _) => Unit.Default)
                 .Skip(1)
                 .Throttle(TimeSpan.FromMilliseconds(500), RxSchedulers.MainThreadScheduler)
                 .Subscribe(async _ =>
                 {
                     try
                     {
-                        await _settingsService.SaveAsync(_settingsService.Current with
-                        {
-                            LastShowFavoritesOnly = ShowFavoritesOnly,
-                            LastShowSensitiveOnly = ShowSensitiveOnly,
-                            LastShowPastedOnly = ShowPastedOnly,
-                            LastUseRegexSearch = UseRegexSearch,
-                            LastCaseSensitiveSearch = CaseSensitiveSearch,
-                            LastUseWildcardSearch = UseWildcardSearch,
-                            LastWholeWordSearch = WholeWordSearch,
-                            LastContentTypeFilter = SelectedContentTypeOption.Value,
-                        });
+                        await PersistCurrentFilterStateAsync();
                     }
-                    catch { /* non-fatal persistence */ }
+                    catch (Exception ex)
+                    {
+                        Trace.TraceWarning($"Filter state save failed: {ex.Message}");
+                    }
                 }));
 
         _subscriptions.Add(
@@ -680,6 +662,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         get => _contentDisplayMode;
         set
         {
+            value = NormalizeContentDisplayMode(value);
             if (_contentDisplayMode == value)
             {
                 return;
@@ -1298,12 +1281,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         || (SelectedClip?.Clip.ContentType is ContentType.RichText
             && _contentDisplayMode is ContentDisplayMode.Textual or ContentDisplayMode.Raw);
 
+    public bool CanEditSelectedRichTextInRenderedMode =>
+        SelectedClip?.Clip.ContentType == ContentType.RichText
+        && SelectedClip?.Clip.ContentFormat == ClipContentFormat.Html
+        && _contentDisplayMode == ContentDisplayMode.Rendered;
+
     public bool SelectedClipTextIsReadOnly => !IsSelectedClipTextEditable;
 
-    public bool ShowCopyEditedClipButton => IsSelectedClipTextEditable
-        && (ShowSelectedTextRenderer || ShowSelectedRichTextRenderer || ShowRawTextContent);
+    public bool SelectedClipRenderedContentIsReadOnly => !CanEditSelectedRichTextInRenderedMode;
 
-    public bool HasEditedClipChanges => IsSelectedClipTextEditable
+    public bool ShowCopyEditedClipButton
+        => (IsSelectedClipTextEditable
+            && (ShowSelectedTextRenderer || ShowSelectedRichTextRenderer || ShowRawTextContent))
+           || CanEditSelectedRichTextInRenderedMode;
+
+    public bool HasEditedClipChanges => (IsSelectedClipTextEditable || CanEditSelectedRichTextInRenderedMode)
         && !string.Equals(_editedClipText, _editedClipBaseline, StringComparison.Ordinal);
 
     public string SelectedClipRenderedText => _selectedClipRenderedText;
@@ -2432,6 +2424,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _clipboardMonitorService.Stop();
         _settingsService.SettingsChanged -= OnSettingsChanged;
         _jobIndicator.Changed -= OnJobIndicatorChanged;
+        FlushCurrentFilterState();
         SelectedClipFiles.Clear();
         ClearClips();
         SessionLogs.Dispose();
@@ -2472,6 +2465,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             var draftSettings = _settingsService.HasSavedSettings ? _settingsService.Current : AppSettings.Default;
             LoadSettingsDraft(draftSettings);
+            ApplyPersistedFilters(draftSettings, notify: true);
             _contentDisplayMode = draftSettings.LastContentDisplayMode;
             _imageViewMode = draftSettings.LastImageViewMode;
             RaiseRenderModeProperties();
@@ -3093,7 +3087,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task CopyEditedClipAsync()
     {
-        if (SelectedClip is null || !IsSelectedClipTextEditable)
+        if (SelectedClip is null || (!IsSelectedClipTextEditable && !CanEditSelectedRichTextInRenderedMode))
         {
             return;
         }
@@ -3101,10 +3095,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var text = EditedClipText ?? string.Empty;
         var contentType = SelectedClip.Clip.ContentType;
         var isRich = contentType == ContentType.RichText;
+        var copyAsRichContent = isRich
+            && (_contentDisplayMode == ContentDisplayMode.Raw || CanEditSelectedRichTextInRenderedMode);
 
         // Put on clipboard (suppressed so we don't race our own capture)
         _clipboardMonitorService.SuppressNext();
-        if (isRich && _contentDisplayMode == ContentDisplayMode.Raw)
+        if (copyAsRichContent)
         {
             var renderedText = ClipDisplayFormatter.RenderRichContent(text);
             await _systemInteractionService.CopyRichContentAsync(text, renderedText, SelectedClip.Clip.ContentFormat);
@@ -3918,6 +3914,70 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         this.RaisePropertyChanged(nameof(ActiveFilterSummary));
         this.RaisePropertyChanged(nameof(EmptyListMessage));
+    }
+
+    private void ApplyPersistedFilters(AppSettings settings, bool notify)
+    {
+        _showFavoritesOnly = settings.LastShowFavoritesOnly;
+        _showSensitiveOnly = settings.LastShowSensitiveOnly;
+        _showPastedOnly = settings.LastShowPastedOnly;
+        _useRegexSearch = settings.LastUseRegexSearch;
+        _caseSensitiveSearch = settings.LastCaseSensitiveSearch;
+        _useWildcardSearch = settings.LastUseWildcardSearch;
+        _wholeWordSearch = settings.LastWholeWordSearch;
+        _useFuzzyClipSearch = settings.LastUseFuzzyClipSearch;
+        _useSemanticClipSearch = settings.LastUseSemanticClipSearch;
+        _selectedContentTypeOption = settings.LastContentTypeFilter is { } savedType
+            ? ContentTypeOptions.FirstOrDefault(o => o.Value == savedType) ?? ContentTypeOptions[0]
+            : ContentTypeOptions[0];
+
+        if (!notify)
+        {
+            return;
+        }
+
+        this.RaisePropertyChanged(nameof(ShowFavoritesOnly));
+        this.RaisePropertyChanged(nameof(ShowSensitiveOnly));
+        this.RaisePropertyChanged(nameof(ShowPastedOnly));
+        this.RaisePropertyChanged(nameof(UseRegexSearch));
+        this.RaisePropertyChanged(nameof(CaseSensitiveSearch));
+        this.RaisePropertyChanged(nameof(UseWildcardSearch));
+        this.RaisePropertyChanged(nameof(WholeWordSearch));
+        this.RaisePropertyChanged(nameof(UseFuzzyClipSearch));
+        this.RaisePropertyChanged(nameof(UseSemanticClipSearch));
+        this.RaisePropertyChanged(nameof(SelectedContentTypeOption));
+        RaiseFilterStateProperties();
+        RaiseContentTypeToggleProperties();
+    }
+
+    private AppSettings BuildPersistedFilterSettings()
+        => _settingsService.Current with
+        {
+            LastShowFavoritesOnly = ShowFavoritesOnly,
+            LastShowSensitiveOnly = ShowSensitiveOnly,
+            LastShowPastedOnly = ShowPastedOnly,
+            LastUseRegexSearch = UseRegexSearch,
+            LastCaseSensitiveSearch = CaseSensitiveSearch,
+            LastUseWildcardSearch = UseWildcardSearch,
+            LastWholeWordSearch = WholeWordSearch,
+            LastUseFuzzyClipSearch = UseFuzzyClipSearch,
+            LastUseSemanticClipSearch = UseSemanticClipSearch,
+            LastContentTypeFilter = SelectedContentTypeOption.Value,
+        };
+
+    private Task PersistCurrentFilterStateAsync()
+        => _settingsService.SaveAsync(BuildPersistedFilterSettings());
+
+    private void FlushCurrentFilterState()
+    {
+        try
+        {
+            PersistCurrentFilterStateAsync().GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Filter state flush failed: {ex.Message}");
+        }
     }
 
     private void RaiseContentTypeToggleProperties()
@@ -4818,8 +4878,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         SelectedCustomHotkeyDraft = SettingsCustomHotkeyDrafts.FirstOrDefault();
         SettingsUseFuzzySearch = settings.UseFuzzySettingsSearch;
-        UseFuzzyClipSearch = settings.UseFuzzyClipSearch;
-        UseSemanticClipSearch = settings.UseSemanticClipSearch;
         IsDatabasePasswordVisible = false;
     }
 
@@ -5483,12 +5541,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(SelectedClipOcrStatusText));
         this.RaisePropertyChanged(nameof(ShowCopyEditedClipButton));
         this.RaisePropertyChanged(nameof(IsSelectedClipTextEditable));
+        this.RaisePropertyChanged(nameof(CanEditSelectedRichTextInRenderedMode));
         this.RaisePropertyChanged(nameof(SelectedClipTextIsReadOnly));
+        this.RaisePropertyChanged(nameof(SelectedClipRenderedContentIsReadOnly));
         this.RaisePropertyChanged(nameof(RawContentSyntaxHint));
         this.RaisePropertyChanged(nameof(IsRenderedMode));
         this.RaisePropertyChanged(nameof(IsTextualMode));
         this.RaisePropertyChanged(nameof(IsRawMode));
     }
+
+    private static ContentDisplayMode NormalizeContentDisplayMode(ContentDisplayMode mode)
+        => mode == ContentDisplayMode.WebView
+            ? ContentDisplayMode.Rendered
+            : mode;
 
     private async void PersistContentDisplayModeInBackground(ContentDisplayMode mode)
     {

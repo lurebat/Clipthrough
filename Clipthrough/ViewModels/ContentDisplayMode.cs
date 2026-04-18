@@ -13,4 +13,7 @@ public enum ContentDisplayMode
 
     /// <summary>Raw HTML/RTF source in the text editor with syntax highlighting.</summary>
     Raw,
+
+    /// <summary>Legacy persisted value that now maps to Rendered.</summary>
+    WebView,
 }
