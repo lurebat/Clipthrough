@@ -754,7 +754,7 @@ public partial class MainWindow : Window
             }
             else
             {
-                m_settingsWindow.Activate();
+                ShowOwnedWindow(m_settingsWindow);
             }
         }
         else if (m_settingsWindow is not null)
@@ -804,7 +804,7 @@ public partial class MainWindow : Window
             }
             else
             {
-                m_sessionLogsWindow.Activate();
+                ShowOwnedWindow(m_sessionLogsWindow);
             }
         }
         else if (m_sessionLogsWindow is not null)
@@ -841,5 +841,20 @@ public partial class MainWindow : Window
         }
 
         Dispatcher.UIThread.Post(() => searchTextBox.Focus(), DispatcherPriority.Input);
+    }
+
+    private void ShowOwnedWindow(Window window)
+    {
+        if (!window.IsVisible)
+        {
+            window.Show(this);
+        }
+
+        if (window.WindowState == WindowState.Minimized)
+        {
+            window.WindowState = WindowState.Normal;
+        }
+
+        window.Activate();
     }
 }

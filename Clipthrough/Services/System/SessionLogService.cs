@@ -14,6 +14,10 @@ public sealed class SessionLogService : TraceListener, ISessionLogService
     [
         "PlatformImpl is null, couldn't handle input.",
         "windows::UI::Composition::ICompositor5.RequestCommitAsync timed out, force-triggering next tick",
+        "[Layout]Layout cycle detected. Item 'Avalonia.Controls.Primitives.DataGridRowsPresenter'",
+        "[Layout]Layout cycle detected. Item 'Avalonia.Controls.Primitives.DataGridColumnHeadersPresenter'",
+        "[Layout]Layout cycle detected. Item 'Avalonia.Controls.DataGrid'",
+        "[Layout]Layout cycle detected. Item 'Avalonia.Controls.Grid'",
     ];
 
     private readonly object _gate = new();
