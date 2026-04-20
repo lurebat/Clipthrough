@@ -572,6 +572,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public System.Collections.ObjectModel.ObservableCollection<AiMenuEntry> VisibleAiMenuEntries { get; } = new();
 
+    public bool IsAiMenuVisible => _settingsEnableAi && VisibleAiMenuEntries.Count > 0;
+
     public ReactiveCommand<AiMenuEntry, Unit> InvokeAiMenuEntryCommand { get; }
 
     public string SearchText
@@ -3089,7 +3091,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         using var bitmapStream = new MemoryStream(editedBytes, writable: false);
         using var bitmap = new Bitmap(bitmapStream);
 
-        var capturedClip = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
+        var capturedClip = await Task.Run(() => _clipStoreService.CaptureAsync(new ClipCaptureRequest
         {
             ContentBytes = editedBytes,
             ContentText = string.IsNullOrWhiteSpace(clip.FullContent) ? null : clip.FullContent,
@@ -3099,7 +3101,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SourceAppPath = Environment.ProcessPath,
             ImageWidth = bitmap.PixelSize.Width,
             ImageHeight = bitmap.PixelSize.Height,
-        });
+        }));
 
         _clipboardMonitorService.SuppressNext();
         await _systemInteractionService.CopyBitmapAsync(bitmap);
@@ -3146,7 +3148,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var nextIsFavorite = targetClips.Any(static clip => !clip.IsFavorite);
         foreach (var clip in targetClips)
         {
-            await _clipStoreService.SetFavoriteAsync(clip.Id, nextIsFavorite);
+            await Task.Run(() => _clipStoreService.SetFavoriteAsync(clip.Id, nextIsFavorite));
             clip.SetFavoriteState(nextIsFavorite);
         }
 
@@ -3174,7 +3176,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var nextIsPinned = targetClips.Any(static clip => !clip.IsPinned);
         foreach (var clip in targetClips)
         {
-            await _clipStoreService.SetPinnedAsync(clip.Id, nextIsPinned);
+            await Task.Run(() => _clipStoreService.SetPinnedAsync(clip.Id, nextIsPinned));
             clip.SetPinnedState(nextIsPinned);
         }
 
@@ -3193,7 +3195,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         var nextIsPinned = !clip.IsPinned;
-        await _clipStoreService.SetPinnedAsync(clip.Id, nextIsPinned);
+        await Task.Run(() => _clipStoreService.SetPinnedAsync(clip.Id, nextIsPinned));
         clip.SetPinnedState(nextIsPinned);
         await RefreshAsync(clip.Id);
     }
@@ -3201,7 +3203,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private async Task TogglePinClipAsync(ClipItemViewModel clip)
     {
         var nextIsPinned = !clip.IsPinned;
-        await _clipStoreService.SetPinnedAsync(clip.Id, nextIsPinned);
+        await Task.Run(() => _clipStoreService.SetPinnedAsync(clip.Id, nextIsPinned));
         clip.SetPinnedState(nextIsPinned);
         await RefreshAsync(clip.Id);
     }
@@ -3247,7 +3249,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (!string.IsNullOrEmpty(text))
         {
             var bytes = System.Text.Encoding.UTF8.GetBytes(text);
-            captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
+            captured = await Task.Run(() => _clipStoreService.CaptureAsync(new ClipCaptureRequest
             {
                 ContentBytes = bytes,
                 ContentText = text,
@@ -3258,7 +3260,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 SourceAppIconBytes = SelectedClip.Clip.SourceAppIconBytes,
                 SourceWindowTitle = SelectedClip.Clip.SourceWindowTitle,
                 IncrementExistingCopyCount = false,
-            });
+            }));
         }
 
         _editedClipBaseline = text;
@@ -3313,7 +3315,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
-        var captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
+        var captured = await Task.Run(() => _clipStoreService.CaptureAsync(new ClipCaptureRequest
         {
             ContentBytes = textBytes,
             ContentText = result,
@@ -3326,7 +3328,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             IncrementExistingCopyCount = false,
             SourceClipId = clip.Clip.Id,
             TransformKind = $"builtin:{transformation}",
-        });
+        }));
         StatusText = AppText.EditedClipCopiedStatus;
         await RefreshAsync(captured?.Id);
     }
@@ -3418,7 +3420,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
 
             var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
-            var captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
+            var captured = await Task.Run(() => _clipStoreService.CaptureAsync(new ClipCaptureRequest
             {
                 ContentBytes = textBytes,
                 ContentText = result,
@@ -3431,7 +3433,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 IncrementExistingCopyCount = false,
                 SourceClipId = target.Clip.Id,
                 TransformKind = transformKind,
-            });
+            }));
             if (captured is not null)
             {
                 lastCreatedId = captured.Id;
@@ -3481,7 +3483,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        await _clipStoreService.MarkOcrForRerunAsync(clip.Clip.Id);
+        await Task.Run(() => _clipStoreService.MarkOcrForRerunAsync(clip.Clip.Id));
         StatusText = "Queued OCR…";
         _backgroundOcrQueue.Enqueue(clip.Clip.Id);
     }
@@ -3648,7 +3650,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             IncrementExistingCopyCount = false,
         };
 
-        await _clipStoreService.CaptureAsync(request);
+        await Task.Run(() => _clipStoreService.CaptureAsync(request));
         _editedClipBaseline = _editedClipText;
     }
 
@@ -3695,7 +3697,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private async Task ToggleFavoriteStateAsync(ClipItemViewModel clip)
     {
         var nextIsFavorite = !clip.IsFavorite;
-        await _clipStoreService.SetFavoriteAsync(clip.Id, nextIsFavorite);
+        await Task.Run(() => _clipStoreService.SetFavoriteAsync(clip.Id, nextIsFavorite));
         clip.SetFavoriteState(nextIsFavorite);
 
         if (ReferenceEquals(SelectedClip, clip))
@@ -3814,7 +3816,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (_pendingDeletes.Remove(id, out _))
             {
-                await _clipStoreService.DeleteAsync(id);
+                await Task.Run(() => _clipStoreService.DeleteAsync(id));
             }
         }
     }
@@ -4414,7 +4416,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 }
 
                 var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
-                var captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
+                var captured = await Task.Run(() => _clipStoreService.CaptureAsync(new ClipCaptureRequest
                 {
                     ContentBytes = textBytes,
                     ContentText = result,
@@ -4427,7 +4429,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     IncrementExistingCopyCount = false,
                     SourceClipId = target.Clip.Id,
                     TransformKind = transformKind,
-                });
+                }));
                 if (captured is not null)
                 {
                     lastCreatedId = captured.Id;
@@ -5026,6 +5028,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsExternalImageEditorPath = settings.ExternalImageEditorPath;
         SettingsExternalDiffToolPath = settings.ExternalDiffToolPath;
         SettingsEnableAi = settings.EnableAi;
+        this.RaisePropertyChanged(nameof(IsAiMenuVisible));
         SettingsAiBaseUrl = settings.AiBaseUrl;
         SettingsAiApiKey = settings.AiApiKey;
         SettingsAiModel = settings.AiModel;
@@ -5924,6 +5927,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             AiMenuEntries.Where(entry =>
                 (entry.Kind == AiPresetKind.TextToText && hasTextTargets)
                 || (entry.Kind is AiPresetKind.ImageToText or AiPresetKind.ImageToImage && hasImageTargets)));
+        this.RaisePropertyChanged(nameof(IsAiMenuVisible));
     }
 
     private static void ReplaceVisibleCollection<T>(ObservableCollection<T> target, IEnumerable<T> source)

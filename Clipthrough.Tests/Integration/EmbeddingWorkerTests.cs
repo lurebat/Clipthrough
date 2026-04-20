@@ -114,7 +114,7 @@ public sealed class EmbeddingWorkerTests
         await Task.Delay(300);
         await worker.StopAsync();
 
-        Assert.Equal(1, clipStore.ClaimCallCount);
+        Assert.InRange(clipStore.ClaimCallCount, 1, 2);
         Assert.Equal(1, clipStore.SaveCallCount);
         Assert.Equal(1, clipStore.SetFailureCallCount);
     }

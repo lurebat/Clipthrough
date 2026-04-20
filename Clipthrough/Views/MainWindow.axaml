@@ -318,7 +318,7 @@
                                                 </MenuItem>
                                                 <MenuItem Header="AI"
                                                           ItemsSource="{Binding #ClipsListBox.DataContext.VisibleAiMenuEntries}"
-                                                          IsVisible="{Binding CanAiTransform}">
+                                                          IsVisible="{Binding #ClipsListBox.DataContext.IsAiMenuVisible}">
                                                     <MenuItem.Styles>
                                                         <Style Selector="MenuItem" x:DataType="models:AiMenuEntry">
                                                             <Setter Property="Header" Value="{Binding Label}" />
