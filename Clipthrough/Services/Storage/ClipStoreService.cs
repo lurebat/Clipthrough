@@ -113,8 +113,8 @@ public sealed class ClipStoreService : IClipStoreService
         var whereClauses = BuildWhereClauses(filters, hasSearch);
         var whereClause = whereClauses.Count > 0 ? $"WHERE {string.Join(" AND ", whereClauses)}" : string.Empty;
         var orderClause = hasSearch
-            ? "ORDER BY CASE WHEN c.pinned_at IS NULL THEN 1 ELSE 0 END, c.pinned_at DESC, bm25(clips_fts), COALESCE(c.last_copied_at, c.captured_at) DESC"
-            : "ORDER BY CASE WHEN c.pinned_at IS NULL THEN 1 ELSE 0 END, c.pinned_at DESC, COALESCE(c.last_copied_at, c.captured_at) DESC";
+            ? $"ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, bm25(clips_fts), COALESCE(c.last_copied_at, c.captured_at) DESC, c.id DESC"
+            : BuildOrderClause(filters.SortOption);
 
         var items = new List<ClipEntry>();
 
@@ -672,7 +672,7 @@ public sealed class ClipStoreService : IClipStoreService
         command.CommandText = $"""
             SELECT {ClipSelectColumns}
             FROM clips c
-            ORDER BY COALESCE(c.last_copied_at, c.captured_at) DESC
+            ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, COALESCE(c.last_copied_at, c.captured_at) DESC, c.id DESC
             LIMIT 1 OFFSET $offset;
             """;
         command.Parameters.AddWithValue("$offset", offset);
@@ -925,7 +925,7 @@ public sealed class ClipStoreService : IClipStoreService
                 SELECT {ClipSelectColumns}
                 FROM clips c
                 {whereClause}
-                ORDER BY COALESCE(c.last_copied_at, c.captured_at) DESC;
+                ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, COALESCE(c.last_copied_at, c.captured_at) DESC, c.id DESC;
                 """;
             AddSearchParameters(queryCommand, filters, hasSearch: false);
 
@@ -1063,6 +1063,16 @@ public sealed class ClipStoreService : IClipStoreService
 
         return clauses;
     }
+
+    private static string BuildOrderClause(ClipSortOption sortOption) => sortOption switch
+    {
+        ClipSortOption.MostRecent => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, COALESCE(c.last_copied_at, c.captured_at) DESC, c.id DESC",
+        ClipSortOption.OldestFirst => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, COALESCE(c.last_copied_at, c.captured_at) ASC, c.id ASC",
+        ClipSortOption.MostPasted => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, c.paste_count DESC, c.id DESC",
+        ClipSortOption.Alphabetical => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, c.content ASC, c.id ASC",
+        ClipSortOption.LargestFirst => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, c.byte_size DESC, c.id DESC",
+        _ => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, COALESCE(c.last_copied_at, c.captured_at) DESC, c.id DESC",
+    };
 
     private static void AddSearchParameters(SqliteCommand command, ClipSearchFilters filters, bool hasSearch)
     {

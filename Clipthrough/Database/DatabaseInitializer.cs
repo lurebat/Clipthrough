@@ -80,6 +80,15 @@ public sealed class DatabaseInitializer
         CREATE INDEX IF NOT EXISTS idx_clips_is_favorite ON clips(is_favorite) WHERE is_favorite = 1;
         CREATE INDEX IF NOT EXISTS idx_clips_is_sensitive ON clips(is_sensitive) WHERE is_sensitive = 1;
 
+        CREATE INDEX IF NOT EXISTS idx_clips_default_order ON clips(
+            (pinned_at IS NULL),
+            pinned_at DESC,
+            COALESCE(last_copied_at, captured_at) DESC,
+            id DESC
+        );
+        CREATE INDEX IF NOT EXISTS idx_clips_paste_count ON clips(paste_count DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_clips_byte_size ON clips(byte_size DESC, id DESC);
+
         CREATE TABLE IF NOT EXISTS app_metadata (
             key   TEXT PRIMARY KEY,
             value TEXT NOT NULL

@@ -22,6 +22,8 @@ public sealed class ClipSearchFilters
 
     public bool UseFuzzy { get; init; }
 
+    public ClipSortOption SortOption { get; init; } = ClipSortOption.MostRecent;
+
     public int Limit { get; init; } = 200;
 
     public int Offset { get; init; }

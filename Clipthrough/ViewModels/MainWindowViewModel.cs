@@ -78,6 +78,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _useWildcardSearch;
     private bool _wholeWordSearch;
     private bool _showPastedOnly;
+    private ClipSortOptionItem _selectedSortOption = null!;
     private ClipItemViewModel? _selectedClip;
     private int _checkedClipCount;
     private int _checkedTransformableClipCount;
@@ -223,6 +224,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new ContentTypeOption(ContentType.Files),
         ];
         _selectedContentTypeOption = ContentTypeOptions[0];
+        SortOptions =
+        [
+            new ClipSortOptionItem(ClipSortOption.MostRecent),
+            new ClipSortOptionItem(ClipSortOption.OldestFirst),
+            new ClipSortOptionItem(ClipSortOption.MostPasted),
+            new ClipSortOptionItem(ClipSortOption.Alphabetical),
+            new ClipSortOptionItem(ClipSortOption.LargestFirst),
+        ];
+        _selectedSortOption = SortOptions[0];
         RefreshCommand = ReactiveCommand.CreateFromTask(RefreshAsync);
         LoadMoreCommand = ReactiveCommand.CreateFromTask(LoadMoreAsync, this.WhenAnyValue(x => x.HasMoreResults, x => x.IsBusy, static (hasMore, isBusy) => hasMore && !isBusy));
 
@@ -654,6 +664,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RaiseFilterStateProperties();
         }
     }
+
+    public ClipSortOptionItem SelectedSortOption
+    {
+        get => _selectedSortOption;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _selectedSortOption, value);
+            _ = RefreshAsync();
+        }
+    }
+
+    public IReadOnlyList<ClipSortOptionItem> SortOptions { get; }
 
     public bool ShowRawContent
     {
@@ -3824,6 +3846,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         UseWildcard = UseWildcardSearch,
         WholeWord = WholeWordSearch,
         UseFuzzy = UseFuzzyClipSearch && !UseRegexSearch && !UseWildcardSearch && !WholeWordSearch,
+        SortOption = SelectedSortOption.Value,
         Limit = PageSize,
         Offset = offset,
     };

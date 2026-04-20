@@ -179,9 +179,9 @@
                 <Grid RowDefinitions="Auto,*,Auto"
                       RowSpacing="10"
                       Margin="12">
-                    <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto"
+                    <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto"
                           ColumnSpacing="4"
-                          HorizontalAlignment="Left">
+                          HorizontalAlignment="Stretch">
                         <Button Classes="secondary compact"
                                 Command="{Binding SelectAllClipsCommand}"
                                 Content="{Binding SelectAllButtonLabel}" />
@@ -205,6 +205,12 @@
                                 Command="{Binding DeleteCheckedClipsCommand}"
                                 IsEnabled="{Binding HasCheckedOrSelectedClip}"
                                 Content="{Binding DeleteButtonLabel}" />
+                        <ComboBox Grid.Column="6"
+                                  Classes="compact"
+                                  ItemsSource="{Binding SortOptions}"
+                                  SelectedItem="{Binding SelectedSortOption}"
+                                  MinWidth="120"
+                                  ToolTip.Tip="Sort order" />
                     </Grid>
 
                     <Grid Grid.Row="1">

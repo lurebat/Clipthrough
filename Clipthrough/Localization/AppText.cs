@@ -103,6 +103,11 @@ public static class AppText
         [nameof(WildcardFilterLabel)] = "Wildcard",
         [nameof(WholeWordFilterLabel)] = "Whole word",
         [nameof(PastedFilterLabel)] = "Pasted",
+        [nameof(SortMostRecentLabel)] = "Most recent",
+        [nameof(SortOldestFirstLabel)] = "Oldest first",
+        [nameof(SortMostPastedLabel)] = "Most pasted",
+        [nameof(SortAlphabeticalLabel)] = "Alphabetical",
+        [nameof(SortLargestFirstLabel)] = "Largest first",
         [nameof(CompareNeedsTwoClipsStatus)] = "Select exactly 2 clips using Ctrl+Click to compare.",
         [nameof(CompareNeedsDiffToolStatus)] = "Set an external diff tool path in Settings to compare clips.",
         [nameof(CompareOpenedStatus)] = "Opened diff tool for comparison.",
@@ -368,6 +373,11 @@ public static class AppText
     public static string WildcardFilterLabel => Text(nameof(WildcardFilterLabel));
     public static string WholeWordFilterLabel => Text(nameof(WholeWordFilterLabel));
     public static string PastedFilterLabel => Text(nameof(PastedFilterLabel));
+    public static string SortMostRecentLabel => Text(nameof(SortMostRecentLabel));
+    public static string SortOldestFirstLabel => Text(nameof(SortOldestFirstLabel));
+    public static string SortMostPastedLabel => Text(nameof(SortMostPastedLabel));
+    public static string SortAlphabeticalLabel => Text(nameof(SortAlphabeticalLabel));
+    public static string SortLargestFirstLabel => Text(nameof(SortLargestFirstLabel));
     public static string CompareNeedsTwoClipsStatus => Text(nameof(CompareNeedsTwoClipsStatus));
     public static string CompareNeedsDiffToolStatus => Text(nameof(CompareNeedsDiffToolStatus));
     public static string CompareOpenedStatus => Text(nameof(CompareOpenedStatus));
