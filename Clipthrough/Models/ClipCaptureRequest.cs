@@ -33,4 +33,6 @@ public sealed class ClipCaptureRequest
     public string? TransformKind { get; init; }
 
     public System.DateTimeOffset? CapturedAtOverride { get; init; }
+
+    public bool SkipPostInsertMaintenance { get; init; }
 }

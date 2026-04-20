@@ -139,6 +139,47 @@ public sealed class ClipStoreServiceTests
     }
 
     [Fact]
+    public async Task CaptureAsync_SkipPostInsertMaintenance_DefersPurgeUntilManualMaintenance()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings
+        {
+            MaxClipSizeBytes = 4096,
+            EnableMaxEntryCount = true,
+            MaxEntryCount = 1,
+        });
+
+        await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "first",
+            ContentBytes = Encoding.UTF8.GetBytes("first"),
+            SkipPostInsertMaintenance = true,
+        });
+
+        await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "second",
+            ContentBytes = Encoding.UTF8.GetBytes("second"),
+            SkipPostInsertMaintenance = true,
+        });
+
+        var beforeMaintenance = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        Assert.Equal(2, beforeMaintenance.TotalClipCount);
+
+        await scope.ClipStoreService.ApplyMaintenanceAsync();
+
+        var afterMaintenance = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        Assert.Equal(1, afterMaintenance.TotalClipCount);
+        Assert.Single(afterMaintenance.Items);
+        Assert.Equal("second", afterMaintenance.Items[0].Content);
+    }
+
+    [Fact]
     public async Task MarkPastedAsync_TracksPasteState()
     {
         using var scope = new TemporaryDatabaseScope();
@@ -405,6 +446,38 @@ public sealed class ClipStoreServiceTests
         // Second claim returns nothing (all succeeded).
         var reclaim = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10);
         Assert.Empty(reclaim);
+    }
+
+    [Fact]
+    public async Task Embeddings_SaveBatch_SkipsDeletedClaimedClip()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "embed then delete",
+            ContentBytes = Encoding.UTF8.GetBytes("embed then delete"),
+            SourceApp = "Editor",
+        });
+
+        Assert.NotNull(clip);
+
+        var claimed = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(1);
+        Assert.Single(claimed);
+
+        await scope.ClipStoreService.DeleteAsync(clip!.Id);
+
+        var exception = await Record.ExceptionAsync(() => scope.ClipStoreService.SaveEmbeddingBatchAsync(
+            [new ClipEmbeddingRecord(clip.Id, [1f, 0f, 0f, 0f])],
+            "test-model-v1"));
+
+        Assert.Null(exception);
+        Assert.Null(await scope.ClipStoreService.GetByIdAsync(clip.Id));
+        Assert.Empty(await scope.ClipStoreService.LoadAllEmbeddingsAsync());
     }
 
     [Fact]

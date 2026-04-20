@@ -123,6 +123,10 @@ public sealed class DatabaseInitializer
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
+        // WAL mode allows concurrent readers during writes — critical for responsiveness.
+        await ExecuteNonQueryAsync(connection, "PRAGMA journal_mode = WAL;", cancellationToken);
+        await ExecuteNonQueryAsync(connection, "PRAGMA busy_timeout = 5000;", cancellationToken);
+
         await MigrateFtsSchemaIfNeededAsync(connection, cancellationToken);
 
         await using (var schemaCommand = connection.CreateCommand())

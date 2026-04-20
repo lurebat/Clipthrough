@@ -711,6 +711,10 @@ public partial class App : Application
             }
 
             RestoreAndActivateWindow(_mainWindow);
+            if (_mainWindow is MainWindow mainWindow)
+            {
+                mainWindow.RestoreOwnedWindowsForCurrentState();
+            }
         });
     }
 

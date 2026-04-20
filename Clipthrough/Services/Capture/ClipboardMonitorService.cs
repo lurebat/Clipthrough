@@ -225,7 +225,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
         var bitmap = await clipboardData.TryGetBitmapAsync();
         if (bitmap is not null)
         {
-            return CreateImageRequest(bitmap, sourceInfo, GetRelatedImageLabel(filePaths, relatedSourceUrl, plainText, sourceInfo?.WindowTitle));
+            return await CreateImageRequestAsync(bitmap, sourceInfo, GetRelatedImageLabel(filePaths, relatedSourceUrl, plainText, sourceInfo?.WindowTitle));
         }
 
         var pngBytes = await TryGetFirstBytesAsync(clipboardData, PngFormats);
@@ -364,18 +364,24 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
         return ClipboardIgnoreFormats.Any(ignore => formatIds.Any(id => string.Equals(id, ignore, StringComparison.OrdinalIgnoreCase)));
     }
 
-    private static ClipCaptureRequest CreateImageRequest(Bitmap bitmap, ClipboardSourceApplicationInfo? sourceInfo, string? imageLabel)
+    private static async Task<ClipCaptureRequest> CreateImageRequestAsync(Bitmap bitmap, ClipboardSourceApplicationInfo? sourceInfo, string? imageLabel)
     {
-        using var bitmapStream = new MemoryStream();
-        bitmap.Save(bitmapStream);
+        var width = bitmap.PixelSize.Width;
+        var height = bitmap.PixelSize.Height;
+        var bytes = await Task.Run(() =>
+        {
+            using var bitmapStream = new MemoryStream();
+            bitmap.Save(bitmapStream);
+            return bitmapStream.ToArray();
+        }).ConfigureAwait(false);
         return new ClipCaptureRequest
         {
             ContentType = ContentType.Image,
             ContentFormat = ClipContentFormat.Bitmap,
             ContentText = imageLabel,
-            ContentBytes = bitmapStream.ToArray(),
-            ImageWidth = bitmap.PixelSize.Width,
-            ImageHeight = bitmap.PixelSize.Height,
+            ContentBytes = bytes,
+            ImageWidth = width,
+            ImageHeight = height,
             SourceApp = sourceInfo?.Name,
             SourceAppPath = sourceInfo?.Path,
             SourceAppIconBytes = sourceInfo?.IconBytes,

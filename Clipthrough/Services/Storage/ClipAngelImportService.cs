@@ -151,6 +151,8 @@ public sealed class ClipAngelImportService : IClipAngelImportService
                 if (progress is not null && (processed % 25 == 0 || processed == total))
                     progress.Report(new ClipAngelImportProgress(processed, total, type));
             }
+
+            await _clipStore.ApplyMaintenanceAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -193,6 +195,7 @@ public sealed class ClipAngelImportService : IClipAngelImportService
                 IsFavorite = favorite,
                 IncrementExistingCopyCount = false,
                 CapturedAtOverride = created,
+                SkipPostInsertMaintenance = true,
             };
         }
 
@@ -214,6 +217,7 @@ public sealed class ClipAngelImportService : IClipAngelImportService
                 IsFavorite = favorite,
                 IncrementExistingCopyCount = false,
                 CapturedAtOverride = created,
+                SkipPostInsertMaintenance = true,
             };
         }
 
@@ -253,6 +257,7 @@ public sealed class ClipAngelImportService : IClipAngelImportService
             IsFavorite = favorite,
             IncrementExistingCopyCount = false,
             CapturedAtOverride = created,
+            SkipPostInsertMaintenance = true,
         };
     }
 

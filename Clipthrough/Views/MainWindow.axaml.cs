@@ -177,6 +177,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (TryHandleClipPasteShortcut(viewModel, e))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (TryHandleEnterToCopyShortcut(viewModel, e))
         {
             e.Handled = true;
@@ -260,7 +266,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        viewModel.CopySelectedCommand.Execute().Subscribe(_ => MinimizeWindow());
+        ExecutePasteSelectedAndHide(viewModel);
         e.Handled = true;
     }
 
@@ -309,7 +315,24 @@ public partial class MainWindow : Window
             return false;
         }
 
-        viewModel.CopySelectedCommand.Execute().Subscribe(_ => MinimizeWindow());
+        ExecuteCopySelectedWithoutClosing(viewModel);
+        return true;
+    }
+
+    private bool TryHandleClipPasteShortcut(MainWindowViewModel viewModel, KeyEventArgs e)
+    {
+        if (m_clipsListBox?.IsKeyboardFocusWithin != true || viewModel.SelectedClip is null)
+        {
+            return false;
+        }
+
+        var relevantModifiers = e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Meta);
+        if (e.Key != Key.V || relevantModifiers != KeyModifiers.Control)
+        {
+            return false;
+        }
+
+        ExecutePasteSelectedAndHide(viewModel);
         return true;
     }
 
@@ -333,6 +356,17 @@ public partial class MainWindow : Window
 
         viewModel.CopySelectedCommand.Execute().Subscribe(_ => MinimizeWindow());
         return true;
+    }
+
+    private static void ExecuteCopySelectedWithoutClosing(MainWindowViewModel viewModel)
+    {
+        viewModel.CopySelectedCommand.Execute().Subscribe();
+    }
+
+    private void ExecutePasteSelectedAndHide(MainWindowViewModel viewModel)
+    {
+        viewModel.PasteSelectedCommand.Execute().Subscribe();
+        MinimizeWindow();
     }
 
     private static bool TryHandleEditedClipShortcut(MainWindowViewModel viewModel, KeyEventArgs e)
@@ -845,6 +879,18 @@ public partial class MainWindow : Window
 
     private void ShowOwnedWindow(Window window)
     {
+        if (!IsVisible)
+        {
+            Show();
+
+            if (WindowState == WindowState.Minimized)
+            {
+                WindowState = WindowState.Normal;
+            }
+
+            Activate();
+        }
+
         if (!window.IsVisible)
         {
             window.Show(this);
@@ -856,5 +902,18 @@ public partial class MainWindow : Window
         }
 
         window.Activate();
+    }
+
+    internal void RestoreOwnedWindowsForCurrentState()
+    {
+        if (m_subscribedViewModel?.IsSettingsOpen == true)
+        {
+            UpdateSettingsWindowVisibility(true);
+        }
+
+        if (m_subscribedSessionLogs?.IsOpen == true)
+        {
+            UpdateSessionLogsWindowVisibility(true);
+        }
     }
 }

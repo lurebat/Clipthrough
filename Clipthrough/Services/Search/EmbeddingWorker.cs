@@ -169,14 +169,26 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
         {
             await _clipStore.SaveEmbeddingBatchAsync(records, ModelVersion, cancellationToken).ConfigureAwait(false);
             _batchCompleted.OnNext(records.Count);
+            return records.Count;
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             Trace.TraceError($"Embedding persist failed: {ex}");
+            foreach (var c in candidates)
+            {
+                try
+                {
+                    await _clipStore.SetEmbeddingFailureAsync(c.ClipId, ex.Message, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception inner)
+                {
+                    Trace.TraceError($"Failed to flag embedding persist failure for clip {c.ClipId}: {inner}");
+                }
+            }
         }
 
-        return candidates.Count;
+        return 0;
     }
 
     public void Dispose()

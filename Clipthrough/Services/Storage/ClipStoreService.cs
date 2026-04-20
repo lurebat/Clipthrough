@@ -55,6 +55,14 @@ public sealed class ClipStoreService : IClipStoreService
     private readonly ISettingsService _settingsService;
     private readonly IAppNotificationService _notificationService;
 
+    // Cached aggregate stats to avoid running COUNT/SUM on every refresh.
+    private int _cachedTotalClipCount = -1;
+    private int _cachedSensitiveClipCount = -1;
+    private long _cachedTotalStoredBytes = -1;
+    private DateTimeOffset? _cachedLastCapturedAt;
+    private long _statsVersion;
+    private long _cachedStatsSnapshotVersion = -1;
+
     public ClipStoreService(SqliteConnectionFactory connectionFactory, ISensitivityService sensitivityService, ISettingsService settingsService, IAppNotificationService notificationService)
     {
         _connectionFactory = connectionFactory;
@@ -62,6 +70,8 @@ public sealed class ClipStoreService : IClipStoreService
         _settingsService = settingsService;
         _notificationService = notificationService;
     }
+
+    private void InvalidateStatsCache() => Interlocked.Increment(ref _statsVersion);
 
     public async Task<ClipEntry?> CaptureAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default)
     {
@@ -129,19 +139,35 @@ public sealed class ClipStoreService : IClipStoreService
         await LoadSensitivityMatchesAsync(connection, items, cancellationToken);
 
         var totalMatchingCount = await ExecuteCountAsync(connection, $"SELECT COUNT(*) {fromClause} {whereClause};", filters, hasSearch, cancellationToken);
-        var totalClipCount = await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips;", cancellationToken);
-        var sensitiveClipCount = await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips WHERE is_sensitive = 1;", cancellationToken);
-        var totalStoredBytes = await ExecuteScalarLongAsync(connection, "SELECT COALESCE(SUM(byte_size), 0) FROM clips;", cancellationToken);
-        var lastCapturedAt = await ExecuteScalarStringAsync(connection, "SELECT MAX(COALESCE(last_copied_at, captured_at)) FROM clips;", cancellationToken);
+
+        // Use cached aggregate stats when available; refresh them only when version has changed.
+        var versionBefore = Interlocked.Read(ref _statsVersion);
+        if (_cachedTotalClipCount < 0 || versionBefore != _cachedStatsSnapshotVersion)
+        {
+            var totalClips = await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips;", cancellationToken);
+            var sensitiveClips = await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips WHERE is_sensitive = 1;", cancellationToken);
+            var storedBytes = await ExecuteScalarLongAsync(connection, "SELECT COALESCE(SUM(byte_size), 0) FROM clips;", cancellationToken);
+            var lastCapturedAtStr = await ExecuteScalarStringAsync(connection, "SELECT MAX(COALESCE(last_copied_at, captured_at)) FROM clips;", cancellationToken);
+
+            // Only publish if no concurrent invalidation happened during the queries.
+            if (Interlocked.Read(ref _statsVersion) == versionBefore)
+            {
+                _cachedTotalClipCount = totalClips;
+                _cachedSensitiveClipCount = sensitiveClips;
+                _cachedTotalStoredBytes = storedBytes;
+                _cachedLastCapturedAt = ParseTimestamp(lastCapturedAtStr);
+                _cachedStatsSnapshotVersion = versionBefore;
+            }
+        }
 
         return new ClipSearchResult
         {
             Items = items,
             TotalMatchingCount = totalMatchingCount,
-            TotalClipCount = totalClipCount,
-            SensitiveClipCount = sensitiveClipCount,
-            TotalStoredBytes = totalStoredBytes,
-            LastCapturedAt = ParseTimestamp(lastCapturedAt),
+            TotalClipCount = _cachedTotalClipCount,
+            SensitiveClipCount = _cachedSensitiveClipCount,
+            TotalStoredBytes = _cachedTotalStoredBytes,
+            LastCapturedAt = _cachedLastCapturedAt,
         };
     }
 
@@ -182,6 +208,7 @@ public sealed class ClipStoreService : IClipStoreService
         command.CommandText = "DELETE FROM clips WHERE id = $id;";
         command.Parameters.AddWithValue("$id", clipId);
         await command.ExecuteNonQueryAsync(cancellationToken);
+        InvalidateStatsCache();
     }
 
     public async Task ClearSensitivityAsync(long clipId, CancellationToken cancellationToken = default)
@@ -207,6 +234,7 @@ public sealed class ClipStoreService : IClipStoreService
         }
 
         await transaction.CommitAsync(cancellationToken);
+        InvalidateStatsCache();
     }
 
     public async Task SetSensitiveAsync(long clipId, bool isSensitive, CancellationToken cancellationToken = default)
@@ -247,6 +275,7 @@ public sealed class ClipStoreService : IClipStoreService
         }
 
         await transaction.CommitAsync(cancellationToken);
+        InvalidateStatsCache();
     }
 
     public async Task MarkPastedAsync(long clipId, CancellationToken cancellationToken = default)
@@ -267,6 +296,7 @@ public sealed class ClipStoreService : IClipStoreService
         command.Parameters.AddWithValue("$id", clipId);
         command.Parameters.AddWithValue("$pastedAt", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
         await command.ExecuteNonQueryAsync(cancellationToken);
+        InvalidateStatsCache();
     }
 
     public async Task<bool> TryClaimForOcrAsync(long clipId, CancellationToken cancellationToken = default)
@@ -330,6 +360,7 @@ public sealed class ClipStoreService : IClipStoreService
         }
 
         await transaction.CommitAsync(cancellationToken);
+        if (rows > 0) InvalidateStatsCache();
         return rows > 0;
     }
 
@@ -491,6 +522,7 @@ public sealed class ClipStoreService : IClipStoreService
         }
 
         await transaction.CommitAsync(cancellationToken);
+        InvalidateStatsCache();
 
         return new ClipMaintenanceResult
         {
@@ -554,6 +586,7 @@ public sealed class ClipStoreService : IClipStoreService
         }
 
         await transaction.CommitAsync(cancellationToken);
+        InvalidateStatsCache();
     }
 
     public async Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default)
@@ -766,7 +799,11 @@ public sealed class ClipStoreService : IClipStoreService
         await AddSensitivityMatchesAsync(connection, transaction, clipId, matches, cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
-        await ApplyMaintenanceAsync(cancellationToken);
+        InvalidateStatsCache();
+        if (!request.SkipPostInsertMaintenance)
+        {
+            await ApplyMaintenanceAsync(cancellationToken);
+        }
         return await GetClipByIdAsync(connection, clipId, cancellationToken);
     }
 
@@ -812,19 +849,14 @@ public sealed class ClipStoreService : IClipStoreService
 
         await LoadSensitivityMatchesAsync(connection, items, cancellationToken);
 
-        var totalClipCount = await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips;", cancellationToken);
-        var sensitiveClipCount = await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips WHERE is_sensitive = 1;", cancellationToken);
-        var totalStoredBytes = await ExecuteScalarLongAsync(connection, "SELECT COALESCE(SUM(byte_size), 0) FROM clips;", cancellationToken);
-        var lastCapturedAt = await ExecuteScalarStringAsync(connection, "SELECT MAX(COALESCE(last_copied_at, captured_at)) FROM clips;", cancellationToken);
-
         return new ClipSearchResult
         {
             Items = items,
             TotalMatchingCount = totalMatchingCount,
-            TotalClipCount = totalClipCount,
-            SensitiveClipCount = sensitiveClipCount,
-            TotalStoredBytes = totalStoredBytes,
-            LastCapturedAt = ParseTimestamp(lastCapturedAt),
+            TotalClipCount = _cachedTotalClipCount >= 0 ? _cachedTotalClipCount : await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips;", cancellationToken),
+            SensitiveClipCount = _cachedSensitiveClipCount >= 0 ? _cachedSensitiveClipCount : await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips WHERE is_sensitive = 1;", cancellationToken),
+            TotalStoredBytes = _cachedTotalStoredBytes >= 0 ? _cachedTotalStoredBytes : await ExecuteScalarLongAsync(connection, "SELECT COALESCE(SUM(byte_size), 0) FROM clips;", cancellationToken),
+            LastCapturedAt = _cachedLastCapturedAt,
         };
     }
 
@@ -1453,12 +1485,14 @@ public sealed class ClipStoreService : IClipStoreService
             var bytes = new byte[record.Vector.Length * sizeof(float)];
             Buffer.BlockCopy(record.Vector, 0, bytes, 0, bytes.Length);
 
+            var embeddingSaved = false;
             await using (var upsert = connection.CreateCommand())
             {
                 upsert.Transaction = transaction;
                 upsert.CommandText = """
                     INSERT INTO clip_embeddings (clip_id, model_version, dimensions, vector, created_at)
-                    VALUES ($id, $model, $dim, $vec, $at)
+                    SELECT $id, $model, $dim, $vec, $at
+                    WHERE EXISTS (SELECT 1 FROM clips WHERE id = $id)
                     ON CONFLICT(clip_id) DO UPDATE SET
                         model_version = excluded.model_version,
                         dimensions    = excluded.dimensions,
@@ -1470,7 +1504,12 @@ public sealed class ClipStoreService : IClipStoreService
                 upsert.Parameters.AddWithValue("$dim", record.Vector.Length);
                 upsert.Parameters.AddWithValue("$vec", bytes);
                 upsert.Parameters.AddWithValue("$at", now);
-                await upsert.ExecuteNonQueryAsync(cancellationToken);
+                embeddingSaved = await upsert.ExecuteNonQueryAsync(cancellationToken) > 0;
+            }
+
+            if (!embeddingSaved)
+            {
+                continue;
             }
 
             await using (var status = connection.CreateCommand())

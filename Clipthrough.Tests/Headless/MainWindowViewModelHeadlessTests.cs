@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Text;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Headless.XUnit;
 using Avalonia.Media.Imaging;
@@ -34,13 +36,73 @@ public sealed class MainWindowViewModelHeadlessTests
 
         var firstClip = await CaptureTextClipAsync(scope.ClipStoreService, "first");
         clipboardMonitor.Emit(firstClip);
+        await Task.Delay(200);
         Dispatcher.UIThread.RunJobs();
 
         var secondClip = await CaptureTextClipAsync(scope.ClipStoreService, "second");
         clipboardMonitor.Emit(secondClip);
-        Dispatcher.UIThread.RunJobs();
+        for (var attempt = 0; attempt < 10 && viewModel.SelectedClip?.Id != secondClip.Id; attempt++)
+        {
+            await Task.Delay(100);
+            Dispatcher.UIThread.RunJobs();
+        }
 
         Assert.Equal(secondClip.Id, viewModel.SelectedClip?.Id);
+    }
+
+    [AvaloniaFact]
+    public async Task CapturedClipRefresh_BurstsCoalesceIntoLatestRefresh()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        var clipStore = new SlowSearchClipStore();
+        using var viewModel = new MainWindowViewModel(
+            clipStore,
+            clipboardMonitor,
+            new TestClipSampleDataService(),
+            scope.SettingsService,
+            systemInteraction,
+            scope.StorageOptionsService,
+            scope.SensitivityService,
+            scope.NotificationService,
+            sessionLogService,
+            scope.ClipExportService,
+            new TestImageEditorService(),
+            scope.SearchHistoryService,
+            new TestAiTransformService(),
+            new Clipthrough.Services.ScriptingService(),
+            new TestOcrService(),
+            new NoOpBackgroundOcrQueue(),
+            new Clipthrough.Services.BackgroundJobIndicator(),
+            scope.DatabaseInitializer);
+
+        await viewModel.InitializeAsync();
+
+        for (var i = 1; i <= 6; i++)
+        {
+            var clip = new ClipEntry
+            {
+                Id = i,
+                Content = $"clip {i}",
+                ContentBytes = Encoding.UTF8.GetBytes($"clip {i}"),
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                SourceApp = "Tests",
+                Hash = $"hash-{i}",
+            };
+            clipStore.Upsert(clip);
+            clipboardMonitor.Emit(clip);
+        }
+
+        await Task.Delay(500);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(6, viewModel.SelectedClip?.Id);
+        Assert.InRange(clipStore.SearchCallCount, 2, 4);
+        Assert.Equal(1, clipStore.MaxConcurrentSearches);
     }
 
     [AvaloniaFact]
@@ -590,6 +652,94 @@ public sealed class MainWindowViewModelHeadlessTests
         public Task StopAsync() => Task.CompletedTask;
         public void Enqueue(long clipId) { }
         public Task EnqueueBacklogAsync(System.Threading.CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class SlowSearchClipStore : IClipStoreService
+    {
+        private readonly object _sync = new();
+        private readonly List<ClipEntry> _items = [];
+        private int _activeSearches;
+        private int _searchCallCount;
+
+        public int SearchCallCount => _searchCallCount;
+
+        public int MaxConcurrentSearches { get; private set; }
+
+        public void Upsert(ClipEntry clip)
+        {
+            lock (_sync)
+            {
+                _items.RemoveAll(item => item.Id == clip.Id);
+                _items.Add(clip);
+            }
+        }
+
+        public async Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default)
+        {
+            var active = Interlocked.Increment(ref _activeSearches);
+            MaxConcurrentSearches = Math.Max(MaxConcurrentSearches, active);
+            Interlocked.Increment(ref _searchCallCount);
+
+            try
+            {
+                await Task.Delay(120, cancellationToken);
+                List<ClipEntry> snapshot;
+                lock (_sync)
+                {
+                    snapshot = _items
+                        .OrderByDescending(item => item.Id)
+                        .Skip(filters.Offset)
+                        .Take(filters.Limit)
+                        .ToList();
+                }
+
+                return new ClipSearchResult
+                {
+                    Items = snapshot,
+                    TotalMatchingCount = snapshot.Count,
+                    TotalClipCount = _items.Count,
+                    SensitiveClipCount = 0,
+                    TotalStoredBytes = snapshot.Sum(static item => item.ByteSize),
+                    LastCapturedAt = null,
+                };
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeSearches);
+            }
+        }
+
+        public Task<ClipEntry?> CaptureAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task SetFavoriteAsync(long clipId, bool isFavorite, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task SetPinnedAsync(long clipId, bool isPinned, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task DeleteAsync(long clipId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task ClearSensitivityAsync(long clipId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task SetSensitiveAsync(long clipId, bool isSensitive, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task MarkPastedAsync(long clipId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> TryClaimForOcrAsync(long clipId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> SetOcrResultAsync(long clipId, string ocrText, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> SetOcrFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<long>> GetPendingOcrClipIdsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> MarkOcrForRerunAsync(long clipId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<long>> MarkAllSucceededForRerunAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default) => Task.FromResult(new OcrCoverage(0, 0, 0, 0, 0));
+        public Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default) => Task.FromResult(new ClipMaintenanceResult());
+        public Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<ClipEntry>> GetByIdsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default)
+        {
+            lock (_sync)
+            {
+                return Task.FromResult<IReadOnlyList<ClipEntry>>(_items.Where(item => clipIds.Contains(item.Id)).ToList());
+            }
+        }
+        public Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task SaveEmbeddingBatchAsync(IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> SetEmbeddingFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default) => Task.FromResult(new EmbeddingCoverage(0, 0, 0, 0, 0));
+        public Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private static async Task PrepareInitializedScopeAsync(TemporaryDatabaseScope scope)

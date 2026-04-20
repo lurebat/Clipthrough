@@ -68,6 +68,14 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     private bool _isChecked;
     private int _displayIndex;
+    private readonly string _title;
+    private readonly string _previewSnippet;
+    private readonly string _singleLinePreview;
+    private string? _fullContent;
+    private Bitmap? _sourceAppIconImage;
+    private Bitmap? _previewThumbnailImage;
+    private bool _sourceAppIconLoaded;
+    private bool _previewThumbnailLoaded;
 
     public ClipItemViewModel(
         ClipEntry clip,
@@ -79,8 +87,9 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         Func<ClipItemViewModel, TextTransformation, Task>? applyTransformHandler = null)
     {
         Clip = clip;
-        SourceAppIconImage = ClipBitmapFactory.TryLoad(clip.SourceAppIconBytes);
-        PreviewThumbnailImage = clip.ContentType == ContentType.Image ? ClipBitmapFactory.TryLoad(clip.ContentBytes) : null;
+        _title = ClipDisplayFormatter.BuildTitle(clip);
+        _previewSnippet = ClipDisplayFormatter.BuildPreviewSnippet(clip);
+        _singleLinePreview = ClipDisplayFormatter.BuildSingleLinePreview(clip);
         CopyCommand = ReactiveCommand.CreateFromTask(
             async () =>
             {
@@ -177,15 +186,15 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     public IBrush DisplayIndexForeground => IsShortcutIndexed ? s_shortcutIndexForeground : s_normalIndexForeground;
 
-    public string Title => ClipDisplayFormatter.BuildTitle(Clip);
+    public string Title => _title;
 
     public string Preview => Clip.Content;
 
-    public string PreviewSnippet => ClipDisplayFormatter.BuildPreviewSnippet(Clip);
+    public string PreviewSnippet => _previewSnippet;
 
-    public string SingleLinePreview => ClipDisplayFormatter.BuildSingleLinePreview(Clip);
+    public string SingleLinePreview => _singleLinePreview;
 
-    public string FullContent => ClipDisplayFormatter.GetRawContentDisplay(Clip);
+    public string FullContent => _fullContent ??= ClipDisplayFormatter.GetRawContentDisplay(Clip);
 
     public string DisplayContentType => Clip.ContentType.ToDisplayName();
 
@@ -252,15 +261,43 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     public string PasteCountDisplay => Clip.PasteCount > 0 ? $"Pasted {Clip.PasteCount}x" : string.Empty;
 
-    public Bitmap? SourceAppIconImage { get; }
+    public Bitmap? SourceAppIconImage
+    {
+        get
+        {
+            if (_sourceAppIconLoaded)
+            {
+                return _sourceAppIconImage;
+            }
 
-    public bool HasSourceAppIcon => SourceAppIconImage is not null;
+            _sourceAppIconLoaded = true;
+            _sourceAppIconImage = ClipBitmapFactory.TryLoad(Clip.SourceAppIconBytes);
+            return _sourceAppIconImage;
+        }
+    }
+
+    public bool HasSourceAppIcon => Clip.SourceAppIconBytes is { Length: > 0 };
 
     public bool ShowTypeGlyph => !HasSourceAppIcon;
 
-    public Bitmap? PreviewThumbnailImage { get; }
+    public Bitmap? PreviewThumbnailImage
+    {
+        get
+        {
+            if (_previewThumbnailLoaded)
+            {
+                return _previewThumbnailImage;
+            }
 
-    public bool ShowPreviewThumbnail => PreviewThumbnailImage is not null;
+            _previewThumbnailLoaded = true;
+            _previewThumbnailImage = Clip.ContentType == ContentType.Image
+                ? ClipBitmapFactory.TryLoad(Clip.ContentBytes)
+                : null;
+            return _previewThumbnailImage;
+        }
+    }
+
+    public bool ShowPreviewThumbnail => Clip.ContentType == ContentType.Image && Clip.ContentBytes is { Length: > 0 };
 
     public bool ShowTextPreview => !ShowPreviewThumbnail;
 
@@ -424,8 +461,8 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
-        PreviewThumbnailImage?.Dispose();
-        SourceAppIconImage?.Dispose();
+        _previewThumbnailImage?.Dispose();
+        _sourceAppIconImage?.Dispose();
     }
 
     private static int GetSeverityRank(string? severity) => severity?.ToLowerInvariant() switch

@@ -65,6 +65,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly DatabaseInitializer _databaseInitializer;
     private readonly CompositeDisposable _subscriptions = new();
     private readonly Dictionary<long, (ClipEntry Clip, CancellationTokenSource Cts)> _pendingDeletes = new();
+    private readonly object _refreshQueueLock = new();
 
     private DateTimeOffset? _lastCapturedAtRaw;
     private bool _suppressEditAutoSave;
@@ -94,10 +95,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _lastCaptureSummary = AppText.WaitingForFirstCapture;
     private ContentDisplayMode _contentDisplayMode;
     private string _selectedClipRenderedText = AppText.PreviewSelectContent;
+    private string _selectedClipRawContent = AppText.PreviewSelectRawContent;
     private string _selectedClipImageHint = AppText.PreviewSelectImage;
     private bool _isStartupInProgress;
     private bool _isDatabaseReady;
     private bool _isStarted;
+    private bool _hasQueuedRefresh;
     private bool _isSettingsOpen;
     private bool _isWelcomeOpen;
     private bool _isPasswordPromptOpen;
@@ -110,6 +113,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _passwordPromptError = string.Empty;
     private bool _isPasswordPromptPasswordVisible;
     private bool _isDatabasePasswordVisible;
+    private Task _queuedRefreshTask = Task.CompletedTask;
+    private long? _queuedRefreshPreferredSelectionId;
     private string _settingsToggleRegexHotkey = AppSettings.Default.ToggleRegexHotkey;
     private bool _settingsEnableToggleRegexHotkey = AppSettings.Default.EnableToggleRegexHotkey;
     private string _settingsToggleFavoritesHotkey = AppSettings.Default.ToggleFavoritesHotkey;
@@ -225,6 +230,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         TogglePinCommand = ReactiveCommand.CreateFromTask(TogglePinAsync, hasSelection);
         DeleteSelectedCommand = ReactiveCommand.CreateFromTask(DeleteSelectedAsync, hasSelection);
         CopySelectedCommand = ReactiveCommand.CreateFromTask(CopySelectedAsync, hasSelection);
+        PasteSelectedCommand = ReactiveCommand.CreateFromTask(PasteSelectedAsync, hasSelection);
         ExportSelectedCommand = ReactiveCommand.CreateFromTask(ExportSelectedAsync, hasSelection);
         OpenInEditorCommand = ReactiveCommand.CreateFromTask(OpenInEditorAsync, hasSelection);
         CompareClipsCommand = ReactiveCommand.CreateFromTask(CompareClipsAsync);
@@ -365,7 +371,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         _subscriptions.Add(
             _clipboardMonitorService.CapturedClips
-                .ObserveOn(RxSchedulers.MainThreadScheduler)
                 .SelectMany(clip => Observable.FromAsync(() => RefreshAsync(clip.Id)))
                 .Subscribe(_ => { }, ex => StatusText = AppText.FormatErrorStatus(ex.Message)));
 
@@ -383,7 +388,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         _subscriptions.Add(
             _backgroundOcrQueue.OcrCompleted
-                .ObserveOn(RxSchedulers.MainThreadScheduler)
                 .SelectMany(id => Observable.FromAsync(() => RefreshAsync(id)))
                 .Subscribe(_ => { }, ex => Trace.TraceError($"OCR refresh failed: {ex}")));
 
@@ -402,6 +406,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .Merge(ToggleFavoriteCommand.ThrownExceptions)
                 .Merge(TogglePinCommand.ThrownExceptions)
                 .Merge(CopySelectedCommand.ThrownExceptions)
+                .Merge(PasteSelectedCommand.ThrownExceptions)
                 .Merge(ExportSelectedCommand.ThrownExceptions)
                 .Merge(OpenInEditorCommand.ThrownExceptions)
                 .Merge(CompareClipsCommand.ThrownExceptions)
@@ -443,6 +448,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> TogglePinCommand { get; }
 
     public ReactiveCommand<Unit, Unit> CopySelectedCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> PasteSelectedCommand { get; }
 
     public ReactiveCommand<Unit, Unit> ExportSelectedCommand { get; }
 
@@ -1300,7 +1307,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string SelectedClipRenderedText => _selectedClipRenderedText;
 
-    public string SelectedClipRawContent => ClipDisplayFormatter.GetRawContentDisplay(SelectedClip?.Clip);
+    public string SelectedClipRawContent => _selectedClipRawContent;
 
     public string RawContentSyntaxHint => SelectedClip?.Clip.ContentFormat switch
     {
@@ -2503,41 +2510,90 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         StatusText = AppText.FormatErrorStatus(ex.Message);
     }
 
-    private Task RefreshAsync() => RefreshAsync(null);
+    private Task RefreshAsync() => QueueRefreshAsync(null);
 
-    private async Task RefreshAsync(long? preferredSelectionId)
+    private Task RefreshAsync(long? preferredSelectionId) => QueueRefreshAsync(preferredSelectionId);
+
+    private Task QueueRefreshAsync(long? preferredSelectionId)
+    {
+        lock (_refreshQueueLock)
+        {
+            _hasQueuedRefresh = true;
+            if (preferredSelectionId.HasValue)
+            {
+                _queuedRefreshPreferredSelectionId = preferredSelectionId;
+            }
+
+            if (_queuedRefreshTask.IsCompleted)
+            {
+                _queuedRefreshTask = ProcessQueuedRefreshesAsync();
+            }
+
+            return _queuedRefreshTask;
+        }
+    }
+
+    private async Task ProcessQueuedRefreshesAsync()
+    {
+        while (true)
+        {
+            long? preferredSelectionId;
+            lock (_refreshQueueLock)
+            {
+                if (!_hasQueuedRefresh)
+                {
+                    _queuedRefreshTask = Task.CompletedTask;
+                    return;
+                }
+
+                _hasQueuedRefresh = false;
+                preferredSelectionId = _queuedRefreshPreferredSelectionId;
+                _queuedRefreshPreferredSelectionId = null;
+            }
+
+            await PerformRefreshAsync(preferredSelectionId).ConfigureAwait(false);
+        }
+    }
+
+    private async Task PerformRefreshAsync(long? preferredSelectionId)
     {
         if (!_isDatabaseReady)
         {
             return;
         }
 
-        IsBusy = true;
+        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => IsBusy = true);
         try
         {
-            var filters = BuildFilters(offset: 0);
-            var result = await _clipStoreService.SearchAsync(filters);
-            result = await ApplySemanticFusionAsync(filters, result);
-            ApplyRefreshResult(result, preferredSelectionId);
+            var request = await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => new RefreshRequest(BuildFilters(offset: 0), UseSemanticClipSearch));
+            var result = await SearchClipsAsync(request.Filters, request.UseSemanticClipSearch).ConfigureAwait(false);
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => ApplyRefreshResult(result, preferredSelectionId));
 
-            if (!string.IsNullOrWhiteSpace(filters.SearchText))
+            if (!string.IsNullOrWhiteSpace(request.Filters.SearchText))
             {
-                await _searchHistoryService.SaveSearchAsync(filters.SearchText);
+                await _searchHistoryService.SaveSearchAsync(request.Filters.SearchText).ConfigureAwait(false);
             }
         }
         finally
         {
-            IsBusy = false;
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => IsBusy = false);
         }
     }
 
-    private async Task<ClipSearchResult> ApplySemanticFusionAsync(ClipSearchFilters filters, ClipSearchResult ftsResult)
+    private Task<ClipSearchResult> SearchClipsAsync(ClipSearchFilters filters, bool useSemanticClipSearch)
+        => Task.Run(async () =>
+        {
+            var result = await _clipStoreService.SearchAsync(filters).ConfigureAwait(false);
+            return await ApplySemanticFusionAsync(filters, result, useSemanticClipSearch).ConfigureAwait(false);
+        });
+
+    private async Task<ClipSearchResult> ApplySemanticFusionAsync(ClipSearchFilters filters, ClipSearchResult ftsResult, bool useSemanticClipSearch)
     {
         if (_semanticSearchService is null)
         {
             return ftsResult;
         }
-        if (!UseSemanticClipSearch)
+        if (!useSemanticClipSearch)
         {
             return ftsResult;
         }
@@ -2643,18 +2699,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         IsBusy = true;
         try
         {
-            var result = await _clipStoreService.SearchAsync(BuildFilters(_currentOffset));
-            foreach (var item in result.Items.Select(clip => CreateClipItemViewModel(clip)))
+            var request = new RefreshRequest(BuildFilters(_currentOffset), UseSemanticClipSearch);
+            var result = await SearchClipsAsync(request.Filters, request.UseSemanticClipSearch).ConfigureAwait(false);
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
-                Clips.Add(item);
-            }
+                foreach (var item in result.Items.Select(clip => CreateClipItemViewModel(clip)))
+                {
+                    Clips.Add(item);
+                }
 
-            _currentOffset += result.Items.Count;
-            HasMoreResults = Clips.Count < result.TotalMatchingCount;
-            this.RaisePropertyChanged(nameof(HasNoClips));
-            RaiseBulkSelectionProperties();
-            UpdateStatus(result);
-            UpdateClipDisplayIndices();
+                _currentOffset += result.Items.Count;
+                HasMoreResults = Clips.Count < result.TotalMatchingCount;
+                this.RaisePropertyChanged(nameof(HasNoClips));
+                RaiseBulkSelectionProperties();
+                UpdateStatus(result);
+                UpdateClipDisplayIndices();
+            });
         }
         finally
         {
@@ -2675,12 +2735,28 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task CopySelectedAsync()
     {
+        _ = await TryCopySelectedAsync();
+    }
+
+    private async Task PasteSelectedAsync()
+    {
+        if (!await TryCopySelectedAsync())
+        {
+            return;
+        }
+
+        await Task.Delay(120);
+        _systemInteractionService.SimulatePasteKeystroke();
+    }
+
+    private async Task<bool> TryCopySelectedAsync()
+    {
         try
         {
             var clip = GetEffectiveSelectedClip();
             if (clip is null)
             {
-                return;
+                return false;
             }
 
             if (!ReferenceEquals(SelectedClip, clip))
@@ -2702,7 +2778,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 StatusText = AppText.CopiedImageStatus;
                 PublishSensitiveCopyNotificationIfNeeded(clip);
                 TrackPasteInBackground(clip.Clip.Id);
-                return;
+                return true;
             }
 
             if (clip.Clip.ContentType == ContentType.RichText)
@@ -2711,7 +2787,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 StatusText = AppText.FormatCopiedClip(clip.DisplayContentType.ToLower(AppText.CurrentCulture));
                 PublishSensitiveCopyNotificationIfNeeded(clip);
                 TrackPasteInBackground(clip.Clip.Id);
-                return;
+                return true;
             }
 
             var isFileList = clip.Clip.ContentType == ContentType.Files && SelectedClipFiles.Count > 0;
@@ -2725,11 +2801,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 : AppText.FormatCopiedClip(clip.DisplayContentType.ToLower(AppText.CurrentCulture));
             PublishSensitiveCopyNotificationIfNeeded(clip);
             TrackPasteInBackground(clip.Clip.Id);
+            return true;
         }
         catch (Exception ex)
         {
             Trace.TraceWarning($"Copy selected failed: {ex}");
             StatusText = $"Copy failed: {ex.Message}";
+            return false;
         }
     }
 
@@ -3809,8 +3887,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void UpdateSelectedClipPresentation()
     {
-        ReplaceSelectedClipFiles(ClipDisplayFormatter.BuildFileItems(SelectedClip?.FullContent));
-        _selectedClipRenderedText = ClipDisplayFormatter.BuildRenderedText(SelectedClip?.Clip, SelectedClipFiles.Select(static file => file.FilePath).ToArray());
+        var rawContent = SelectedClip?.FullContent ?? ClipDisplayFormatter.GetRawContentDisplay(null);
+        var fileItems = ClipDisplayFormatter.BuildFileItems(rawContent);
+        ReplaceSelectedClipFiles(fileItems);
+        _selectedClipRawContent = rawContent;
+        _selectedClipRenderedText = ClipDisplayFormatter.BuildRenderedText(SelectedClip?.Clip, fileItems);
         SyncEditedClipText();
 
         var hasImageBytes = SelectedClip?.Clip.ContentType == ContentType.Image
@@ -3970,9 +4051,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void FlushCurrentFilterState()
     {
+        _ = FlushCurrentFilterStateSafeAsync();
+    }
+
+    private async Task FlushCurrentFilterStateSafeAsync()
+    {
         try
         {
-            PersistCurrentFilterStateAsync().GetAwaiter().GetResult();
+            await PersistCurrentFilterStateAsync();
         }
         catch (Exception ex)
         {
@@ -5253,9 +5339,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private async Task LoadSensitivityRulesAsync()
     {
         var rules = _isDatabaseReady
-            ? await _sensitivityService.GetRulesAsync()
+            ? await Task.Run(async () => await _sensitivityService.GetRulesAsync().ConfigureAwait(false)).ConfigureAwait(false)
             : _sensitivityService.GetDefaultRules();
-        ReplaceSensitivityRules(rules);
+        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => ReplaceSensitivityRules(rules));
     }
 
     private void ReplaceSensitivityRules(IReadOnlyList<SensitivityRule> rules)
@@ -5348,7 +5434,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var maintenanceResult = await _clipStoreService.ApplyMaintenanceAsync();
+        var maintenanceResult = await Task.Run(async () => await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false)).ConfigureAwait(false);
         if (!forceRefresh && maintenanceResult.PurgedClipCount == 0)
         {
             return;
@@ -5944,5 +6030,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     private readonly record struct HotkeyDraft(string Name, bool IsEnabled, string HotkeyText);
+
+    private readonly record struct RefreshRequest(ClipSearchFilters Filters, bool UseSemanticClipSearch);
 
 }

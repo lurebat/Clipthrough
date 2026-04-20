@@ -224,6 +224,8 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
 
     public int BitmapCopyCount { get; private set; }
 
+    public int SimulatedPasteCount { get; private set; }
+
     public Task CopyTextAsync(string text)
     {
         LastCopiedText = text;
@@ -268,6 +270,7 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
 
     public void SimulatePasteKeystroke()
     {
+        SimulatedPasteCount++;
     }
 
     public void ShowNotification(AppNotification notification)

@@ -28,7 +28,17 @@ public sealed class SqliteConnectionFactory
             builder.Password = options.DatabasePassword;
         }
 
-        return new SqliteConnection(builder.ToString());
+        var connection = new SqliteConnection(builder.ToString());
+        connection.StateChange += (_, e) =>
+        {
+            if (e.CurrentState == System.Data.ConnectionState.Open)
+            {
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = "PRAGMA busy_timeout = 5000;";
+                cmd.ExecuteNonQuery();
+            }
+        };
+        return connection;
     }
 }
 
