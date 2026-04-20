@@ -3439,7 +3439,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         private set => this.RaiseAndSetIfChanged(ref _semanticCoverageText, value);
     }
 
-    public bool IsSemanticCoverageVisible => _embeddingWorker is not null && UseSemanticClipSearch && !string.IsNullOrEmpty(SemanticCoverageText);
+    public bool IsSemanticCoverageVisible => _embeddingWorker is not null && !string.IsNullOrEmpty(SemanticCoverageText);
 
     private string _ocrCoverageText = string.Empty;
     public string OcrCoverageText
