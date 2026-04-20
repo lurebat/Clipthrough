@@ -100,6 +100,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isStartupInProgress;
     private bool _isDatabaseReady;
     private bool _isStarted;
+    private bool _isLoadingDatabase;
     private bool _hasQueuedRefresh;
     private bool _isSettingsOpen;
     private bool _isWelcomeOpen;
@@ -824,6 +825,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get => _statusText;
         private set => this.RaiseAndSetIfChanged(ref _statusText, value);
+    }
+
+    public bool IsLoadingDatabase
+    {
+        get => _isLoadingDatabase;
+        private set => this.RaiseAndSetIfChanged(ref _isLoadingDatabase, value);
     }
 
     public bool HasRunningJobs
@@ -2494,15 +2501,39 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 return;
             }
 
-            await StartDatabaseAsync();
-            StatusText = AppText.LoadingStatus;
-            _ = ApplyMaintenanceAndRefreshAsync();
-
+            IsLoadingDatabase = true;
+            StatusText = "Loading clipboard library\u2026";
             _isStarted = true;
+
+            _ = StartDatabaseInBackgroundAsync();
         }
         finally
         {
             _isStartupInProgress = false;
+        }
+    }
+
+    private async Task StartDatabaseInBackgroundAsync()
+    {
+        try
+        {
+            await Task.Run(async () => await StartDatabaseAsync().ConfigureAwait(false)).ConfigureAwait(false);
+
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                IsLoadingDatabase = false;
+                StatusText = AppText.LoadingStatus;
+            });
+
+            _ = ApplyMaintenanceAndRefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                IsLoadingDatabase = false;
+                StatusText = AppText.FormatErrorStatus(ex.Message);
+            });
         }
     }
 
@@ -2816,7 +2847,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         try
         {
-            await _clipStoreService.MarkPastedAsync(clipId);
+            await Task.Run(() => _clipStoreService.MarkPastedAsync(clipId));
         }
         catch (Exception ex)
         {
@@ -4875,13 +4906,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await _settingsService.SaveAsync(settings);
         if (!_isDatabaseReady)
         {
-            await StartDatabaseAsync();
+            IsLoadingDatabase = true;
+            StatusText = "Loading clipboard library\u2026";
+            _ = StartDatabaseInBackgroundAsync();
+            return;
         }
 
         await Task.Run(async () =>
         {
+            var existingRules = await _sensitivityService.GetRulesAsync().ConfigureAwait(false);
             await _sensitivityService.SaveRulesAsync(sensitivityRules).ConfigureAwait(false);
-            await _clipStoreService.RebuildSensitivityMatchesAsync().ConfigureAwait(false);
+
+            if (SensitivityRulesChanged(existingRules, sensitivityRules))
+            {
+                await _clipStoreService.RebuildSensitivityMatchesAsync().ConfigureAwait(false);
+            }
         });
         _ = ApplyMaintenanceAndRefreshAsync();
 
@@ -5082,6 +5121,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _clipboardMonitorService.Start();
         _backgroundOcrQueue.Start();
         _ = Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync());
+        if (_embeddingWorker is not null)
+        {
+            _embeddingWorker.Start();
+        }
         StartMaintenanceLoop();
         _ = RefreshSemanticCoverageAsync();
         _ = RefreshOcrCoverageAsync();
@@ -5303,14 +5346,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var draftSettings = _settingsService.HasSavedSettings ? _settingsService.Current : AppSettings.Default;
             LoadSettingsDraft(draftSettings);
 
-            await StartDatabaseAsync();
-
-            // Close the prompt immediately so the user sees the main workspace
-            // while maintenance and initial refresh run in the background.
+            // Close the prompt immediately and show loading state.
             IsPasswordPromptOpen = false;
-            StatusText = AppText.LoadingStatus;
+            IsLoadingDatabase = true;
+            StatusText = "Loading clipboard library\u2026";
 
-            _ = ApplyMaintenanceAndRefreshAsync();
+            _ = StartDatabaseInBackgroundAsync();
         }
         catch (Exception ex)
         {
@@ -5394,6 +5435,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             IsEnabled = rule.IsEnabled,
             IsBuiltIn = rule.IsBuiltIn,
         };
+    }
+
+    private static bool SensitivityRulesChanged(IReadOnlyList<SensitivityRule> existing, IReadOnlyList<SensitivityRule> incoming)
+    {
+        if (existing.Count != incoming.Count)
+        {
+            return true;
+        }
+
+        for (int i = 0; i < existing.Count; i++)
+        {
+            var a = existing[i];
+            var b = incoming[i];
+            if (a.Name != b.Name || a.Pattern != b.Pattern || a.Severity != b.Severity || a.IsEnabled != b.IsEnabled)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void AddSensitivityRule()

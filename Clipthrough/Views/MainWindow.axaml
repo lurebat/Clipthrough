@@ -1403,6 +1403,27 @@
             </Grid>
         </Border>
 
+        <!-- Loading Database Overlay -->
+        <Border IsVisible="{Binding IsLoadingDatabase}"
+                Margin="10"
+                Classes="hero-surface"
+                Padding="28">
+            <StackPanel HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Spacing="16">
+                <TextBlock Classes="hero-title"
+                           HorizontalAlignment="Center"
+                           Text="Loading Clipboard Library" />
+                <ProgressBar IsIndeterminate="True"
+                             Width="240"
+                             HorizontalAlignment="Center" />
+                <TextBlock Classes="body-muted"
+                           HorizontalAlignment="Center"
+                           Text="{Binding StatusText}"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+        </Border>
+
         <!-- AI Prompt Panel -->
         <Border IsVisible="{Binding IsAiPromptOpen}"
                 Background="{DynamicResource ModalBackdropBrush}">

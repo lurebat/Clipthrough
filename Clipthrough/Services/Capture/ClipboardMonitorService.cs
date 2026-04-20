@@ -132,7 +132,15 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
 
         try
         {
-            var capturedClip = await CaptureClipboardChangeAsync(clipboard);
+            // Read clipboard data on the UI thread (COM requirement),
+            // but persist to DB on a background thread to avoid blocking.
+            var captureRequest = await BuildCaptureRequestFromClipboardAsync(clipboard);
+            if (captureRequest is null)
+            {
+                return;
+            }
+
+            var capturedClip = await Task.Run(() => _clipStoreService.CaptureAsync(captureRequest));
             if (capturedClip is not null)
             {
                 _capturedClips.OnNext(capturedClip);
@@ -155,7 +163,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
         }
     }
 
-    private async Task<ClipEntry?> CaptureClipboardChangeAsync(Avalonia.Input.Platform.IClipboard clipboard)
+    private async Task<ClipCaptureRequest?> BuildCaptureRequestFromClipboardAsync(Avalonia.Input.Platform.IClipboard clipboard)
     {
         for (var attempt = 0; ; attempt++)
         {
@@ -186,7 +194,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                 }
 
                 Trace.TraceInformation($"Clipboard capture selected {captureRequest.ContentType}/{captureRequest.ContentFormat} bytes={captureRequest.ContentBytes.Length} source={captureRequest.SourceApp ?? "Unknown"}");
-                return await _clipStoreService.CaptureAsync(captureRequest);
+                return captureRequest;
             }
             catch (COMException ex) when (attempt < ClipboardRetryDelays.Length)
             {

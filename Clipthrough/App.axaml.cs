@@ -86,13 +86,13 @@ public partial class App : Application
                 .Subscribe(OnNotificationPublished);
 
             _embeddingWorker = Services.GetRequiredService<Clipthrough.Services.Search.IEmbeddingWorker>();
-            _embeddingWorker.Start();
+            // Don't start the embedding worker here — it's started in StartDatabaseAsync
+            // after the DB is initialized and password is set.
             _embeddingWorkerCaptureSubscription = _clipboardMonitorService.CapturedClips
                 .Subscribe(_ => _embeddingWorker.Poke());
             var semanticSearch = Services.GetRequiredService<Clipthrough.Services.Search.ISemanticSearchService>();
             _embeddingWorkerBatchSubscription = _embeddingWorker.BatchCompleted
                 .Subscribe((int count) => { _ = semanticSearch.RefreshCacheAsync(); });
-            _ = semanticSearch.RefreshCacheAsync();
 
             StartApplicationAsync(mainWindowViewModel);
         }
