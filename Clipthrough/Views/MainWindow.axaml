@@ -211,6 +211,12 @@
                                   SelectedItem="{Binding SelectedSortOption}"
                                   MinWidth="120"
                                   ToolTip.Tip="Sort order" />
+                        <ProgressBar Grid.Column="6"
+                                     IsIndeterminate="True"
+                                     IsVisible="{Binding IsBusy}"
+                                     Height="2"
+                                     Margin="0,0,0,-2"
+                                     VerticalAlignment="Bottom" />
                     </Grid>
 
                     <Grid Grid.Row="1">
@@ -506,7 +512,7 @@
                                     IsVisible="{Binding IsSemanticCoverageVisible}"
                                     Background="{DynamicResource StatusChipSemanticBg}"
                                     BorderBrush="{DynamicResource StatusChipSemanticBorder}"
-                                    ToolTip.Tip="Semantic embedding coverage. Click to refresh.">
+                                    ToolTip.Tip="{Binding SemanticCoverageText}">
                                 <TextBlock Text="{Binding SemanticCoverageText}"
                                            Foreground="{DynamicResource StatusChipSemanticFg}"
                                            TextTrimming="CharacterEllipsis"
@@ -517,7 +523,7 @@
                                     IsVisible="{Binding IsOcrCoverageVisible}"
                                     Background="{DynamicResource StatusChipOcrBg}"
                                     BorderBrush="{DynamicResource StatusChipOcrBorder}"
-                                    ToolTip.Tip="Background OCR coverage for image clips.">
+                                    ToolTip.Tip="{Binding OcrCoverageText}">
                                 <TextBlock Text="{Binding OcrCoverageText}"
                                            Foreground="{DynamicResource StatusChipOcrFg}"
                                            TextTrimming="CharacterEllipsis"
@@ -1082,7 +1088,8 @@
                             BorderBrush="#7C3AED"
                             BorderThickness="1"
                             VerticalAlignment="Center"
-                            IsVisible="{Binding HasRunningJobs}">
+                            IsVisible="{Binding HasRunningJobs}"
+                            ToolTip.Tip="{Binding RunningJobsLabel}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <TextBlock Text="⏳"
                                        VerticalAlignment="Center"

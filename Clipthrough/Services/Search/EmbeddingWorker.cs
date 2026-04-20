@@ -29,7 +29,6 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
 
     private readonly IClipStoreService _clipStore;
     private readonly IEmbeddingService _embeddingService;
-    private readonly IBackgroundJobIndicator _jobIndicator;
     private readonly SemaphoreSlim _wake = new(0, 1);
     private readonly Subject<int> _batchCompleted = new();
     private CancellationTokenSource _cts = new();
@@ -41,7 +40,6 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
     {
         _clipStore = clipStore;
         _embeddingService = embeddingService;
-        _jobIndicator = jobIndicator;
     }
 
     public IObservable<int> BatchCompleted => _batchCompleted.AsObservable();
@@ -130,8 +128,6 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
         }
 
         if (candidates.Count == 0) return 0;
-
-        using var job = _jobIndicator.Begin($"Embedding {candidates.Count} clip{(candidates.Count == 1 ? "" : "s")}");
 
         IReadOnlyList<float[]> vectors;
         try
