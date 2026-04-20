@@ -3470,7 +3470,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             else
             {
                 var pct = (int)Math.Round(100.0 * coverage.Embedded / eligible);
-                var suffix = coverage.Failed > 0 ? $" · {coverage.Failed} failed" : string.Empty;
+                var suffixParts = new List<string>();
+                if (coverage.Pending > 0)
+                {
+                    suffixParts.Add($"{coverage.Pending} queued");
+                }
+                if (coverage.Failed > 0)
+                {
+                    suffixParts.Add($"{coverage.Failed} failed");
+                }
+
+                var suffix = suffixParts.Count > 0
+                    ? $" · {string.Join(" · ", suffixParts)}"
+                    : string.Empty;
                 SemanticCoverageText = $"Semantic: {coverage.Embedded}/{eligible} ({pct}%){suffix}";
             }
         }
@@ -4866,9 +4878,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             await StartDatabaseAsync();
         }
 
-        await _sensitivityService.SaveRulesAsync(sensitivityRules);
-        await _clipStoreService.RebuildSensitivityMatchesAsync();
-        await ApplyMaintenanceAndRefreshAsync();
+        await Task.Run(async () =>
+        {
+            await _sensitivityService.SaveRulesAsync(sensitivityRules).ConfigureAwait(false);
+            await _clipStoreService.RebuildSensitivityMatchesAsync().ConfigureAwait(false);
+        });
+        _ = ApplyMaintenanceAndRefreshAsync();
 
         if (_isDatabaseReady && _ocrService.IsAvailable)
         {

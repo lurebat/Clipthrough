@@ -32,7 +32,7 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
     private readonly IBackgroundJobIndicator _jobIndicator;
     private readonly SemaphoreSlim _wake = new(0, 1);
     private readonly Subject<int> _batchCompleted = new();
-    private readonly CancellationTokenSource _cts = new();
+    private CancellationTokenSource _cts = new();
     private Task? _loop;
     private bool _started;
     private bool _disposed;
@@ -48,14 +48,17 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
 
     public void Start()
     {
-        if (_started || _disposed) return;
+        if (_disposed) return;
+        if (_started) return;
         _started = true;
+        _cts = new CancellationTokenSource();
         _loop = Task.Run(() => RunAsync(_cts.Token));
     }
 
     public async Task StopAsync()
     {
         if (!_started) return;
+        _started = false;
         _cts.Cancel();
         try { if (_wake.CurrentCount == 0) _wake.Release(); } catch { }
         try
@@ -63,6 +66,7 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
             if (_loop is not null) await _loop.ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }
+        _loop = null;
     }
 
     public void Poke()

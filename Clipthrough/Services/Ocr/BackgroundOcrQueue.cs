@@ -16,7 +16,7 @@ public sealed class BackgroundOcrQueue : IBackgroundOcrQueue, IDisposable
     private readonly IClipStoreService _clipStoreService;
     private readonly IOcrService _ocrService;
     private readonly ISettingsService _settingsService;
-    private readonly Channel<long> _channel = Channel.CreateUnbounded<long>(new UnboundedChannelOptions
+    private Channel<long> _channel = Channel.CreateUnbounded<long>(new UnboundedChannelOptions
     {
         SingleReader = true,
         SingleWriter = false,
@@ -24,7 +24,7 @@ public sealed class BackgroundOcrQueue : IBackgroundOcrQueue, IDisposable
     private readonly ConcurrentDictionary<long, byte> _inflight = new();
     private readonly Subject<long> _completed = new();
     private readonly Subject<Unit> _queueChanged = new();
-    private readonly CancellationTokenSource _cts = new();
+    private CancellationTokenSource _cts = new();
     private Task? _worker;
     private bool _started;
     private bool _disposed;
@@ -42,11 +42,15 @@ public sealed class BackgroundOcrQueue : IBackgroundOcrQueue, IDisposable
 
     public void Start()
     {
-        if (_started || _disposed)
-        {
-            return;
-        }
+        if (_disposed) return;
+        if (_started) return;
         _started = true;
+        _cts = new CancellationTokenSource();
+        _channel = Channel.CreateUnbounded<long>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false,
+        });
         _worker = Task.Run(() => RunAsync(_cts.Token));
     }
 
@@ -56,6 +60,7 @@ public sealed class BackgroundOcrQueue : IBackgroundOcrQueue, IDisposable
         {
             return;
         }
+        _started = false;
         _channel.Writer.TryComplete();
         _cts.Cancel();
         try
@@ -68,6 +73,7 @@ public sealed class BackgroundOcrQueue : IBackgroundOcrQueue, IDisposable
         catch (OperationCanceledException)
         {
         }
+        _worker = null;
     }
 
     public void Enqueue(long clipId)
