@@ -2495,7 +2495,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
 
             await StartDatabaseAsync();
-            await ApplyMaintenanceAndRefreshAsync();
+            StatusText = AppText.LoadingStatus;
+            _ = ApplyMaintenanceAndRefreshAsync();
 
             _isStarted = true;
         }
@@ -3460,7 +3461,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         try
         {
-            var coverage = await _embeddingWorker.GetCoverageAsync();
+            var coverage = await Task.Run(() => _embeddingWorker.GetCoverageAsync());
             var eligible = coverage.EligibleTotal;
             if (eligible <= 0)
             {
@@ -3491,7 +3492,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         try
         {
-            var coverage = await _clipStoreService.GetOcrCoverageAsync();
+            var coverage = await Task.Run(() => _clipStoreService.GetOcrCoverageAsync());
             if (coverage.EligibleTotal <= 0)
             {
                 OcrCoverageText = "No images to OCR yet";
@@ -4567,6 +4568,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         IsImportingClipAngel = true;
         ClipAngelImportProcessed = 0;
         ClipAngelImportTotal = 0;
+
+        // Pause background workers to avoid write contention during bulk import.
+        await _backgroundOcrQueue.StopAsync();
+        if (_embeddingWorker is not null)
+            await _embeddingWorker.StopAsync();
+
         try
         {
             var progress = new Progress<ClipAngelImportProgress>(p =>
@@ -4575,7 +4582,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 ClipAngelImportTotal = p.Total;
                 StatusText = AppText.FormatClipAngelImportProgress(p.Processed, p.Total);
             });
-            var result = await _clipAngelImportService.ImportAsync(path!, progress);
+            var result = await Task.Run(() => _clipAngelImportService.ImportAsync(path!, progress));
             var msg = AppText.FormatClipAngelImportSuccess(result.Imported, result.Skipped, result.Failed);
             StatusText = msg;
             _notificationService.PublishInfo(AppText.SettingsClipAngelImportTitle, msg);
@@ -4588,6 +4595,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         finally
         {
+            // Resume background workers.
+            _backgroundOcrQueue.Start();
+            _embeddingWorker?.Start();
+
             IsBusy = false;
             IsImportingClipAngel = false;
         }
@@ -5278,9 +5289,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             LoadSettingsDraft(draftSettings);
 
             await StartDatabaseAsync();
-            await ApplyMaintenanceAndRefreshAsync();
 
+            // Close the prompt immediately so the user sees the main workspace
+            // while maintenance and initial refresh run in the background.
             IsPasswordPromptOpen = false;
+            StatusText = AppText.LoadingStatus;
+
+            _ = ApplyMaintenanceAndRefreshAsync();
         }
         catch (Exception ex)
         {

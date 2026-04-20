@@ -686,6 +686,110 @@ public sealed class ClipStoreService : IClipStoreService
         return ReadClip(reader);
     }
 
+    public async Task<BulkCaptureResult> CaptureBatchAsync(IReadOnlyList<ClipCaptureRequest> requests, CancellationToken cancellationToken = default)
+    {
+        if (requests.Count == 0)
+            return new BulkCaptureResult(0, 0);
+
+        int imported = 0, skipped = 0;
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        using var transaction = connection.BeginTransaction();
+
+        foreach (var request in requests)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (request.ContentBytes.Length == 0 || request.ContentBytes.Length > _settingsService.Current.MaxClipSizeBytes)
+            {
+                skipped++;
+                continue;
+            }
+
+            var contentText = BuildStoredContentText(request);
+            var hash = ComputeHash(request.ContentType, request.ContentFormat, request.ContentBytes);
+            var matches = _sensitivityService.Scan(contentText);
+            var capturedAt = (request.CapturedAtOverride ?? DateTimeOffset.UtcNow).ToString("O", CultureInfo.InvariantCulture);
+            var byteSize = request.ContentBytes.LongLength;
+
+            long clipId;
+            await using (var existingCommand = connection.CreateCommand())
+            {
+                existingCommand.Transaction = transaction;
+                existingCommand.CommandText = "SELECT id FROM clips WHERE hash = $hash LIMIT 1;";
+                existingCommand.Parameters.AddWithValue("$hash", hash);
+                var existingId = await existingCommand.ExecuteScalarAsync(cancellationToken);
+
+                if (existingId is not null && existingId != DBNull.Value)
+                {
+                    if (request.IncrementExistingCopyCount)
+                    {
+                        clipId = (long)existingId;
+                        await using var updateCommand = connection.CreateCommand();
+                        updateCommand.Transaction = transaction;
+                        updateCommand.CommandText = """
+                            UPDATE clips
+                            SET content = CASE WHEN $content IS NULL OR TRIM($content) = '' THEN content ELSE $content END,
+                                content_bytes = CASE WHEN $contentBytes IS NULL THEN content_bytes ELSE $contentBytes END,
+                                content_format = $contentFormat,
+                                source_app = CASE WHEN $sourceApp IS NULL OR TRIM($sourceApp) = '' THEN source_app ELSE $sourceApp END,
+                                source_app_path = CASE WHEN $sourceAppPath IS NULL OR TRIM($sourceAppPath) = '' THEN source_app_path ELSE $sourceAppPath END,
+                                source_app_icon = CASE WHEN $sourceAppIcon IS NULL THEN source_app_icon ELSE $sourceAppIcon END,
+                                source_window_title = CASE WHEN $sourceWindowTitle IS NULL OR TRIM($sourceWindowTitle) = '' THEN source_window_title ELSE $sourceWindowTitle END,
+                                source_url = CASE WHEN $sourceUrl IS NULL OR TRIM($sourceUrl) = '' THEN source_url ELSE $sourceUrl END,
+                                is_favorite = CASE WHEN is_favorite = 1 OR $isFavorite = 1 THEN 1 ELSE 0 END,
+                                is_sensitive = CASE WHEN is_sensitive = 1 OR $isSensitive = 1 THEN 1 ELSE 0 END,
+                                captured_at = $lastCopiedAt,
+                                first_copied_at = COALESCE(first_copied_at, captured_at, $lastCopiedAt),
+                                last_copied_at = $lastCopiedAt,
+                                copy_count = copy_count + 1,
+                                byte_size = $byteSize,
+                                image_width = COALESCE($imageWidth, image_width),
+                                image_height = COALESCE($imageHeight, image_height)
+                            WHERE id = $id;
+                            """;
+                        AddUpsertParameters(updateCommand, request, contentText, hash, matches.Count > 0, capturedAt, byteSize, clipId);
+                        await updateCommand.ExecuteNonQueryAsync(cancellationToken);
+                        imported++;
+                    }
+                    else
+                    {
+                        skipped++;
+                    }
+                    continue;
+                }
+
+                await using var insertCommand = connection.CreateCommand();
+                insertCommand.Transaction = transaction;
+                insertCommand.CommandText = """
+                    INSERT INTO clips (
+                        content, content_bytes, content_type, content_format,
+                        source_app, source_app_path, source_app_icon, source_window_title, source_url,
+                        hash, is_favorite, is_sensitive, captured_at, copy_count,
+                        first_copied_at, last_copied_at, byte_size,
+                        image_width, image_height, source_clip_id, transform_kind)
+                    VALUES (
+                        $content, $contentBytes, $contentType, $contentFormat,
+                        $sourceApp, $sourceAppPath, $sourceAppIcon, $sourceWindowTitle, $sourceUrl,
+                        $hash, $isFavorite, $isSensitive, $capturedAt, 1,
+                        $capturedAt, $capturedAt, $byteSize,
+                        $imageWidth, $imageHeight, $sourceClipId, $transformKind);
+                    SELECT last_insert_rowid();
+                    """;
+                AddUpsertParameters(insertCommand, request, contentText, hash, matches.Count > 0, capturedAt, byteSize);
+                clipId = (long)(await insertCommand.ExecuteScalarAsync(cancellationToken) ?? 0L);
+            }
+
+            await AddSensitivityMatchesAsync(connection, transaction, clipId, matches, cancellationToken);
+            imported++;
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        InvalidateStatsCache();
+        return new BulkCaptureResult(imported, skipped);
+    }
+
     private async Task<ClipEntry?> InsertClipAsync(ClipCaptureRequest request, CancellationToken cancellationToken)
     {
         var contentText = BuildStoredContentText(request);

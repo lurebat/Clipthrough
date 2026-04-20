@@ -1,4 +1,5 @@
-﻿using System.Threading;
+﻿using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Clipthrough.Models;
 
@@ -7,6 +8,9 @@ namespace Clipthrough.Services;
 public interface IClipStoreService
 {
     Task<ClipEntry?> CaptureAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>Insert multiple clips in a single transaction for bulk import scenarios.</summary>
+    Task<BulkCaptureResult> CaptureBatchAsync(IReadOnlyList<ClipCaptureRequest> requests, CancellationToken cancellationToken = default);
 
     Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default);
 

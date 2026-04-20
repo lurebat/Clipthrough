@@ -93,6 +93,8 @@ public sealed class ClipAngelImportService : IClipAngelImportService
         int imported = 0, skipped = 0, failed = 0;
         var errors = new List<string>();
 
+        const int batchSize = 200;
+
         try
         {
             await using var conn = new SqliteConnection($"Data Source={temp};Mode=ReadOnly");
@@ -116,6 +118,7 @@ public sealed class ClipAngelImportService : IClipAngelImportService
             await using var reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
             int processed = 0;
+            var batch = new List<ClipCaptureRequest>(batchSize);
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
                 processed++;
@@ -130,11 +133,7 @@ public sealed class ClipAngelImportService : IClipAngelImportService
                     }
                     else
                     {
-                        var clip = await _clipStore.CaptureAsync(request, cancellationToken).ConfigureAwait(false);
-                        if (clip is null)
-                            skipped++;
-                        else
-                            imported++;
+                        batch.Add(request);
                     }
                 }
                 catch (OperationCanceledException)
@@ -148,8 +147,23 @@ public sealed class ClipAngelImportService : IClipAngelImportService
                         errors.Add($"row {processed}: {ex.Message}");
                 }
 
-                if (progress is not null && (processed % 25 == 0 || processed == total))
+                if (batch.Count >= batchSize)
+                {
+                    var result = await _clipStore.CaptureBatchAsync(batch, cancellationToken).ConfigureAwait(false);
+                    imported += result.Imported;
+                    skipped += result.Skipped;
+                    batch.Clear();
+                }
+
+                if (progress is not null && (processed % 100 == 0 || processed == total))
                     progress.Report(new ClipAngelImportProgress(processed, total, type));
+            }
+
+            if (batch.Count > 0)
+            {
+                var result = await _clipStore.CaptureBatchAsync(batch, cancellationToken).ConfigureAwait(false);
+                imported += result.Imported;
+                skipped += result.Skipped;
             }
 
             await _clipStore.ApplyMaintenanceAsync(cancellationToken).ConfigureAwait(false);
