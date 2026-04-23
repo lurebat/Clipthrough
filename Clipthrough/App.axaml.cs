@@ -71,7 +71,7 @@ public partial class App : Application
             _aiTransformService = Services.GetRequiredService<IAiTransformService>();
             _scriptingService = Services.GetRequiredService<IScriptingService>();
 
-            _mainWindow = desktop.MainWindow = new MainWindow
+            _mainWindow = desktop.MainWindow = new MainWindow(_systemInteractionService)
             {
                 DataContext = mainWindowViewModel,
             };

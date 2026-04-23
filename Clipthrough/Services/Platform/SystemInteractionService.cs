@@ -381,6 +381,25 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         _capturedPasteTarget = IntPtr.Zero;
     }
 
+    /// <summary>
+    /// Explicitly restores keyboard focus to the captured target window.
+    /// Must be called while the calling process still has foreground rights
+    /// (i.e. synchronously inside a user-input event handler).
+    /// </summary>
+    public void RestoreCapturedForeground()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var target = System.Threading.Interlocked.Exchange(ref _capturedPasteTarget, IntPtr.Zero);
+        if (target != IntPtr.Zero)
+        {
+            SetForegroundWindow(target);
+        }
+    }
+
     public void SimulatePasteKeystroke()
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -390,14 +409,6 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
 
         try
         {
-            // Restore the window that had focus before Clipthrough stole it, so
-            // SendInput delivers Ctrl+V to the right target.
-            var target = System.Threading.Interlocked.Exchange(ref _capturedPasteTarget, IntPtr.Zero);
-            if (target != IntPtr.Zero)
-            {
-                SetForegroundWindow(target);
-            }
-
             SendPasteInputs();
         }
         catch (Exception ex)

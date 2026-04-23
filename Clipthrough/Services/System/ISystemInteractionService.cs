@@ -29,6 +29,8 @@ public interface ISystemInteractionService
 
     void ClearTargetWindowCapture();
 
+    void RestoreCapturedForeground();
+
     void SimulatePasteKeystroke();
 
     void ShowNotification(AppNotification notification);

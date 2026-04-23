@@ -10,6 +10,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Clipthrough.Controls;
 using Clipthrough.Models;
+using Clipthrough.Services;
 using Clipthrough.ViewModels;
 
 namespace Clipthrough.Views;
@@ -22,9 +23,13 @@ public partial class MainWindow : Window
     private SessionLogsWindow? m_sessionLogsWindow;
     private MainWindowViewModel? m_subscribedViewModel;
     private SettingsWindow? m_settingsWindow;
+    private ISystemInteractionService? m_systemInteractionService;
 
-    public MainWindow()
+    public MainWindow() : this(null) { }
+
+    public MainWindow(ISystemInteractionService? systemInteractionService)
     {
+        m_systemInteractionService = systemInteractionService;
         InitializeComponent();
         Opened += OnOpened;
         Closed += OnClosed;
@@ -343,7 +348,8 @@ public partial class MainWindow : Window
             return false;
         }
 
-        if (e.Source is TextBox or AvaloniaEdit.TextEditor or Controls.SyntaxTextEditor)
+        // Block Enter in multi-line inputs. Allow it from single-line TextBoxes (e.g., the search box).
+        if (e.Source is TextBox { AcceptsReturn: true } or AvaloniaEdit.TextEditor or Controls.SyntaxTextEditor)
         {
             return false;
         }
@@ -365,8 +371,10 @@ public partial class MainWindow : Window
 
     private void ExecutePasteSelectedAndHide(MainWindowViewModel viewModel)
     {
-        // Hide synchronously before starting the paste so the window is gone
-        // when SimulatePasteKeystroke fires (the captured target is restored there).
+        // Restore focus to the original window NOW, while this process still has
+        // foreground rights (we're executing in a user-input event handler).
+        // SetForegroundWindow only works from the foreground process.
+        m_systemInteractionService?.RestoreCapturedForeground();
         Hide();
         viewModel.PasteSelectedCommand.Execute().Subscribe();
     }

@@ -272,6 +272,8 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
 
     public void ClearTargetWindowCapture() { }
 
+    public void RestoreCapturedForeground() { }
+
     public void SimulatePasteKeystroke()
     {
         SimulatedPasteCount++;
