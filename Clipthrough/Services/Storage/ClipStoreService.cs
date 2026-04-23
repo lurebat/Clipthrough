@@ -112,7 +112,7 @@ public sealed class ClipStoreService : IClipStoreService
             : "FROM clips c";
         var whereClauses = BuildWhereClauses(filters, hasSearch);
         var whereClause = whereClauses.Count > 0 ? $"WHERE {string.Join(" AND ", whereClauses)}" : string.Empty;
-        var orderClause = hasSearch
+        var orderClause = hasSearch && !filters.SearchSortByDate
             ? $"ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, bm25(clips_fts), COALESCE(c.last_copied_at, c.captured_at) DESC, c.id DESC"
             : BuildOrderClause(filters.SortOption);
 

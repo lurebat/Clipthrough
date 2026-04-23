@@ -2134,6 +2134,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private bool _settingsSearchSortByDate = AppSettings.Default.SearchSortByDate;
+
+    public bool SettingsSearchSortByDate
+    {
+        get => _settingsSearchSortByDate;
+        set => this.RaiseAndSetIfChanged(ref _settingsSearchSortByDate, value);
+    }
+
     private bool _isSettingsSectionBehaviorExpanded = true;
     private bool _isSettingsSectionLocalHotkeysExpanded = true;
     private bool _isSettingsSectionGlobalHotkeyExpanded = true;
@@ -2248,7 +2256,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private static readonly string _ocrKeywords = "ocr image text extract recognition language bcp-47 windows.media.ocr";
     private static readonly string _remoteApiKeywords = "remote api http server kestrel bearer token port bind loopback swagger openapi mcp";
     private static readonly string _userScriptsKeywords = "script scripts user roslyn csharp c# code custom transform";
-    private static readonly string _semanticKeywords = "semantic embedding embeddings similarity vector search meaning ai ml rerun reembed";
+    private static readonly string _semanticKeywords = "semantic embedding embeddings similarity vector search meaning ai ml rerun reembed sort relevance date proximity";
 
     private bool MatchesFilter(string keywords)
     {
@@ -2387,6 +2395,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ThemeMode[] ThemeModeOptions { get; } = Enum.GetValues<ThemeMode>();
 
     public string SettingsThemeModeLabel => AppText.SettingsThemeModeLabel;
+
+    public string SettingsSearchSortByDateLabel => AppText.SettingsSearchSortByDateLabel;
 
     public bool SettingsEnableNormalClipLifetime
     {
@@ -3859,6 +3869,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         WholeWord = WholeWordSearch,
         UseFuzzy = UseFuzzyClipSearch && !UseRegexSearch && !UseWildcardSearch && !WholeWordSearch,
         SortOption = SelectedSortOption.Value,
+        SearchSortByDate = _settingsSearchSortByDate,
         Limit = PageSize,
         Offset = offset,
     };
@@ -4935,6 +4946,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             UseFuzzyClipSearch = UseFuzzyClipSearch,
             UseSemanticClipSearch = UseSemanticClipSearch,
             UseFuzzySettingsSearch = SettingsUseFuzzySearch,
+            SearchSortByDate = SettingsSearchSortByDate,
         };
 
         await _storageOptionsService.SaveAsync(storageOptions);
@@ -5065,6 +5077,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         SelectedCustomHotkeyDraft = SettingsCustomHotkeyDrafts.FirstOrDefault();
         SettingsUseFuzzySearch = settings.UseFuzzySettingsSearch;
+        SettingsSearchSortByDate = settings.SearchSortByDate;
         IsDatabasePasswordVisible = false;
     }
 

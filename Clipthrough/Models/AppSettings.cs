@@ -132,6 +132,12 @@ public sealed record AppSettings
 
     public bool UseSemanticClipSearch { get; init; } = true;
 
+    /// <summary>
+    /// When true, search results are sorted by date (respects the selected sort option)
+    /// instead of by text-match relevance (bm25).
+    /// </summary>
+    public bool SearchSortByDate { get; init; }
+
     public bool UseFuzzySettingsSearch { get; init; } = true;
 
     // Persisted last-session filter toggle states
