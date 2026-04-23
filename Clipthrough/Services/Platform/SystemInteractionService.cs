@@ -395,6 +395,7 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         var target = System.Threading.Interlocked.Exchange(ref _capturedPasteTarget, IntPtr.Zero);
         if (target == IntPtr.Zero)
         {
+            Trace.TraceWarning("[Paste] RestoreCapturedForeground: no captured target (HWND is zero).");
             return;
         }
 
@@ -412,15 +413,18 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
     private static void RestoreForegroundCore(nint target)
     {
         var currentThreadId = GetCurrentThreadId();
-        var targetThreadId = GetWindowThreadProcessId(target, out _);
+        var targetThreadId = GetWindowThreadProcessId(target, out var targetProcessId);
 
         // Attach input queues so SetForegroundWindow works even without foreground rights.
         var attached = targetThreadId != 0 && targetThreadId != currentThreadId
             && AttachThreadInput(currentThreadId, targetThreadId, true);
         try
         {
-            SetForegroundWindow(target);
+            var sfwResult = SetForegroundWindow(target);
             BringWindowToTop(target);
+            Trace.TraceInformation(
+                $"[Paste] RestoreForeground: target=0x{target:X} pid={targetProcessId} " +
+                $"tid={targetThreadId} attached={attached} SetForegroundWindow={sfwResult}");
         }
         finally
         {

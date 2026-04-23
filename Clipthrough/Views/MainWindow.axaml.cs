@@ -372,22 +372,23 @@ public partial class MainWindow : Window
 
     private async void ExecutePasteSelectedAndHide(MainWindowViewModel viewModel)
     {
-        // Step 1: Copy to clipboard FIRST while the window is still visible and
-        // Clipthrough's OLE/COM message pump is fully operational.
+        // Step 1: Restore focus to the target window synchronously while we are still
+        // inside the user-input event handler and guaranteed to hold the foreground lock.
+        // AttachThreadInput ensures SetForegroundWindow succeeds regardless of lock state.
+        m_systemInteractionService?.RestoreCapturedForeground();
+
+        // Step 2: Copy to clipboard. Clipboard operations do not require the caller to be
+        // the foreground window, so this can safely happen after we've yielded focus.
         var copied = await viewModel.TryCopySelectedForPasteAsync();
         if (!copied)
         {
             return;
         }
 
-        // Step 2: Restore focus to the target window. Uses AttachThreadInput so
-        // SetForegroundWindow succeeds regardless of foreground-lock state.
-        m_systemInteractionService?.RestoreCapturedForeground();
-
-        // Step 3: Hide Clipthrough now that target has been given focus.
+        // Step 3: Hide Clipthrough. Target has already been scheduled to receive focus.
         Hide();
 
-        // Step 4: Give the OS a moment to process WM_ACTIVATE and transfer focus.
+        // Step 4: Give the OS time to process WM_ACTIVATE / WM_SETFOCUS on the target.
         await Task.Delay(150);
 
         // Step 5: Deliver Ctrl+V to the (now foreground) target window.
