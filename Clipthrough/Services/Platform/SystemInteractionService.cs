@@ -501,7 +501,13 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         }
 
         var arr = inputs.ToArray();
-        _ = SendInput((uint)arr.Length, arr, Marshal.SizeOf<INPUT>());
+        var cbSize = Marshal.SizeOf<INPUT>();
+        System.Diagnostics.Debug.Assert(cbSize == 40, $"INPUT struct size mismatch: got {cbSize}, expected 40");
+        var sent = SendInput((uint)arr.Length, arr, cbSize);
+        if (sent != arr.Length)
+        {
+            Trace.TraceWarning($"[Paste] SendInput: requested {arr.Length} events, injected {sent} (error {Marshal.GetLastWin32Error()})");
+        }
 
         static INPUT MakeKey(ushort vk, uint flags) => new()
         {
@@ -527,10 +533,35 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         public InputUnion U;
     }
 
+    // InputUnion must include MOUSEINPUT so the union is 32 bytes on x64,
+    // matching the real Win32 sizeof(INPUT) = 40. Without it the union is only
+    // 24 bytes and Marshal.SizeOf<INPUT>() returns 32, causing SendInput to
+    // silently reject every call because cbSize does not match.
     [StructLayout(LayoutKind.Explicit)]
     private struct InputUnion
     {
+        [FieldOffset(0)] public MOUSEINPUT mi;
         [FieldOffset(0)] public KEYBDINPUT ki;
+        [FieldOffset(0)] public HARDWAREINPUT hi;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MOUSEINPUT
+    {
+        public int dx;
+        public int dy;
+        public uint mouseData;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct HARDWAREINPUT
+    {
+        public uint uMsg;
+        public ushort wParamL;
+        public ushort wParamH;
     }
 
     [StructLayout(LayoutKind.Sequential)]
