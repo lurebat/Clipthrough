@@ -25,6 +25,10 @@ public interface ISystemInteractionService
 
     Task OpenInDiffToolAsync(string leftPath, string rightPath, string diffToolPath);
 
+    void CaptureTargetWindowForPaste();
+
+    void ClearTargetWindowCapture();
+
     void SimulatePasteKeystroke();
 
     void ShowNotification(AppNotification notification);

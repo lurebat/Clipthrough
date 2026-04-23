@@ -354,7 +354,7 @@ public partial class MainWindow : Window
             return false;
         }
 
-        viewModel.CopySelectedCommand.Execute().Subscribe(_ => MinimizeWindow());
+        ExecutePasteSelectedAndHide(viewModel);
         return true;
     }
 
@@ -365,8 +365,10 @@ public partial class MainWindow : Window
 
     private void ExecutePasteSelectedAndHide(MainWindowViewModel viewModel)
     {
+        // Hide synchronously before starting the paste so the window is gone
+        // when SimulatePasteKeystroke fires (the captured target is restored there).
+        Hide();
         viewModel.PasteSelectedCommand.Execute().Subscribe();
-        MinimizeWindow();
     }
 
     private static bool TryHandleEditedClipShortcut(MainWindowViewModel viewModel, KeyEventArgs e)

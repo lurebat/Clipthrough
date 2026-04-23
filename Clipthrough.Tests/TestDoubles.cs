@@ -268,6 +268,10 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
 
     public Task OpenInDiffToolAsync(string leftPath, string rightPath, string diffToolPath) => Task.CompletedTask;
 
+    public void CaptureTargetWindowForPaste() { }
+
+    public void ClearTargetWindowCapture() { }
+
     public void SimulatePasteKeystroke()
     {
         SimulatedPasteCount++;

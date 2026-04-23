@@ -39,6 +39,7 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
     private WindowsGlobalHotKeyRegistration? _globalHotKeyRegistration;
     private readonly Dictionary<string, WindowsGlobalHotKeyRegistration> _namedHotKeys = new(StringComparer.Ordinal);
     private WindowsBalloonNotificationHost? _notificationHost;
+    private nint _capturedPasteTarget;
 
     public async Task CopyTextAsync(string text)
     {
@@ -367,6 +368,19 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         return result;
     }
 
+    public void CaptureTargetWindowForPaste()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            _capturedPasteTarget = GetForegroundWindow();
+        }
+    }
+
+    public void ClearTargetWindowCapture()
+    {
+        _capturedPasteTarget = IntPtr.Zero;
+    }
+
     public void SimulatePasteKeystroke()
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -376,6 +390,14 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
 
         try
         {
+            // Restore the window that had focus before Clipthrough stole it, so
+            // SendInput delivers Ctrl+V to the right target.
+            var target = System.Threading.Interlocked.Exchange(ref _capturedPasteTarget, IntPtr.Zero);
+            if (target != IntPtr.Zero)
+            {
+                SetForegroundWindow(target);
+            }
+
             SendPasteInputs();
         }
         catch (Exception ex)
@@ -1358,6 +1380,10 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(nint hWnd);
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);

@@ -598,9 +598,13 @@ public partial class App : Application
         {
             if (window.IsVisible && window.IsActive)
             {
+                _systemInteractionService?.ClearTargetWindowCapture();
                 window.Hide();
                 return;
             }
+
+            // Record what window had focus so SimulatePasteKeystroke can restore it.
+            _systemInteractionService?.CaptureTargetWindowForPaste();
 
             PositionWindowNearCaret(window);
 
@@ -663,6 +667,7 @@ public partial class App : Application
 
         Dispatcher.UIThread.Post(() =>
         {
+            _systemInteractionService?.ClearTargetWindowCapture();
             RestoreWindowState(_mainWindow);
             _mainWindow.Hide();
 
