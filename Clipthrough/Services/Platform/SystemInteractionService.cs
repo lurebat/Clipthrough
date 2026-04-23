@@ -382,9 +382,8 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
     }
 
     /// <summary>
-    /// Explicitly restores keyboard focus to the captured target window.
-    /// Must be called while the calling process still has foreground rights
-    /// (i.e. synchronously inside a user-input event handler).
+    /// Explicitly restores keyboard focus to the captured target window using
+    /// AttachThreadInput so the call succeeds regardless of foreground lock state.
     /// </summary>
     public void RestoreCapturedForeground()
     {
@@ -394,9 +393,41 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         }
 
         var target = System.Threading.Interlocked.Exchange(ref _capturedPasteTarget, IntPtr.Zero);
-        if (target != IntPtr.Zero)
+        if (target == IntPtr.Zero)
+        {
+            return;
+        }
+
+        try
+        {
+            RestoreForegroundCore(target);
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"RestoreCapturedForeground failed: {ex.Message}");
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void RestoreForegroundCore(nint target)
+    {
+        var currentThreadId = GetCurrentThreadId();
+        var targetThreadId = GetWindowThreadProcessId(target, out _);
+
+        // Attach input queues so SetForegroundWindow works even without foreground rights.
+        var attached = targetThreadId != 0 && targetThreadId != currentThreadId
+            && AttachThreadInput(currentThreadId, targetThreadId, true);
+        try
         {
             SetForegroundWindow(target);
+            BringWindowToTop(target);
+        }
+        finally
+        {
+            if (attached)
+            {
+                AttachThreadInput(currentThreadId, targetThreadId, false);
+            }
         }
     }
 
@@ -1395,6 +1426,17 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetForegroundWindow(nint hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool BringWindowToTop(nint hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);

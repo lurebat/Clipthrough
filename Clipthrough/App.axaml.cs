@@ -710,6 +710,9 @@ public partial class App : Application
 
         Dispatcher.UIThread.Post(() =>
         {
+            // Capture the current foreground window before Clipthrough steals focus.
+            _systemInteractionService?.CaptureTargetWindowForPaste();
+
             if (!_mainWindow.IsVisible)
             {
                 _mainWindow.Show();

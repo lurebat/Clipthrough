@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using System.Linq;
 using System.Reactive.Linq;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -369,14 +370,28 @@ public partial class MainWindow : Window
         viewModel.CopySelectedCommand.Execute().Subscribe();
     }
 
-    private void ExecutePasteSelectedAndHide(MainWindowViewModel viewModel)
+    private async void ExecutePasteSelectedAndHide(MainWindowViewModel viewModel)
     {
-        // Restore focus to the original window NOW, while this process still has
-        // foreground rights (we're executing in a user-input event handler).
-        // SetForegroundWindow only works from the foreground process.
+        // Step 1: Copy to clipboard FIRST while the window is still visible and
+        // Clipthrough's OLE/COM message pump is fully operational.
+        var copied = await viewModel.TryCopySelectedForPasteAsync();
+        if (!copied)
+        {
+            return;
+        }
+
+        // Step 2: Restore focus to the target window. Uses AttachThreadInput so
+        // SetForegroundWindow succeeds regardless of foreground-lock state.
         m_systemInteractionService?.RestoreCapturedForeground();
+
+        // Step 3: Hide Clipthrough now that target has been given focus.
         Hide();
-        viewModel.PasteSelectedCommand.Execute().Subscribe();
+
+        // Step 4: Give the OS a moment to process WM_ACTIVATE and transfer focus.
+        await Task.Delay(150);
+
+        // Step 5: Deliver Ctrl+V to the (now foreground) target window.
+        m_systemInteractionService?.SimulatePasteKeystroke();
     }
 
     private static bool TryHandleEditedClipShortcut(MainWindowViewModel viewModel, KeyEventArgs e)

@@ -2796,14 +2796,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task PasteSelectedAsync()
     {
+        // The view-side ExecutePasteSelectedAndHide drives the full paste sequence
+        // (copy → restore focus → hide → delay → SendInput). This command is only
+        // called from global hotkey paste paths that don't go through the view.
         if (!await TryCopySelectedAsync())
         {
             return;
         }
 
-        await Task.Delay(120);
+        await Task.Delay(150);
         _systemInteractionService.SimulatePasteKeystroke();
     }
+
+    /// <summary>
+    /// Copies the selected clip to the clipboard. Returns true on success.
+    /// Called by the view's paste-and-hide path so it can control the exact
+    /// ordering of copy → focus-restore → hide → delay → SendInput.
+    /// </summary>
+    internal async Task<bool> TryCopySelectedForPasteAsync() => await TryCopySelectedAsync();
 
     private async Task<bool> TryCopySelectedAsync()
     {
