@@ -7,4 +7,5 @@ public enum ClipSortOption
     MostPasted,
     Alphabetical,
     LargestFirst,
+    BestMatching,
 }

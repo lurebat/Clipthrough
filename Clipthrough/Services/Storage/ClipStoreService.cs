@@ -112,7 +112,7 @@ public sealed class ClipStoreService : IClipStoreService
             : "FROM clips c";
         var whereClauses = BuildWhereClauses(filters, hasSearch);
         var whereClause = whereClauses.Count > 0 ? $"WHERE {string.Join(" AND ", whereClauses)}" : string.Empty;
-        var orderClause = hasSearch && !filters.SearchSortByDate
+        var orderClause = hasSearch && filters.SortOption == ClipSortOption.BestMatching
             ? $"ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, bm25(clips_fts), COALESCE(c.last_copied_at, c.captured_at) DESC, c.id DESC"
             : BuildOrderClause(filters.SortOption);
 
@@ -1071,6 +1071,7 @@ public sealed class ClipStoreService : IClipStoreService
         ClipSortOption.MostPasted => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, c.paste_count DESC, c.id DESC",
         ClipSortOption.Alphabetical => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, c.content ASC, c.id ASC",
         ClipSortOption.LargestFirst => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, c.byte_size DESC, c.id DESC",
+        ClipSortOption.BestMatching => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, COALESCE(c.last_copied_at, c.captured_at) DESC, c.id DESC",
         _ => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, COALESCE(c.last_copied_at, c.captured_at) DESC, c.id DESC",
     };
 

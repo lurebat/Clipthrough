@@ -232,6 +232,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new ClipSortOptionItem(ClipSortOption.MostPasted),
             new ClipSortOptionItem(ClipSortOption.Alphabetical),
             new ClipSortOptionItem(ClipSortOption.LargestFirst),
+            new ClipSortOptionItem(ClipSortOption.BestMatching),
         ];
         _selectedSortOption = SortOptions[0];
         RefreshCommand = ReactiveCommand.CreateFromTask(RefreshAsync);
@@ -2149,14 +2150,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool IsSemanticSearchEnabled => _settingsService.Current.EnableSemanticSearch;
 
-    private bool _settingsSearchSortByDate = AppSettings.Default.SearchSortByDate;
-
-    public bool SettingsSearchSortByDate
-    {
-        get => _settingsSearchSortByDate;
-        set => this.RaiseAndSetIfChanged(ref _settingsSearchSortByDate, value);
-    }
-
     private bool _isSettingsSectionBehaviorExpanded = true;
     private bool _isSettingsSectionLocalHotkeysExpanded = true;
     private bool _isSettingsSectionGlobalHotkeyExpanded = true;
@@ -2428,8 +2421,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ThemeMode[] ThemeModeOptions { get; } = Enum.GetValues<ThemeMode>();
 
     public string SettingsThemeModeLabel => AppText.SettingsThemeModeLabel;
-
-    public string SettingsSearchSortByDateLabel => AppText.SettingsSearchSortByDateLabel;
 
     public bool SettingsEnableNormalClipLifetime
     {
@@ -3903,7 +3894,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         WholeWord = WholeWordSearch,
         UseFuzzy = UseFuzzyClipSearch && !UseRegexSearch && !UseWildcardSearch && !WholeWordSearch,
         SortOption = SelectedSortOption.Value,
-        SearchSortByDate = _settingsSearchSortByDate,
         Limit = PageSize,
         Offset = offset,
     };
@@ -4988,7 +4978,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             EnableSemanticSearch = SettingsEnableSemanticSearch,
             UseSemanticClipSearch = UseSemanticClipSearch,
             UseFuzzySettingsSearch = SettingsUseFuzzySearch,
-            SearchSortByDate = SettingsSearchSortByDate,
         };
 
         await _storageOptionsService.SaveAsync(storageOptions);
@@ -5120,7 +5109,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         SelectedCustomHotkeyDraft = SettingsCustomHotkeyDrafts.FirstOrDefault();
         SettingsUseFuzzySearch = settings.UseFuzzySettingsSearch;
-        SettingsSearchSortByDate = settings.SearchSortByDate;
         SettingsEnableSemanticSearch = settings.EnableSemanticSearch;
         IsDatabasePasswordVisible = false;
     }

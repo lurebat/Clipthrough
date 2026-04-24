@@ -565,9 +565,6 @@
                         <TextBlock Text="Search" FontSize="16" FontWeight="SemiBold" />
                     </Expander.Header>
                     <StackPanel Spacing="10" Margin="8,10,0,0">
-                        <CheckBox Content="{Binding SettingsSearchSortByDateLabel}"
-                                  ToolTip.Tip="When checked, search results follow the selected sort order (e.g. most recent). When unchecked, results are ranked by text-match relevance."
-                                  IsChecked="{Binding SettingsSearchSortByDate, Mode=TwoWay}" />
                         <TextBlock Classes="body-muted" TextWrapping="Wrap"
                                    Text="Semantic search uses a small on-device embedding model (MiniLM-L6) to rank clips by meaning. Results from full-text and semantic search are fused with reciprocal rank fusion. Regex, wildcard, and whole-word modes disable semantic ranking." />
                         <CheckBox Content="Enable semantic search (on-device embedding model + fusion with full-text search)"

@@ -24,12 +24,6 @@ public sealed class ClipSearchFilters
 
     public ClipSortOption SortOption { get; init; } = ClipSortOption.MostRecent;
 
-    /// <summary>
-    /// When true and a search query is active, sort by the selected <see cref="SortOption"/>
-    /// (e.g. most-recent) instead of by FTS relevance (bm25).
-    /// </summary>
-    public bool SearchSortByDate { get; init; }
-
     public int Limit { get; init; } = 200;
 
     public int Offset { get; init; }

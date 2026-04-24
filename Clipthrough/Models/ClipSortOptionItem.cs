@@ -17,6 +17,7 @@ public sealed class ClipSortOptionItem
         ClipSortOption.MostPasted => AppText.SortMostPastedLabel,
         ClipSortOption.Alphabetical => AppText.SortAlphabeticalLabel,
         ClipSortOption.LargestFirst => AppText.SortLargestFirstLabel,
+        ClipSortOption.BestMatching => AppText.SortBestMatchingLabel,
         _ => Value.ToString(),
     };
 
