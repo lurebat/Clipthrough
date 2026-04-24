@@ -400,6 +400,19 @@ internal sealed class TestAiTransformService : IAiTransformService
         => Task.FromResult(imageBytes);
 }
 
+internal sealed class TestCopilotAuthService : ICopilotAuthService
+{
+    public bool IsSignedIn => false;
+    public event Action? SignedInChanged;
+    public Task<DeviceCodeResult> StartDeviceCodeFlowAsync(CancellationToken cancellationToken = default)
+        => throw new InvalidOperationException("Test stub");
+    public Task<bool> PollForAuthorizationAsync(DeviceCodeResult deviceCode, CancellationToken cancellationToken = default)
+        => Task.FromResult(false);
+    public Task<string> GetTokenAsync(CancellationToken cancellationToken = default)
+        => throw new InvalidOperationException("Test stub");
+    public void SignOut() { SignedInChanged?.Invoke(); }
+}
+
 internal sealed class TestOcrService : IOcrService
 {
     public bool IsAvailable => false;

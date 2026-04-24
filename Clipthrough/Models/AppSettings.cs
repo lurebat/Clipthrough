@@ -150,6 +150,8 @@ public sealed record AppSettings
 
     public bool EnableAi { get; init; }
 
+    public AiProvider AiProvider { get; init; }
+
     public string AiBaseUrl { get; init; } = string.Empty;
 
     public string AiApiKey { get; init; } = string.Empty;

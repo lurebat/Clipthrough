@@ -62,6 +62,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly IBackgroundJobIndicator _jobIndicator;
     private readonly Clipthrough.Services.Search.ISemanticSearchService? _semanticSearchService;
     private readonly Clipthrough.Services.Search.IEmbeddingWorker? _embeddingWorker;
+    private readonly ICopilotAuthService? _copilotAuthService;
     private readonly DatabaseInitializer _databaseInitializer;
     private readonly CompositeDisposable _subscriptions = new();
     private readonly Dictionary<long, (ClipEntry Clip, CancellationTokenSource Cts)> _pendingDeletes = new();
@@ -192,7 +193,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _editedClipSelectionLength;
     private long? _checkedSelectionAnchorId;
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, IClipAngelImportService? clipAngelImportService = null, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null, Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, IClipAngelImportService? clipAngelImportService = null, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null, Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null, ICopilotAuthService? copilotAuthService = null)
     {
         _clipStoreService = clipStoreService;
         _clipAngelImportService = clipAngelImportService ?? new ClipAngelImportService(clipStoreService);
@@ -214,6 +215,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _jobIndicator.Changed += OnJobIndicatorChanged;
         _semanticSearchService = semanticSearchService;
         _embeddingWorker = embeddingWorker;
+        _copilotAuthService = copilotAuthService;
         _databaseInitializer = databaseInitializer;
         SessionLogs = new SessionLogsViewModel(sessionLogService);
         ContentTypeOptions =
@@ -270,6 +272,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         UnlockDatabaseCommand = ReactiveCommand.CreateFromTask(UnlockDatabaseAsync);
         ExitApplicationCommand = ReactiveCommand.Create(ExitApplication);
         OpenAiPromptCommand = ReactiveCommand.Create(OpenAiPrompt);
+        CopilotSignInCommand = ReactiveCommand.CreateFromTask(CopilotSignInAsync);
+        CopilotSignOutCommand = ReactiveCommand.Create(CopilotSignOut);
         SubmitAiPromptCommand = ReactiveCommand.CreateFromTask(SubmitAiPromptAsync);
         CancelAiPromptCommand = ReactiveCommand.Create(CancelAiPrompt);
         ApplyAiPresetCommand = ReactiveCommand.CreateFromTask<AiPreset>(ApplyAiPresetAsync);
@@ -537,6 +541,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> ExitApplicationCommand { get; }
 
     public ReactiveCommand<Unit, Unit> OpenAiPromptCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> CopilotSignInCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> CopilotSignOutCommand { get; }
 
     public ReactiveCommand<Unit, Unit> SubmitAiPromptCommand { get; }
 
@@ -1762,6 +1770,42 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public System.Collections.Generic.IReadOnlyList<string> AiReasoningEffortOptions { get; } = new[] { "", "none", "minimal", "low", "medium", "high" };
+
+    private Models.AiProvider _settingsAiProvider = AppSettings.Default.AiProvider;
+
+    public Models.AiProvider SettingsAiProvider
+    {
+        get => _settingsAiProvider;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _settingsAiProvider, value);
+            this.RaisePropertyChanged(nameof(IsOpenAiSettingsVisible));
+            this.RaisePropertyChanged(nameof(IsCopilotSettingsVisible));
+        }
+    }
+
+    public Models.AiProvider[] AiProviderOptions { get; } = Enum.GetValues<Models.AiProvider>();
+
+    public bool IsOpenAiSettingsVisible => SettingsAiProvider == Models.AiProvider.OpenAi;
+    public bool IsCopilotSettingsVisible => SettingsAiProvider == Models.AiProvider.Copilot;
+
+    private string _copilotSignInStatus = string.Empty;
+
+    public string CopilotSignInStatus
+    {
+        get => _copilotSignInStatus;
+        private set => this.RaiseAndSetIfChanged(ref _copilotSignInStatus, value);
+    }
+
+    private bool _isCopilotSigningIn;
+
+    public bool IsCopilotSigningIn
+    {
+        get => _isCopilotSigningIn;
+        private set => this.RaiseAndSetIfChanged(ref _isCopilotSigningIn, value);
+    }
+
+    public bool IsCopilotSignedIn => _copilotAuthService?.IsSignedIn == true;
 
     public bool SettingsEnableAutoUpdate
     {
@@ -4302,6 +4346,59 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         AiPromptError = string.Empty;
     }
 
+    private async Task CopilotSignInAsync()
+    {
+        if (_copilotAuthService is null)
+        {
+            CopilotSignInStatus = "Copilot auth service not available.";
+            return;
+        }
+
+        IsCopilotSigningIn = true;
+        CopilotSignInStatus = "Starting device code flow…";
+        try
+        {
+            var deviceCode = await Task.Run(() => _copilotAuthService.StartDeviceCodeFlowAsync()).ConfigureAwait(false);
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                CopilotSignInStatus = $"Enter code {deviceCode.UserCode} at {deviceCode.VerificationUri}";
+                await _systemInteractionService.OpenUrlAsync(deviceCode.VerificationUri);
+            });
+
+            var success = await Task.Run(() => _copilotAuthService.PollForAuthorizationAsync(deviceCode)).ConfigureAwait(false);
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (success)
+                {
+                    CopilotSignInStatus = "Signed in to GitHub Copilot.";
+                    this.RaisePropertyChanged(nameof(IsCopilotSignedIn));
+                }
+                else
+                {
+                    CopilotSignInStatus = "Sign-in expired or denied.";
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                CopilotSignInStatus = $"Sign-in failed: {ex.Message}";
+            });
+        }
+        finally
+        {
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => IsCopilotSigningIn = false);
+        }
+    }
+
+    private void CopilotSignOut()
+    {
+        _copilotAuthService?.SignOut();
+        CopilotSignInStatus = "Signed out.";
+        this.RaisePropertyChanged(nameof(IsCopilotSignedIn));
+    }
+
     private Task SubmitAiPromptAsync() => SubmitAiPromptAsync(transformKind: GetCustomAiTransformKind(_aiPromptKind), presetLabel: null);
 
     private Task SubmitAiPromptAsync(string transformKind, string? presetLabel)
@@ -4940,6 +5037,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ExternalImageEditorPath = SettingsExternalImageEditorPath.Trim(),
             ExternalDiffToolPath = SettingsExternalDiffToolPath.Trim(),
             EnableAi = SettingsEnableAi,
+            AiProvider = SettingsAiProvider,
             AiBaseUrl = (SettingsAiBaseUrl ?? string.Empty).Trim(),
             AiApiKey = (SettingsAiApiKey ?? string.Empty).Trim(),
             AiModel = (SettingsAiModel ?? string.Empty).Trim(),
@@ -5083,6 +5181,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsExternalDiffToolPath = settings.ExternalDiffToolPath;
         SettingsEnableAi = settings.EnableAi;
         this.RaisePropertyChanged(nameof(IsAiMenuVisible));
+        SettingsAiProvider = settings.AiProvider;
         SettingsAiBaseUrl = settings.AiBaseUrl;
         SettingsAiApiKey = settings.AiApiKey;
         SettingsAiModel = settings.AiModel;

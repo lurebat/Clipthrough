@@ -155,6 +155,7 @@ public partial class App : Application
         services.AddSingleton<IClipAngelImportService, ClipAngelImportService>();
         services.AddSingleton<IClipSampleDataService, ClipSampleDataService>();
         services.AddSingleton<IClipboardMonitorService, ClipboardMonitorService>();
+        services.AddSingleton<ICopilotAuthService, CopilotAuthService>();
         services.AddSingleton<IAiTransformService, AiTransformService>();
         services.AddSingleton<IScriptingService, ScriptingService>();
         services.AddSingleton<IUpdateService, UpdateService>();

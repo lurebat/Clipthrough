@@ -18,28 +18,32 @@ namespace Clipthrough.Services;
 public sealed class AiTransformService : IAiTransformService, IDisposable
 {
     private const string DefaultBaseUrl = "https://api.openai.com/v1";
+    private const string CopilotBaseUrl = "https://api.githubcopilot.com";
     private const string DefaultModel = "gpt-4o-mini";
+    private const string DefaultCopilotModel = "gpt-4o";
     private const string DefaultImageModel = "gpt-image-1";
 
     private readonly ISettingsService _settings;
+    private readonly ICopilotAuthService? _copilotAuth;
     private readonly HttpClient _http;
     private readonly bool _ownsHttpClient;
 
-    public AiTransformService(ISettingsService settings)
-        : this(settings, new HttpClient { Timeout = TimeSpan.FromSeconds(60) }, ownsHttpClient: true)
+    public AiTransformService(ISettingsService settings, ICopilotAuthService? copilotAuth = null)
+        : this(settings, copilotAuth, new HttpClient { Timeout = TimeSpan.FromSeconds(60) }, ownsHttpClient: true)
     {
     }
 
-    internal AiTransformService(ISettingsService settings, HttpClient http, bool ownsHttpClient = false)
+    internal AiTransformService(ISettingsService settings, ICopilotAuthService? copilotAuth, HttpClient http, bool ownsHttpClient = false)
     {
         _settings = settings;
+        _copilotAuth = copilotAuth;
         _http = http;
         _ownsHttpClient = ownsHttpClient;
     }
 
     // Test-only constructor (public to avoid InternalsVisibleTo just for tests)
     public AiTransformService(ISettingsService settings, HttpClient http)
-        : this(settings, http, ownsHttpClient: false)
+        : this(settings, null, http, ownsHttpClient: false)
     {
     }
 
@@ -47,14 +51,18 @@ public sealed class AiTransformService : IAiTransformService, IDisposable
     {
         get
         {
-            var (_, apiKey, _, _) = ResolveConfig();
-            return _settings.Current.EnableAi && !string.IsNullOrWhiteSpace(apiKey);
+            var s = _settings.Current;
+            if (!s.EnableAi) return false;
+            if (s.AiProvider == Models.AiProvider.Copilot)
+                return _copilotAuth?.IsSignedIn == true;
+            var (_, apiKey, _, _) = ResolveOpenAiConfig();
+            return !string.IsNullOrWhiteSpace(apiKey);
         }
     }
 
     public async Task<string> TransformAsync(string systemPrompt, string input, CancellationToken cancellationToken = default)
     {
-        var (baseUrl, apiKey, model, _) = ResolveConfig();
+        var (baseUrl, apiKey, model, _) = await ResolveConfigAsync(cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             throw new InvalidOperationException("AI is not configured. Set an API key in settings or the OPENAI_API_KEY environment variable.");
@@ -110,7 +118,7 @@ public sealed class AiTransformService : IAiTransformService, IDisposable
             throw new ArgumentException("Image bytes are required.", nameof(imageBytes));
         }
 
-        var (baseUrl, apiKey, model, _) = ResolveConfig();
+        var (baseUrl, apiKey, model, _) = await ResolveConfigAsync(cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             throw new InvalidOperationException("AI is not configured. Set an API key in settings or the OPENAI_API_KEY environment variable.");
@@ -186,7 +194,7 @@ public sealed class AiTransformService : IAiTransformService, IDisposable
             throw new ArgumentException("Prompt is required.", nameof(prompt));
         }
 
-        var (baseUrl, apiKey, _, imageModel) = ResolveConfig();
+        var (baseUrl, apiKey, _, imageModel) = await ResolveConfigAsync(cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             throw new InvalidOperationException("AI is not configured. Set an API key in settings or the OPENAI_API_KEY environment variable.");
@@ -264,7 +272,21 @@ public sealed class AiTransformService : IAiTransformService, IDisposable
         return sb.ToString();
     }
 
-    private (string BaseUrl, string ApiKey, string Model, string ImageModel) ResolveConfig()
+    private async Task<(string BaseUrl, string ApiKey, string Model, string ImageModel)> ResolveConfigAsync(CancellationToken cancellationToken)
+    {
+        var s = _settings.Current;
+        if (s.AiProvider == Models.AiProvider.Copilot && _copilotAuth is not null && _copilotAuth.IsSignedIn)
+        {
+            var token = await _copilotAuth.GetTokenAsync(cancellationToken).ConfigureAwait(false);
+            var model = !string.IsNullOrWhiteSpace(s.AiModel) ? s.AiModel : DefaultCopilotModel;
+            var imageModel = !string.IsNullOrWhiteSpace(s.AiImageModel) ? s.AiImageModel : DefaultImageModel;
+            return (CopilotBaseUrl, token, model, imageModel);
+        }
+
+        return ResolveOpenAiConfig();
+    }
+
+    private (string BaseUrl, string ApiKey, string Model, string ImageModel) ResolveOpenAiConfig()
     {
         var s = _settings.Current;
         var baseUrl = !string.IsNullOrWhiteSpace(s.AiBaseUrl)
