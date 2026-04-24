@@ -20,39 +20,39 @@ public sealed record AppSettings
     public const int MinMaxEntryCount = 1;
     public const int MaxMaxEntryCount = 5_000_000;
 
-    public bool EnableToggleRegexHotkey { get; init; } = true;
+    public bool EnableToggleRegexHotkey { get; init; }
 
     public string ToggleRegexHotkey { get; init; } = "Ctrl+R";
 
-    public bool EnableToggleFavoritesHotkey { get; init; } = true;
+    public bool EnableToggleFavoritesHotkey { get; init; }
 
     public string ToggleFavoritesHotkey { get; init; } = "Ctrl+D";
 
-    public bool EnableToggleSensitiveHotkey { get; init; } = true;
+    public bool EnableToggleSensitiveHotkey { get; init; }
 
     public string ToggleSensitiveHotkey { get; init; } = "Ctrl+L";
 
-    public bool EnableToggleCaseSensitiveHotkey { get; init; } = true;
+    public bool EnableToggleCaseSensitiveHotkey { get; init; }
 
     public string ToggleCaseSensitiveHotkey { get; init; } = "Ctrl+K";
 
-    public bool EnableToggleWildcardHotkey { get; init; } = true;
+    public bool EnableToggleWildcardHotkey { get; init; }
 
     public string ToggleWildcardHotkey { get; init; } = "Ctrl+M";
 
-    public bool EnableToggleWholeWordHotkey { get; init; } = true;
+    public bool EnableToggleWholeWordHotkey { get; init; }
 
     public string ToggleWholeWordHotkey { get; init; } = "Ctrl+E";
 
-    public bool EnableTogglePastedHotkey { get; init; } = true;
+    public bool EnableTogglePastedHotkey { get; init; }
 
     public string TogglePastedHotkey { get; init; } = "Ctrl+U";
 
-    public bool EnableToggleFuzzyHotkey { get; init; } = true;
+    public bool EnableToggleFuzzyHotkey { get; init; }
 
     public string ToggleFuzzyHotkey { get; init; } = "Ctrl+T";
 
-    public bool EnableToggleSemanticHotkey { get; init; } = true;
+    public bool EnableToggleSemanticHotkey { get; init; }
 
     public string ToggleSemanticHotkey { get; init; } = "Ctrl+J";
 
@@ -60,11 +60,11 @@ public sealed record AppSettings
 
     public string ToggleWindowHotkey { get; init; } = "Alt+V";
 
-    public bool EnableIncrementalPasteHotkey { get; init; } = true;
+    public bool EnableIncrementalPasteHotkey { get; init; }
 
     public string IncrementalPasteHotkey { get; init; } = "Ctrl+Shift+V";
 
-    public bool EnableDecrementalPasteHotkey { get; init; } = true;
+    public bool EnableDecrementalPasteHotkey { get; init; }
 
     public string DecrementalPasteHotkey { get; init; } = "Ctrl+Shift+B";
 
