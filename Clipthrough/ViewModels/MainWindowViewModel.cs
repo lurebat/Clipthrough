@@ -2135,6 +2135,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private bool _settingsEnableSemanticSearch = AppSettings.Default.EnableSemanticSearch;
+
+    public bool SettingsEnableSemanticSearch
+    {
+        get => _settingsEnableSemanticSearch;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _settingsEnableSemanticSearch, value);
+            this.RaisePropertyChanged(nameof(IsSemanticSearchEnabled));
+        }
+    }
+
+    public bool IsSemanticSearchEnabled => _settingsService.Current.EnableSemanticSearch;
+
     private bool _settingsSearchSortByDate = AppSettings.Default.SearchSortByDate;
 
     public bool SettingsSearchSortByDate
@@ -4971,6 +4985,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             EnableMaxEntryCount = SettingsEnableMaxEntryCount,
             MaxEntryCount = maxEntryCount,
             UseFuzzyClipSearch = UseFuzzyClipSearch,
+            EnableSemanticSearch = SettingsEnableSemanticSearch,
             UseSemanticClipSearch = UseSemanticClipSearch,
             UseFuzzySettingsSearch = SettingsUseFuzzySearch,
             SearchSortByDate = SettingsSearchSortByDate,
@@ -5106,6 +5121,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedCustomHotkeyDraft = SettingsCustomHotkeyDrafts.FirstOrDefault();
         SettingsUseFuzzySearch = settings.UseFuzzySettingsSearch;
         SettingsSearchSortByDate = settings.SearchSortByDate;
+        SettingsEnableSemanticSearch = settings.EnableSemanticSearch;
         IsDatabasePasswordVisible = false;
     }
 
@@ -5130,6 +5146,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(PastedFilterTooltip));
         this.RaisePropertyChanged(nameof(FuzzyFilterTooltip));
         this.RaisePropertyChanged(nameof(SemanticFilterTooltip));
+        this.RaisePropertyChanged(nameof(IsSemanticSearchEnabled));
     }
 
     private void SyncUserScripts(AppSettings settings)
@@ -5198,7 +5215,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _clipboardMonitorService.Start();
         _backgroundOcrQueue.Start();
         _ = Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync());
-        if (_embeddingWorker is not null)
+        if (_embeddingWorker is not null && _settingsService.Current.EnableSemanticSearch)
         {
             _embeddingWorker.Start();
         }

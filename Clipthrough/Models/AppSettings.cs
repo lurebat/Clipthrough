@@ -130,7 +130,9 @@ public sealed record AppSettings
 
     public bool UseFuzzyClipSearch { get; init; }
 
-    public bool UseSemanticClipSearch { get; init; } = true;
+    public bool EnableSemanticSearch { get; init; }
+
+    public bool UseSemanticClipSearch { get; init; }
 
     /// <summary>
     /// When true, search results are sorted by date (respects the selected sort option)
@@ -149,7 +151,7 @@ public sealed record AppSettings
     public bool LastUseWildcardSearch { get; init; }
     public bool LastWholeWordSearch { get; init; }
     public bool LastUseFuzzyClipSearch { get; init; }
-    public bool LastUseSemanticClipSearch { get; init; } = true;
+    public bool LastUseSemanticClipSearch { get; init; }
     public ContentType? LastContentTypeFilter { get; init; }
 
     public bool EnableAi { get; init; }

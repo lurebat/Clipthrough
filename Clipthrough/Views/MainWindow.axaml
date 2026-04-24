@@ -163,6 +163,7 @@
                               Content="Fuzzy" />
                     <CheckBox Classes="filter-toggle compact-toggle"
                               IsChecked="{Binding UseSemanticClipSearch}"
+                              IsEnabled="{Binding IsSemanticSearchEnabled}"
                               ToolTip.Tip="{Binding SemanticFilterTooltip}"
                               Content="Semantic" />
                 </WrapPanel>

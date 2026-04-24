@@ -570,8 +570,8 @@
                                   IsChecked="{Binding SettingsSearchSortByDate, Mode=TwoWay}" />
                         <TextBlock Classes="body-muted" TextWrapping="Wrap"
                                    Text="Semantic search uses a small on-device embedding model (MiniLM-L6) to rank clips by meaning. Results from full-text and semantic search are fused with reciprocal rank fusion. Regex, wildcard, and whole-word modes disable semantic ranking." />
-                        <CheckBox Content="Enable semantic ranking in the toolbar (fuses with full-text search)"
-                                  IsChecked="{Binding UseSemanticClipSearch, Mode=TwoWay}" />
+                        <CheckBox Content="Enable semantic search (on-device embedding model + fusion with full-text search)"
+                                  IsChecked="{Binding SettingsEnableSemanticSearch, Mode=TwoWay}" />
                         <TextBlock Classes="body-muted" Text="{Binding SemanticCoverageText}" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button Classes="secondary compact"
