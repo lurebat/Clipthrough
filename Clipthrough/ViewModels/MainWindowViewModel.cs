@@ -2556,6 +2556,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
                 IsLoadingDatabase = false;
+                IsWelcomeOpen = false;
                 StatusText = AppText.LoadingStatus;
             });
 

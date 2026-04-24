@@ -1221,8 +1221,10 @@
                 Margin="10"
                 Classes="hero-surface"
                 Padding="28">
+            <Panel>
             <Grid RowDefinitions="Auto,*,Auto"
-                  RowSpacing="18">
+                  RowSpacing="18"
+                  IsVisible="{Binding !IsLoadingDatabase}">
                 <StackPanel Spacing="8">
                     <TextBlock Classes="eyebrow"
                                Text="{Binding WindowTitle}" />
@@ -1355,6 +1357,23 @@
                             Content="{Binding WelcomeSaveButtonLabel}" />
                 </Grid>
             </Grid>
+
+            <StackPanel IsVisible="{Binding IsLoadingDatabase}"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Spacing="16">
+                <TextBlock Classes="hero-title"
+                           HorizontalAlignment="Center"
+                           Text="Creating Clipboard Library" />
+                <ProgressBar IsIndeterminate="True"
+                             Width="240"
+                             HorizontalAlignment="Center" />
+                <TextBlock Classes="body-muted"
+                           HorizontalAlignment="Center"
+                           Text="{Binding StatusText}"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+            </Panel>
         </Border>
 
         <!-- Password Prompt Panel -->
