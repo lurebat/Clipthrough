@@ -130,6 +130,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _settingsMaxClipSizeKilobytes = (AppSettings.Default.MaxClipSizeBytes / 1024d).ToString("0.##", CultureInfo.InvariantCulture);
     private string _settingsDatabasePath = StorageOptions.Default.DatabasePath;
     private string _settingsDatabasePassword = StorageOptions.Default.DatabasePassword;
+    private string _settingsDatabasePasswordConfirm = StorageOptions.Default.DatabasePassword;
     private bool _settingsCloseToTray = AppSettings.Default.CloseToTray;
     private bool _settingsMinimizeToTray = AppSettings.Default.MinimizeToTray;
     private bool _settingsStartWithWindows = AppSettings.Default.StartWithWindows;
@@ -2359,8 +2360,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string SettingsDatabasePassword
     {
         get => _settingsDatabasePassword;
-        set => this.RaiseAndSetIfChanged(ref _settingsDatabasePassword, value);
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _settingsDatabasePassword, value);
+            this.RaisePropertyChanged(nameof(IsPasswordMismatchVisible));
+        }
     }
+
+    public string SettingsDatabasePasswordConfirm
+    {
+        get => _settingsDatabasePasswordConfirm;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _settingsDatabasePasswordConfirm, value);
+            this.RaisePropertyChanged(nameof(IsPasswordMismatchVisible));
+        }
+    }
+
+    public bool IsPasswordMismatchVisible =>
+        !string.IsNullOrEmpty(SettingsDatabasePassword)
+        && !string.Equals(SettingsDatabasePassword, SettingsDatabasePasswordConfirm, StringComparison.Ordinal);
 
     public bool IsDatabasePasswordVisible
     {
@@ -4841,6 +4860,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        if (!string.IsNullOrEmpty(SettingsDatabasePassword)
+            && !string.Equals(SettingsDatabasePassword, SettingsDatabasePasswordConfirm, StringComparison.Ordinal))
+        {
+            StatusText = AppText.SettingsPasswordMismatch;
+            return;
+        }
+
         StorageOptions storageOptions;
         try
         {
@@ -5009,6 +5035,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsMaxClipSizeKilobytes = (settings.MaxClipSizeBytes / 1024d).ToString("0.##", CultureInfo.InvariantCulture);
         SettingsDatabasePath = _storageOptionsService.Current.DatabasePath;
         SettingsDatabasePassword = _storageOptionsService.Current.DatabasePassword;
+        SettingsDatabasePasswordConfirm = _storageOptionsService.Current.DatabasePassword;
         SettingsCloseToTray = settings.CloseToTray;
         SettingsMinimizeToTray = settings.MinimizeToTray;
         SettingsStartWithWindows = settings.StartWithWindows;

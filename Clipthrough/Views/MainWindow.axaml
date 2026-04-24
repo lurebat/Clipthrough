@@ -1293,8 +1293,22 @@
                                                  Text="{Binding SettingsDatabasePassword, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                  PasswordChar="*"
                                                  RevealPassword="{Binding IsDatabasePasswordVisible}" />
+                                        <TextBlock Classes="detail-label"
+                                                   Text="Confirm password" />
+                                        <TextBox Text="{Binding SettingsDatabasePasswordConfirm, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 PasswordChar="*"
+                                                 RevealPassword="{Binding IsDatabasePasswordVisible}" />
+                                        <TextBlock Text="Passwords do not match."
+                                                   IsVisible="{Binding IsPasswordMismatchVisible}"
+                                                   Foreground="{DynamicResource DangerBrush}"
+                                                   FontSize="11" />
                                         <CheckBox Content="{Binding SettingsShowPasswordLabel}"
                                                   IsChecked="{Binding IsDatabasePasswordVisible}" />
+                                        <TextBlock Text="Warning: if you forget this password, your database cannot be recovered."
+                                                   Classes="body-muted"
+                                                   FontSize="11"
+                                                   Foreground="{DynamicResource WarningBrush}"
+                                                   TextWrapping="Wrap" />
                                     </StackPanel>
                                 </StackPanel>
                             </Border>
