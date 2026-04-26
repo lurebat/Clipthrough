@@ -108,6 +108,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _hasQueuedRefresh;
     private int _recentSearchNavigationIndex = -1;
     private bool _isNavigatingSearchHistory;
+    private bool _isSearchBoxFocused;
     private bool _isSettingsOpen;
     private bool _isWelcomeOpen;
     private bool _isPasswordPromptOpen;
@@ -448,6 +449,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ObservableCollection<string> RecentSearches { get; } = [];
 
+    public ObservableCollection<string> FilteredRecentSearches { get; } = [];
+
+    public bool IsSearchSuggestionsOpen => _isSearchBoxFocused && FilteredRecentSearches.Count > 0;
+
     public ObservableCollection<ClipFileItemViewModel> SelectedClipFiles { get; } = [];
 
     public ObservableCollection<AppNotificationViewModel> Notifications { get; } = [];
@@ -600,6 +605,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 _recentSearchNavigationIndex = -1;
             }
+            RefreshFilteredRecentSearches();
             RaiseFilterStateProperties();
         }
     }
@@ -4378,11 +4384,61 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 RecentSearches.Add(search);
             }
+            RefreshFilteredRecentSearches();
         }
         catch (Exception ex)
         {
             System.Diagnostics.Trace.TraceWarning($"Failed to load search history: {ex.Message}");
         }
+    }
+
+    public void SetSearchBoxFocused(bool isFocused)
+    {
+        if (_isSearchBoxFocused == isFocused)
+        {
+            return;
+        }
+
+        _isSearchBoxFocused = isFocused;
+        RefreshFilteredRecentSearches();
+    }
+
+    public void ApplySearchSuggestion(string? suggestion)
+    {
+        if (string.IsNullOrWhiteSpace(suggestion))
+        {
+            return;
+        }
+
+        _isNavigatingSearchHistory = true;
+        try
+        {
+            SearchText = suggestion;
+        }
+        finally
+        {
+            _isNavigatingSearchHistory = false;
+        }
+
+        _recentSearchNavigationIndex = RecentSearches.IndexOf(suggestion);
+        SetSearchBoxFocused(false);
+    }
+
+    private void RefreshFilteredRecentSearches()
+    {
+        var query = SearchText?.Trim() ?? string.Empty;
+        var matches = string.IsNullOrEmpty(query)
+            ? RecentSearches
+            : RecentSearches
+                .Where(search => search.Contains(query, StringComparison.OrdinalIgnoreCase));
+
+        FilteredRecentSearches.Clear();
+        foreach (var match in matches.Take(8))
+        {
+            FilteredRecentSearches.Add(match);
+        }
+
+        this.RaisePropertyChanged(nameof(IsSearchSuggestionsOpen));
     }
 
     public async Task NavigateSearchHistoryAsync(int delta)

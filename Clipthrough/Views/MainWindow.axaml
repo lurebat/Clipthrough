@@ -3,6 +3,7 @@
         xmlns:controls="using:Clipthrough.Controls"
         xmlns:conv="using:Clipthrough.Converters"
         xmlns:models="using:Clipthrough.Models"
+        xmlns:primitives="using:Avalonia.Controls.Primitives"
         xmlns:vm="using:Clipthrough.ViewModels"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -78,16 +79,27 @@
                            VerticalAlignment="Center"
                            Text="{Binding HeroTitle}" />
 
-                <ComboBox x:Name="SearchTextBox"
-                          Grid.Column="1"
-                          AutomationProperties.Name="Search clips"
-                          HorizontalAlignment="Stretch"
-                          VerticalAlignment="Center"
-                          MinWidth="360"
-                          IsEditable="True"
-                          ItemsSource="{Binding RecentSearches}"
-                          PlaceholderText="{Binding SearchWatermark}"
-                          Text="{Binding SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                <Grid Grid.Column="1"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Center"
+                      MinWidth="360">
+                    <TextBox x:Name="SearchTextBox"
+                             AutomationProperties.Name="Search clips"
+                             PlaceholderText="{Binding SearchWatermark}"
+                             Text="{Binding SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    <primitives:Popup IsOpen="{Binding IsSearchSuggestionsOpen}"
+                                      PlacementTarget="{Binding #SearchTextBox}"
+                                      Placement="Bottom"
+                                      Width="{Binding Bounds.Width, ElementName=SearchTextBox}">
+                        <Border Classes="inset-panel"
+                                Padding="4"
+                                MaxHeight="220">
+                            <ListBox x:Name="SearchSuggestionsList"
+                                     ItemsSource="{Binding FilteredRecentSearches}"
+                                     SelectionChanged="OnSearchSuggestionSelected" />
+                        </Border>
+                    </primitives:Popup>
+                </Grid>
 
                 <UniformGrid Grid.Column="2"
                              Columns="5"

@@ -62,6 +62,7 @@ public partial class MainWindow : Window
         if (searchBox is not null)
         {
             searchBox.GotFocus += OnSearchBoxGotFocus;
+            searchBox.LostFocus += OnSearchBoxLostFocus;
         }
 
         FocusSearchBox();
@@ -1054,8 +1055,34 @@ public partial class MainWindow : Window
     {
         if (DataContext is MainWindowViewModel viewModel)
         {
+            viewModel.SetSearchBoxFocused(true);
             await viewModel.LoadRecentSearchesAsync();
         }
+    }
+
+    private async void OnSearchBoxLostFocus(object? sender, RoutedEventArgs e)
+    {
+        await Task.Delay(150);
+        if (DataContext is MainWindowViewModel viewModel
+            && GetSearchBox()?.IsKeyboardFocusWithin != true
+            && this.FindControl<ListBox>("SearchSuggestionsList")?.IsKeyboardFocusWithin != true)
+        {
+            viewModel.SetSearchBoxFocused(false);
+        }
+    }
+
+    private void OnSearchSuggestionSelected(object? sender, SelectionChangedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel
+            || sender is not ListBox listBox
+            || listBox.SelectedItem is not string suggestion)
+        {
+            return;
+        }
+
+        viewModel.ApplySearchSuggestion(suggestion);
+        listBox.SelectedItem = null;
+        FocusSearchBox();
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
@@ -1235,7 +1262,7 @@ public partial class MainWindow : Window
         }, DispatcherPriority.Input);
     }
 
-    private ComboBox? GetSearchBox() => this.FindControl<ComboBox>("SearchTextBox");
+    private TextBox? GetSearchBox() => this.FindControl<TextBox>("SearchTextBox");
 
     private void FocusSortBox()
     {
