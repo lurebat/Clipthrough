@@ -1697,9 +1697,9 @@ public sealed class ClipStoreService : IClipStoreService
         command.CommandText = $"""
             SELECT
                 SUM(CASE WHEN {EmbeddingEligibilityClause} THEN 1 ELSE 0 END) AS eligible,
-                SUM(CASE WHEN embedding_status = 'succeeded' THEN 1 ELSE 0 END) AS embedded,
-                SUM(CASE WHEN embedding_status IS NULL OR embedding_status IN ('pending','rerun','processing') THEN 1 ELSE 0 END) AS pending,
-                SUM(CASE WHEN embedding_status = 'failed' THEN 1 ELSE 0 END) AS failed,
+                SUM(CASE WHEN {EmbeddingEligibilityClause} AND embedding_status = 'succeeded' THEN 1 ELSE 0 END) AS embedded,
+                SUM(CASE WHEN {EmbeddingEligibilityClause} AND (embedding_status IS NULL OR embedding_status IN ('pending','rerun','processing')) THEN 1 ELSE 0 END) AS pending,
+                SUM(CASE WHEN {EmbeddingEligibilityClause} AND embedding_status = 'failed' THEN 1 ELSE 0 END) AS failed,
                 SUM(CASE WHEN embedding_status = 'excluded' THEN 1 ELSE 0 END) AS excluded
             FROM clips;
             """;

@@ -600,6 +600,10 @@ public partial class App : Application
             if (window.IsVisible && window.IsActive)
             {
                 _systemInteractionService?.ClearTargetWindowCapture();
+                if (window.DataContext is MainWindowViewModel viewModel)
+                {
+                    _ = viewModel.ClearSearchFilterAsync(forceRefresh: true);
+                }
                 window.Hide();
                 return;
             }
@@ -669,6 +673,10 @@ public partial class App : Application
         Dispatcher.UIThread.Post(() =>
         {
             _systemInteractionService?.ClearTargetWindowCapture();
+            if (_mainWindow.DataContext is MainWindowViewModel viewModel)
+            {
+                _ = viewModel.ClearSearchFilterAsync(forceRefresh: true);
+            }
             RestoreWindowState(_mainWindow);
             _mainWindow.Hide();
 

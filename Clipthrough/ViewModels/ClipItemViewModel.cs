@@ -23,6 +23,7 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     private static readonly IBrush s_frequencyLowBrush = new SolidColorBrush(Color.Parse("#1A3B82F6"));
     private static readonly IBrush s_frequencyMediumBrush = new SolidColorBrush(Color.Parse("#1A22C55E"));
     private static readonly IBrush s_frequencyHighBrush = new SolidColorBrush(Color.Parse("#1AF59E0B"));
+    private static readonly IBrush s_pinnedBackgroundBrush = new SolidColorBrush(Color.Parse("#24210B"));
 
     private static readonly IBrush s_shortcutIndexForeground = new SolidColorBrush(Color.Parse("#E2E8F0"));
     private static readonly IBrush s_normalIndexForeground = new SolidColorBrush(Color.Parse("#475569"));
@@ -371,7 +372,7 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     public string ExportLabel => AppText.ExportButtonLabel;
 
-    public IBrush FrequencyBackground => GetFrequencyBrush(Clip.CopyCount);
+    public IBrush RowBackgroundBrush => IsPinned ? s_pinnedBackgroundBrush : GetFrequencyBrush(Clip.CopyCount);
 
     public string CopyCountBadge => Clip.CopyCount > 1 ? $"×{Clip.CopyCount}" : string.Empty;
 

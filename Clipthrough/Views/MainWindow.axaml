@@ -78,11 +78,16 @@
                            VerticalAlignment="Center"
                            Text="{Binding HeroTitle}" />
 
-                <TextBox x:Name="SearchTextBox"
-                         Grid.Column="1"
-                         AutomationProperties.Name="Search clips"
-                         PlaceholderText="{Binding SearchWatermark}"
-                         Text="{Binding SearchText}" />
+                <ComboBox x:Name="SearchTextBox"
+                          Grid.Column="1"
+                          AutomationProperties.Name="Search clips"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Center"
+                          MinWidth="360"
+                          IsEditable="True"
+                          ItemsSource="{Binding RecentSearches}"
+                          PlaceholderText="{Binding SearchWatermark}"
+                          Text="{Binding SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                 <UniformGrid Grid.Column="2"
                              Columns="5"
@@ -115,10 +120,11 @@
                 </UniformGrid>
             </Grid>
 
-            <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="12">
+            <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,*,Auto" ColumnSpacing="12">
                 <!-- Category filters: which clips to show -->
                 <WrapPanel Grid.Column="0"
                            Orientation="Horizontal"
+                           VerticalAlignment="Center"
                            ItemSpacing="8"
                            LineSpacing="4"
                            ToolTip.Tip="Category filters — which clips to show">
@@ -136,7 +142,16 @@
                               Content="{Binding PastedFilterLabel}" />
                 </WrapPanel>
 
-                <ComboBox Grid.Column="1"
+                <Border Grid.Column="1"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Stretch"
+                        Width="1"
+                        Margin="4,2"
+                        Background="{DynamicResource SystemBaseLowColor}"
+                        Opacity="0.4" />
+
+                <ComboBox x:Name="SortComboBox"
+                          Grid.Column="2"
                           Classes="compact"
                           ItemsSource="{Binding SortOptions}"
                           SelectedItem="{Binding SelectedSortOption}"
@@ -144,16 +159,10 @@
                           VerticalAlignment="Center"
                           ToolTip.Tip="Sort order" />
 
-                <Border Grid.Column="2"
-                        HorizontalAlignment="Left"
-                        Width="1"
-                        Margin="4,2"
-                        Background="{DynamicResource SystemBaseLowColor}"
-                        Opacity="0.4" />
-
                 <!-- Search modifier filters: how the search works -->
-                <WrapPanel Grid.Column="3"
+                <WrapPanel Grid.Column="4"
                            Orientation="Horizontal"
+                           VerticalAlignment="Center"
                            ItemSpacing="8"
                            LineSpacing="4"
                            ToolTip.Tip="Search modifiers — how the filter text is matched">
@@ -193,41 +202,40 @@
             <Border Grid.Column="0"
                     Classes="surface-panel"
                     MinWidth="340">
-                <Grid RowDefinitions="Auto,*,Auto"
+                <Grid RowDefinitions="Auto,*,Auto,Auto"
                       RowSpacing="10"
                       Margin="12">
                     <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto"
                           ColumnSpacing="4"
                           HorizontalAlignment="Stretch">
                         <Button Classes="secondary compact"
+                                VerticalAlignment="Center"
                                 Command="{Binding SelectAllClipsCommand}"
                                 Content="{Binding SelectAllButtonLabel}" />
                         <Button Classes="secondary compact"
                                 Grid.Column="1"
+                                VerticalAlignment="Center"
                                 Command="{Binding SelectNoClipsCommand}"
                                 Content="{Binding SelectNoneButtonLabel}" />
                         <Button Classes="secondary compact"
                                  Grid.Column="2"
+                                VerticalAlignment="Center"
                                 Command="{Binding FavoriteCheckedClipsCommand}"
                                 IsEnabled="{Binding HasCheckedOrSelectedClip}"
                                 Content="{Binding FavoriteSelectedButtonLabel}" />
                         <Button Classes="secondary compact"
                                  Grid.Column="3"
+                                VerticalAlignment="Center"
                                 Command="{Binding PinCheckedClipsCommand}"
                                 IsEnabled="{Binding HasCheckedOrSelectedClip}"
                                 ToolTip.Tip="Pin checked/selected clips to the top"
                                 Content="📌 Pin" />
                         <Button Classes="destructive compact"
                                 Grid.Column="4"
+                                VerticalAlignment="Center"
                                 Command="{Binding DeleteCheckedClipsCommand}"
                                 IsEnabled="{Binding HasCheckedOrSelectedClip}"
                                 Content="{Binding DeleteButtonLabel}" />
-                        <ProgressBar Grid.Column="6"
-                                     IsIndeterminate="True"
-                                     IsVisible="{Binding IsBusy}"
-                                     Height="2"
-                                     Margin="0,0,0,-2"
-                                     VerticalAlignment="Bottom" />
                     </Grid>
 
                     <Grid Grid.Row="1">
@@ -246,7 +254,7 @@
                             <ListBox.ItemTemplate>
                                 <DataTemplate x:DataType="vm:ClipItemViewModel">
                                     <Border Classes="clip-row-card"
-                                            Background="{Binding FrequencyBackground}"
+                                            Background="{Binding RowBackgroundBrush}"
                                             BorderBrush="{Binding RowBorderBrush}"
                                             BorderThickness="{Binding RowBorderThickness}"
                                             Padding="10,8">
@@ -491,7 +499,14 @@
                         </ListBox>
                     </Grid>
 
-                    <Border Grid.Row="2"
+                    <ProgressBar Grid.Row="2"
+                                 IsIndeterminate="True"
+                                 IsVisible="{Binding IsBusy}"
+                                 Height="4"
+                                 Margin="0,-4,0,0"
+                                 VerticalAlignment="Bottom" />
+
+                    <Border Grid.Row="3"
                             Classes="inset-panel"
                             Padding="8,6">
                         <WrapPanel Orientation="Horizontal"

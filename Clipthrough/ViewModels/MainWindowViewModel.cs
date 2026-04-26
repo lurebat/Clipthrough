@@ -9,6 +9,7 @@ using System.Linq;
 using System.Reactive;
 using System.Reactive.Disposables;
 using System.Reactive.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -103,7 +104,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isDatabaseReady;
     private bool _isStarted;
     private bool _isLoadingDatabase;
+    private bool _areBackgroundServicesStarted;
     private bool _hasQueuedRefresh;
+    private int _recentSearchNavigationIndex = -1;
+    private bool _isNavigatingSearchHistory;
     private bool _isSettingsOpen;
     private bool _isWelcomeOpen;
     private bool _isPasswordPromptOpen;
@@ -592,6 +596,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set
         {
             this.RaiseAndSetIfChanged(ref _searchText, value);
+            if (!_isNavigatingSearchHistory)
+            {
+                _recentSearchNavigationIndex = -1;
+            }
             RaiseFilterStateProperties();
         }
     }
@@ -744,6 +752,52 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set { if (value) SelectedContentDisplayMode = ContentDisplayMode.Raw; }
     }
 
+    public void CycleSelectedViewerMode(bool reverse = false)
+    {
+        if (ShowSelectedImageRenderer)
+        {
+            var modes = new[]
+            {
+                ImageViewMode.Preview,
+                ImageViewMode.Editor,
+                ImageViewMode.Text,
+            };
+            var index = Array.IndexOf(modes, _imageViewMode);
+            if (index < 0)
+            {
+                index = 0;
+            }
+
+            SelectedImageViewMode = modes[(index + (reverse ? modes.Length - 1 : 1)) % modes.Length];
+            return;
+        }
+
+        if (!IsDisplayModeApplicable)
+        {
+            return;
+        }
+
+        var index2 = Array.IndexOf(DisplayModeOptions, _contentDisplayMode);
+        if (index2 < 0)
+        {
+            index2 = 0;
+        }
+
+        SelectedContentDisplayMode = DisplayModeOptions[(index2 + (reverse ? DisplayModeOptions.Length - 1 : 1)) % DisplayModeOptions.Length];
+    }
+
+    public bool TrySelectContentTypeByShortcut(int shortcutNumber)
+    {
+        var index = shortcutNumber - 1;
+        if (index < 0 || index >= ContentTypeOptions.Count)
+        {
+            return false;
+        }
+
+        SelectedContentTypeOption = ContentTypeOptions[index];
+        return true;
+    }
+
     public bool IsAllTypeSelected
     {
         get => _selectedContentTypeOption.Value is null;
@@ -784,7 +838,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 return _checkedTransformableClipCount > 0;
             }
-            return SelectedClip?.CanAiTransform == true;
+            return SelectedClip?.CanTransform == true;
         }
     }
 
@@ -929,13 +983,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         private set => this.RaiseAndSetIfChanged(ref _lastCaptureSummary, value);
     }
 
-    public string WindowTitle => AppText.WindowTitle;
+    public string WindowTitle => $"{AppText.WindowTitle} {GetDisplayVersion()}";
 
     public string HeroTitle => AppText.WindowTitle;
 
     public string SearchWatermark => AppText.SearchWatermark;
 
     public string ClipboardHistoryCaptionText => AppText.ClipboardHistoryCaption;
+
+    private static string GetDisplayVersion()
+    {
+        var assembly = Assembly.GetExecutingAssembly();
+        var informationalVersion = assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion;
+        var version = string.IsNullOrWhiteSpace(informationalVersion)
+            ? assembly.GetName().Version?.ToString()
+            : informationalVersion.Split('+', 2)[0];
+
+        return string.IsNullOrWhiteSpace(version) ? string.Empty : $"v{version}";
+    }
 
     public string ClipsPanelTitleText => AppText.ClipsPanelTitle;
 
@@ -2620,15 +2687,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         try
         {
             await Task.Run(async () => await StartDatabaseAsync().ConfigureAwait(false)).ConfigureAwait(false);
+            await RefreshAsync();
 
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
                 IsLoadingDatabase = false;
                 IsWelcomeOpen = false;
-                StatusText = AppText.LoadingStatus;
             });
 
-            _ = ApplyMaintenanceAndRefreshAsync();
+            StartBackgroundServices();
+            _ = ApplyMaintenanceAndRefreshAsync(forceRefresh: false);
         }
         catch (Exception ex)
         {
@@ -3439,6 +3507,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             IncrementExistingCopyCount = false,
             SourceClipId = clip.Clip.Id,
             TransformKind = $"builtin:{transformation}",
+            SkipPostInsertMaintenance = true,
         }));
         StatusText = AppText.EditedClipCopiedStatus;
         await RefreshAsync(captured?.Id);
@@ -3544,6 +3613,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 IncrementExistingCopyCount = false,
                 SourceClipId = target.Clip.Id,
                 TransformKind = transformKind,
+                SkipPostInsertMaintenance = true,
             }));
             if (captured is not null)
             {
@@ -3558,6 +3628,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 ? (useSelectionSlice ? $"Applied {singleLabel} to selection" : AppText.EditedClipCopiedStatus)
                 : multiSummary(transformed);
             await RefreshAsync(lastCreatedId);
+        }
+        else
+        {
+            StatusText = $"No text clips changed by {singleLabel}";
         }
     }
 
@@ -3635,7 +3709,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
             else
             {
-                var pct = (int)Math.Round(100.0 * coverage.Embedded / eligible);
+                var pct = Math.Clamp((int)Math.Round(100.0 * coverage.Embedded / eligible), 0, 100);
                 var suffixParts = new List<string>();
                 if (coverage.Pending > 0)
                 {
@@ -4052,8 +4126,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             HasMoreResults = Clips.Count < result.TotalMatchingCount;
             this.RaisePropertyChanged(nameof(HasNoClips));
             SelectedClip = previousSelectionId is null
-                ? Clips.FirstOrDefault()
-                : Clips.FirstOrDefault(clip => clip.Id == previousSelectionId) ?? Clips.FirstOrDefault();
+                ? GetDefaultAutoSelectedClip()
+                : Clips.FirstOrDefault(clip => clip.Id == previousSelectionId) ?? GetDefaultAutoSelectedClip();
         }
         finally
         {
@@ -4063,6 +4137,30 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaiseBulkSelectionProperties();
         UpdateStatus(result);
         UpdateClipDisplayIndices();
+    }
+
+    public ClipItemViewModel? GetDefaultAutoSelectedClip()
+    {
+        if (Clips.Count == 0)
+        {
+            return null;
+        }
+
+        var first = Clips[0];
+        if (!first.IsPinned)
+        {
+            return first;
+        }
+
+        var firstUnpinned = Clips.FirstOrDefault(static clip => !clip.IsPinned);
+        if (firstUnpinned is null)
+        {
+            return first;
+        }
+
+        return first.Clip.LastCopiedAt >= firstUnpinned.Clip.LastCopiedAt
+            ? first
+            : firstUnpinned;
     }
 
     private void UpdateSelectedClipPresentation()
@@ -4274,7 +4372,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         try
         {
-            var searches = await _searchHistoryService.GetRecentSearchesAsync();
+            var searches = await Task.Run(() => _searchHistoryService.GetRecentSearchesAsync());
             RecentSearches.Clear();
             foreach (var search in searches)
             {
@@ -4284,6 +4382,63 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         catch (Exception ex)
         {
             System.Diagnostics.Trace.TraceWarning($"Failed to load search history: {ex.Message}");
+        }
+    }
+
+    public async Task NavigateSearchHistoryAsync(int delta)
+    {
+        if (RecentSearches.Count == 0)
+        {
+            await LoadRecentSearchesAsync();
+        }
+
+        if (RecentSearches.Count == 0)
+        {
+            return;
+        }
+
+        if (_recentSearchNavigationIndex == 0 && delta < 0)
+        {
+            _recentSearchNavigationIndex = -1;
+            await ClearSearchFilterAsync(forceRefresh: true);
+            return;
+        }
+
+        if (_recentSearchNavigationIndex == RecentSearches.Count - 1 && delta > 0)
+        {
+            _recentSearchNavigationIndex = -1;
+            await ClearSearchFilterAsync(forceRefresh: true);
+            return;
+        }
+
+        var next = _recentSearchNavigationIndex < 0
+            ? (delta < 0 ? 0 : RecentSearches.Count - 1)
+            : Math.Clamp(_recentSearchNavigationIndex + delta, 0, RecentSearches.Count - 1);
+
+        _recentSearchNavigationIndex = next;
+        _isNavigatingSearchHistory = true;
+        try
+        {
+            SearchText = RecentSearches[next];
+        }
+        finally
+        {
+            _isNavigatingSearchHistory = false;
+        }
+    }
+
+    public async Task ClearSearchFilterAsync(bool forceRefresh = false)
+    {
+        var hadSearchText = !string.IsNullOrEmpty(SearchText);
+        _recentSearchNavigationIndex = -1;
+        if (hadSearchText)
+        {
+            SearchText = string.Empty;
+        }
+
+        if (forceRefresh || (!hadSearchText && Clips.Count == 0))
+        {
+            await RefreshAsync();
         }
     }
 
@@ -4593,6 +4748,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     IncrementExistingCopyCount = false,
                     SourceClipId = target.Clip.Id,
                     TransformKind = transformKind,
+                    SkipPostInsertMaintenance = true,
                 }));
                 if (captured is not null)
                 {
@@ -4710,6 +4866,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 IncrementExistingCopyCount = false,
                 SourceClipId = clip.Clip.Id,
                 TransformKind = transformKind,
+                SkipPostInsertMaintenance = true,
             });
 
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
@@ -5321,6 +5478,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         await LoadSensitivityRulesAsync();
         _isDatabaseReady = true;
+    }
+
+    private void StartBackgroundServices()
+    {
+        if (_areBackgroundServicesStarted)
+        {
+            return;
+        }
+
+        _areBackgroundServicesStarted = true;
         _clipboardMonitorService.Start();
         _backgroundOcrQueue.Start();
         _ = Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync());

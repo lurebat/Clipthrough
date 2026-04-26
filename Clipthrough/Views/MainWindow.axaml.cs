@@ -33,6 +33,7 @@ public partial class MainWindow : Window
         m_systemInteractionService = systemInteractionService;
         InitializeComponent();
         Opened += OnOpened;
+        Activated += OnActivated;
         Closed += OnClosed;
         DataContextChanged += OnDataContextChanged;
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
@@ -57,14 +58,16 @@ public partial class MainWindow : Window
 
         PopulateTransformMenus();
 
-        var searchTextBox = this.FindControl<TextBox>("SearchTextBox");
-        if (searchTextBox is not null)
+        var searchBox = GetSearchBox();
+        if (searchBox is not null)
         {
-            searchTextBox.GotFocus += OnSearchBoxGotFocus;
+            searchBox.GotFocus += OnSearchBoxGotFocus;
         }
 
         FocusSearchBox();
     }
+
+    private void OnActivated(object? sender, EventArgs e) => FocusSearchBox();
 
     /// <summary>
     /// Lazily connects the clip list scroll viewer for scroll-to-load.
@@ -243,6 +246,26 @@ public partial class MainWindow : Window
             return true;
         }
 
+        if (e.Key == Key.Back && modifiers == KeyModifiers.Control)
+        {
+            _ = viewModel.ClearSearchFilterAsync(forceRefresh: true);
+            FocusSearchBox();
+            return true;
+        }
+
+        if (e.Key == Key.O && modifiers == (KeyModifiers.Control | KeyModifiers.Shift))
+        {
+            FocusSortBox();
+            return true;
+        }
+
+        if (modifiers == (KeyModifiers.Control | KeyModifiers.Shift)
+            && TryGetShortcutNumber(e.Key) is { } contentTypeShortcut
+            && viewModel.TrySelectContentTypeByShortcut(contentTypeShortcut))
+        {
+            return true;
+        }
+
         // Don't interfere with arrow keys in multi-line text editors
         if (e.Source is AvaloniaEdit.TextEditor or Controls.SyntaxTextEditor)
         {
@@ -255,15 +278,27 @@ public partial class MainWindow : Window
             return false;
         }
 
-        var searchTextBox = this.FindControl<TextBox>("SearchTextBox");
-        var isSearchFocused = searchTextBox?.IsFocused == true;
+        var searchBox = GetSearchBox();
+        var isSearchFocused = searchBox?.IsKeyboardFocusWithin == true;
+
+        if (isSearchFocused && modifiers == KeyModifiers.Alt && (e.Key == Key.Down || e.Key == Key.Up))
+        {
+            _ = viewModel.NavigateSearchHistoryAsync(e.Key == Key.Up ? -1 : 1);
+            return true;
+        }
+
+        if (e.Key == Key.Tab && modifiers is KeyModifiers.Control or (KeyModifiers.Control | KeyModifiers.Shift))
+        {
+            viewModel.CycleSelectedViewerMode((modifiers & KeyModifiers.Shift) == KeyModifiers.Shift);
+            return true;
+        }
 
         // Tab from search box: move focus to clip list
         if (e.Key == Key.Tab && modifiers == KeyModifiers.None && isSearchFocused && viewModel.Clips.Count > 0)
         {
             if (viewModel.SelectedClip is null)
             {
-                viewModel.SelectedClip = viewModel.Clips[0];
+                viewModel.SelectedClip = viewModel.GetDefaultAutoSelectedClip();
             }
             FocusSelectedClipInList();
             return true;
@@ -286,7 +321,7 @@ public partial class MainWindow : Window
         {
             if (viewModel.SelectedClip is null)
             {
-                viewModel.SelectedClip = viewModel.Clips[0];
+                viewModel.SelectedClip = viewModel.GetDefaultAutoSelectedClip();
             }
             FocusSelectedClipInList();
             return true;
@@ -378,11 +413,10 @@ public partial class MainWindow : Window
             return false;
         }
 
-        var searchTextBox = this.FindControl<TextBox>("SearchTextBox");
         if (!string.IsNullOrEmpty(viewModel.SearchText))
         {
             viewModel.SearchText = string.Empty;
-            searchTextBox?.Focus();
+            FocusSearchBox();
             return true;
         }
 
@@ -490,8 +524,8 @@ public partial class MainWindow : Window
 
     private bool TryRedirectToSearchBox(KeyEventArgs e)
     {
-        var searchTextBox = this.FindControl<TextBox>("SearchTextBox");
-        if (searchTextBox is null || searchTextBox.IsFocused)
+        var searchBox = GetSearchBox();
+        if (searchBox is null || searchBox.IsKeyboardFocusWithin)
         {
             return false;
         }
@@ -534,11 +568,10 @@ public partial class MainWindow : Window
             return false;
         }
 
-        searchTextBox.Focus();
+        searchBox.Focus();
         if (DataContext is MainWindowViewModel vm)
         {
             vm.SearchText = (vm.SearchText ?? string.Empty) + typed.Value;
-            searchTextBox.CaretIndex = vm.SearchText.Length;
         }
         return true;
     }
@@ -666,6 +699,7 @@ public partial class MainWindow : Window
         }
 
         // Step 3: Hide Clipthrough. Target has already been scheduled to receive focus.
+        _ = viewModel.ClearSearchFilterAsync(forceRefresh: true);
         Hide();
 
         // Step 4: Give the OS time to process WM_ACTIVATE / WM_SETFOCUS on the target.
@@ -1006,7 +1040,14 @@ public partial class MainWindow : Window
 
     private void MinimizeWindow()
     {
-        Dispatcher.UIThread.Post(() => Hide());
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (DataContext is MainWindowViewModel viewModel)
+            {
+                _ = viewModel.ClearSearchFilterAsync(forceRefresh: true);
+            }
+            Hide();
+        });
     }
 
     private async void OnSearchBoxGotFocus(object? sender, FocusChangedEventArgs e)
@@ -1174,14 +1215,48 @@ public partial class MainWindow : Window
 
     public void FocusSearchBox()
     {
-        var searchTextBox = this.FindControl<TextBox>("SearchTextBox");
-        if (searchTextBox is null)
+        if (DataContext is MainWindowViewModel viewModel
+            && (viewModel.IsSettingsOpen || viewModel.IsWelcomeOpen || viewModel.IsPasswordPromptOpen
+                || viewModel.IsAiPromptOpen || viewModel.SessionLogs.IsOpen))
         {
             return;
         }
 
-        Dispatcher.UIThread.Post(() => searchTextBox.Focus(), DispatcherPriority.Input);
+        var searchBox = GetSearchBox();
+        if (searchBox is null)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            searchBox.Focus();
+            Dispatcher.UIThread.Post(() => searchBox.Focus(), DispatcherPriority.Input);
+        }, DispatcherPriority.Input);
     }
+
+    private ComboBox? GetSearchBox() => this.FindControl<ComboBox>("SearchTextBox");
+
+    private void FocusSortBox()
+    {
+        var sortBox = this.FindControl<ComboBox>("SortComboBox");
+        if (sortBox is null)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() => sortBox.Focus(), DispatcherPriority.Input);
+    }
+
+    private static int? TryGetShortcutNumber(Key key) => key switch
+    {
+        Key.D1 or Key.NumPad1 => 1,
+        Key.D2 or Key.NumPad2 => 2,
+        Key.D3 or Key.NumPad3 => 3,
+        Key.D4 or Key.NumPad4 => 4,
+        Key.D5 or Key.NumPad5 => 5,
+        _ => null,
+    };
 
     private void ShowOwnedWindow(Window window)
     {
