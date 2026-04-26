@@ -37,11 +37,19 @@
                 <MenuItem Header="E_xit" Command="{Binding ExitApplicationCommand}" />
             </MenuItem>
             <MenuItem Header="Edit">
-                <MenuItem Header="_Copy selected" Command="{Binding CopySelectedCommand}" />
-                <MenuItem Header="_Delete selected" Command="{Binding DeleteSelectedCommand}" />
+                <MenuItem Header="_Copy selected"
+                          Command="{Binding CopySelectedCommand}"
+                          InputGesture="Ctrl+D" />
+                <MenuItem Header="_Delete selected"
+                          Command="{Binding DeleteSelectedCommand}"
+                          InputGesture="Delete" />
                 <Separator />
-                <MenuItem Header="Toggle _favorite" Command="{Binding ToggleFavoriteCommand}" />
-                <MenuItem Header="Toggle _pin" Command="{Binding TogglePinCommand}" />
+                <MenuItem Header="Toggle _favorite"
+                          Command="{Binding ToggleFavoriteCommand}"
+                          InputGesture="F" />
+                <MenuItem Header="Toggle _pin"
+                          Command="{Binding TogglePinCommand}"
+                          InputGesture="P" />
                 <Separator />
                 <MenuItem Header="_Transform"
                           x:Name="EditTransformMenu"

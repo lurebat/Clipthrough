@@ -2956,6 +2956,28 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    internal async Task CopySelectedAsPlainTextAsync()
+    {
+        var clip = GetEffectiveSelectedClip();
+        if (clip is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _clipboardMonitorService.SuppressNext();
+            await _systemInteractionService.CopyTextAsync(clip.FullContent);
+            StatusText = AppText.FormatCopiedClip("plain text");
+            TrackPasteInBackground(clip.Clip.Id);
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Copy as plain text failed: {ex}");
+            StatusText = $"Copy failed: {ex.Message}";
+        }
+    }
+
     private async void TrackPasteInBackground(long clipId)
     {
         try

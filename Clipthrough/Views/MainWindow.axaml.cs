@@ -171,6 +171,24 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (TryHandleArrowKeyNavigation(viewModel, e))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        if (TryHandleEscapeKey(viewModel, e))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        if (TryHandleClipListShortcuts(viewModel, e))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (TryHandleClipIndexShortcut(viewModel, e))
         {
             e.Handled = true;
@@ -206,6 +224,268 @@ public partial class MainWindow : Window
         {
             e.Handled = true;
         }
+    }
+
+    /// <summary>
+    /// Arrow Down from search box moves focus into the clip list.
+    /// Up/Down in the clip list navigates between clips.
+    /// Home/End jump to the first/last clip.
+    /// Ctrl+F focuses the search box from anywhere.
+    /// </summary>
+    private bool TryHandleArrowKeyNavigation(MainWindowViewModel viewModel, KeyEventArgs e)
+    {
+        var modifiers = e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Meta);
+
+        // Ctrl+F: focus search box from anywhere
+        if (e.Key == Key.F && modifiers == KeyModifiers.Control)
+        {
+            FocusSearchBox();
+            return true;
+        }
+
+        // Don't interfere with arrow keys in multi-line text editors
+        if (e.Source is AvaloniaEdit.TextEditor or Controls.SyntaxTextEditor)
+        {
+            return false;
+        }
+
+        if (viewModel.IsSettingsOpen || viewModel.IsWelcomeOpen || viewModel.IsPasswordPromptOpen
+            || viewModel.IsAiPromptOpen || viewModel.SessionLogs.IsOpen)
+        {
+            return false;
+        }
+
+        var searchTextBox = this.FindControl<TextBox>("SearchTextBox");
+        var isSearchFocused = searchTextBox?.IsFocused == true;
+
+        // Tab from search box: move focus to clip list
+        if (e.Key == Key.Tab && modifiers == KeyModifiers.None && isSearchFocused && viewModel.Clips.Count > 0)
+        {
+            if (viewModel.SelectedClip is null)
+            {
+                viewModel.SelectedClip = viewModel.Clips[0];
+            }
+            FocusSelectedClipInList();
+            return true;
+        }
+
+        // Shift+Tab from clip list: return focus to search box
+        if (e.Key == Key.Tab && modifiers == KeyModifiers.Shift && m_clipsListBox?.IsKeyboardFocusWithin == true)
+        {
+            FocusSearchBox();
+            return true;
+        }
+
+        if (viewModel.Clips.Count == 0)
+        {
+            return false;
+        }
+
+        // Arrow Down from search box: move focus to clip list, select first clip if none selected
+        if (e.Key == Key.Down && modifiers == KeyModifiers.None && isSearchFocused)
+        {
+            if (viewModel.SelectedClip is null)
+            {
+                viewModel.SelectedClip = viewModel.Clips[0];
+            }
+            FocusSelectedClipInList();
+            return true;
+        }
+
+        // Home/End: jump to first/last clip (from search box or clip list)
+        if (modifiers == KeyModifiers.None && (isSearchFocused || m_clipsListBox?.IsKeyboardFocusWithin == true))
+        {
+            if (e.Key == Key.Home)
+            {
+                viewModel.SelectedClip = viewModel.Clips[0];
+                FocusSelectedClipInList();
+                return true;
+            }
+
+            if (e.Key == Key.End)
+            {
+                viewModel.SelectedClip = viewModel.Clips[^1];
+                FocusSelectedClipInList();
+                return true;
+            }
+        }
+
+        // Up/Down in clip list: navigate between clips
+        if (m_clipsListBox?.IsKeyboardFocusWithin != true)
+        {
+            return false;
+        }
+
+        if (modifiers != KeyModifiers.None)
+        {
+            return false;
+        }
+
+        var currentIndex = viewModel.SelectedClip is not null ? viewModel.Clips.IndexOf(viewModel.SelectedClip) : -1;
+
+        if (e.Key == Key.Down)
+        {
+            var nextIndex = currentIndex + 1;
+            if (nextIndex < viewModel.Clips.Count)
+            {
+                viewModel.SelectedClip = viewModel.Clips[nextIndex];
+                FocusSelectedClipInList();
+            }
+            return true;
+        }
+
+        if (e.Key == Key.Up)
+        {
+            if (currentIndex == 0)
+            {
+                // Up from first clip: return focus to search box
+                FocusSearchBox();
+                return true;
+            }
+
+            var prevIndex = currentIndex - 1;
+            if (prevIndex >= 0)
+            {
+                viewModel.SelectedClip = viewModel.Clips[prevIndex];
+                FocusSelectedClipInList();
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Escape: if search text is non-empty, clear it and stay in search box.
+    /// If search is empty and clip list is focused, move focus back to search box.
+    /// </summary>
+    private bool TryHandleEscapeKey(MainWindowViewModel viewModel, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape)
+        {
+            return false;
+        }
+
+        if (viewModel.IsSettingsOpen || viewModel.IsWelcomeOpen || viewModel.IsPasswordPromptOpen
+            || viewModel.IsAiPromptOpen || viewModel.SessionLogs.IsOpen)
+        {
+            return false;
+        }
+
+        // Don't capture Escape from multi-line text editors
+        if (e.Source is AvaloniaEdit.TextEditor or Controls.SyntaxTextEditor)
+        {
+            return false;
+        }
+
+        var searchTextBox = this.FindControl<TextBox>("SearchTextBox");
+        if (!string.IsNullOrEmpty(viewModel.SearchText))
+        {
+            viewModel.SearchText = string.Empty;
+            searchTextBox?.Focus();
+            return true;
+        }
+
+        if (m_clipsListBox?.IsKeyboardFocusWithin == true)
+        {
+            FocusSearchBox();
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Keyboard shortcuts when the clip list is focused:
+    /// Delete — delete selected clip
+    /// F — toggle favorite
+    /// P — toggle pin
+    /// Space — toggle checkbox for multi-selection
+    /// </summary>
+    private bool TryHandleClipListShortcuts(MainWindowViewModel viewModel, KeyEventArgs e)
+    {
+        if (m_clipsListBox?.IsKeyboardFocusWithin != true || viewModel.SelectedClip is null)
+        {
+            return false;
+        }
+
+        var modifiers = e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Meta);
+
+        // Ctrl+A: toggle select/deselect all clips
+        if (e.Key == Key.A && modifiers == KeyModifiers.Control)
+        {
+            if (viewModel.Clips.All(static c => c.IsChecked))
+                viewModel.SelectNoClipsCommand.Execute().Subscribe();
+            else
+                viewModel.SelectAllClipsCommand.Execute().Subscribe();
+            return true;
+        }
+
+        // Ctrl+Shift+C: copy selected clip as plain text
+        if (e.Key == Key.C && modifiers == (KeyModifiers.Control | KeyModifiers.Shift))
+        {
+            _ = viewModel.CopySelectedAsPlainTextAsync();
+            return true;
+        }
+
+        // Ctrl+D: copy selected clip to clipboard without pasting or closing
+        if (e.Key == Key.D && modifiers == KeyModifiers.Control)
+        {
+            viewModel.CopySelectedCommand.Execute().Subscribe();
+            return true;
+        }
+
+        if (modifiers != KeyModifiers.None)
+        {
+            return false;
+        }
+
+        switch (e.Key)
+        {
+            case Key.Delete:
+                viewModel.DeleteSelectedCommand.Execute().Subscribe();
+                return true;
+            case Key.F:
+                viewModel.ToggleFavoriteCommand.Execute().Subscribe();
+                return true;
+            case Key.P:
+                viewModel.TogglePinCommand.Execute().Subscribe();
+                return true;
+            case Key.Space:
+                viewModel.ToggleClipCheckedSelection(viewModel.SelectedClip);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void FocusSelectedClipInList()
+    {
+        if (m_clipsListBox is null)
+        {
+            return;
+        }
+
+        // Scroll the selected item into view
+        if (m_clipsListBox.SelectedItem is not null)
+        {
+            m_clipsListBox.ScrollIntoView(m_clipsListBox.SelectedItem);
+        }
+
+        // Focus the ListBoxItem for the selected clip
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (m_clipsListBox.SelectedIndex < 0)
+            {
+                return;
+            }
+
+            var container = m_clipsListBox.ContainerFromIndex(m_clipsListBox.SelectedIndex);
+            if (container is ListBoxItem item)
+            {
+                item.Focus();
+            }
+        }, DispatcherPriority.Input);
     }
 
     private bool TryRedirectToSearchBox(KeyEventArgs e)
