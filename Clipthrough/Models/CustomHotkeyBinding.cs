@@ -13,6 +13,7 @@ public sealed record CustomHotkeyBinding
     ///   "builtin:&lt;TextTransformation enum name&gt;"
     ///   "script:&lt;user script name&gt;"
     ///   "ai:&lt;AI preset name&gt;"
+    ///   "prompt:&lt;free-form AI prompt text&gt;"
     /// </summary>
     public string Target { get; init; } = string.Empty;
 

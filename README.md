@@ -15,7 +15,9 @@ Clipthrough is an Avalonia desktop clipboard history app focused on rich clipboa
 - Clip export with original payload, rendered text, and metadata
 - Top menu bar and an in-app Help window
 - **AI transforms** — send text or image clips to any OpenAI-compatible chat-completions endpoint with a custom instruction or preset; results are saved as new clips (`Edit -> AI transform...`, `Ctrl+I`). Image presets support both image-to-text and image-to-image flows. Configure base URL, API key and model in Settings, or fall back to `OPENAI_BASE_URL` / `OPENAI_API_KEY` environment variables.
+- **Text transformations** — `Edit -> Transform` (and the per-clip context menu) groups built-ins into **Case**, **Whitespace**, **Lines**, plus a **Text table → HTML** action that converts box-drawing, Markdown pipe, and ASCII `+---+` tables (handles multiple tables and surrounding text) into HTML you can paste into Teams/Outlook with cell formatting preserved. Single-clip transforms automatically place the result on the OS clipboard so you can paste immediately.
 - **User scripting** — write C# scripts that transform clip text. Scripts live in settings; `Edit → Run script` lists them. `Edit → Load default scripts` seeds JSON quote/unquote/minify/pretty, URL encode/decode, Base64 encode/decode, and a couple of whitespace helpers. Transforms respect the editor text selection — selecting part of a clip and running a transform rewrites only that range.
+- **Custom hotkey actions** — bind any global hotkey to a one-shot transform of the most recent clip. Targets are `builtin:<TextTransformation>`, `script:<Name>`, `ai:<PresetName>`, or `prompt:<free-form prompt>` for ad-hoc AI prompts without saving a preset.
 - **OCR** — `Edit -> Extract text from image (OCR)` runs Windows.Media.Ocr on the selected image clip and captures the recognized text as a new clip. Optional background OCR can process new image clips automatically and reports status in the main window. Install additional Windows language packs (with the optional OCR feature) and list their BCP-47 tags in Settings (e.g. `en+he`).
 - **Auto-update** — optional Velopack-based update channel. Enable `Auto-update` in Settings and set the feed URL; updates are staged to apply on next launch. Releases are published via the tagged `release.yml` workflow which also invokes `vpk pack`.
 - **Remote control API** — optional authenticated HTTP API for local tools and AI agents. It binds to loopback by default but can be reconfigured in Settings -> Remote API. Enable it and mint a bearer token in Settings -> Remote API. See `.github/copilot-cli-skills/clipthrough-remote-api.md` for the endpoint reference.
@@ -52,8 +54,8 @@ dotnet test .\Clipthrough.Tests\Clipthrough.Tests.csproj
 Tag the commit `vX.Y.Z` and push. The `release.yml` workflow publishes a framework-dependent build, zips it, and drafts a GitHub Release with the artifact attached. Review and publish the draft to promote the release.
 
 ```powershell
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
 ### Build a local release package
@@ -62,9 +64,9 @@ Use the same flow as the GitHub release workflow:
 
 ```powershell
 dotnet restore .\Clipthrough.slnx
-dotnet publish .\Clipthrough\Clipthrough.csproj --configuration Release -p:Version=0.1.0 --output .\artifacts\publish
-Compress-Archive -Path .\artifacts\publish\* -DestinationPath .\artifacts\Clipthrough-0.1.0-win-x64.zip
-vpk pack --packId Clipthrough --packVersion 0.1.0 --packDir .\artifacts\publish --mainExe Clipthrough.exe --outputDir .\artifacts\velopack
+dotnet publish .\Clipthrough\Clipthrough.csproj --configuration Release -p:Version=0.5.0 --output .\artifacts\publish
+Compress-Archive -Path .\artifacts\publish\* -DestinationPath .\artifacts\Clipthrough-0.5.0-win-x64.zip
+vpk pack --packId Clipthrough --packVersion 0.5.0 --packDir .\artifacts\publish --mainExe Clipthrough.exe --outputDir .\artifacts\velopack
 ```
 
 ## Project layout

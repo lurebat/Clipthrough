@@ -3467,11 +3467,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        var producesHtml = transformation == TextTransformation.BoxTableToHtml;
         await ApplyTransformToTargetsAsync(
             (source, _) => Task.FromResult(TextTransformationService.Apply(transformation, source)),
             $"transformation",
             multiSummary: count => $"Applied transformation to {count} clips",
-            transformKind: $"builtin:{transformation}");
+            transformKind: $"builtin:{transformation}",
+            outputFormat: producesHtml ? ClipContentFormat.Html : ClipContentFormat.PlainText);
     }
 
     private async Task ApplyTransformationToSingleClipAsync(ClipItemViewModel clip, TextTransformation transformation)
@@ -3500,12 +3502,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
+        var isHtml = transformation == TextTransformation.BoxTableToHtml;
         var captured = await Task.Run(() => _clipStoreService.CaptureAsync(new ClipCaptureRequest
         {
             ContentBytes = textBytes,
             ContentText = result,
-            ContentType = ContentType.Text,
-            ContentFormat = ClipContentFormat.PlainText,
+            ContentType = isHtml ? ContentType.RichText : ContentType.Text,
+            ContentFormat = isHtml ? ClipContentFormat.Html : ClipContentFormat.PlainText,
             SourceApp = clip.SourceApp,
             SourceAppPath = clip.Clip.SourceAppPath,
             SourceAppIconBytes = clip.Clip.SourceAppIconBytes,
@@ -3515,7 +3518,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             TransformKind = $"builtin:{transformation}",
             SkipPostInsertMaintenance = true,
         }));
-        StatusText = AppText.EditedClipCopiedStatus;
+        await CopyTransformResultToClipboardAsync(result, isHtml ? ClipContentFormat.Html : ClipContentFormat.PlainText);
+        StatusText = "Transformed and copied to clipboard";
         await RefreshAsync(captured?.Id);
     }
 
@@ -3549,11 +3553,38 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private async Task CopyTransformResultToClipboardAsync(string result, ClipContentFormat format)
+    {
+        if (string.IsNullOrEmpty(result))
+        {
+            return;
+        }
+
+        try
+        {
+            _clipboardMonitorService.SuppressNext();
+            if (format == ClipContentFormat.Html)
+            {
+                var plain = ClipDisplayFormatter.RenderRichContent(result);
+                await _systemInteractionService.CopyRichContentAsync(result, plain, ClipContentFormat.Html);
+            }
+            else
+            {
+                await _systemInteractionService.CopyTextAsync(result);
+            }
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Auto-copy of transform result failed: {ex.Message}");
+        }
+    }
+
     private async Task ApplyTransformToTargetsAsync(
         Func<string, CancellationToken, Task<string>> transform,
         string singleLabel,
         Func<int, string> multiSummary,
-        string? transformKind = null)
+        string? transformKind = null,
+        ClipContentFormat outputFormat = ClipContentFormat.PlainText)
     {
         var checkedClips = Clips.Where(static c => c.IsChecked).ToList();
         var useSelectionSlice = checkedClips.Count == 0
@@ -3568,6 +3599,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         var transformed = 0;
         long? lastCreatedId = null;
+        string? lastResult = null;
         foreach (var target in targets)
         {
             if (target.Clip.ContentType != ContentType.Text && target.Clip.ContentType != ContentType.RichText)
@@ -3606,12 +3638,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
 
             var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
+            var isHtml = outputFormat == ClipContentFormat.Html;
             var captured = await Task.Run(() => _clipStoreService.CaptureAsync(new ClipCaptureRequest
             {
                 ContentBytes = textBytes,
                 ContentText = result,
-                ContentType = ContentType.Text,
-                ContentFormat = ClipContentFormat.PlainText,
+                ContentType = isHtml ? ContentType.RichText : ContentType.Text,
+                ContentFormat = outputFormat,
                 SourceApp = target.SourceApp,
                 SourceAppPath = target.Clip.SourceAppPath,
                 SourceAppIconBytes = target.Clip.SourceAppIconBytes,
@@ -3624,15 +3657,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (captured is not null)
             {
                 lastCreatedId = captured.Id;
+                lastResult = result;
             }
             transformed++;
         }
 
         if (transformed > 0)
         {
-            StatusText = transformed == 1
-                ? (useSelectionSlice ? $"Applied {singleLabel} to selection" : AppText.EditedClipCopiedStatus)
-                : multiSummary(transformed);
+            if (transformed == 1 && lastCreatedId is not null && lastResult is not null)
+            {
+                await CopyTransformResultToClipboardAsync(lastResult, outputFormat);
+                StatusText = useSelectionSlice
+                    ? $"Applied {singleLabel} to selection and copied"
+                    : "Transformed and copied to clipboard";
+            }
+            else
+            {
+                StatusText = transformed == 1
+                    ? (useSelectionSlice ? $"Applied {singleLabel} to selection" : AppText.EditedClipCopiedStatus)
+                    : multiSummary(transformed);
+            }
             await RefreshAsync(lastCreatedId);
         }
         else
@@ -4427,15 +4471,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private void RefreshFilteredRecentSearches()
     {
         var query = SearchText?.Trim() ?? string.Empty;
-        var matches = string.IsNullOrEmpty(query)
-            ? RecentSearches
-            : RecentSearches
-                .Where(search => search.Contains(query, StringComparison.OrdinalIgnoreCase));
-
         FilteredRecentSearches.Clear();
-        foreach (var match in matches.Take(8))
+        if (!string.IsNullOrEmpty(query))
         {
-            FilteredRecentSearches.Add(match);
+            var matches = RecentSearches
+                .Where(search => search.Contains(query, StringComparison.OrdinalIgnoreCase));
+            foreach (var match in matches.Take(8))
+            {
+                FilteredRecentSearches.Add(match);
+            }
         }
 
         this.RaisePropertyChanged(nameof(IsSearchSuggestionsOpen));

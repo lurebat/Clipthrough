@@ -513,6 +513,13 @@ public partial class App : Application
                     output = await _aiTransformService.TransformAsync(preset.Prompt, input);
                     break;
                 }
+                case "prompt":
+                {
+                    if (_aiTransformService is null || !_aiTransformService.IsConfigured) return;
+                    if (string.IsNullOrWhiteSpace(name)) return;
+                    output = await _aiTransformService.TransformAsync(name, input);
+                    break;
+                }
                 default:
                     return;
             }

@@ -21,4 +21,5 @@ public enum TextTransformation
     ReverseLines,
     RemoveEmptyLines,
     RemoveDuplicateLines,
+    BoxTableToHtml,
 }

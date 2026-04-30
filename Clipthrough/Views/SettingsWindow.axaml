@@ -473,7 +473,7 @@
                     </Expander.Header>
                     <StackPanel Spacing="10" Margin="8,10,0,0">
                         <TextBlock Classes="body-muted" TextWrapping="Wrap"
-                                   Text="Bind a global hotkey to a transformation of the most recent clip. Target format: 'builtin:UpperCase' for a built-in text transformation, 'script:MyScript' for a user script by name, or 'ai:MyPreset' for an AI preset by name. When 'Paste after' is checked, the transformed text is pasted into the foreground window." />
+                                   Text="Bind a global hotkey to a transformation of the most recent clip. Target format: 'builtin:UpperCase' for a built-in text transformation, 'script:MyScript' for a user script by name, 'ai:MyPreset' for an AI preset by name, or 'prompt:Your custom prompt here' to send a one-off prompt to the AI service. When 'Paste after' is checked, the transformed text is pasted into the foreground window." />
                         <Grid ColumnDefinitions="260,*" ColumnSpacing="12" MinHeight="200">
                             <DockPanel Grid.Column="0" LastChildFill="True">
                                 <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="6" Margin="0,6,0,0">
@@ -503,7 +503,7 @@
                                         IsEnabled="{Binding Converter={x:Static ObjectConverters.IsNotNull}}">
                                 <TextBlock Classes="detail-label" Text="Hotkey gesture (e.g. Ctrl+Alt+U)" />
                                 <TextBox Text="{Binding Gesture, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
-                                <TextBlock Classes="detail-label" Text="Target (builtin:Name | script:Name | ai:Name)" />
+                                <TextBlock Classes="detail-label" Text="Target (builtin:Name | script:Name | ai:Name | prompt:Free-form prompt text)" />
                                 <TextBox FontFamily="Consolas,Cascadia Code,monospace"
                                          Text="{Binding Target, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
                                 <CheckBox Content="Paste after transforming (Ctrl+V into foreground window)"

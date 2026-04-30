@@ -39,6 +39,7 @@ public static partial class TextTransformationService
             Models.TextTransformation.ReverseLines => ReverseLines(input),
             Models.TextTransformation.RemoveEmptyLines => RemoveEmptyLines(input),
             Models.TextTransformation.RemoveDuplicateLines => RemoveDuplicateLines(input),
+            Models.TextTransformation.BoxTableToHtml => BoxTableToHtml(input),
             _ => input,
         };
     }
@@ -196,6 +197,228 @@ public static partial class TextTransformationService
         var lines = SplitLines(NormalizeEol(input));
         var seen = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
         return string.Join('\n', lines.Where(line => seen.Add(line)));
+    }
+
+    private static string BoxTableToHtml(string input)
+    {
+        var lines = SplitLines(NormalizeEol(input));
+        var sb = new StringBuilder();
+        var block = new System.Collections.Generic.List<string>();
+        var nonTableBuffer = new System.Collections.Generic.List<string>();
+        var producedAnyTable = false;
+
+        void FlushBlock()
+        {
+            if (block.Count == 0)
+            {
+                return;
+            }
+
+            var html = TryRenderTableBlock(block);
+            if (html is not null)
+            {
+                FlushNonTable();
+                sb.Append(html);
+                producedAnyTable = true;
+            }
+            else
+            {
+                // Not actually a table — treat the buffered lines as plain text.
+                foreach (var raw in block)
+                {
+                    nonTableBuffer.Add(raw);
+                }
+            }
+            block.Clear();
+        }
+
+        void FlushNonTable()
+        {
+            if (nonTableBuffer.Count == 0)
+            {
+                return;
+            }
+
+            sb.Append("<div>");
+            for (var i = 0; i < nonTableBuffer.Count; i++)
+            {
+                if (i > 0)
+                {
+                    sb.Append("<br>");
+                }
+                sb.Append(EscapeHtml(nonTableBuffer[i]));
+            }
+            sb.Append("</div>");
+            nonTableBuffer.Clear();
+        }
+
+        foreach (var rawLine in lines)
+        {
+            var trimmed = rawLine.Trim();
+            if (trimmed.Length > 0 && (IsTableBorderLine(trimmed) || IsRowSeparator(trimmed[0])))
+            {
+                block.Add(rawLine);
+                continue;
+            }
+
+            FlushBlock();
+            nonTableBuffer.Add(rawLine);
+        }
+
+        FlushBlock();
+        FlushNonTable();
+
+        return producedAnyTable ? sb.ToString() : input;
+    }
+
+    private static string? TryRenderTableBlock(System.Collections.Generic.List<string> blockLines)
+    {
+        var rows = new System.Collections.Generic.List<string[]>();
+        foreach (var rawLine in blockLines)
+        {
+            var trimmed = rawLine.Trim();
+            if (trimmed.Length == 0 || IsTableBorderLine(trimmed))
+            {
+                continue;
+            }
+            if (!IsRowSeparator(trimmed[0]))
+            {
+                continue;
+            }
+
+            var cells = SplitOnRowSeparator(trimmed);
+            if (cells.Length == 0)
+            {
+                continue;
+            }
+
+            for (var i = 0; i < cells.Length; i++)
+            {
+                cells[i] = cells[i].Trim();
+            }
+            rows.Add(cells);
+        }
+
+        if (rows.Count == 0)
+        {
+            return null;
+        }
+
+        var columnCount = rows.Max(static r => r.Length);
+        var sb = new StringBuilder();
+        sb.Append("<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;\">");
+        for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+        {
+            var row = rows[rowIndex];
+            var tag = rowIndex == 0 ? "th" : "td";
+            sb.Append("<tr>");
+            for (var col = 0; col < columnCount; col++)
+            {
+                var cell = col < row.Length ? row[col] : string.Empty;
+                sb.Append('<').Append(tag).Append('>');
+                sb.Append(EscapeHtml(cell));
+                sb.Append("</").Append(tag).Append('>');
+            }
+            sb.Append("</tr>");
+        }
+        sb.Append("</table>");
+        return sb.ToString();
+    }
+
+    private static bool IsRowSeparator(char c)
+        => c is '│' or '┃' or '|' or '║';
+
+    private static bool IsTableBorderLine(string line)
+    {
+        // A border line has no letters/digits and contains at least one
+        // horizontal/junction character (dash, equals, plus, or any non-vertical
+        // box-drawing glyph). Pure vertical-only lines (e.g. just "|") are not
+        // borders — they would be empty data rows instead.
+        var hasHorizontal = false;
+        foreach (var c in line)
+        {
+            if (char.IsLetterOrDigit(c))
+            {
+                return false;
+            }
+
+            if (c is '-' or '=' or '+' or ':')
+            {
+                hasHorizontal = true;
+                continue;
+            }
+
+            if (c >= '\u2500' && c <= '\u257F')
+            {
+                if (!IsRowSeparator(c))
+                {
+                    hasHorizontal = true;
+                }
+                continue;
+            }
+
+            if (IsRowSeparator(c) || char.IsWhiteSpace(c))
+            {
+                continue;
+            }
+
+            // Any other character (punctuation, symbols) means it's content.
+            return false;
+        }
+
+        return hasHorizontal;
+    }
+
+    private static string[] SplitOnRowSeparator(string line)
+    {
+        // Drop the leading and trailing vertical separator, then split on any
+        // vertical separator character within the remainder.
+        var start = 0;
+        var end = line.Length;
+        if (start < end && IsRowSeparator(line[start])) start++;
+        if (end > start && IsRowSeparator(line[end - 1])) end--;
+
+        if (end <= start)
+        {
+            return Array.Empty<string>();
+        }
+
+        var inner = line[start..end];
+        var parts = new System.Collections.Generic.List<string>();
+        var sb = new StringBuilder();
+        foreach (var c in inner)
+        {
+            if (IsRowSeparator(c))
+            {
+                parts.Add(sb.ToString());
+                sb.Clear();
+            }
+            else
+            {
+                sb.Append(c);
+            }
+        }
+        parts.Add(sb.ToString());
+        return parts.ToArray();
+    }
+
+    private static string EscapeHtml(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+        var sb = new StringBuilder(value.Length);
+        foreach (var c in value)
+        {
+            switch (c)
+            {
+                case '&': sb.Append("&amp;"); break;
+                case '<': sb.Append("&lt;"); break;
+                case '>': sb.Append("&gt;"); break;
+                case '"': sb.Append("&quot;"); break;
+                case '\'': sb.Append("&#39;"); break;
+                default: sb.Append(c); break;
+            }
+        }
+        return sb.ToString();
     }
 
     private static string[] SplitLines(string input)

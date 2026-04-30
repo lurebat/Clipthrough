@@ -150,6 +150,126 @@ public sealed class TextTransformationServiceTests
     }
 
     [Fact]
+    public void BoxTableToHtml_ConvertsBoxDrawingTable()
+    {
+        var input = string.Join('\n',
+            "┌────────┬─────────┐",
+            "│ Name   │ Status  │",
+            "├────────┼─────────┤",
+            "│ alpha  │ ✅ ok   │",
+            "├────────┼─────────┤",
+            "│ bravo  │ ⚠️ miss │",
+            "└────────┴─────────┘");
+
+        var result = TextTransformationService.Apply(TextTransformation.BoxTableToHtml, input);
+
+        Assert.StartsWith("<table", result);
+        Assert.EndsWith("</table>", result);
+        Assert.Contains("<th>Name</th>", result);
+        Assert.Contains("<th>Status</th>", result);
+        Assert.Contains("<td>alpha</td>", result);
+        Assert.Contains("<td>\u2705 ok</td>", result);
+        Assert.Contains("<td>bravo</td>", result);
+        // Border-only rows are dropped, leaving header + 2 data rows.
+        Assert.Equal(3, System.Text.RegularExpressions.Regex.Matches(result, "<tr>").Count);
+    }
+
+    [Fact]
+    public void BoxTableToHtml_EscapesHtmlInCells()
+    {
+        var input = string.Join('\n',
+            "┌──────────────┐",
+            "│ a<b>&\"c\"      │",
+            "└──────────────┘");
+
+        var result = TextTransformationService.Apply(TextTransformation.BoxTableToHtml, input);
+
+        Assert.Contains("a&lt;b&gt;&amp;&quot;c&quot;", result);
+    }
+
+    [Fact]
+    public void BoxTableToHtml_ReturnsInputWhenNoTableRows()
+    {
+        var input = "just some plain text\nwith no box drawing";
+        var result = TextTransformationService.Apply(TextTransformation.BoxTableToHtml, input);
+        Assert.Equal(input, result);
+    }
+
+    [Fact]
+    public void BoxTableToHtml_ConvertsMarkdownPipeTable()
+    {
+        var input = string.Join('\n',
+            "| Name  | Status |",
+            "|-------|:------:|",
+            "| alpha | ok     |",
+            "| bravo | miss   |");
+
+        var result = TextTransformationService.Apply(TextTransformation.BoxTableToHtml, input);
+
+        Assert.StartsWith("<table", result);
+        Assert.Contains("<th>Name</th>", result);
+        Assert.Contains("<th>Status</th>", result);
+        Assert.Contains("<td>alpha</td>", result);
+        Assert.Contains("<td>bravo</td>", result);
+        // The |---|:---:| separator must be dropped — only header + 2 data rows.
+        Assert.Equal(3, System.Text.RegularExpressions.Regex.Matches(result, "<tr>").Count);
+    }
+
+    [Fact]
+    public void BoxTableToHtml_ConvertsAsciiPlusBorderedTable()
+    {
+        var input = string.Join('\n',
+            "+-------+--------+",
+            "| Name  | Status |",
+            "+-------+--------+",
+            "| alpha | ok     |",
+            "| bravo | miss   |",
+            "+-------+--------+");
+
+        var result = TextTransformationService.Apply(TextTransformation.BoxTableToHtml, input);
+
+        Assert.Contains("<th>Name</th>", result);
+        Assert.Contains("<td>alpha</td>", result);
+        Assert.Contains("<td>bravo</td>", result);
+        Assert.Equal(3, System.Text.RegularExpressions.Regex.Matches(result, "<tr>").Count);
+    }
+
+    [Fact]
+    public void BoxTableToHtml_PreservesSurroundingTextAndHandlesMultipleTables()
+    {
+        var input = string.Join("\n", new[]
+        {
+            "Intro paragraph with <special> chars.",
+            "",
+            "┌─────────┬─────────┐",
+            "│ Cluster │ Status  │",
+            "├─────────┼─────────┤",
+            "│ A       │ ok      │",
+            "└─────────┴─────────┘",
+            "",
+            "Some words between tables.",
+            "",
+            "| Check | Result |",
+            "|-------|--------|",
+            "| One   | ✅     |",
+            "",
+            "Trailing line.",
+        });
+
+        var result = TextTransformationService.Apply(TextTransformation.BoxTableToHtml, input);
+
+        // Two distinct tables produced.
+        Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(result, "<table").Count);
+        // Headers from each table present.
+        Assert.Contains("<th>Cluster</th>", result);
+        Assert.Contains("<th>Check</th>", result);
+        // Surrounding text preserved and HTML-escaped.
+        Assert.Contains("Intro paragraph with &lt;special&gt; chars.", result);
+        Assert.Contains("Some words between tables.", result);
+        Assert.Contains("Trailing line.", result);
+    }
+
+    [Fact]
     public void None_ReturnsInputUnchanged()
     {
         var input = "hello world";

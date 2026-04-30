@@ -65,6 +65,12 @@ public partial class MainWindow : Window
             searchBox.LostFocus += OnSearchBoxLostFocus;
         }
 
+        var menu = this.FindControl<Menu>("TopMenu");
+        if (menu is not null)
+        {
+            menu.GotFocus += OnTopMenuGotFocus;
+        }
+
         FocusSearchBox();
     }
 
@@ -285,6 +291,14 @@ public partial class MainWindow : Window
         if (isSearchFocused && modifiers == KeyModifiers.Alt && (e.Key == Key.Down || e.Key == Key.Up))
         {
             _ = viewModel.NavigateSearchHistoryAsync(e.Key == Key.Up ? -1 : 1);
+            return true;
+        }
+
+        // Plain Up from the search box also walks back through recent searches
+        // (Down keeps moving focus into the clip list to preserve discoverability).
+        if (isSearchFocused && modifiers == KeyModifiers.None && e.Key == Key.Up)
+        {
+            _ = viewModel.NavigateSearchHistoryAsync(-1);
             return true;
         }
 
@@ -641,19 +655,47 @@ public partial class MainWindow : Window
 
     private bool TryHandleClipPasteShortcut(MainWindowViewModel viewModel, KeyEventArgs e)
     {
-        if (m_clipsListBox?.IsKeyboardFocusWithin != true || viewModel.SelectedClip is null)
-        {
-            return false;
-        }
-
         var relevantModifiers = e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Meta);
-        if (e.Key != Key.V || relevantModifiers != KeyModifiers.Control)
+        if (e.Key != Key.V)
         {
             return false;
         }
 
-        ExecutePasteSelectedAndHide(viewModel);
-        return true;
+        // Plain Ctrl+V from the clip list: paste the selected clip.
+        var fromClipList = m_clipsListBox?.IsKeyboardFocusWithin == true;
+        if (relevantModifiers == KeyModifiers.Control && fromClipList && viewModel.SelectedClip is not null)
+        {
+            ExecutePasteSelectedAndHide(viewModel);
+            return true;
+        }
+
+        // Ctrl+Shift+V from anywhere (including the search box): paste the
+        // currently selected clip, or the first clip if nothing is selected.
+        // This lets the user filter and Ctrl+Shift+V to paste without leaving
+        // the search box (where plain Ctrl+V is reserved for pasting into the
+        // filter text).
+        if (relevantModifiers == (KeyModifiers.Control | KeyModifiers.Shift))
+        {
+            if (viewModel.IsSettingsOpen || viewModel.IsWelcomeOpen || viewModel.IsPasswordPromptOpen
+                || viewModel.IsAiPromptOpen || viewModel.SessionLogs.IsOpen)
+            {
+                return false;
+            }
+
+            if (viewModel.SelectedClip is null)
+            {
+                if (viewModel.Clips.Count == 0)
+                {
+                    return false;
+                }
+                viewModel.SelectedClip = viewModel.GetDefaultAutoSelectedClip() ?? viewModel.Clips[0];
+            }
+
+            ExecutePasteSelectedAndHide(viewModel);
+            return true;
+        }
+
+        return false;
     }
 
     private bool TryHandleEnterToCopyShortcut(MainWindowViewModel viewModel, KeyEventArgs e)
@@ -776,29 +818,26 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private static readonly (string Header, TextTransformation? Kind)[] s_transformMenuEntries =
+    private static readonly (string Group, string Header, TextTransformation Kind)[] s_transformMenuEntries =
     {
-        ("UPPERCASE", TextTransformation.UpperCase),
-        ("lowercase", TextTransformation.LowerCase),
-        ("Title Case", TextTransformation.TitleCase),
-        ("Sentence case", TextTransformation.SentenceCase),
-        (string.Empty, null),
-        ("UpperCamelCase", TextTransformation.UpperCamelCase),
-        ("lowerCamelCase", TextTransformation.LowerCamelCase),
-        ("From camelCase", TextTransformation.FromCamelCase),
-        (string.Empty, null),
-        ("Trim whitespace", TextTransformation.TrimWhitespace),
-        ("Collapse whitespace", TextTransformation.CollapseWhitespace),
-        ("Tabs → Spaces", TextTransformation.TabsToSpaces),
-        ("Spaces → Tabs", TextTransformation.SpacesToTabs),
-        ("Normalize line endings", TextTransformation.NormalizeEol),
-        (string.Empty, null),
-        ("Sort lines", TextTransformation.SortLines),
-        ("Reverse lines", TextTransformation.ReverseLines),
-        ("Remove empty lines", TextTransformation.RemoveEmptyLines),
-        ("Remove duplicate lines", TextTransformation.RemoveDuplicateLines),
-        ("Lines → JSON array", TextTransformation.LinesToJsonArray),
-        (string.Empty, null),
+        ("Case", "UPPERCASE", TextTransformation.UpperCase),
+        ("Case", "lowercase", TextTransformation.LowerCase),
+        ("Case", "Title Case", TextTransformation.TitleCase),
+        ("Case", "Sentence case", TextTransformation.SentenceCase),
+        ("Case", "UpperCamelCase", TextTransformation.UpperCamelCase),
+        ("Case", "lowerCamelCase", TextTransformation.LowerCamelCase),
+        ("Case", "From camelCase", TextTransformation.FromCamelCase),
+        ("Whitespace", "Trim whitespace", TextTransformation.TrimWhitespace),
+        ("Whitespace", "Collapse whitespace", TextTransformation.CollapseWhitespace),
+        ("Whitespace", "Tabs → Spaces", TextTransformation.TabsToSpaces),
+        ("Whitespace", "Spaces → Tabs", TextTransformation.SpacesToTabs),
+        ("Whitespace", "Normalize line endings", TextTransformation.NormalizeEol),
+        ("Lines", "Sort lines", TextTransformation.SortLines),
+        ("Lines", "Reverse lines", TextTransformation.ReverseLines),
+        ("Lines", "Remove empty lines", TextTransformation.RemoveEmptyLines),
+        ("Lines", "Remove duplicate lines", TextTransformation.RemoveDuplicateLines),
+        ("Lines", "Lines → JSON array", TextTransformation.LinesToJsonArray),
+        ("Tables", "Text table → HTML", TextTransformation.BoxTableToHtml),
     };
 
     private readonly System.Collections.Generic.List<MenuItem> m_scriptsRoots = new();
@@ -844,21 +883,34 @@ public partial class MainWindow : Window
 
         if (showTextTransforms)
         {
-            foreach (var (header, kind) in s_transformMenuEntries)
+            foreach (var grouping in s_transformMenuEntries.GroupBy(e => e.Group))
             {
-                if (kind is null)
+                var entries = grouping.ToList();
+                if (entries.Count == 1)
                 {
-                    controls.Add(new Separator());
+                    var (_, header, kind) = entries[0];
+                    var item = new MenuItem
+                    {
+                        Header = header,
+                        CommandParameter = kind,
+                    };
+                    item.Click += OnTransformMenuClick;
+                    controls.Add(item);
                     continue;
                 }
 
-                var item = new MenuItem
+                var groupRoot = new MenuItem { Header = grouping.Key };
+                foreach (var (_, header, kind) in entries)
                 {
-                    Header = header,
-                    CommandParameter = kind.Value,
-                };
-                item.Click += OnTransformMenuClick;
-                controls.Add(item);
+                    var item = new MenuItem
+                    {
+                        Header = header,
+                        CommandParameter = kind,
+                    };
+                    item.Click += OnTransformMenuClick;
+                    groupRoot.Items.Add(item);
+                }
+                controls.Add(groupRoot);
             }
         }
 
@@ -1049,6 +1101,35 @@ public partial class MainWindow : Window
             }
             Hide();
         });
+    }
+
+    private void OnTopMenuGotFocus(object? sender, RoutedEventArgs e)
+    {
+        // The top-level menu sometimes grabs focus when the window activates
+        // (Win32 menu accelerator handling kicks in even without an Alt press).
+        // If no submenu is actually open, the user did not intend to interact
+        // with the menu — bounce focus back to the search box.
+        if (sender is not Menu menu)
+        {
+            return;
+        }
+
+        var anySubmenuOpen = false;
+        foreach (var item in menu.Items)
+        {
+            if (item is MenuItem mi && mi.IsSubMenuOpen)
+            {
+                anySubmenuOpen = true;
+                break;
+            }
+        }
+
+        if (anySubmenuOpen)
+        {
+            return;
+        }
+
+        FocusSearchBox();
     }
 
     private async void OnSearchBoxGotFocus(object? sender, FocusChangedEventArgs e)
@@ -1255,10 +1336,22 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Avalonia + Win32 will sometimes hand focus to the menu bar when the
+        // window is activated. Schedule the focus call at three priorities so
+        // we win regardless of when the menu's auto-focus runs.
+        void TryFocus()
+        {
+            if (!searchBox.IsKeyboardFocusWithin)
+            {
+                searchBox.Focus();
+            }
+        }
+
         Dispatcher.UIThread.Post(() =>
         {
-            searchBox.Focus();
-            Dispatcher.UIThread.Post(() => searchBox.Focus(), DispatcherPriority.Input);
+            TryFocus();
+            Dispatcher.UIThread.Post(TryFocus, DispatcherPriority.Input);
+            Dispatcher.UIThread.Post(TryFocus, DispatcherPriority.Background);
         }, DispatcherPriority.Input);
     }
 

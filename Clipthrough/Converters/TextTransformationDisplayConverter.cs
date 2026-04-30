@@ -37,6 +37,7 @@ public sealed class TextTransformationDisplayConverter : IValueConverter
             TextTransformation.ReverseLines => "Reverse lines",
             TextTransformation.RemoveEmptyLines => "Remove empty lines",
             TextTransformation.RemoveDuplicateLines => "Remove duplicate lines",
+            TextTransformation.BoxTableToHtml => "Text table → HTML",
             _ => transformation.ToString(),
         };
     }

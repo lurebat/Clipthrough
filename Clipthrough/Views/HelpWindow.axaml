@@ -42,7 +42,9 @@
                     <TextBlock TextWrapping="Wrap" Text="• Mark as favorite to quickly filter it later (Ctrl+Shift+F toggles the filter)." />
                     <TextBlock TextWrapping="Wrap" Text="• Filter toggles: Ctrl+Shift+F (favorites), Ctrl+Shift+S (sensitive), Ctrl+Shift+R (regex), Ctrl+Shift+A (case), Ctrl+Shift+W (wildcard), Ctrl+Shift+H (whole word), Ctrl+Shift+P (pasted). Ctrl+Home jumps to the top of the list. Typing any letter with the list focused jumps to the filter box." />
                     <TextBlock TextWrapping="Wrap" Text="• Sensitivity rules scrub/auto-expire clips that match configured patterns (credit cards, tokens, …)." />
-                    <TextBlock TextWrapping="Wrap" Text="• Incremental paste (Ctrl+Shift+V) walks backwards through clip history; Decremental (Ctrl+Shift+B) goes forward." />
+                    <TextBlock TextWrapping="Wrap" Text="• Ctrl+Shift+V from the search box pastes the currently selected (or first) clip without leaving the filter; plain Ctrl+V still pastes into the filter text." />
+                    <TextBlock TextWrapping="Wrap" Text="• Up arrow in the search box walks back through recent searches (Alt+Up/Down also works)." />
+                    <TextBlock TextWrapping="Wrap" Text="• Optional incremental/decremental paste hotkeys can be configured in Settings (no default binding)." />
                 </StackPanel>
             </Border>
 

@@ -62,7 +62,7 @@ public sealed record AppSettings
 
     public bool EnableIncrementalPasteHotkey { get; init; }
 
-    public string IncrementalPasteHotkey { get; init; } = "Ctrl+Shift+V";
+    public string IncrementalPasteHotkey { get; init; } = string.Empty;
 
     public bool EnableDecrementalPasteHotkey { get; init; }
 
@@ -209,7 +209,7 @@ public sealed record AppSettings
         EnableToggleWindowHotkey = EnableToggleWindowHotkey,
         ToggleWindowHotkey = MigrateFilterHotkey(ToggleWindowHotkey, Default.ToggleWindowHotkey, "Ctrl+Shift+Space"),
         EnableIncrementalPasteHotkey = EnableIncrementalPasteHotkey,
-        IncrementalPasteHotkey = NormalizeHotkey(IncrementalPasteHotkey, Default.IncrementalPasteHotkey),
+        IncrementalPasteHotkey = NormalizeOptionalHotkey(IncrementalPasteHotkey),
         EnableDecrementalPasteHotkey = EnableDecrementalPasteHotkey,
         DecrementalPasteHotkey = NormalizeHotkey(DecrementalPasteHotkey, Default.DecrementalPasteHotkey),
         EnableCopyAndFavoriteHotkey = EnableCopyAndFavoriteHotkey,
