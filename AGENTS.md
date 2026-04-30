@@ -98,3 +98,6 @@ The headless filter is there because some Avalonia headless tests hang intermitt
 - `AGENTS.md` (this file): developer/agent guidance. Update when architecture or conventions change.
 - `CONTRIBUTING.md`: PR and style guidance.
 - `.github/copilot-cli-skills/clipthrough-remote-api.md`: agent-facing reference for the local Remote API. Update it whenever the API surface, auth rules, or DTOs change.
+- `.github/copilot-cli-skills/clipthrough-transforms.md`: agent-facing reference for built-in transformations, the auto-copy contract, user scripts/AI presets, and the custom-hotkey `Target` syntax (`builtin:` / `script:` / `ai:` / `prompt:`). Update when adding transforms or new hotkey kinds.
+- `.github/copilot-cli-skills/clipthrough-storage-schema.md`: agent-facing reference for the SQLite schema, FTS5 triggers, indexes, and the migration pattern. Update on every schema change.
+- `.github/copilot-cli-skills/clipthrough-platform-windows.md`: agent-facing reference for Windows interop — clipboard formats (CF_HTML wrapping), foreground capture + paste sequencing, AttachThreadInput, SendInput, and global hotkeys via `Win32Properties.AddWndProcHookCallback`. Update when changing platform behavior.

@@ -73,7 +73,7 @@ vpk pack --packId Clipthrough --packVersion 0.5.0 --packDir .\artifacts\publish 
 
 - `Clipthrough/` - application code
 - `Clipthrough.Tests/` - unit, integration, and Avalonia headless tests
-- `.github/copilot-cli-skills/` - agent-facing local API guidance
+- `.github/copilot-cli-skills/` - agent-facing references for the local Remote API, transformation/hotkey wiring, SQLite storage schema, and Windows platform interop
 - `.github/workflows/` - CI build and test automation
 
 ## License
