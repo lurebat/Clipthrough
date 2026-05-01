@@ -189,7 +189,6 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                 if (captureRequest is null)
                 {
                     Trace.TraceInformation($"Clipboard change ignored because no supported payload was found. Formats: {availableFormats}");
-                    _notificationService.PublishWarning(AppText.ClipCaptureFailedTitle, AppText.ClipCaptureFailedUnsupportedPayload);
                     return null;
                 }
 
