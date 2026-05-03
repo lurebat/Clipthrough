@@ -103,8 +103,11 @@ internal sealed class TestSettingsService : ISettingsService
 internal sealed class TestClipboardMonitorService : IClipboardMonitorService
 {
     private readonly Subject<ClipEntry> _capturedClips = new();
+    private readonly Subject<ClipEntry> _updatedClips = new();
 
     public IObservable<ClipEntry> CapturedClips => _capturedClips.AsObservable();
+
+    public IObservable<ClipEntry> UpdatedClips => _updatedClips.AsObservable();
 
     public void Start()
     {
@@ -119,6 +122,8 @@ internal sealed class TestClipboardMonitorService : IClipboardMonitorService
     }
 
     public void Emit(ClipEntry clip) => _capturedClips.OnNext(clip);
+
+    public void EmitUpdate(ClipEntry clip) => _updatedClips.OnNext(clip);
 }
 
 internal sealed class TestClipSampleDataService : IClipSampleDataService

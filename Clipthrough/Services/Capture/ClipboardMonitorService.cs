@@ -43,6 +43,8 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     private readonly ISourceApplicationResolver _sourceApplicationResolver;
     private readonly IAppNotificationService _notificationService;
     private readonly Subject<ClipEntry> _capturedClips = new();
+    private readonly Subject<ClipEntry> _updatedClips = new();
+    private readonly SemaphoreSlim _captureGate = new(1, 1);
 
     private Window? _window;
     private bool _isStarted;
@@ -58,6 +60,8 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     }
 
     public IObservable<ClipEntry> CapturedClips => _capturedClips.AsObservable();
+
+    public IObservable<ClipEntry> UpdatedClips => _updatedClips.AsObservable();
 
     public void SuppressNext() => Interlocked.Increment(ref _suppressCount);
 
@@ -105,7 +109,10 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
         _isDisposed = true;
         Stop();
         _capturedClips.OnCompleted();
+        _updatedClips.OnCompleted();
         _capturedClips.Dispose();
+        _updatedClips.Dispose();
+        _captureGate.Dispose();
     }
 
     private IntPtr WndProcHook(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -132,18 +139,29 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
 
         try
         {
-            // Read clipboard data on the UI thread (COM requirement),
-            // but persist to DB on a background thread to avoid blocking.
-            var captureRequest = await BuildCaptureRequestFromClipboardAsync(clipboard);
-            if (captureRequest is null)
+            await _captureGate.WaitAsync();
+            try
             {
-                return;
-            }
+                // Read clipboard data on the UI thread (COM requirement),
+                // but persist to DB on a background thread to avoid blocking.
+                var captureStopwatch = Stopwatch.StartNew();
+                var captureRequest = await BuildCaptureRequestFromClipboardAsync(clipboard);
+                if (captureRequest is null)
+                {
+                    return;
+                }
 
-            var capturedClip = await Task.Run(() => _clipStoreService.CaptureAsync(captureRequest));
-            if (capturedClip is not null)
+                var capturedClip = await Task.Run(() => _clipStoreService.CaptureFastAsync(captureRequest));
+                if (capturedClip is not null)
+                {
+                    Trace.TraceInformation($"Clipboard fast capture completed in {captureStopwatch.ElapsedMilliseconds} ms for clip {capturedClip.Id}.");
+                    _capturedClips.OnNext(capturedClip);
+                    _ = EnrichCapturedClipAsync(clipboard, capturedClip);
+                }
+            }
+            finally
             {
-                _capturedClips.OnNext(capturedClip);
+                _captureGate.Release();
             }
         }
         catch (InvalidOperationException ex)
@@ -210,7 +228,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
 
     private async Task<ClipCaptureRequest?> BuildCaptureRequestAsync(IAsyncDataTransfer clipboardData)
     {
-        var sourceInfo = _sourceApplicationResolver.TryResolve();
+        var sourceInfo = _sourceApplicationResolver.TryResolve(includeIcon: false);
         var plainText = await clipboardData.TryGetTextAsync();
         var relatedSourceUrl = await TryGetPlatformStringAsync(clipboardData, SourceUrlFormats);
 
@@ -240,6 +258,17 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
         {
             Trace.TraceInformation($"Recovered bitmap clipboard payload from platform PNG bytes ({pngBytes.Length} bytes).");
             return CreateImageRequest(pngBytes, sourceInfo, GetRelatedImageLabel(filePaths, relatedSourceUrl, plainText, sourceInfo?.WindowTitle));
+        }
+
+        if (!string.IsNullOrWhiteSpace(plainText))
+        {
+            return CreateRequest(
+                plainText,
+                Encoding.UTF8.GetBytes(plainText),
+                ContentType.Text,
+                ClipContentFormat.PlainText,
+                sourceInfo,
+                relatedSourceUrl);
         }
 
         var html = await TryGetMarkupAsync(clipboardData, HtmlFormats, ClipContentFormat.Html);
@@ -274,23 +303,108 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                 relatedSourceUrl);
         }
 
-        if (!string.IsNullOrWhiteSpace(plainText))
-        {
-            return CreateRequest(
-                plainText,
-                Encoding.UTF8.GetBytes(plainText),
-                ContentType.Text,
-                ClipContentFormat.PlainText,
-                sourceInfo,
-                relatedSourceUrl);
-        }
-
         if (filePaths.Length > 0)
         {
             return CreateFileRequest(filePaths, sourceInfo);
         }
 
         return null;
+    }
+
+    private async Task EnrichCapturedClipAsync(Avalonia.Input.Platform.IClipboard clipboard, ClipEntry capturedClip)
+    {
+        try
+        {
+            var enrichmentStopwatch = Stopwatch.StartNew();
+            var deferredContent = await BuildDeferredContentRequestAsync(clipboard, capturedClip);
+            if (deferredContent is not null)
+            {
+                var updated = await Task.Run(() => _clipStoreService.UpdateDeferredContentAsync(capturedClip.Id, deferredContent));
+                PublishUpdatedClip(updated);
+            }
+
+            var sensitivityUpdated = await Task.Run(() => _clipStoreService.ApplySensitivityAsync(capturedClip.Id));
+            PublishUpdatedClip(sensitivityUpdated);
+
+            var iconBytes = await Task.Run(() => _sourceApplicationResolver.TryResolveIcon(capturedClip.SourceAppPath));
+            if (iconBytes is { Length: > 0 })
+            {
+                var iconUpdated = await Task.Run(() => _clipStoreService.UpdateSourceAppIconAsync(capturedClip.Id, iconBytes));
+                PublishUpdatedClip(iconUpdated);
+            }
+
+            await Task.Run(() => _clipStoreService.ApplyMaintenanceAsync());
+            Trace.TraceInformation($"Clipboard background enrichment completed in {enrichmentStopwatch.ElapsedMilliseconds} ms for clip {capturedClip.Id}.");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or COMException)
+        {
+            Trace.TraceWarning($"Clipboard background enrichment failed for clip {capturedClip.Id}: {ex}");
+        }
+    }
+
+    private async Task<ClipCaptureRequest?> BuildDeferredContentRequestAsync(Avalonia.Input.Platform.IClipboard clipboard, ClipEntry capturedClip)
+    {
+        using var clipboardData = await clipboard.TryGetDataAsync();
+        if (clipboardData is null || ShouldIgnoreClipboard(clipboardData))
+        {
+            return null;
+        }
+
+        var plainText = await clipboardData.TryGetTextAsync();
+        if (string.IsNullOrWhiteSpace(plainText)
+            || !string.Equals(plainText, capturedClip.Content, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var relatedSourceUrl = await TryGetPlatformStringAsync(clipboardData, SourceUrlFormats);
+        var sourceInfo = new ClipboardSourceApplicationInfo(
+            capturedClip.SourceApp,
+            capturedClip.SourceAppPath,
+            null,
+            capturedClip.SourceWindowTitle);
+
+        var html = await TryGetMarkupAsync(clipboardData, HtmlFormats, ClipContentFormat.Html);
+        if (!string.IsNullOrWhiteSpace(html))
+        {
+            var normalizedHtml = ClipboardMarkupDecoder.NormalizePlatformMarkupString(html, ClipContentFormat.Html);
+            var htmlFragment = ClipboardMarkupDecoder.ExtractHtmlFragment(normalizedHtml);
+            var renderedText = !string.IsNullOrWhiteSpace(plainText)
+                ? plainText
+                : ClipDisplayFormatter.RenderRichContent(htmlFragment);
+            return CreateRequest(
+                renderedText,
+                Encoding.UTF8.GetBytes(normalizedHtml),
+                ContentType.RichText,
+                ClipContentFormat.Html,
+                sourceInfo,
+                relatedSourceUrl);
+        }
+
+        var rtf = await TryGetMarkupAsync(clipboardData, RtfFormats, ClipContentFormat.Rtf);
+        if (!string.IsNullOrWhiteSpace(rtf))
+        {
+            var renderedText = !string.IsNullOrWhiteSpace(plainText)
+                ? plainText
+                : ClipDisplayFormatter.RenderRichContent(rtf);
+            return CreateRequest(
+                renderedText,
+                Encoding.UTF8.GetBytes(rtf),
+                ContentType.RichText,
+                ClipContentFormat.Rtf,
+                sourceInfo,
+                relatedSourceUrl);
+        }
+
+        return null;
+    }
+
+    private void PublishUpdatedClip(ClipEntry? clip)
+    {
+        if (clip is not null)
+        {
+            _updatedClips.OnNext(clip);
+        }
     }
 
     private static async Task<byte[]?> TryGetFirstBytesAsync(IAsyncDataTransfer clipboardData, string[] formatNames)

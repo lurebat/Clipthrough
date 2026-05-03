@@ -6,5 +6,7 @@ namespace Clipthrough.Services;
 /// </summary>
 public interface ISourceApplicationResolver
 {
-    ClipboardSourceApplicationInfo? TryResolve();
+    ClipboardSourceApplicationInfo? TryResolve(bool includeIcon = true);
+
+    byte[]? TryResolveIcon(string? processPath);
 }

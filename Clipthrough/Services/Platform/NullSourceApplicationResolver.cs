@@ -5,5 +5,7 @@ namespace Clipthrough.Services.Platform;
 /// </summary>
 public sealed class NullSourceApplicationResolver : ISourceApplicationResolver
 {
-    public ClipboardSourceApplicationInfo? TryResolve() => null;
+    public ClipboardSourceApplicationInfo? TryResolve(bool includeIcon = true) => null;
+
+    public byte[]? TryResolveIcon(string? processPath) => null;
 }

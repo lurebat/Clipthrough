@@ -7,6 +7,8 @@ public interface IClipboardMonitorService
 {
     IObservable<ClipEntry> CapturedClips { get; }
 
+    IObservable<ClipEntry> UpdatedClips { get; }
+
     void Start();
 
     void Stop();

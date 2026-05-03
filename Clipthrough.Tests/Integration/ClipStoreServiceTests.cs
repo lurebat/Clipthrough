@@ -180,6 +180,89 @@ public sealed class ClipStoreServiceTests
     }
 
     [Fact]
+    public async Task CaptureFastAsync_DefersSensitivityUntilApplied()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        var clip = await scope.ClipStoreService.CaptureFastAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "password=supersecret",
+            ContentBytes = Encoding.UTF8.GetBytes("password=supersecret"),
+        });
+
+        Assert.NotNull(clip);
+        Assert.False(clip!.IsSensitive);
+        Assert.Empty(clip.SensitivityMatches);
+
+        var updated = await scope.ClipStoreService.ApplySensitivityAsync(clip.Id);
+
+        Assert.NotNull(updated);
+        Assert.True(updated!.IsSensitive);
+        Assert.NotEmpty(updated.SensitivityMatches);
+    }
+
+    [Fact]
+    public async Task CaptureFastAsync_DuplicatePayloadIncrementsCopyCount()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        var request = new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "fast duplicate",
+            ContentBytes = Encoding.UTF8.GetBytes("fast duplicate"),
+            IncrementExistingCopyCount = true,
+        };
+
+        var first = await scope.ClipStoreService.CaptureFastAsync(request);
+        var second = await scope.ClipStoreService.CaptureFastAsync(request);
+
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+        Assert.Equal(first!.Id, second!.Id);
+        Assert.Equal(2, second.CopyCount);
+    }
+
+    [Fact]
+    public async Task UpdateDeferredContentAsync_UpgradesPlainTextCaptureToRichContent()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        var clip = await scope.ClipStoreService.CaptureFastAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "Hello rich",
+            ContentBytes = Encoding.UTF8.GetBytes("Hello rich"),
+        });
+
+        Assert.NotNull(clip);
+
+        var updated = await scope.ClipStoreService.UpdateDeferredContentAsync(clip!.Id, new ClipCaptureRequest
+        {
+            ContentType = ContentType.RichText,
+            ContentFormat = ClipContentFormat.Html,
+            ContentText = "Hello rich",
+            ContentBytes = Encoding.UTF8.GetBytes("<p><strong>Hello rich</strong></p>"),
+        });
+
+        Assert.NotNull(updated);
+        Assert.Equal(ContentType.RichText, updated!.ContentType);
+        Assert.Equal(ClipContentFormat.Html, updated.ContentFormat);
+        Assert.Equal("Hello rich", updated.Content);
+        Assert.Contains("<strong>", Encoding.UTF8.GetString(updated.ContentBytes!));
+    }
+
+    [Fact]
     public async Task MarkPastedAsync_TracksPasteState()
     {
         using var scope = new TemporaryDatabaseScope();

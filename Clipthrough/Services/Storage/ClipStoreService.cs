@@ -96,6 +96,148 @@ public sealed class ClipStoreService : IClipStoreService
         return await InsertClipAsync(request, cancellationToken);
     }
 
+    public async Task<ClipEntry?> CaptureFastAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.ContentBytes.Length == 0)
+        {
+            var reason = AppText.ClipCaptureFailedEmptyPayload;
+            Trace.TraceWarning($"Skipped fast clipboard capture because payload was empty. type={request.ContentType} format={request.ContentFormat} source={request.SourceApp ?? "Unknown"}");
+            _notificationService.PublishWarning(AppText.ClipCaptureFailedTitle, reason);
+            return null;
+        }
+
+        if (request.ContentBytes.Length > _settingsService.Current.MaxClipSizeBytes)
+        {
+            var reason = AppText.FormatClipCaptureFailedTooLarge(request.ContentBytes.Length, _settingsService.Current.MaxClipSizeBytes);
+            Trace.TraceWarning($"Skipped fast clipboard capture because payload exceeded limit. type={request.ContentType} format={request.ContentFormat} size={request.ContentBytes.Length} limit={_settingsService.Current.MaxClipSizeBytes} source={request.SourceApp ?? "Unknown"}");
+            _notificationService.PublishWarning(AppText.ClipCaptureFailedTitle, reason);
+            return null;
+        }
+
+        return await InsertClipAsync(request, cancellationToken, scanSensitivity: false, applyMaintenance: false);
+    }
+
+    public async Task<ClipEntry?> UpdateDeferredContentAsync(long clipId, ClipCaptureRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.ContentBytes.Length == 0 || request.ContentBytes.Length > _settingsService.Current.MaxClipSizeBytes)
+        {
+            return await GetByIdAsync(clipId, cancellationToken);
+        }
+
+        var contentText = BuildStoredContentText(request);
+        var byteSize = request.ContentBytes.LongLength;
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE clips
+            SET content = CASE WHEN $content IS NULL OR TRIM($content) = '' THEN content ELSE $content END,
+                content_bytes = $contentBytes,
+                content_type = $contentType,
+                content_format = $contentFormat,
+                byte_size = $byteSize,
+                image_width = COALESCE($imageWidth, image_width),
+                image_height = COALESCE($imageHeight, image_height),
+                source_window_title = CASE WHEN $sourceWindowTitle IS NULL OR TRIM($sourceWindowTitle) = '' THEN source_window_title ELSE $sourceWindowTitle END,
+                source_url = CASE WHEN $sourceUrl IS NULL OR TRIM($sourceUrl) = '' THEN source_url ELSE $sourceUrl END,
+                embedding_status = CASE
+                    WHEN embedding_status = 'excluded' THEN embedding_status
+                    ELSE NULL
+                END
+            WHERE id = $id;
+            """;
+        command.Parameters.AddWithValue("$id", clipId);
+        command.Parameters.AddWithValue("$content", string.IsNullOrWhiteSpace(contentText) ? DBNull.Value : contentText);
+        command.Parameters.AddWithValue("$contentBytes", request.ContentBytes);
+        command.Parameters.AddWithValue("$contentType", request.ContentType.ToStorageValue());
+        command.Parameters.AddWithValue("$contentFormat", request.ContentFormat.ToStorageValue());
+        command.Parameters.AddWithValue("$byteSize", byteSize);
+        command.Parameters.AddWithValue("$imageWidth", request.ImageWidth is { } width ? width : DBNull.Value);
+        command.Parameters.AddWithValue("$imageHeight", request.ImageHeight is { } height ? height : DBNull.Value);
+        command.Parameters.AddWithValue("$sourceWindowTitle", string.IsNullOrWhiteSpace(request.SourceWindowTitle) ? DBNull.Value : request.SourceWindowTitle);
+        command.Parameters.AddWithValue("$sourceUrl", string.IsNullOrWhiteSpace(request.SourceUrl) ? DBNull.Value : request.SourceUrl);
+        var changed = await command.ExecuteNonQueryAsync(cancellationToken);
+        if (changed > 0)
+        {
+            InvalidateStatsCache();
+        }
+
+        return await GetClipByIdAsync(connection, clipId, cancellationToken);
+    }
+
+    public async Task<ClipEntry?> UpdateSourceAppIconAsync(long clipId, byte[] iconBytes, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(iconBytes);
+        if (iconBytes.Length == 0)
+        {
+            return await GetByIdAsync(clipId, cancellationToken);
+        }
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE clips SET source_app_icon = $sourceAppIcon WHERE id = $id;";
+        command.Parameters.AddWithValue("$id", clipId);
+        command.Parameters.AddWithValue("$sourceAppIcon", iconBytes);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+
+        return await GetClipByIdAsync(connection, clipId, cancellationToken);
+    }
+
+    public async Task<ClipEntry?> ApplySensitivityAsync(long clipId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var content = await ExecuteScalarStringAsync(connection, "SELECT content FROM clips WHERE id = $id;", cancellationToken, ("$id", clipId));
+        if (content is null)
+        {
+            return null;
+        }
+
+        var matches = _sensitivityService.Scan(content);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+        await using (var clear = connection.CreateCommand())
+        {
+            clear.Transaction = transaction;
+            clear.CommandText = "DELETE FROM clip_sensitivity_matches WHERE clip_id = $id;";
+            clear.Parameters.AddWithValue("$id", clipId);
+            await clear.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var update = connection.CreateCommand())
+        {
+            update.Transaction = transaction;
+            update.CommandText = """
+                UPDATE clips
+                SET is_sensitive = $isSensitive,
+                    embedding_status = CASE
+                        WHEN $isSensitive = 1 THEN 'excluded'
+                        WHEN embedding_status = 'excluded' THEN NULL
+                        ELSE embedding_status
+                    END
+                WHERE id = $id;
+                """;
+            update.Parameters.AddWithValue("$id", clipId);
+            update.Parameters.AddWithValue("$isSensitive", matches.Count > 0 ? 1 : 0);
+            await update.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await AddSensitivityMatchesAsync(connection, transaction, clipId, matches, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        InvalidateStatsCache();
+
+        return await GetClipByIdAsync(connection, clipId, cancellationToken);
+    }
+
     public async Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default)
     {
         await using var connection = _connectionFactory.CreateConnection();
@@ -790,11 +932,15 @@ public sealed class ClipStoreService : IClipStoreService
         return new BulkCaptureResult(imported, skipped);
     }
 
-    private async Task<ClipEntry?> InsertClipAsync(ClipCaptureRequest request, CancellationToken cancellationToken)
+    private async Task<ClipEntry?> InsertClipAsync(
+        ClipCaptureRequest request,
+        CancellationToken cancellationToken,
+        bool scanSensitivity = true,
+        bool applyMaintenance = true)
     {
         var contentText = BuildStoredContentText(request);
         var hash = ComputeHash(request.ContentType, request.ContentFormat, request.ContentBytes);
-        var matches = _sensitivityService.Scan(contentText);
+        var matches = scanSensitivity ? _sensitivityService.Scan(contentText) : Array.Empty<SensitivityMatch>();
         var capturedAt = (request.CapturedAtOverride ?? DateTimeOffset.UtcNow).ToString("O", CultureInfo.InvariantCulture);
         var byteSize = request.ContentBytes.LongLength;
 
@@ -904,7 +1050,7 @@ public sealed class ClipStoreService : IClipStoreService
 
         await transaction.CommitAsync(cancellationToken);
         InvalidateStatsCache();
-        if (!request.SkipPostInsertMaintenance)
+        if (applyMaintenance && !request.SkipPostInsertMaintenance)
         {
             await ApplyMaintenanceAsync(cancellationToken);
         }
@@ -1307,6 +1453,23 @@ public sealed class ClipStoreService : IClipStoreService
     {
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
+        var scalar = await command.ExecuteScalarAsync(cancellationToken);
+        return scalar is DBNull or null ? null : Convert.ToString(scalar, CultureInfo.InvariantCulture);
+    }
+
+    private static async Task<string?> ExecuteScalarStringAsync(
+        SqliteConnection connection,
+        string sql,
+        CancellationToken cancellationToken,
+        params (string Name, object Value)[] parameters)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        foreach (var (name, value) in parameters)
+        {
+            command.Parameters.AddWithValue(name, value);
+        }
+
         var scalar = await command.ExecuteScalarAsync(cancellationToken);
         return scalar is DBNull or null ? null : Convert.ToString(scalar, CultureInfo.InvariantCulture);
     }

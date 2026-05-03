@@ -88,7 +88,9 @@ public partial class App : Application
             _embeddingWorker = Services.GetRequiredService<Clipthrough.Services.Search.IEmbeddingWorker>();
             // Don't start the embedding worker here — it's started in StartDatabaseAsync
             // after the DB is initialized and password is set.
-            _embeddingWorkerCaptureSubscription = _clipboardMonitorService.CapturedClips
+            _embeddingWorkerCaptureSubscription = System.Reactive.Linq.Observable.Merge(
+                    _clipboardMonitorService.CapturedClips,
+                    _clipboardMonitorService.UpdatedClips)
                 .Subscribe(_ => _embeddingWorker.Poke());
             var semanticSearch = Services.GetRequiredService<Clipthrough.Services.Search.ISemanticSearchService>();
             _embeddingWorkerBatchSubscription = _embeddingWorker.BatchCompleted

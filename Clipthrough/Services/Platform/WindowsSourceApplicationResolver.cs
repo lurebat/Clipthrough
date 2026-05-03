@@ -12,7 +12,7 @@ namespace Clipthrough.Services.Platform;
 [SupportedOSPlatform("windows")]
 public sealed class WindowsSourceApplicationResolver : ISourceApplicationResolver
 {
-    public ClipboardSourceApplicationInfo? TryResolve()
+    public ClipboardSourceApplicationInfo? TryResolve(bool includeIcon = true)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -21,7 +21,7 @@ public sealed class WindowsSourceApplicationResolver : ISourceApplicationResolve
 
         try
         {
-            return ResolveCore();
+            return ResolveCore(includeIcon);
         }
         catch (Win32Exception ex)
         {
@@ -40,7 +40,9 @@ public sealed class WindowsSourceApplicationResolver : ISourceApplicationResolve
         }
     }
 
-    private static ClipboardSourceApplicationInfo? ResolveCore()
+    public byte[]? TryResolveIcon(string? processPath) => TryGetProcessIcon(processPath);
+
+    private static ClipboardSourceApplicationInfo? ResolveCore(bool includeIcon)
     {
         var owner = GetClipboardOwner();
         if (owner == IntPtr.Zero)
@@ -57,7 +59,7 @@ public sealed class WindowsSourceApplicationResolver : ISourceApplicationResolve
         using var process = Process.GetProcessById((int)processId);
         var processPath = TryGetProcessPath(process);
         var name = TryGetProcessName(process, processPath);
-        var iconBytes = TryGetProcessIcon(processPath);
+        var iconBytes = includeIcon ? TryGetProcessIcon(processPath) : null;
         var windowTitle = TryGetWindowTitle(owner);
 
         // Fallbacks: the clipboard owner is often a hidden helper window with no title

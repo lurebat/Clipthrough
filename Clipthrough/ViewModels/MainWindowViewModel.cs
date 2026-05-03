@@ -393,6 +393,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         _subscriptions.Add(
             _clipboardMonitorService.CapturedClips
+                .ObserveOn(RxSchedulers.MainThreadScheduler)
+                .Subscribe(ApplyCapturedClipOptimistically, ex => StatusText = AppText.FormatErrorStatus(ex.Message)));
+
+        _subscriptions.Add(
+            _clipboardMonitorService.UpdatedClips
+                .ObserveOn(RxSchedulers.MainThreadScheduler)
+                .Subscribe(ApplyUpdatedClipOptimistically, ex => StatusText = AppText.FormatErrorStatus(ex.Message)));
+
+        _subscriptions.Add(
+            _clipboardMonitorService.UpdatedClips
+                .Throttle(TimeSpan.FromMilliseconds(250), RxSchedulers.MainThreadScheduler)
                 .SelectMany(clip => Observable.FromAsync(() => RefreshAsync(clip.Id)))
                 .Subscribe(_ => { }, ex => StatusText = AppText.FormatErrorStatus(ex.Message)));
 
@@ -4187,6 +4198,53 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaiseBulkSelectionProperties();
         UpdateStatus(result);
         UpdateClipDisplayIndices();
+    }
+
+    private void ApplyCapturedClipOptimistically(ClipEntry clip)
+    {
+        UpsertClipItem(clip, targetIndex: 0, select: true);
+    }
+
+    private void ApplyUpdatedClipOptimistically(ClipEntry clip)
+    {
+        var existingIndex = IndexOfClip(clip.Id);
+        if (existingIndex < 0)
+        {
+            return;
+        }
+
+        UpsertClipItem(clip, existingIndex, select: SelectedClip?.Id == clip.Id);
+    }
+
+    private void UpsertClipItem(ClipEntry clip, int targetIndex, bool select)
+    {
+        var existingIndex = IndexOfClip(clip.Id);
+        var wasChecked = existingIndex >= 0 && Clips[existingIndex].IsChecked;
+        if (existingIndex >= 0)
+        {
+            DetachClip(Clips[existingIndex]);
+            Clips.RemoveAt(existingIndex);
+            if (existingIndex < targetIndex)
+            {
+                targetIndex--;
+            }
+        }
+
+        targetIndex = Math.Clamp(targetIndex, 0, Clips.Count);
+        var checkedIds = wasChecked ? new HashSet<long> { clip.Id } : null;
+        var item = CreateClipItemViewModel(clip, checkedIds);
+        Clips.Insert(targetIndex, item);
+        _currentOffset = Clips.Count;
+        HasMoreResults = HasMoreResults || Clips.Count > _currentOffset;
+        this.RaisePropertyChanged(nameof(HasNoClips));
+        RaiseBulkSelectionProperties();
+        UpdateClipDisplayIndices();
+        RefreshLastCaptureSummary();
+
+        if (select)
+        {
+            SelectedClip = item;
+        }
     }
 
     public ClipItemViewModel? GetDefaultAutoSelectedClip()

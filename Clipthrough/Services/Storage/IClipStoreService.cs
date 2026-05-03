@@ -9,6 +9,14 @@ public interface IClipStoreService
 {
     Task<ClipEntry?> CaptureAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default);
 
+    Task<ClipEntry?> CaptureFastAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default);
+
+    Task<ClipEntry?> UpdateDeferredContentAsync(long clipId, ClipCaptureRequest request, CancellationToken cancellationToken = default);
+
+    Task<ClipEntry?> UpdateSourceAppIconAsync(long clipId, byte[] iconBytes, CancellationToken cancellationToken = default);
+
+    Task<ClipEntry?> ApplySensitivityAsync(long clipId, CancellationToken cancellationToken = default);
+
     /// <summary>Insert multiple clips in a single transaction for bulk import scenarios.</summary>
     Task<BulkCaptureResult> CaptureBatchAsync(IReadOnlyList<ClipCaptureRequest> requests, CancellationToken cancellationToken = default);
 
