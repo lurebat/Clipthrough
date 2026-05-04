@@ -723,10 +723,10 @@
                     </Expander.Header>
                     <StackPanel Spacing="10" Margin="8,10,0,0">
                         <TextBlock Classes="body-muted" TextWrapping="Wrap"
-                                   Text="Clipthrough uses Velopack for auto-updates. When enabled, the app checks the feed URL on launch and downloads any newer build to apply on next restart. Only effective when installed via a Velopack package." />
+                                   Text="Clipthrough uses Velopack for auto-updates. When enabled, the app checks the feed URL on launch, downloads any newer build, and applies it when Clipthrough exits or starts next. Only effective when installed via a Velopack package." />
                         <CheckBox Content="Enable auto-update" IsChecked="{Binding SettingsEnableAutoUpdate}" />
                         <StackPanel Spacing="6">
-                            <TextBlock Classes="detail-label" Text="Update feed URL (blank = CLIPTHROUGH_UPDATE_FEED env var)" />
+                            <TextBlock Classes="detail-label" Text="Update feed URL (CLIPTHROUGH_UPDATE_FEED overrides this; blank uses the default GitHub Releases feed)" />
                             <TextBox PlaceholderText="https://github.com/owner/repo/releases/latest/download"
                                      Text="{Binding SettingsUpdateFeedUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </StackPanel>
@@ -749,4 +749,3 @@
         </StackPanel>
     </Grid>
 </Window>
-

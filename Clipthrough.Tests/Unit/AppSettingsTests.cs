@@ -12,6 +12,15 @@ public sealed class AppSettingsTests
     }
 
     [Fact]
+    public void Defaults_EnableAutoUpdateWithGitHubReleaseFeed()
+    {
+        Assert.True(AppSettings.Default.EnableAutoUpdate);
+        Assert.Equal(
+            "https://github.com/lurebat/Clipthrough/releases/latest/download",
+            AppSettings.Default.UpdateFeedUrl);
+    }
+
+    [Fact]
     public void Normalize_AllowsDefaultMaxClipSize()
     {
         var settings = new AppSettings

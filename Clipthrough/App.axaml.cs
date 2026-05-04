@@ -31,6 +31,7 @@ public partial class App : Application
     private IClipStoreService? _clipStoreService;
     private IClipboardMonitorService? _clipboardMonitorService;
     private IAppNotificationService? _notificationService;
+    private IUpdateService? _updateService;
     private IAiTransformService? _aiTransformService;
     private IScriptingService? _scriptingService;
     private Clipthrough.Services.Search.IEmbeddingWorker? _embeddingWorker;
@@ -68,6 +69,7 @@ public partial class App : Application
             _clipboardMonitorService = Services.GetRequiredService<IClipboardMonitorService>();
             ApplyThemeMode(_settingsService.Current.ThemeMode);
             _notificationService = Services.GetRequiredService<IAppNotificationService>();
+            _updateService = Services.GetRequiredService<IUpdateService>();
             _aiTransformService = Services.GetRequiredService<IAiTransformService>();
             _scriptingService = Services.GetRequiredService<IScriptingService>();
 
@@ -235,6 +237,7 @@ public partial class App : Application
         _systemInteractionService?.UnregisterAllGlobalHotKeys();
         _ = Services.GetService<IBackgroundOcrQueue>()?.StopAsync();
         _ = Services.GetService<Clipthrough.Services.Search.IEmbeddingWorker>()?.StopAsync();
+        _updateService?.ApplyDownloadedUpdateOnExit();
         _trayIcon?.Dispose();
         _trayIcon = null;
     }

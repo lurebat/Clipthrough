@@ -10,6 +10,11 @@ public interface IUpdateService
     /// No-op when the app is not deployed as a Velopack package or when no feed is configured.
     /// </summary>
     Task<UpdateCheckResult> CheckAndApplyAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Starts the Velopack updater for a previously downloaded update while the app is already shutting down.
+    /// </summary>
+    void ApplyDownloadedUpdateOnExit();
 }
 
 public sealed record UpdateCheckResult(bool HasUpdate, string? Version, string? Message);

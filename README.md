@@ -19,7 +19,7 @@ Clipthrough is an Avalonia desktop clipboard history app focused on rich clipboa
 - **User scripting** — write C# scripts that transform clip text. Scripts live in settings; `Edit → Run script` lists them. `Edit → Load default scripts` seeds JSON quote/unquote/minify/pretty, URL encode/decode, Base64 encode/decode, and a couple of whitespace helpers. Transforms respect the editor text selection — selecting part of a clip and running a transform rewrites only that range.
 - **Custom hotkey actions** — bind any global hotkey to a one-shot transform of the most recent clip. Targets are `builtin:<TextTransformation>`, `script:<Name>`, `ai:<PresetName>`, or `prompt:<free-form prompt>` for ad-hoc AI prompts without saving a preset.
 - **OCR** — `Edit -> Extract text from image (OCR)` runs Windows.Media.Ocr on the selected image clip and captures the recognized text as a new clip. Optional background OCR can process new image clips automatically and reports status in the main window. Install additional Windows language packs (with the optional OCR feature) and list their BCP-47 tags in Settings (e.g. `en+he`).
-- **Auto-update** — optional Velopack-based update channel. Enable `Auto-update` in Settings and set the feed URL; updates are staged to apply on next launch. Releases are published via the tagged `release.yml` workflow which also invokes `vpk pack`.
+- **Auto-update** — Velopack-based update channel using the GitHub Releases feed by default. Updates are downloaded in the background and applied when Clipthrough exits or on the next launch.
 - **Remote control API** — optional authenticated HTTP API for local tools and AI agents. It binds to loopback by default but can be reconfigured in Settings -> Remote API. Enable it and mint a bearer token in Settings -> Remote API. See `.github/copilot-cli-skills/clipthrough-remote-api.md` for the endpoint reference.
 - **Release polish** — Help -> About shows the current app version, image clips can use a dedicated external editor path, and session logs capture app-level warnings without known benign Avalonia compositor noise.
 - Windows publish artifact via GitHub Actions, plus a tagged-release workflow
@@ -51,7 +51,7 @@ dotnet test .\Clipthrough.Tests\Clipthrough.Tests.csproj
 
 ### Release a new version
 
-Tag the commit `vX.Y.Z` and push. The `release.yml` workflow publishes a framework-dependent build, zips it, and drafts a GitHub Release with the artifact attached. Review and publish the draft to promote the release.
+Tag the commit `vX.Y.Z` and push. The `release.yml` workflow publishes a framework-dependent build, zips it, creates the Velopack installer/feed assets, and publishes a GitHub Release. The published release updates the default feed at `https://github.com/lurebat/Clipthrough/releases/latest/download`.
 
 ```powershell
 git tag v0.5.0

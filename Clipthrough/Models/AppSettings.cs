@@ -4,6 +4,7 @@ namespace Clipthrough.Models;
 
 public sealed record AppSettings
 {
+    public const string DefaultUpdateFeedUrl = "https://github.com/lurebat/Clipthrough/releases/latest/download";
     public const int DefaultMaxClipSizeBytes = 2_048 * 1_024;
     public const int MinMaxClipSizeBytes = 256;
     public const int MaxMaxClipSizeBytes = 32 * 1_024 * 1_024;
@@ -168,9 +169,9 @@ public sealed record AppSettings
 
     public System.Collections.Generic.IReadOnlyList<CustomHotkeyBinding> CustomHotkeys { get; init; } = System.Array.Empty<CustomHotkeyBinding>();
 
-    public bool EnableAutoUpdate { get; init; }
+    public bool EnableAutoUpdate { get; init; } = true;
 
-    public string UpdateFeedUrl { get; init; } = string.Empty;
+    public string UpdateFeedUrl { get; init; } = DefaultUpdateFeedUrl;
 
     public string OcrLanguages { get; init; } = "en";
 
@@ -346,5 +347,4 @@ public sealed record AppSettings
         };
     }
 }
-
 

@@ -98,7 +98,7 @@ jobs:
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: Clipthrough ${{ steps.ver.outputs.tag }}
-          draft: true
+          draft: false
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
