@@ -201,7 +201,7 @@ public static partial class TextTransformationService
 
     private static string BoxTableToHtml(string input)
     {
-        var lines = SplitLines(NormalizeEol(input));
+        var lines = SplitTableInputLines(input);
         var sb = new StringBuilder();
         var block = new System.Collections.Generic.List<string>();
         var nonTableBuffer = new System.Collections.Generic.List<string>();
@@ -324,6 +324,114 @@ public static partial class TextTransformationService
         sb.Append("</table>");
         return sb.ToString();
     }
+
+    private static string[] SplitTableInputLines(string input)
+    {
+        var expanded = new System.Collections.Generic.List<string>();
+        foreach (var line in SplitLines(NormalizeEol(input)))
+        {
+            expanded.AddRange(SplitCollapsedTableLine(line));
+        }
+
+        return expanded.ToArray();
+    }
+
+    private static string[] SplitCollapsedTableLine(string line)
+    {
+        if (line.Length == 0)
+        {
+            return [line];
+        }
+
+        var segments = new System.Collections.Generic.List<string>();
+        var segmentStart = 0;
+        for (var i = 1; i < line.Length; i++)
+        {
+            if (!StartsCollapsedTableSegment(line, i))
+            {
+                continue;
+            }
+
+            AddSegment(segmentStart, i);
+            segmentStart = i;
+        }
+
+        if (segments.Count == 0)
+        {
+            return [line];
+        }
+
+        AddSegment(segmentStart, line.Length);
+        return segments.ToArray();
+
+        void AddSegment(int start, int end)
+        {
+            var segment = line[start..end];
+            if (start > 0)
+            {
+                segment = segment.TrimStart();
+            }
+            if (end < line.Length)
+            {
+                segment = segment.TrimEnd();
+            }
+
+            if (segment.Length > 0)
+            {
+                segments.Add(segment);
+            }
+        }
+    }
+
+    private static bool StartsCollapsedTableSegment(string line, int index)
+    {
+        if (char.IsWhiteSpace(line[index]))
+        {
+            return false;
+        }
+
+        var previous = PreviousNonWhitespace(line, index - 1);
+        if (previous is null)
+        {
+            return false;
+        }
+
+        var current = line[index];
+        return (IsTableBorderStart(current)
+                && (IsRowSeparator(previous.Value) || IsTableBorderEnd(previous.Value))
+                && LooksLikeCollapsedBorderSegment(line, index))
+            || (IsRowSeparator(current) && IsTableBorderEnd(previous.Value));
+    }
+
+    private static bool LooksLikeCollapsedBorderSegment(string line, int startIndex)
+    {
+        var end = startIndex;
+        while (end < line.Length && !char.IsWhiteSpace(line[end]))
+        {
+            end++;
+        }
+
+        return IsTableBorderLine(line[startIndex..end]);
+    }
+
+    private static char? PreviousNonWhitespace(string line, int startIndex)
+    {
+        for (var i = startIndex; i >= 0; i--)
+        {
+            if (!char.IsWhiteSpace(line[i]))
+            {
+                return line[i];
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsTableBorderStart(char c)
+        => c is '┌' or '├' or '└' or '╔' or '╠' or '╚' or '+';
+
+    private static bool IsTableBorderEnd(char c)
+        => c is '┐' or '┤' or '┘' or '╗' or '╣' or '╝' or '+';
 
     private static bool IsRowSeparator(char c)
         => c is '│' or '┃' or '|' or '║';

@@ -175,6 +175,22 @@ public sealed class TextTransformationServiceTests
     }
 
     [Fact]
+    public void BoxTableToHtml_ConvertsCollapsedSingleLineBoxDrawingTable()
+    {
+        var input = "┌──────────────────────────┬────────────────────────────┬─────────────────┬──────────────┐ │ Source                   │ May 5-7 schema-skip alerts │ Distinct tables │ Distinct DBs │ ├──────────────────────────┼────────────────────────────┼─────────────────┼──────────────┤ │ INGEST-REFLEXPRDCUC000   │ ~445K                      │ 235             │ 155          │ ├──────────────────────────┼────────────────────────────┼─────────────────┼──────────────┤ │ INGEST-REFLEXPRDE2C000   │ ~253K                      │ 141             │ 77           │ ├──────────────────────────┼────────────────────────────┼─────────────────┼──────────────┤ │ INGEST-REFLEXPRDWUC000   │ ~208K                      │ 55              │ 51           │ ├──────────────────────────┼────────────────────────────┼─────────────────┼──────────────┤ │ INGEST-REFLEXPRDNEU000   │ ~139K                      │ 44              │ 32           │ └──────────────────────────┴────────────────────────────┴─────────────────┴──────────────┘";
+
+        var result = TextTransformationService.Apply(TextTransformation.BoxTableToHtml, input);
+
+        Assert.StartsWith("<table", result);
+        Assert.Contains("<th>Source</th>", result);
+        Assert.Contains("<th>May 5-7 schema-skip alerts</th>", result);
+        Assert.Contains("<td>INGEST-REFLEXPRDCUC000</td>", result);
+        Assert.Contains("<td>~445K</td>", result);
+        Assert.Contains("<td>155</td>", result);
+        Assert.Equal(5, System.Text.RegularExpressions.Regex.Matches(result, "<tr>").Count);
+    }
+
+    [Fact]
     public void BoxTableToHtml_EscapesHtmlInCells()
     {
         var input = string.Join('\n',

@@ -449,6 +449,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .Merge(PinCheckedClipsCommand.ThrownExceptions)
                 .Merge(DeleteCheckedClipsCommand.ThrownExceptions)
                 .Merge(CopyEditedClipCommand.ThrownExceptions)
+                .Merge(ApplyTextTransformationCommand.ThrownExceptions)
                 .Merge(SaveSettingsCommand.ThrownExceptions)
                 .Merge(BrowseDatabasePathCommand.ThrownExceptions)
                 .Merge(UnlockDatabaseCommand.ThrownExceptions)
@@ -3479,12 +3480,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         var producesHtml = transformation == TextTransformation.BoxTableToHtml;
-        await ApplyTransformToTargetsAsync(
-            (source, _) => Task.FromResult(TextTransformationService.Apply(transformation, source)),
-            $"transformation",
-            multiSummary: count => $"Applied transformation to {count} clips",
-            transformKind: $"builtin:{transformation}",
-            outputFormat: producesHtml ? ClipContentFormat.Html : ClipContentFormat.PlainText);
+        var label = GetTextTransformationLabel(transformation);
+        StatusText = $"Applying {label}…";
+        try
+        {
+            await ApplyTransformToTargetsAsync(
+                (source, _) => Task.FromResult(TextTransformationService.Apply(transformation, source)),
+                label,
+                multiSummary: count => $"Applied {label} to {count} clips",
+                transformKind: $"builtin:{transformation}",
+                outputFormat: producesHtml ? ClipContentFormat.Html : ClipContentFormat.PlainText,
+                noChangeNotificationTitle: producesHtml ? "Text table → HTML made no changes" : null,
+                noChangeNotificationMessage: producesHtml
+                    ? "The selected text did not contain a supported table, so nothing was changed."
+                    : null);
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Failed to apply {label}: {ex.Message}";
+            _notificationService.PublishError($"Failed to apply {label}", ex.Message);
+        }
     }
 
     private async Task ApplyTransformationToSingleClipAsync(ClipItemViewModel clip, TextTransformation transformation)
@@ -3496,42 +3511,68 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         if (clip.Clip.ContentType != ContentType.Text && clip.Clip.ContentType != ContentType.RichText)
         {
+            StatusText = "Only text clips can be transformed";
             return;
         }
 
         var source = clip.Clip.Content ?? string.Empty;
         if (string.IsNullOrEmpty(source))
         {
+            StatusText = "Selected clip has no text to transform";
             return;
         }
 
-        var result = TextTransformationService.Apply(transformation, source);
-        if (string.Equals(result, source, StringComparison.Ordinal))
+        var label = GetTextTransformationLabel(transformation);
+        StatusText = $"Applying {label}…";
+        try
         {
-            StatusText = "Transformation produced no change";
-            return;
-        }
+            var result = TextTransformationService.Apply(transformation, source);
+            if (string.Equals(result, source, StringComparison.Ordinal))
+            {
+                StatusText = $"{label} produced no change";
+                if (transformation == TextTransformation.BoxTableToHtml)
+                {
+                    _notificationService.PublishWarning(
+                        "Text table → HTML made no changes",
+                        "The selected text did not contain a supported table, so nothing was changed.");
+                }
+                return;
+            }
 
-        var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
-        var isHtml = transformation == TextTransformation.BoxTableToHtml;
-        var captured = await Task.Run(() => _clipStoreService.CaptureAsync(new ClipCaptureRequest
+            var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
+            var isHtml = transformation == TextTransformation.BoxTableToHtml;
+            var captured = await Task.Run(() => _clipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentBytes = textBytes,
+                ContentText = result,
+                ContentType = isHtml ? ContentType.RichText : ContentType.Text,
+                ContentFormat = isHtml ? ClipContentFormat.Html : ClipContentFormat.PlainText,
+                SourceApp = clip.SourceApp,
+                SourceAppPath = clip.Clip.SourceAppPath,
+                SourceAppIconBytes = clip.Clip.SourceAppIconBytes,
+                SourceWindowTitle = clip.Clip.SourceWindowTitle,
+                IncrementExistingCopyCount = false,
+                SourceClipId = clip.Clip.Id,
+                TransformKind = $"builtin:{transformation}",
+                SkipPostInsertMaintenance = true,
+            }));
+            var copyFailure = await CopyTransformResultToClipboardAsync(result, isHtml ? ClipContentFormat.Html : ClipContentFormat.PlainText);
+            if (copyFailure is null)
+            {
+                StatusText = "Transformed and copied to clipboard";
+            }
+            else
+            {
+                StatusText = $"Transformed, but copy failed: {copyFailure}";
+                _notificationService.PublishWarning("Transform copy failed", copyFailure);
+            }
+            await RefreshAsync(captured?.Id);
+        }
+        catch (Exception ex)
         {
-            ContentBytes = textBytes,
-            ContentText = result,
-            ContentType = isHtml ? ContentType.RichText : ContentType.Text,
-            ContentFormat = isHtml ? ClipContentFormat.Html : ClipContentFormat.PlainText,
-            SourceApp = clip.SourceApp,
-            SourceAppPath = clip.Clip.SourceAppPath,
-            SourceAppIconBytes = clip.Clip.SourceAppIconBytes,
-            SourceWindowTitle = clip.Clip.SourceWindowTitle,
-            IncrementExistingCopyCount = false,
-            SourceClipId = clip.Clip.Id,
-            TransformKind = $"builtin:{transformation}",
-            SkipPostInsertMaintenance = true,
-        }));
-        await CopyTransformResultToClipboardAsync(result, isHtml ? ClipContentFormat.Html : ClipContentFormat.PlainText);
-        StatusText = "Transformed and copied to clipboard";
-        await RefreshAsync(captured?.Id);
+            StatusText = $"Failed to apply {label}: {ex.Message}";
+            _notificationService.PublishError($"Failed to apply {label}", ex.Message);
+        }
     }
 
     private async Task ApplyUserScriptAsync(UserScript? script)
@@ -3564,11 +3605,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private async Task CopyTransformResultToClipboardAsync(string result, ClipContentFormat format)
+    private async Task<string?> CopyTransformResultToClipboardAsync(string result, ClipContentFormat format)
     {
         if (string.IsNullOrEmpty(result))
         {
-            return;
+            return "Transform result was empty.";
         }
 
         try
@@ -3583,10 +3624,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 await _systemInteractionService.CopyTextAsync(result);
             }
+
+            return null;
         }
         catch (Exception ex)
         {
             Trace.TraceWarning($"Auto-copy of transform result failed: {ex.Message}");
+            return ex.Message;
         }
     }
 
@@ -3595,7 +3639,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         string singleLabel,
         Func<int, string> multiSummary,
         string? transformKind = null,
-        ClipContentFormat outputFormat = ClipContentFormat.PlainText)
+        ClipContentFormat outputFormat = ClipContentFormat.PlainText,
+        string? noChangeNotificationTitle = null,
+        string? noChangeNotificationMessage = null)
     {
         var checkedClips = Clips.Where(static c => c.IsChecked).ToList();
         var useSelectionSlice = checkedClips.Count == 0
@@ -3677,10 +3723,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (transformed == 1 && lastCreatedId is not null && lastResult is not null)
             {
-                await CopyTransformResultToClipboardAsync(lastResult, outputFormat);
-                StatusText = useSelectionSlice
-                    ? $"Applied {singleLabel} to selection and copied"
-                    : "Transformed and copied to clipboard";
+                var copyFailure = await CopyTransformResultToClipboardAsync(lastResult, outputFormat);
+                if (copyFailure is null)
+                {
+                    StatusText = useSelectionSlice
+                        ? $"Applied {singleLabel} to selection and copied"
+                        : "Transformed and copied to clipboard";
+                }
+                else
+                {
+                    StatusText = $"Applied {singleLabel}, but copy failed: {copyFailure}";
+                    _notificationService.PublishWarning("Transform copy failed", copyFailure);
+                }
             }
             else
             {
@@ -3693,8 +3747,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         else
         {
             StatusText = $"No text clips changed by {singleLabel}";
+            if (noChangeNotificationTitle is not null && noChangeNotificationMessage is not null)
+            {
+                _notificationService.PublishWarning(noChangeNotificationTitle, noChangeNotificationMessage);
+            }
         }
     }
+
+    private static string GetTextTransformationLabel(TextTransformation transformation)
+        => transformation switch
+        {
+            TextTransformation.BoxTableToHtml => "text table → HTML",
+            _ => "transformation",
+        };
 
     // Old single-clip script body replaced above; keep old method signature for legacy callers (none left).
 
