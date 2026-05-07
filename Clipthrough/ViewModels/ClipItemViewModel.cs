@@ -3,6 +3,7 @@ using System.Linq;
 using System.Reactive;
 using System.Threading.Tasks;
 using Avalonia;
+using Avalonia.Threading;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Clipthrough.Localization;
@@ -77,6 +78,7 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     private Bitmap? _previewThumbnailImage;
     private bool _sourceAppIconLoaded;
     private bool _previewThumbnailLoaded;
+    private bool _isDisposed;
 
     public ClipItemViewModel(
         ClipEntry clip,
@@ -272,7 +274,11 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
             }
 
             _sourceAppIconLoaded = true;
-            _sourceAppIconImage = ClipBitmapFactory.TryLoad(Clip.SourceAppIconBytes);
+            LoadBitmapInBackground(Clip.SourceAppIconBytes, bitmap =>
+            {
+                _sourceAppIconImage = bitmap;
+                this.RaisePropertyChanged(nameof(SourceAppIconImage));
+            });
             return _sourceAppIconImage;
         }
     }
@@ -291,9 +297,14 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
             }
 
             _previewThumbnailLoaded = true;
-            _previewThumbnailImage = Clip.ContentType == ContentType.Image
-                ? ClipBitmapFactory.TryLoad(Clip.ContentBytes)
-                : null;
+            if (Clip.ContentType == ContentType.Image)
+            {
+                LoadBitmapInBackground(Clip.ContentBytes, bitmap =>
+                {
+                    _previewThumbnailImage = bitmap;
+                    this.RaisePropertyChanged(nameof(PreviewThumbnailImage));
+                });
+            }
             return _previewThumbnailImage;
         }
     }
@@ -462,8 +473,33 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        _isDisposed = true;
         _previewThumbnailImage?.Dispose();
         _sourceAppIconImage?.Dispose();
+    }
+
+    private void LoadBitmapInBackground(byte[]? bytes, Action<Bitmap?> apply)
+    {
+        if (bytes is not { Length: > 0 })
+        {
+            return;
+        }
+
+        _ = Task.Run(() => ClipBitmapFactory.TryLoad(bytes))
+            .ContinueWith(task =>
+            {
+                var bitmap = task.Status == TaskStatus.RanToCompletion ? task.Result : null;
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (_isDisposed)
+                    {
+                        bitmap?.Dispose();
+                        return;
+                    }
+
+                    apply(bitmap);
+                });
+            }, TaskScheduler.Default);
     }
 
     private static int GetSeverityRank(string? severity) => severity?.ToLowerInvariant() switch

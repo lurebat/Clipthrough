@@ -3206,7 +3206,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         try
         {
-            var source = await _clipStoreService.GetByIdAsync(sourceId);
+            var source = await Task.Run(() => _clipStoreService.GetByIdAsync(sourceId));
             if (source is null)
             {
                 StatusText = $"Clip #{sourceId} no longer exists.";
@@ -5107,7 +5107,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
 
             var textBytes = System.Text.Encoding.UTF8.GetBytes(text);
-            var captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
+            var captured = await Task.Run(() => _clipStoreService.CaptureAsync(new ClipCaptureRequest
             {
                 ContentBytes = textBytes,
                 ContentText = text,
@@ -5121,7 +5121,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 SourceClipId = clip.Clip.Id,
                 TransformKind = transformKind,
                 SkipPostInsertMaintenance = true,
-            });
+            }));
 
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
@@ -5542,7 +5542,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 if (languagesChanged)
                 {
-                    await _clipStoreService.MarkAllSucceededForRerunAsync();
+                    await Task.Run(() => _clipStoreService.MarkAllSucceededForRerunAsync());
                 }
                 _ = Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync());
             }
@@ -6623,7 +6623,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     Label = AppText.DeleteButtonLabel,
                     ExecuteAsync = async () =>
                     {
-                        await _clipStoreService.DeleteAsync(clip.Id);
+                        await Task.Run(() => _clipStoreService.DeleteAsync(clip.Id));
                         await RefreshAsync();
                     }
                 },
@@ -6632,7 +6632,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     Label = AppText.UnmarkSensitiveButtonLabel,
                     ExecuteAsync = async () =>
                     {
-                        await _clipStoreService.ClearSensitivityAsync(clip.Id);
+                        await Task.Run(() => _clipStoreService.ClearSensitivityAsync(clip.Id));
                         await RefreshAsync(clip.Id);
                     }
                 }

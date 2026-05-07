@@ -1,11 +1,14 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Threading;
 using ShareX.ImageEditor.Hosting;
 using ShareX.ImageEditor.Presentation.ViewModels;
 using ShareX.ImageEditor.Presentation.Views;
@@ -24,6 +27,7 @@ public sealed class EmbeddedImageEditorView : UserControl
     private readonly Border _fallbackBorder;
     private readonly Image _fallbackImage;
     private bool _editorReady;
+    private int _loadVersion;
 
     public EmbeddedImageEditorView()
     {
@@ -44,9 +48,13 @@ public sealed class EmbeddedImageEditorView : UserControl
         Content = _root;
 
         this.GetObservable(SourceImageBytesProperty).Subscribe(LoadImage);
-
-        // Pre-initialize the editor so the first image open doesn't stutter
-        Loaded += (_, _) => Avalonia.Threading.Dispatcher.UIThread.Post(EnsureEditor, Avalonia.Threading.DispatcherPriority.Background);
+        this.GetObservable(IsVisibleProperty).Subscribe(isVisible =>
+        {
+            if (isVisible && !_editorReady && SourceImageBytes is { Length: > 0 } imageBytes)
+            {
+                LoadImage(imageBytes);
+            }
+        });
     }
 
     public byte[]? SourceImageBytes
@@ -126,6 +134,7 @@ public sealed class EmbeddedImageEditorView : UserControl
 
     private void LoadImage(byte[]? imageBytes)
     {
+        var version = Interlocked.Increment(ref _loadVersion);
         _editorReady = false;
 
         if (imageBytes is not { Length: > 0 })
@@ -139,47 +148,91 @@ public sealed class EmbeddedImageEditorView : UserControl
             return;
         }
 
-        // Show fallback preview immediately
-        try
+        _fallbackImage.Source = null;
+        _fallbackBorder.IsVisible = true;
+        if (_editorView is not null)
         {
-            using var previewStream = new MemoryStream(imageBytes, writable: false);
-            _fallbackImage.Source = new Bitmap(previewStream);
-            _fallbackBorder.IsVisible = true;
-        }
-        catch (Exception ex)
-        {
-            Trace.TraceWarning($"Image fallback preview failed: {ex.Message}");
-            _fallbackImage.Source = null;
-            _fallbackBorder.IsVisible = false;
+            _editorView.IsVisible = false;
         }
 
-        // Try to initialize editor
-        EnsureEditor();
-        if (_editorViewModel is null || _editorView is null)
+        if (!IsVisible)
         {
             return;
         }
 
+        _ = LoadImageAsync(imageBytes, version);
+    }
+
+    private async Task LoadImageAsync(byte[] imageBytes, int version)
+    {
+        Bitmap? preview = null;
         try
         {
-            using var stream = new MemoryStream(imageBytes, writable: false);
-            using var bitmap = SKBitmap.Decode(stream);
-            if (bitmap is null)
+            preview = await Task.Run(() =>
             {
-                Trace.TraceWarning("Image editor: SKBitmap.Decode returned null");
+                using var previewStream = new MemoryStream(imageBytes, writable: false);
+                return new Bitmap(previewStream);
+            }).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Image fallback preview failed: {ex.Message}");
+        }
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (version != _loadVersion)
+            {
+                preview?.Dispose();
                 return;
             }
 
-            _editorViewModel.UpdatePreview(bitmap.Copy(), clearAnnotations: true);
+            _fallbackImage.Source = preview;
+            _fallbackBorder.IsVisible = preview is not null;
+        });
+
+        SKBitmap? bitmap = null;
+        try
+        {
+            bitmap = await Task.Run(() =>
+            {
+                using var stream = new MemoryStream(imageBytes, writable: false);
+                return SKBitmap.Decode(stream);
+            }).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Image editor decode failed: {ex.Message}");
+        }
+
+        if (bitmap is null)
+        {
+            Trace.TraceWarning("Image editor: SKBitmap.Decode returned null");
+            return;
+        }
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (version != _loadVersion)
+            {
+                bitmap.Dispose();
+                return;
+            }
+
+            EnsureEditor();
+            if (_editorViewModel is null || _editorView is null)
+            {
+                bitmap.Dispose();
+                return;
+            }
+
+            var editorBitmap = bitmap.Copy();
+            bitmap.Dispose();
+            _editorViewModel.UpdatePreview(editorBitmap, clearAnnotations: true);
             _editorViewModel.IsDirty = false;
             _editorView.IsVisible = true;
             _fallbackBorder.IsVisible = false;
             _editorReady = true;
-        }
-        catch (Exception ex)
-        {
-            Trace.TraceWarning($"Image editor load failed, using fallback: {ex.Message}");
-            // Fallback stays visible; editor stays hidden
-        }
+        }, DispatcherPriority.Background);
     }
 }
