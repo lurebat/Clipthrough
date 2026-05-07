@@ -1,11 +1,38 @@
 using Clipthrough.Models;
 using Clipthrough.Services;
+using System.Threading.Tasks;
 using Xunit;
 
 namespace Clipthrough.Tests.Unit;
 
 public sealed class UpdateServiceTests
 {
+    [Fact]
+    public async Task CheckAndApplyAsync_RespectsDisabledAutoUpdateByDefault()
+    {
+        var settings = new TestSettingsService();
+        settings.SetCurrent(AppSettings.Default with { EnableAutoUpdate = false });
+        var service = new UpdateService(settings);
+
+        var result = await service.CheckAndApplyAsync();
+
+        Assert.False(result.HasUpdate);
+        Assert.Equal("Auto-update disabled", result.Message);
+    }
+
+    [Fact]
+    public async Task CheckAndApplyAsync_ManualCheckBypassesDisabledAutoUpdate()
+    {
+        var settings = new TestSettingsService();
+        settings.SetCurrent(AppSettings.Default with { EnableAutoUpdate = false });
+        var service = new UpdateService(settings);
+
+        var result = await service.CheckAndApplyAsync(ignoreAutoUpdateDisabled: true);
+
+        Assert.False(result.HasUpdate);
+        Assert.NotEqual("Auto-update disabled", result.Message);
+    }
+
     [Fact]
     public void ResolveFeedUrl_UsesDefaultFeedWhenNoOverrideIsConfigured()
     {

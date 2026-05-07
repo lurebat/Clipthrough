@@ -42,6 +42,13 @@ public static class AppText
         [nameof(AboutWindowDescription)] = "Clipboard history with search, transforms, OCR, and AI.",
         [nameof(AboutWindowVersionLabel)] = "Version",
         [nameof(AboutWindowCloseHint)] = "Press Esc to close.",
+        [nameof(CheckForUpdateMenuHeader)] = "_Check for updates",
+        [nameof(CheckForUpdateButtonLabel)] = "Check for updates",
+        [nameof(CheckingForUpdateStatus)] = "Checking for updates...",
+        [nameof(UpdateAvailableTitle)] = "Update available",
+        [nameof(UpdateCheckCompleteTitle)] = "Update check complete",
+        [nameof(UpdateCheckCompleteStatus)] = "Update check complete.",
+        [nameof(UpdateCheckFailedTitle)] = "Update check failed",
         [nameof(SettingsTitleText)] = "Settings",
         [nameof(SettingsDescriptionText)] = "Adjust shortcuts, tray behavior, storage, sensitivity rules, retention, and archive capacity.",
         [nameof(SettingsLocalHotkeysTitle)] = "Local shortcuts",
@@ -242,6 +249,7 @@ public static class AppText
         ["Format.OpenFailed"] = "Open failed: {0}",
         ["Format.FolderOpenFailed"] = "Folder open failed: {0}",
         ["Format.ErrorStatus"] = "Error: {0}",
+        ["Format.UpdateCheckFailed"] = "Update check failed: {0}",
         ["Format.SettingsValidationError"] = "Settings error: {0}",
         ["Format.PathNotFound"] = "The requested file or directory could not be found: {0}",
         ["Format.DuplicateHotkey"] = "The hotkey {0} is assigned more than once.",
@@ -309,6 +317,13 @@ public static class AppText
     public static string AboutWindowDescription => Text(nameof(AboutWindowDescription));
     public static string AboutWindowVersionLabel => Text(nameof(AboutWindowVersionLabel));
     public static string AboutWindowCloseHint => Text(nameof(AboutWindowCloseHint));
+    public static string CheckForUpdateMenuHeader => Text(nameof(CheckForUpdateMenuHeader));
+    public static string CheckForUpdateButtonLabel => Text(nameof(CheckForUpdateButtonLabel));
+    public static string CheckingForUpdateStatus => Text(nameof(CheckingForUpdateStatus));
+    public static string UpdateAvailableTitle => Text(nameof(UpdateAvailableTitle));
+    public static string UpdateCheckCompleteTitle => Text(nameof(UpdateCheckCompleteTitle));
+    public static string UpdateCheckCompleteStatus => Text(nameof(UpdateCheckCompleteStatus));
+    public static string UpdateCheckFailedTitle => Text(nameof(UpdateCheckFailedTitle));
     public static string SettingsTitleText => Text(nameof(SettingsTitleText));
     public static string SettingsDescriptionText => Text(nameof(SettingsDescriptionText));
     public static string SettingsLocalHotkeysTitle => Text(nameof(SettingsLocalHotkeysTitle));
@@ -594,6 +609,8 @@ public static class AppText
     public static string FormatFolderOpenFailed(string message) => Format("Format.FolderOpenFailed", message);
 
     public static string FormatErrorStatus(string message) => Format("Format.ErrorStatus", message);
+
+    public static string FormatUpdateCheckFailed(string message) => Format("Format.UpdateCheckFailed", message);
 
     public static string FormatSettingsValidationError(string message) => Format("Format.SettingsValidationError", message);
 

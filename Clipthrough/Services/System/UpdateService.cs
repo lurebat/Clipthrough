@@ -25,10 +25,12 @@ public sealed class UpdateService : IUpdateService
         _settingsService = settingsService;
     }
 
-    public async Task<UpdateCheckResult> CheckAndApplyAsync(CancellationToken cancellationToken = default)
+    public async Task<UpdateCheckResult> CheckAndApplyAsync(
+        bool ignoreAutoUpdateDisabled = false,
+        CancellationToken cancellationToken = default)
     {
         var settings = _settingsService.Current;
-        if (!settings.EnableAutoUpdate)
+        if (!settings.EnableAutoUpdate && !ignoreAutoUpdateDisabled)
         {
             return new UpdateCheckResult(false, null, "Auto-update disabled");
         }

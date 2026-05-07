@@ -163,26 +163,72 @@ public sealed class StorageOptionsService : IStorageOptionsService
         {
             if (!File.Exists(_configPath))
             {
-                return StorageOptions.Default.Normalize();
+                return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize());
             }
 
             var json = File.ReadAllText(_configPath);
             var stored = JsonSerializer.Deserialize<StorageOptionsDocument>(json, JsonOptions);
             if (stored is null)
             {
-                return StorageOptions.Default.Normalize();
+                return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize());
             }
 
-            return new StorageOptions
+            var options = new StorageOptions
             {
                 DatabasePath = stored.DatabasePath ?? StorageOptions.GetDefaultDatabasePath(),
                 DatabasePassword = string.Empty,
             }.Normalize();
+            return EnsureLegacyDefaultDatabaseCopied(options);
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
             Trace.TraceWarning($"Storage settings load failed: {ex.Message}");
-            return StorageOptions.Default.Normalize();
+            return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize());
+        }
+    }
+
+    private static StorageOptions EnsureLegacyDefaultDatabaseCopied(StorageOptions options)
+    {
+        if (string.Equals(options.DatabasePath, StorageOptions.GetDefaultDatabasePath(), StringComparison.OrdinalIgnoreCase))
+        {
+            TryCopyLegacyDatabase(StorageOptions.GetLegacyDefaultDatabasePath(), options.DatabasePath);
+            return options;
+        }
+
+        if (!StorageOptions.IsLegacyDefaultDatabasePath(options.DatabasePath))
+        {
+            return options;
+        }
+
+        var migrated = options with { DatabasePath = StorageOptions.GetDefaultDatabasePath() };
+        TryCopyLegacyDatabase(options.DatabasePath, migrated.DatabasePath);
+        return migrated.Normalize();
+    }
+
+    private static void TryCopyLegacyDatabase(string legacyPath, string migratedPath)
+    {
+        if (!File.Exists(legacyPath) || File.Exists(migratedPath))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(migratedPath)!);
+            foreach (var suffix in new[] { string.Empty, "-wal", "-shm" })
+            {
+                var source = legacyPath + suffix;
+                if (File.Exists(source))
+                {
+                    File.Copy(source, migratedPath + suffix);
+                }
+            }
+
+            Trace.TraceInformation($"Copied legacy database from '{legacyPath}' to uninstall-safe path '{migratedPath}'.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceWarning($"Legacy database migration failed: {ex.Message}");
         }
     }
 

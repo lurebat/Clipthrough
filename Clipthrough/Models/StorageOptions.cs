@@ -5,6 +5,10 @@ namespace Clipthrough.Models;
 
 public sealed record StorageOptions
 {
+    private const string UserDataDirectoryName = "ClipthroughData";
+    private const string LegacyUserDataDirectoryName = "Clipthrough";
+    private const string DatabaseFileName = "clipthrough.db";
+
     public string DatabasePath { get; init; } = GetDefaultDatabasePath();
 
     public string DatabasePassword { get; init; } = string.Empty;
@@ -28,8 +32,28 @@ public sealed record StorageOptions
     {
         var appDataDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Clipthrough");
+            UserDataDirectoryName);
 
-        return Path.Combine(appDataDirectory, "clipthrough.db");
+        return Path.Combine(appDataDirectory, DatabaseFileName);
+    }
+
+    public static string GetLegacyDefaultDatabasePath()
+    {
+        var appDataDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            LegacyUserDataDirectoryName);
+
+        return Path.Combine(appDataDirectory, DatabaseFileName);
+    }
+
+    public static bool IsLegacyDefaultDatabasePath(string? databasePath)
+    {
+        if (string.IsNullOrWhiteSpace(databasePath))
+        {
+            return false;
+        }
+
+        var normalizedPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(databasePath.Trim()));
+        return string.Equals(normalizedPath, GetLegacyDefaultDatabasePath(), StringComparison.OrdinalIgnoreCase);
     }
 }

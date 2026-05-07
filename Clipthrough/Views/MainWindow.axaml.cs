@@ -1178,6 +1178,7 @@ public partial class MainWindow : Window
         {
             m_subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
             m_subscribedViewModel.HelpRequested -= OnHelpRequested;
+            m_subscribedViewModel.AboutRequested -= OnAboutRequested;
             m_subscribedViewModel = null;
         }
 
@@ -1209,7 +1210,10 @@ public partial class MainWindow : Window
     {
         Dispatcher.UIThread.Post(() =>
         {
-            var window = new AboutWindow();
+            var window = new AboutWindow
+            {
+                DataContext = sender as MainWindowViewModel ?? DataContext,
+            };
             window.Show(this);
         });
     }

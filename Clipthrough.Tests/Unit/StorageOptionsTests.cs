@@ -37,4 +37,27 @@ public sealed class StorageOptionsTests
 
         Assert.Equal(StorageOptions.GetDefaultDatabasePath(), normalized.DatabasePath);
     }
+
+    [Fact]
+    public void GetDefaultDatabasePath_UsesUninstallSafeDataDirectory()
+    {
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+        var defaultPath = StorageOptions.GetDefaultDatabasePath();
+
+        Assert.Equal(Path.Combine(localAppData, "ClipthroughData", "clipthrough.db"), defaultPath);
+        Assert.NotEqual(StorageOptions.GetLegacyDefaultDatabasePath(), defaultPath);
+    }
+
+    [Fact]
+    public void IsLegacyDefaultDatabasePath_RecognizesPreviousDefaultLocation()
+    {
+        var legacyPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Clipthrough",
+            "clipthrough.db");
+
+        Assert.True(StorageOptions.IsLegacyDefaultDatabasePath(legacyPath));
+        Assert.False(StorageOptions.IsLegacyDefaultDatabasePath(StorageOptions.GetDefaultDatabasePath()));
+    }
 }

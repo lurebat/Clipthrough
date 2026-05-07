@@ -58,6 +58,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly ISearchHistoryService _searchHistoryService;
     private readonly IAiTransformService _aiTransformService;
     private readonly IScriptingService _scriptingService;
+    private readonly IUpdateService _updateService;
     private readonly IOcrService _ocrService;
     private readonly IBackgroundOcrQueue _backgroundOcrQueue;
     private readonly IBackgroundJobIndicator _jobIndicator;
@@ -198,7 +199,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _editedClipSelectionLength;
     private long? _checkedSelectionAnchorId;
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, IClipAngelImportService? clipAngelImportService = null, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null, Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null, ICopilotAuthService? copilotAuthService = null)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, IClipAngelImportService? clipAngelImportService = null, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null, Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null, ICopilotAuthService? copilotAuthService = null, IUpdateService? updateService = null)
     {
         _clipStoreService = clipStoreService;
         _clipAngelImportService = clipAngelImportService ?? new ClipAngelImportService(clipStoreService);
@@ -214,6 +215,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _searchHistoryService = searchHistoryService;
         _aiTransformService = aiTransformService;
         _scriptingService = scriptingService;
+        _updateService = updateService ?? new UpdateService(settingsService);
         _ocrService = ocrService;
         _backgroundOcrQueue = backgroundOcrQueue;
         _jobIndicator = jobIndicator;
@@ -270,6 +272,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         JumpToTopCommand = ReactiveCommand.Create(() => { if (Clips.Count > 0) SelectedClip = Clips[0]; });
         OpenHelpCommand = ReactiveCommand.Create(OpenHelp);
         OpenAboutCommand = ReactiveCommand.Create(OpenAbout);
+        CheckForUpdateCommand = ReactiveCommand.CreateFromTask(CheckForUpdateAsync);
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
         SaveSettingsCommand = ReactiveCommand.CreateFromTask(SaveSettingsAsync);
         BrowseDatabasePathCommand = ReactiveCommand.CreateFromTask<Window?>(BrowseDatabasePathAsync);
@@ -450,6 +453,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .Merge(DeleteCheckedClipsCommand.ThrownExceptions)
                 .Merge(CopyEditedClipCommand.ThrownExceptions)
                 .Merge(ApplyTextTransformationCommand.ThrownExceptions)
+                .Merge(CheckForUpdateCommand.ThrownExceptions)
                 .Merge(SaveSettingsCommand.ThrownExceptions)
                 .Merge(BrowseDatabasePathCommand.ThrownExceptions)
                 .Merge(UnlockDatabaseCommand.ThrownExceptions)
@@ -548,6 +552,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> OpenHelpCommand { get; }
 
     public ReactiveCommand<Unit, Unit> OpenAboutCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> CheckForUpdateCommand { get; }
 
     public ReactiveCommand<Unit, Unit> CloseSettingsCommand { get; }
 
@@ -4715,6 +4721,31 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private void OpenAbout()
     {
         AboutRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private async Task CheckForUpdateAsync()
+    {
+        StatusText = AppText.CheckingForUpdateStatus;
+
+        try
+        {
+            var result = await _jobIndicator.TrackAsync(
+                AppText.CheckingForUpdateStatus,
+                () => _updateService.CheckAndApplyAsync(ignoreAutoUpdateDisabled: true));
+            var message = string.IsNullOrWhiteSpace(result.Message)
+                ? AppText.UpdateCheckCompleteStatus
+                : result.Message;
+
+            StatusText = message;
+            _notificationService.PublishInfo(
+                result.HasUpdate ? AppText.UpdateAvailableTitle : AppText.UpdateCheckCompleteTitle,
+                message);
+        }
+        catch (Exception ex)
+        {
+            StatusText = AppText.FormatUpdateCheckFailed(ex.Message);
+            _notificationService.PublishError(AppText.UpdateCheckFailedTitle, ex.Message);
+        }
     }
 
     public event EventHandler? HelpRequested;

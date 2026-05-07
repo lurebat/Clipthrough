@@ -9,7 +9,7 @@ public interface IUpdateService
     /// Checks for updates against the configured feed and, if one is available, downloads and applies it on next restart.
     /// No-op when the app is not deployed as a Velopack package or when no feed is configured.
     /// </summary>
-    Task<UpdateCheckResult> CheckAndApplyAsync(CancellationToken cancellationToken = default);
+    Task<UpdateCheckResult> CheckAndApplyAsync(bool ignoreAutoUpdateDisabled = false, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Starts the Velopack updater for a previously downloaded update while the app is already shutting down.

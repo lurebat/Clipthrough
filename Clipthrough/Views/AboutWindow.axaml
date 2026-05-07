@@ -2,12 +2,14 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:loc="using:Clipthrough.Localization"
         xmlns:pres="using:Clipthrough.Presentation"
+        xmlns:vm="using:Clipthrough.ViewModels"
         x:Class="Clipthrough.Views.AboutWindow"
+        x:DataType="vm:MainWindowViewModel"
         Title="{x:Static loc:AppText.AboutWindowTitle}"
         Width="460"
-        Height="280"
+        Height="320"
         MinWidth="420"
-        MinHeight="240"
+        MinHeight="280"
         Background="{DynamicResource AppBackgroundBrush}"
         ShowInTaskbar="True"
         WindowStartupLocation="CenterOwner">
@@ -36,6 +38,10 @@
                                Text="{x:Static pres:AppIdentity.DisplayVersion}" />
                 </StackPanel>
             </Border>
+            <Button Classes="secondary"
+                    HorizontalAlignment="Center"
+                    Command="{Binding CheckForUpdateCommand}"
+                    Content="{x:Static loc:AppText.CheckForUpdateButtonLabel}" />
             <TextBlock Classes="body-muted"
                        HorizontalAlignment="Center"
                        Text="{x:Static loc:AppText.AboutWindowCloseHint}" />

@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="using:Clipthrough.Controls"
         xmlns:conv="using:Clipthrough.Converters"
+        xmlns:loc="using:Clipthrough.Localization"
         xmlns:models="using:Clipthrough.Models"
         xmlns:primitives="using:Avalonia.Controls.Primitives"
         xmlns:vm="using:Clipthrough.ViewModels"
@@ -65,6 +66,8 @@
             </MenuItem>
             <MenuItem Header="Help">
                 <MenuItem Header="_User guide" Command="{Binding OpenHelpCommand}" />
+                <MenuItem Header="{x:Static loc:AppText.CheckForUpdateMenuHeader}"
+                          Command="{Binding CheckForUpdateCommand}" />
                 <MenuItem Header="_About" Command="{Binding OpenAboutCommand}" />
             </MenuItem>
         </Menu>
