@@ -266,6 +266,128 @@
                                   ItemsSource="{Binding Clips}"
                                   SelectedItem="{Binding SelectedClip, Mode=TwoWay}"
                                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListBox.ContextMenu>
+                                <!--
+                                    Single shared context menu for the clip list. Bound to
+                                    SelectedClip so the same menu instance can serve every
+                                    row without paying the per-row template cost (~50 MenuItems
+                                    × every realized container would otherwise freeze the UI
+                                    when the list is rebuilt).
+                                -->
+                                <ContextMenu DataContext="{Binding SelectedClip}">
+                                    <MenuItem Header="{Binding CopyLabel}"
+                                              Command="{Binding CopyCommand}" />
+                                    <MenuItem Header="Open in editor"
+                                              Command="{Binding #ClipsListBox.DataContext.OpenInEditorCommand}" />
+                                    <MenuItem Header="Compare checked clips"
+                                              Command="{Binding #ClipsListBox.DataContext.CompareClipsCommand}" />
+                                    <Separator />
+                                    <MenuItem Header="{Binding FavoriteActionLabel}"
+                                              Command="{Binding ToggleFavoriteCommand}" />
+                                    <MenuItem Header="{Binding PinActionLabel}"
+                                              Command="{Binding TogglePinCommand}" />
+                                    <MenuItem Header="{Binding ExportLabel}"
+                                              Command="{Binding ExportCommand}" />
+                                    <MenuItem Header="Transform"
+                                              IsVisible="{Binding CanTransform}">
+                                        <MenuItem Header="Case">
+                                            <MenuItem Header="UPPERCASE"
+                                                      Command="{Binding ApplyTextTransformationCommand}"
+                                                      CommandParameter="{x:Static models:TextTransformation.UpperCase}" />
+                                            <MenuItem Header="lowercase"
+                                                      Command="{Binding ApplyTextTransformationCommand}"
+                                                      CommandParameter="{x:Static models:TextTransformation.LowerCase}" />
+                                            <MenuItem Header="Title Case"
+                                                      Command="{Binding ApplyTextTransformationCommand}"
+                                                      CommandParameter="{x:Static models:TextTransformation.TitleCase}" />
+                                            <MenuItem Header="Sentence case"
+                                                      Command="{Binding ApplyTextTransformationCommand}"
+                                                      CommandParameter="{x:Static models:TextTransformation.SentenceCase}" />
+                                            <MenuItem Header="UpperCamelCase"
+                                                      Command="{Binding ApplyTextTransformationCommand}"
+                                                      CommandParameter="{x:Static models:TextTransformation.UpperCamelCase}" />
+                                            <MenuItem Header="lowerCamelCase"
+                                                      Command="{Binding ApplyTextTransformationCommand}"
+                                                      CommandParameter="{x:Static models:TextTransformation.LowerCamelCase}" />
+                                            <MenuItem Header="From camelCase"
+                                                      Command="{Binding ApplyTextTransformationCommand}"
+                                                      CommandParameter="{x:Static models:TextTransformation.FromCamelCase}" />
+                                        </MenuItem>
+                                        <MenuItem Header="Whitespace">
+                                            <MenuItem Header="Trim whitespace"
+                                                      Command="{Binding ApplyTextTransformationCommand}"
+                                                      CommandParameter="{x:Static models:TextTransformation.TrimWhitespace}" />
+                                            <MenuItem Header="Collapse whitespace"
+                                                      Command="{Binding ApplyTextTransformationCommand}"
+                                                      CommandParameter="{x:Static models:TextTransformation.CollapseWhitespace}" />
+                                            <MenuItem Header="Tabs → Spaces"
+                                                      Command="{Binding ApplyTextTransformationCommand}"
+                                                      CommandParameter="{x:Static models:TextTransformation.TabsToSpaces}" />
+                                            <MenuItem Header="Spaces → Tabs"
+                                                      Command="{Binding ApplyTextTransformationCommand}"
+                                                      CommandParameter="{x:Static models:TextTransformation.SpacesToTabs}" />
+                                            <MenuItem Header="Normalize line endings"
+                                                      Command="{Binding ApplyTextTransformationCommand}"
+                                                      CommandParameter="{x:Static models:TextTransformation.NormalizeEol}" />
+                                        </MenuItem>
+                                        <MenuItem Header="Lines">
+                                            <MenuItem Header="Sort lines"
+                                                      Command="{Binding ApplyTextTransformationCommand}"
+                                                      CommandParameter="{x:Static models:TextTransformation.SortLines}" />
+                                            <MenuItem Header="Reverse lines"
+                                                      Command="{Binding ApplyTextTransformationCommand}"
+                                                      CommandParameter="{x:Static models:TextTransformation.ReverseLines}" />
+                                            <MenuItem Header="Remove empty lines"
+                                                      Command="{Binding ApplyTextTransformationCommand}"
+                                                      CommandParameter="{x:Static models:TextTransformation.RemoveEmptyLines}" />
+                                            <MenuItem Header="Remove duplicate lines"
+                                                      Command="{Binding ApplyTextTransformationCommand}"
+                                                      CommandParameter="{x:Static models:TextTransformation.RemoveDuplicateLines}" />
+                                            <MenuItem Header="Lines → JSON array"
+                                                      Command="{Binding ApplyTextTransformationCommand}"
+                                                      CommandParameter="{x:Static models:TextTransformation.LinesToJsonArray}" />
+                                        </MenuItem>
+                                        <MenuItem Header="Text table → HTML"
+                                                  Command="{Binding ApplyTextTransformationCommand}"
+                                                  CommandParameter="{x:Static models:TextTransformation.BoxTableToHtml}" />
+                                    </MenuItem>
+                                    <MenuItem Header="Scripts"
+                                              ItemsSource="{Binding #ClipsListBox.DataContext.VisibleUserScripts}"
+                                              IsVisible="{Binding CanTransform}">
+                                        <MenuItem.Styles>
+                                            <Style Selector="MenuItem" x:DataType="models:UserScript">
+                                                <Setter Property="Header" Value="{Binding Name}" />
+                                                <Setter Property="Command" Value="{Binding #ClipsListBox.DataContext.ApplyUserScriptCommand}" />
+                                                <Setter Property="CommandParameter" Value="{Binding}" />
+                                            </Style>
+                                        </MenuItem.Styles>
+                                    </MenuItem>
+                                    <MenuItem Header="AI"
+                                              ItemsSource="{Binding #ClipsListBox.DataContext.VisibleAiMenuEntries}"
+                                              IsVisible="{Binding #ClipsListBox.DataContext.IsAiMenuVisible}">
+                                        <MenuItem.Styles>
+                                            <Style Selector="MenuItem" x:DataType="models:AiMenuEntry">
+                                                <Setter Property="Header" Value="{Binding Label}" />
+                                                <Setter Property="Command" Value="{Binding #ClipsListBox.DataContext.InvokeAiMenuEntryCommand}" />
+                                                <Setter Property="CommandParameter" Value="{Binding}" />
+                                            </Style>
+                                        </MenuItem.Styles>
+                                    </MenuItem>
+                                    <MenuItem Header="Extract text (OCR)"
+                                              IsVisible="{Binding IsImageClip}"
+                                              Command="{Binding #ClipsListBox.DataContext.RunOcrOnSelectedImageCommand}" />
+                                    <Separator IsVisible="{Binding HasAnySourceInfo}" />
+                                    <MenuItem Header="Open source URL"
+                                              IsVisible="{Binding HasSourceUrl}"
+                                              Command="{Binding #ClipsListBox.DataContext.OpenSelectedClipSourceUrlCommand}" />
+                                    <MenuItem Header="Copy window title"
+                                              IsVisible="{Binding HasSourceWindowTitle}"
+                                              Command="{Binding #ClipsListBox.DataContext.CopySelectedClipWindowTitleCommand}" />
+                                    <Separator />
+                                    <MenuItem Header="{Binding DeleteLabel}"
+                                              Command="{Binding DeleteCommand}" />
+                                </ContextMenu>
+                            </ListBox.ContextMenu>
                             <ListBox.ItemTemplate>
                                 <DataTemplate x:DataType="vm:ClipItemViewModel">
                                     <Border Classes="clip-row-card"
@@ -273,121 +395,6 @@
                                             BorderBrush="{Binding RowBorderBrush}"
                                             BorderThickness="{Binding RowBorderThickness}"
                                             Padding="10,8">
-                                        <Border.ContextMenu>
-                                            <ContextMenu>
-                                                <MenuItem Header="{Binding CopyLabel}"
-                                                          Command="{Binding CopyCommand}" />
-                                                <MenuItem Header="Open in editor"
-                                                          Command="{Binding #ClipsListBox.DataContext.OpenInEditorCommand}" />
-                                                <MenuItem Header="Compare checked clips"
-                                                          Command="{Binding #ClipsListBox.DataContext.CompareClipsCommand}" />
-                                                <Separator />
-                                                <MenuItem Header="{Binding FavoriteActionLabel}"
-                                                          Command="{Binding ToggleFavoriteCommand}" />
-                                                <MenuItem Header="{Binding PinActionLabel}"
-                                                          Command="{Binding TogglePinCommand}" />
-                                                <MenuItem Header="{Binding ExportLabel}"
-                                                          Command="{Binding ExportCommand}" />
-                                                <MenuItem Header="Transform"
-                                                          IsVisible="{Binding CanTransform}">
-                                                    <MenuItem Header="Case">
-                                                        <MenuItem Header="UPPERCASE"
-                                                                  Command="{Binding ApplyTextTransformationCommand}"
-                                                                  CommandParameter="{x:Static models:TextTransformation.UpperCase}" />
-                                                        <MenuItem Header="lowercase"
-                                                                  Command="{Binding ApplyTextTransformationCommand}"
-                                                                  CommandParameter="{x:Static models:TextTransformation.LowerCase}" />
-                                                        <MenuItem Header="Title Case"
-                                                                  Command="{Binding ApplyTextTransformationCommand}"
-                                                                  CommandParameter="{x:Static models:TextTransformation.TitleCase}" />
-                                                        <MenuItem Header="Sentence case"
-                                                                  Command="{Binding ApplyTextTransformationCommand}"
-                                                                  CommandParameter="{x:Static models:TextTransformation.SentenceCase}" />
-                                                        <MenuItem Header="UpperCamelCase"
-                                                                  Command="{Binding ApplyTextTransformationCommand}"
-                                                                  CommandParameter="{x:Static models:TextTransformation.UpperCamelCase}" />
-                                                        <MenuItem Header="lowerCamelCase"
-                                                                  Command="{Binding ApplyTextTransformationCommand}"
-                                                                  CommandParameter="{x:Static models:TextTransformation.LowerCamelCase}" />
-                                                        <MenuItem Header="From camelCase"
-                                                                  Command="{Binding ApplyTextTransformationCommand}"
-                                                                  CommandParameter="{x:Static models:TextTransformation.FromCamelCase}" />
-                                                    </MenuItem>
-                                                    <MenuItem Header="Whitespace">
-                                                        <MenuItem Header="Trim whitespace"
-                                                                  Command="{Binding ApplyTextTransformationCommand}"
-                                                                  CommandParameter="{x:Static models:TextTransformation.TrimWhitespace}" />
-                                                        <MenuItem Header="Collapse whitespace"
-                                                                  Command="{Binding ApplyTextTransformationCommand}"
-                                                                  CommandParameter="{x:Static models:TextTransformation.CollapseWhitespace}" />
-                                                        <MenuItem Header="Tabs → Spaces"
-                                                                  Command="{Binding ApplyTextTransformationCommand}"
-                                                                  CommandParameter="{x:Static models:TextTransformation.TabsToSpaces}" />
-                                                        <MenuItem Header="Spaces → Tabs"
-                                                                  Command="{Binding ApplyTextTransformationCommand}"
-                                                                  CommandParameter="{x:Static models:TextTransformation.SpacesToTabs}" />
-                                                        <MenuItem Header="Normalize line endings"
-                                                                  Command="{Binding ApplyTextTransformationCommand}"
-                                                                  CommandParameter="{x:Static models:TextTransformation.NormalizeEol}" />
-                                                    </MenuItem>
-                                                    <MenuItem Header="Lines">
-                                                        <MenuItem Header="Sort lines"
-                                                                  Command="{Binding ApplyTextTransformationCommand}"
-                                                                  CommandParameter="{x:Static models:TextTransformation.SortLines}" />
-                                                        <MenuItem Header="Reverse lines"
-                                                                  Command="{Binding ApplyTextTransformationCommand}"
-                                                                  CommandParameter="{x:Static models:TextTransformation.ReverseLines}" />
-                                                        <MenuItem Header="Remove empty lines"
-                                                                  Command="{Binding ApplyTextTransformationCommand}"
-                                                                  CommandParameter="{x:Static models:TextTransformation.RemoveEmptyLines}" />
-                                                        <MenuItem Header="Remove duplicate lines"
-                                                                  Command="{Binding ApplyTextTransformationCommand}"
-                                                                  CommandParameter="{x:Static models:TextTransformation.RemoveDuplicateLines}" />
-                                                        <MenuItem Header="Lines → JSON array"
-                                                                  Command="{Binding ApplyTextTransformationCommand}"
-                                                                  CommandParameter="{x:Static models:TextTransformation.LinesToJsonArray}" />
-                                                    </MenuItem>
-                                                    <MenuItem Header="Text table → HTML"
-                                                              Command="{Binding ApplyTextTransformationCommand}"
-                                                              CommandParameter="{x:Static models:TextTransformation.BoxTableToHtml}" />
-                                                </MenuItem>
-                                                <MenuItem Header="Scripts"
-                                                          ItemsSource="{Binding #ClipsListBox.DataContext.VisibleUserScripts}"
-                                                          IsVisible="{Binding CanTransform}">
-                                                    <MenuItem.Styles>
-                                                        <Style Selector="MenuItem" x:DataType="models:UserScript">
-                                                            <Setter Property="Header" Value="{Binding Name}" />
-                                                            <Setter Property="Command" Value="{Binding #ClipsListBox.DataContext.ApplyUserScriptCommand}" />
-                                                            <Setter Property="CommandParameter" Value="{Binding}" />
-                                                        </Style>
-                                                    </MenuItem.Styles>
-                                                </MenuItem>
-                                                <MenuItem Header="AI"
-                                                          ItemsSource="{Binding #ClipsListBox.DataContext.VisibleAiMenuEntries}"
-                                                          IsVisible="{Binding #ClipsListBox.DataContext.IsAiMenuVisible}">
-                                                    <MenuItem.Styles>
-                                                        <Style Selector="MenuItem" x:DataType="models:AiMenuEntry">
-                                                            <Setter Property="Header" Value="{Binding Label}" />
-                                                            <Setter Property="Command" Value="{Binding #ClipsListBox.DataContext.InvokeAiMenuEntryCommand}" />
-                                                            <Setter Property="CommandParameter" Value="{Binding}" />
-                                                        </Style>
-                                                    </MenuItem.Styles>
-                                                </MenuItem>
-                                                <MenuItem Header="Extract text (OCR)"
-                                                          IsVisible="{Binding IsImageClip}"
-                                                          Command="{Binding #ClipsListBox.DataContext.RunOcrOnSelectedImageCommand}" />
-                                                <Separator IsVisible="{Binding HasAnySourceInfo}" />
-                                                <MenuItem Header="Open source URL"
-                                                          IsVisible="{Binding HasSourceUrl}"
-                                                          Command="{Binding #ClipsListBox.DataContext.OpenSelectedClipSourceUrlCommand}" />
-                                                <MenuItem Header="Copy window title"
-                                                          IsVisible="{Binding HasSourceWindowTitle}"
-                                                          Command="{Binding #ClipsListBox.DataContext.CopySelectedClipWindowTitleCommand}" />
-                                                <Separator />
-                                                <MenuItem Header="{Binding DeleteLabel}"
-                                                          Command="{Binding DeleteCommand}" />
-                                            </ContextMenu>
-                                        </Border.ContextMenu>
                                         <Grid ColumnDefinitions="Auto,Auto,Auto,*"
                                               ColumnSpacing="4">
                                             <CheckBox Grid.Column="0"

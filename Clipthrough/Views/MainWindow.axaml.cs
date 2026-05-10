@@ -607,8 +607,15 @@ public partial class MainWindow : Window
     private void OnClipsListPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (DataContext is not MainWindowViewModel viewModel
-            || e.GetCurrentPoint(this).Properties.PointerUpdateKind != PointerUpdateKind.LeftButtonPressed
             || e.Source is not Avalonia.Visual sourceVisual)
+        {
+            return;
+        }
+
+        var pointerProperties = e.GetCurrentPoint(this).Properties;
+        var pointerKind = pointerProperties.PointerUpdateKind;
+        if (pointerKind != PointerUpdateKind.LeftButtonPressed
+            && pointerKind != PointerUpdateKind.RightButtonPressed)
         {
             return;
         }
@@ -618,6 +625,15 @@ public partial class MainWindow : Window
             .FirstOrDefault(current => current.DataContext is ClipItemViewModel);
         if (clipElement?.DataContext is not ClipItemViewModel clip)
         {
+            return;
+        }
+
+        // Avalonia's ListBox does not auto-select on right-click. Make the
+        // right-clicked clip the selection so the shared ContextMenu (bound to
+        // SelectedClip) targets it.
+        if (pointerKind == PointerUpdateKind.RightButtonPressed)
+        {
+            viewModel.SelectedClip = clip;
             return;
         }
 
