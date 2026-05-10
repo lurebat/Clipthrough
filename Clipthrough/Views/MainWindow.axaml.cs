@@ -742,7 +742,7 @@ public partial class MainWindow : Window
         }
 
         // Step 3: Hide Clipthrough. Target has already been scheduled to receive focus.
-        _ = viewModel.ClearSearchFilterAsync(forceRefresh: true);
+        _ = viewModel.ClearSearchFilterAsync(forceRefresh: false);
         Hide();
 
         // Step 4: Give the OS time to process WM_ACTIVATE / WM_SETFOCUS on the target.
@@ -1097,7 +1097,7 @@ public partial class MainWindow : Window
         {
             if (DataContext is MainWindowViewModel viewModel)
             {
-                _ = viewModel.ClearSearchFilterAsync(forceRefresh: true);
+                _ = viewModel.ClearSearchFilterAsync(forceRefresh: false);
             }
             Hide();
         });

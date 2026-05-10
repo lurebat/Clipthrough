@@ -614,7 +614,13 @@ public partial class App : Application
                 _systemInteractionService?.ClearTargetWindowCapture();
                 if (window.DataContext is MainWindowViewModel viewModel)
                 {
-                    _ = viewModel.ClearSearchFilterAsync(forceRefresh: true);
+                    // Don't force a DB refresh on hide — it churns the Clips
+                    // collection (rebuilds up to 200 ClipItemViewModels on the
+                    // UI thread) and that work can land during the next show,
+                    // making the popup feel frozen. The SearchText setter
+                    // already triggers a throttled refresh when search was
+                    // actually active.
+                    _ = viewModel.ClearSearchFilterAsync(forceRefresh: false);
                 }
                 window.Hide();
                 return;
@@ -687,7 +693,8 @@ public partial class App : Application
             _systemInteractionService?.ClearTargetWindowCapture();
             if (_mainWindow.DataContext is MainWindowViewModel viewModel)
             {
-                _ = viewModel.ClearSearchFilterAsync(forceRefresh: true);
+                // See ToggleMainWindowVisibility for why forceRefresh is false.
+                _ = viewModel.ClearSearchFilterAsync(forceRefresh: false);
             }
             RestoreWindowState(_mainWindow);
             _mainWindow.Hide();
