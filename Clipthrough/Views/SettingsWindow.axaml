@@ -582,6 +582,31 @@
                             <TextBlock Classes="body-muted" Text="{Binding CopilotSignInStatus}"
                                        IsVisible="{Binding CopilotSignInStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                                        TextWrapping="Wrap" />
+                            <!--
+                                When a device-flow code is active, surface it
+                                in a big read-only textbox so the user can
+                                select it manually if the auto-copy was
+                                clobbered by another clipboard write, and
+                                offer a one-click "Copy code" alongside.
+                            -->
+                            <StackPanel Spacing="6"
+                                        IsVisible="{Binding HasCopilotUserCode}">
+                                <TextBlock Classes="detail-label"
+                                           Text="Your GitHub device code (copied to clipboard)" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBox Text="{Binding CopilotUserCode, Mode=OneWay}"
+                                             IsReadOnly="True"
+                                             FontFamily="Consolas, Menlo, monospace"
+                                             FontSize="20"
+                                             FontWeight="SemiBold"
+                                             MinWidth="180"
+                                             VerticalContentAlignment="Center"
+                                             ToolTip.Tip="Select to copy manually, or use the Copy code button." />
+                                    <Button Classes="secondary compact"
+                                            Content="Copy code"
+                                            Command="{Binding CopyCopilotUserCodeCommand}" />
+                                </StackPanel>
+                            </StackPanel>
                             <StackPanel Spacing="6">
                                 <TextBlock Classes="detail-label" Text="Model (blank = gpt-4o)" />
                                 <TextBox PlaceholderText="gpt-4o"
