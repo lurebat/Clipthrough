@@ -297,6 +297,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OpenAiPromptCommand = ReactiveCommand.Create(OpenAiPrompt);
         CopilotSignInCommand = ReactiveCommand.CreateFromTask(CopilotSignInAsync);
         CopilotSignOutCommand = ReactiveCommand.Create(CopilotSignOut);
+        CopyCopilotUserCodeCommand = ReactiveCommand.CreateFromTask(CopyCopilotUserCodeAsync);
         SubmitAiPromptCommand = ReactiveCommand.CreateFromTask(SubmitAiPromptAsync);
         CancelAiPromptCommand = ReactiveCommand.Create(CancelAiPrompt);
         ApplyAiPresetCommand = ReactiveCommand.CreateFromTask<AiPreset>(ApplyAiPresetAsync);
@@ -623,6 +624,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> CopilotSignInCommand { get; }
 
     public ReactiveCommand<Unit, Unit> CopilotSignOutCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> CopyCopilotUserCodeCommand { get; }
 
     public ReactiveCommand<Unit, Unit> SubmitAiPromptCommand { get; }
 
@@ -1937,6 +1940,33 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get => _copilotSignInStatus;
         private set => this.RaiseAndSetIfChanged(ref _copilotSignInStatus, value);
+    }
+
+    private string _copilotUserCode = string.Empty;
+
+    /// <summary>
+    /// The short device-flow user code (e.g. ABCD-1234) the user must paste
+    /// into github.com/login/device. Empty when no sign-in is in progress.
+    /// Bound to a selectable, copyable surface in Settings.
+    /// </summary>
+    public string CopilotUserCode
+    {
+        get => _copilotUserCode;
+        private set
+        {
+            this.RaiseAndSetIfChanged(ref _copilotUserCode, value);
+            this.RaisePropertyChanged(nameof(HasCopilotUserCode));
+        }
+    }
+
+    public bool HasCopilotUserCode => !string.IsNullOrWhiteSpace(_copilotUserCode);
+
+    private string _copilotVerificationUri = string.Empty;
+
+    public string CopilotVerificationUri
+    {
+        get => _copilotVerificationUri;
+        private set => this.RaiseAndSetIfChanged(ref _copilotVerificationUri, value);
     }
 
     private bool _isCopilotSigningIn;
@@ -5152,19 +5182,38 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         IsCopilotSigningIn = true;
-        CopilotSignInStatus = "Starting device code flow…";
+        CopilotSignInStatus = "Starting device code flow\u2026";
+        CopilotUserCode = string.Empty;
+        CopilotVerificationUri = string.Empty;
         try
         {
             var deviceCode = await Task.Run(() => _copilotAuthService.StartDeviceCodeFlowAsync()).ConfigureAwait(false);
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () =>
             {
-                CopilotSignInStatus = $"Enter code {deviceCode.UserCode} at {deviceCode.VerificationUri}";
+                CopilotUserCode = deviceCode.UserCode;
+                CopilotVerificationUri = deviceCode.VerificationUri;
+                CopilotSignInStatus = $"Enter code {deviceCode.UserCode} at {deviceCode.VerificationUri} (code copied to clipboard).";
+                try
+                {
+                    // Auto-copy the device code so the user can paste it into
+                    // the GitHub page immediately. The clipboard monitor will
+                    // capture this — that's fine; it's just a 9-character
+                    // public code with no security implication.
+                    _clipboardMonitorService.SuppressNext();
+                    await _systemInteractionService.CopyTextAsync(deviceCode.UserCode);
+                }
+                catch (Exception ex)
+                {
+                    Trace.TraceWarning($"Copilot sign-in: failed to auto-copy device code: {ex.Message}");
+                }
                 await _systemInteractionService.OpenUrlAsync(deviceCode.VerificationUri);
             });
 
             var success = await Task.Run(() => _copilotAuthService.PollForAuthorizationAsync(deviceCode)).ConfigureAwait(false);
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
+                CopilotUserCode = string.Empty;
+                CopilotVerificationUri = string.Empty;
                 if (success)
                 {
                     CopilotSignInStatus = "Signed in to GitHub Copilot.";
@@ -5180,6 +5229,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
+                CopilotUserCode = string.Empty;
+                CopilotVerificationUri = string.Empty;
                 CopilotSignInStatus = $"Sign-in failed: {ex.Message}";
             });
         }
@@ -5189,9 +5240,31 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private async Task CopyCopilotUserCodeAsync()
+    {
+        if (string.IsNullOrWhiteSpace(CopilotUserCode))
+        {
+            return;
+        }
+
+        try
+        {
+            _clipboardMonitorService.SuppressNext();
+            await _systemInteractionService.CopyTextAsync(CopilotUserCode);
+            CopilotSignInStatus = $"Code {CopilotUserCode} copied. Paste it at {CopilotVerificationUri}.";
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Copy Copilot device code failed: {ex.Message}");
+            CopilotSignInStatus = $"Could not copy code: {ex.Message}";
+        }
+    }
+
     private void CopilotSignOut()
     {
         _copilotAuthService?.SignOut();
+        CopilotUserCode = string.Empty;
+        CopilotVerificationUri = string.Empty;
         CopilotSignInStatus = "Signed out.";
         this.RaisePropertyChanged(nameof(IsCopilotSignedIn));
     }
