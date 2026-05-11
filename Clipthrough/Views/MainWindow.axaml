@@ -1546,12 +1546,14 @@
 
                     <Border Grid.Row="1" Classes="surface-panel" Padding="12">
                         <StackPanel Spacing="8">
-                            <TextBox AcceptsReturn="True"
+                            <TextBox Name="AiPromptInputTextBox"
+                                     AcceptsReturn="True"
                                      MinHeight="100"
                                      MaxHeight="180"
                                      TextWrapping="Wrap"
                                      PlaceholderText="{Binding AiPromptPlaceholder}"
-                                     Text="{Binding AiPromptInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                     Text="{Binding AiPromptInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     KeyDown="AiPromptTextBox_KeyDown" />
                             <TextBlock Text="{Binding AiPromptError}"
                                        IsVisible="{Binding AiPromptError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                                        Foreground="{DynamicResource DangerBrush}"

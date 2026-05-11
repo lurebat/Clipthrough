@@ -176,7 +176,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
             var options = new StorageOptions
             {
                 DatabasePath = stored.DatabasePath ?? StorageOptions.GetDefaultDatabasePath(),
-                DatabasePassword = string.Empty,
+                DatabasePassword = stored.DatabasePassword ?? string.Empty,
             }.Normalize();
             return EnsureLegacyDefaultDatabaseCopied(options);
         }
@@ -240,6 +240,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
         var document = new StorageOptionsDocument
         {
             DatabasePath = options.DatabasePath,
+            DatabasePassword = string.IsNullOrEmpty(options.DatabasePassword) ? null : options.DatabasePassword,
         };
 
         await File.WriteAllTextAsync(_configPath, JsonSerializer.Serialize(document, JsonOptions), cancellationToken);
@@ -250,5 +251,11 @@ public sealed class StorageOptionsService : IStorageOptionsService
     private sealed class StorageOptionsDocument
     {
         public string? DatabasePath { get; init; }
+
+        /// <summary>
+        /// Database password stored as plaintext to enable automatic unlocking. The
+        /// settings UI surfaces a warning about this trade-off.
+        /// </summary>
+        public string? DatabasePassword { get; init; }
     }
 }

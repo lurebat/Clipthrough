@@ -23,4 +23,10 @@ public sealed record CustomHotkeyBinding
     /// placed on the clipboard.
     /// </summary>
     public bool PasteAfter { get; init; } = true;
+
+    /// <summary>
+    /// If true, the hotkey is registered system-wide (works from any focused window).
+    /// If false, the hotkey is only active while the Clipthrough window is focused.
+    /// </summary>
+    public bool IsGlobal { get; init; }
 }

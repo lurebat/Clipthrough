@@ -80,18 +80,22 @@ record CustomHotkeyBinding {
     string Gesture;       // e.g. "Ctrl+Alt+U"
     string Target;        // "kind:value", see below
     bool   PasteAfter;    // true → simulate Ctrl+V into foreground window
+    bool   IsGlobal;      // true → register system-wide; false → only when Clipthrough is focused
 }
 ```
 
+`IsGlobal` controls registration: global bindings go through `ISystemInteractionService.TryRegisterGlobalHotKey` (Win32 `RegisterHotKey` on Windows), local bindings are added to `MainWindow.KeyBindings` as Avalonia `KeyBinding`s and only fire while Clipthrough has focus. Both code paths route to `ExecuteCustomHotkey`.
+
 `Target` is a `kind:value` string. Recognised kinds (handled in `App.axaml.cs#ExecuteCustomHotkey`):
 
-| Kind      | `value`                          | Behaviour                                                            |
-| --------- | -------------------------------- | -------------------------------------------------------------------- |
-| `builtin` | `TextTransformation` enum name   | Runs `TextTransformationService.Apply(kind, latestClip)`.            |
-| `script`  | User script `Name`               | Runs the matching `UserScript.Code` via `IScriptingService`.         |
-| `ai`      | AI preset `Name`                 | Runs `IAiTransformService.TransformAsync(preset.Prompt, latestClip)`.|
-| `prompt`  | Free-form prompt text            | Runs `IAiTransformService.TransformAsync(value, latestClip)` directly — handy for one-off prompts without creating a preset. |
+| Kind       | `value`                                         | Behaviour                                                            |
+| ---------- | ----------------------------------------------- | -------------------------------------------------------------------- |
+| `builtin`  | `TextTransformation` enum name                  | Runs `TextTransformationService.Apply(kind, latestClip)`.            |
+| `script`   | User script `Name`                              | Runs the matching `UserScript.Code` via `IScriptingService`.         |
+| `ai`       | AI preset `Name`                                | Runs `IAiTransformService.TransformAsync(preset.Prompt, latestClip)`.|
+| `prompt`   | Free-form prompt text                           | Runs `IAiTransformService.TransformAsync(value, latestClip)` directly — handy for one-off prompts without creating a preset. |
+| `aiprompt` | `<kind>[\|<prefill>]` (`<kind>` ∈ `auto`, `text`, `image-to-text`, `image-to-image`) | Opens the AI prompt dialog with the requested kind selected. Anything after the first `\|` is loaded into the prompt textbox so the user can edit/extend before submitting. `auto` (default) lets the VM pick the kind based on the active clip. |
 
-After producing `output`, the handler calls `_clipboardMonitorService.SuppressNext()`, copies via `CopyTextAsync`, and (when `PasteAfter` is true) simulates Ctrl+V after a short delay.
+After producing `output`, the handler calls `_clipboardMonitorService.SuppressNext()`, copies via `CopyTextAsync`, and (when `PasteAfter` is true) simulates Ctrl+V after a short delay. The `aiprompt` kind is an exception: it just opens the dialog and ignores `PasteAfter` (the dialog's own submit path produces the new clip).
 
-The `Target` string is currently entered free-form in **Settings → Custom hotkey actions**. If you add a new kind, update both `ExecuteCustomHotkey` and the help text in `Clipthrough/Views/SettingsWindow.axaml`.
+The `Target` string is currently entered free-form in **Settings → Custom hotkey actions** (placed alongside the Local/Global hotkey sections). If you add a new kind, update both `ExecuteCustomHotkey` and the help text in `Clipthrough/Views/SettingsWindow.axaml`.

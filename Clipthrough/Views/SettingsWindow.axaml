@@ -198,6 +198,55 @@
                     </StackPanel>
                 </Expander>
 
+                <!-- Custom hotkey actions (placed next to the other shortcut sections) -->
+                <Expander Classes="settings-section">
+                    <Expander.Header>
+                        <TextBlock Text="Custom hotkey actions" FontSize="16" FontWeight="SemiBold" />
+                    </Expander.Header>
+                    <StackPanel Spacing="10" Margin="8,10,0,0">
+                        <TextBlock Classes="body-muted" TextWrapping="Wrap"
+                                   Text="Bind a hotkey to a transformation of the most recent clip. Target format: 'builtin:UpperCase' for a built-in text transformation, 'script:MyScript' for a user script, 'ai:MyPreset' for an AI preset, 'prompt:Your fixed prompt' to send a one-off prompt to the AI service, or 'aiprompt:auto' (also: text, image-to-text, image-to-image) to open the AI prompt dialog. For 'aiprompt:', any text after a '|' is pre-filled into the prompt textbox, e.g. 'aiprompt:text|Translate to French:'. The 'Global' toggle decides whether the hotkey is captured system-wide or only when Clipthrough has focus." />
+                        <Grid ColumnDefinitions="260,*" ColumnSpacing="12" MinHeight="200">
+                            <DockPanel Grid.Column="0" LastChildFill="True">
+                                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="6" Margin="0,6,0,0">
+                                    <Button Classes="secondary compact"
+                                            Content="Add"
+                                            Command="{Binding AddCustomHotkeyDraftCommand}" />
+                                    <Button Classes="destructive compact"
+                                            Content="Remove"
+                                            Command="{Binding RemoveCustomHotkeyDraftCommand}"
+                                            CommandParameter="{Binding SelectedCustomHotkeyDraft}" />
+                                </StackPanel>
+                                <ListBox ItemsSource="{Binding SettingsCustomHotkeyDrafts}"
+                                         SelectedItem="{Binding SelectedCustomHotkeyDraft, Mode=TwoWay}">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <TextBlock Text="{Binding Gesture}" FontFamily="Consolas,Cascadia Code,monospace" />
+                                                <TextBlock Text="→" Classes="body-muted" />
+                                                <TextBlock Text="{Binding Target}" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </DockPanel>
+                            <StackPanel Grid.Column="1" Spacing="6"
+                                        DataContext="{Binding SelectedCustomHotkeyDraft}"
+                                        IsEnabled="{Binding Converter={x:Static ObjectConverters.IsNotNull}}">
+                                <TextBlock Classes="detail-label" Text="Hotkey gesture (e.g. Ctrl+Alt+U)" />
+                                <TextBox Text="{Binding Gesture, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
+                                <TextBlock Classes="detail-label" Text="Target (builtin:Name | script:Name | ai:Name | prompt:Text | aiprompt:Kind[|Prefill])" />
+                                <TextBox FontFamily="Consolas,Cascadia Code,monospace"
+                                         Text="{Binding Target, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
+                                <CheckBox Content="Global (capture system-wide; otherwise only when Clipthrough is focused)"
+                                          IsChecked="{Binding IsGlobal, Mode=TwoWay}" />
+                                <CheckBox Content="Paste after transforming (Ctrl+V into foreground window)"
+                                          IsChecked="{Binding PasteAfter, Mode=TwoWay}" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Expander>
+
                 <!-- Storage -->
                 <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionStorageVisible}"
                           IsExpanded="{Binding IsSettingsSectionStorageExpanded, Mode=TwoWay}">
@@ -229,6 +278,11 @@
                                      RevealPassword="{Binding IsDatabasePasswordVisible}" />
                             <CheckBox Content="{Binding SettingsShowPasswordLabel}"
                                       IsChecked="{Binding IsDatabasePasswordVisible}" />
+                            <TextBlock Classes="body-muted"
+                                       Foreground="{DynamicResource DangerBrush}"
+                                       TextWrapping="Wrap"
+                                       IsVisible="{Binding SettingsDatabasePassword, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                       Text="{Binding SettingsDatabasePasswordWarningText}" />
                         </StackPanel>
 
                         <TextBlock Classes="body-muted"
@@ -462,52 +516,6 @@
                                 <ctrl:SyntaxTextEditor MinHeight="220"
                                                        SyntaxHint=".cs"
                                                        Text="{Binding Code, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
-                            </StackPanel>
-                        </Grid>
-                    </StackPanel>
-                </Expander>
-
-                <Expander Classes="settings-section">
-                    <Expander.Header>
-                        <TextBlock Text="Custom hotkey actions" FontSize="16" FontWeight="SemiBold" />
-                    </Expander.Header>
-                    <StackPanel Spacing="10" Margin="8,10,0,0">
-                        <TextBlock Classes="body-muted" TextWrapping="Wrap"
-                                   Text="Bind a global hotkey to a transformation of the most recent clip. Target format: 'builtin:UpperCase' for a built-in text transformation, 'script:MyScript' for a user script by name, 'ai:MyPreset' for an AI preset by name, or 'prompt:Your custom prompt here' to send a one-off prompt to the AI service. When 'Paste after' is checked, the transformed text is pasted into the foreground window." />
-                        <Grid ColumnDefinitions="260,*" ColumnSpacing="12" MinHeight="200">
-                            <DockPanel Grid.Column="0" LastChildFill="True">
-                                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="6" Margin="0,6,0,0">
-                                    <Button Classes="secondary compact"
-                                            Content="Add"
-                                            Command="{Binding AddCustomHotkeyDraftCommand}" />
-                                    <Button Classes="destructive compact"
-                                            Content="Remove"
-                                            Command="{Binding RemoveCustomHotkeyDraftCommand}"
-                                            CommandParameter="{Binding SelectedCustomHotkeyDraft}" />
-                                </StackPanel>
-                                <ListBox ItemsSource="{Binding SettingsCustomHotkeyDrafts}"
-                                         SelectedItem="{Binding SelectedCustomHotkeyDraft, Mode=TwoWay}">
-                                    <ListBox.ItemTemplate>
-                                        <DataTemplate>
-                                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <TextBlock Text="{Binding Gesture}" FontFamily="Consolas,Cascadia Code,monospace" />
-                                                <TextBlock Text="→" Classes="body-muted" />
-                                                <TextBlock Text="{Binding Target}" />
-                                            </StackPanel>
-                                        </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                </ListBox>
-                            </DockPanel>
-                            <StackPanel Grid.Column="1" Spacing="6"
-                                        DataContext="{Binding SelectedCustomHotkeyDraft}"
-                                        IsEnabled="{Binding Converter={x:Static ObjectConverters.IsNotNull}}">
-                                <TextBlock Classes="detail-label" Text="Hotkey gesture (e.g. Ctrl+Alt+U)" />
-                                <TextBox Text="{Binding Gesture, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
-                                <TextBlock Classes="detail-label" Text="Target (builtin:Name | script:Name | ai:Name | prompt:Free-form prompt text)" />
-                                <TextBox FontFamily="Consolas,Cascadia Code,monospace"
-                                         Text="{Binding Target, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
-                                <CheckBox Content="Paste after transforming (Ctrl+V into foreground window)"
-                                          IsChecked="{Binding PasteAfter, Mode=TwoWay}" />
                             </StackPanel>
                         </Grid>
                     </StackPanel>

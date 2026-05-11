@@ -1437,4 +1437,26 @@ public partial class MainWindow : Window
             UpdateSessionLogsWindowVisibility(true);
         }
     }
+
+    private void AiPromptTextBox_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter && e.Key != Key.Return)
+        {
+            return;
+        }
+
+        // Shift+Enter falls through so the TextBox inserts a newline.
+        if ((e.KeyModifiers & KeyModifiers.Shift) != 0)
+        {
+            return;
+        }
+
+        if (DataContext is not MainWindowViewModel vm)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        vm.SubmitAiPromptCommand.Execute().Subscribe();
+    }
 }

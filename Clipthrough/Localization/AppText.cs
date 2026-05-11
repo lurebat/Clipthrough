@@ -124,6 +124,11 @@ public static class AppText
         [nameof(OpenedInEditorStatus)] = "Opened in editor",
         [nameof(SettingsHintText)] = "Enter shortcuts in forms like Ctrl+Shift+R, Ctrl+Shift+F, or F8. Disable any shortcut you do not want active. Startup registration applies on Windows.",
         [nameof(SettingsStorageHintText)] = "The path is stored outside the clip database so you can move or encrypt it. Leave the password empty to keep SQLite unencrypted.",
+        [nameof(SettingsDatabasePasswordWarning)] = "⚠ Saved as plaintext in storage.json so the database can auto-unlock on startup. Anyone with access to your user profile can read it.",
+        [nameof(SettingsConfirmEncryptionPasswordTitle)] = "Save encryption password?",
+        [nameof(SettingsConfirmEncryptionPasswordBody)] = "The encryption password will be stored as plaintext in storage.json so Clipthrough can auto-unlock the database on startup.\n\nAnyone with access to your user profile can read it. Continue?",
+        [nameof(SettingsConfirmEncryptionPasswordConfirm)] = "Save plaintext",
+        [nameof(SettingsConfirmEncryptionPasswordCancel)] = "Cancel",
         [nameof(WelcomeTitleText)] = "Welcome to Clipthrough",
         [nameof(WelcomeDescriptionText)] = "Set up your clipboard library before the app starts capturing. You can change these options later in Settings.",
         [nameof(WelcomeSaveButtonLabel)] = "Create library",
@@ -405,6 +410,11 @@ public static class AppText
     public static string OpenedInEditorStatus => Text(nameof(OpenedInEditorStatus));
     public static string SettingsHintText => Text(nameof(SettingsHintText));
     public static string SettingsStorageHintText => Text(nameof(SettingsStorageHintText));
+    public static string SettingsDatabasePasswordWarning => Text(nameof(SettingsDatabasePasswordWarning));
+    public static string SettingsConfirmEncryptionPasswordTitle => Text(nameof(SettingsConfirmEncryptionPasswordTitle));
+    public static string SettingsConfirmEncryptionPasswordBody => Text(nameof(SettingsConfirmEncryptionPasswordBody));
+    public static string SettingsConfirmEncryptionPasswordConfirm => Text(nameof(SettingsConfirmEncryptionPasswordConfirm));
+    public static string SettingsConfirmEncryptionPasswordCancel => Text(nameof(SettingsConfirmEncryptionPasswordCancel));
     public static string WelcomeTitleText => Text(nameof(WelcomeTitleText));
     public static string WelcomeDescriptionText => Text(nameof(WelcomeDescriptionText));
     public static string WelcomeSaveButtonLabel => Text(nameof(WelcomeSaveButtonLabel));

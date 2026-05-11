@@ -41,6 +41,7 @@ public partial class App : Application
     private bool _isExitRequested;
     private bool _hasShownTrayNotification;
     private int _incrementalPasteOffset = 0;
+    private readonly System.Collections.Generic.List<Avalonia.Input.KeyBinding> _customLocalKeyBindings = new();
 
     public App()
     {
@@ -356,6 +357,11 @@ public partial class App : Application
         }
 
         _systemInteractionService.UnregisterAllGlobalHotKeys();
+        foreach (var kb in _customLocalKeyBindings)
+        {
+            _mainWindow.KeyBindings.Remove(kb);
+        }
+        _customLocalKeyBindings.Clear();
 
         if (_settingsService.Current.EnableToggleWindowHotkey
             && HotkeyGesture.TryParse(_settingsService.Current.ToggleWindowHotkey, out var windowHotkey, out _))
@@ -411,11 +417,24 @@ public partial class App : Application
                 continue;
             }
             var localBinding = binding;
-            _systemInteractionService.TryRegisterGlobalHotKey(
-                _mainWindow,
-                "custom-" + localBinding.Id,
-                gesture,
-                () => ExecuteCustomHotkey(localBinding));
+            if (binding.IsGlobal)
+            {
+                _systemInteractionService.TryRegisterGlobalHotKey(
+                    _mainWindow,
+                    "custom-" + localBinding.Id,
+                    gesture,
+                    () => ExecuteCustomHotkey(localBinding));
+            }
+            else
+            {
+                var kb = new Avalonia.Input.KeyBinding
+                {
+                    Gesture = new Avalonia.Input.KeyGesture(gesture.Key, gesture.Modifiers),
+                    Command = ReactiveUI.ReactiveCommand.Create(() => ExecuteCustomHotkey(localBinding)),
+                };
+                _mainWindow.KeyBindings.Add(kb);
+                _customLocalKeyBindings.Add(kb);
+            }
         }
     }
 
@@ -530,14 +549,23 @@ public partial class App : Application
         if (_clipStoreService is null || _systemInteractionService is null || _clipboardMonitorService is null) return;
         try
         {
-            var clip = await _clipStoreService.GetClipAtOffsetAsync(0);
-            if (clip is null || string.IsNullOrEmpty(clip.Content)) return;
-
             var target = binding.Target ?? string.Empty;
             var colon = target.IndexOf(':');
             if (colon <= 0) return;
             var kind = target.Substring(0, colon);
             var name = target.Substring(colon + 1);
+
+            // The "aiprompt:" target just opens the AI prompt dialog. It does not
+            // need a recent clip and does not produce text to paste.
+            if (string.Equals(kind, "aiprompt", StringComparison.OrdinalIgnoreCase))
+            {
+                ExecuteAiPromptHotkey(name);
+                return;
+            }
+
+            var clip = await _clipStoreService.GetClipAtOffsetAsync(0);
+            if (clip is null || string.IsNullOrEmpty(clip.Content)) return;
+
             var input = clip.Content;
             string output;
 
@@ -589,7 +617,66 @@ public partial class App : Application
                 _systemInteractionService.SimulatePasteKeystroke();
             }
         }
-        catch (Exception ex) { Trace.TraceWarning($"ExecuteCustomHotkey failed: {ex.Message}"); }
+        catch (Exception ex) { Trace.TraceError($"ExecuteCustomHotkey failed: {ex}"); }
+    }
+
+    private void ExecuteAiPromptHotkey(string spec)
+    {
+        if (_mainWindow?.DataContext is not MainWindowViewModel vm)
+        {
+            return;
+        }
+
+        // Spec format: "<kind>[|<prefill text>]" where kind is one of
+        // text, image-to-text, image-to-image, auto (default).
+        var bar = spec.IndexOf('|');
+        var kindRaw = (bar < 0 ? spec : spec.Substring(0, bar)).Trim();
+        var prefill = bar < 0 ? null : spec.Substring(bar + 1);
+
+        var resolved = kindRaw.ToLowerInvariant() switch
+        {
+            "text" or "text-to-text" or "t" => AiPresetKind.TextToText,
+            "image-to-text" or "image2text" or "i2t" => AiPresetKind.ImageToText,
+            "image-to-image" or "image2image" or "i2i" => AiPresetKind.ImageToImage,
+            _ => (AiPresetKind?)null,
+        };
+
+        if (resolved is null && !string.IsNullOrEmpty(kindRaw) && !string.Equals(kindRaw, "auto", StringComparison.OrdinalIgnoreCase))
+        {
+            Trace.TraceWarning($"Unknown aiprompt kind '{kindRaw}', falling back to auto.");
+        }
+
+        EnsureMainWindowVisible();
+        if (resolved is { } kind)
+        {
+            vm.OpenAiPromptWithPrefill(kind, prefill);
+        }
+        else
+        {
+            // "auto" — let the VM pick the default kind for the currently selected clip.
+            Dispatcher.UIThread.Post(() =>
+            {
+                vm.OpenAiPromptCommand.Execute().Subscribe();
+                if (!string.IsNullOrEmpty(prefill))
+                {
+                    vm.AiPromptInput = prefill;
+                }
+            });
+        }
+    }
+
+    private void EnsureMainWindowVisible()
+    {
+        if (_mainWindow is null) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!_mainWindow.IsVisible)
+            {
+                _mainWindow.Show();
+            }
+            _mainWindow.WindowState = WindowState.Normal;
+            _mainWindow.Activate();
+        });
     }
 
     private void ToggleMainWindowVisibility()

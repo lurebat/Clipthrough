@@ -238,6 +238,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _semanticSearchService = semanticSearchService;
         _embeddingWorker = embeddingWorker;
         _copilotAuthService = copilotAuthService;
+        if (_copilotAuthService is not null)
+        {
+            _copilotAuthService.SignedInChanged += OnCopilotSignedInChanged;
+        }
         _databaseInitializer = databaseInitializer;
         SessionLogs = new SessionLogsViewModel(sessionLogService);
         ContentTypeOptions =
@@ -663,7 +667,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public System.Collections.ObjectModel.ObservableCollection<AiMenuEntry> VisibleAiMenuEntries { get; } = new();
 
-    public bool IsAiMenuVisible => _settingsEnableAi && VisibleAiMenuEntries.Count > 0;
+    public bool IsAiMenuVisible => _aiTransformService.IsConfigured && VisibleAiMenuEntries.Count > 0;
 
     public ReactiveCommand<AiMenuEntry, Unit> InvokeAiMenuEntryCommand { get; }
 
@@ -1182,6 +1186,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string SettingsDatabasePathLabel => AppText.SettingsDatabasePathLabel;
 
     public string SettingsDatabasePasswordLabel => AppText.SettingsDatabasePasswordLabel;
+
+    public string SettingsDatabasePasswordWarningText => AppText.SettingsDatabasePasswordWarning;
 
     public string SettingsBrowseDatabasePathButtonLabel => AppText.SettingsBrowseDatabasePathButtonLabel;
 
@@ -2593,6 +2599,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             this.RaiseAndSetIfChanged(ref _settingsDatabasePassword, value);
             this.RaisePropertyChanged(nameof(IsPasswordMismatchVisible));
+            this.RaisePropertyChanged(nameof(IsPendingPlaintextEncryptionPasswordChange));
         }
     }
 
@@ -2609,6 +2616,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsPasswordMismatchVisible =>
         !string.IsNullOrEmpty(SettingsDatabasePassword)
         && !string.Equals(SettingsDatabasePassword, SettingsDatabasePasswordConfirm, StringComparison.Ordinal);
+
+    /// <summary>
+    /// True when Save is about to persist a non-empty encryption password that
+    /// differs from the currently-active one. Used to gate the plaintext-storage
+    /// confirmation dialog.
+    /// </summary>
+    public bool IsPendingPlaintextEncryptionPasswordChange =>
+        !string.IsNullOrEmpty(SettingsDatabasePassword)
+        && !string.Equals(SettingsDatabasePassword, _storageOptionsService.Current.DatabasePassword, StringComparison.Ordinal);
 
     public bool IsDatabasePasswordVisible
     {
@@ -5186,6 +5202,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void OpenAiPrompt(AiPresetKind kind)
     {
+        OpenAiPrompt(kind, prefill: null);
+    }
+
+    public void OpenAiPromptWithPrefill(AiPresetKind kind, string? prefill)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => OpenAiPrompt(kind, prefill));
+    }
+
+    private void OpenAiPrompt(AiPresetKind kind, string? prefill)
+    {
         if (!_aiTransformService.IsConfigured)
         {
             StatusText = "AI is not configured. Enable it in Settings → AI and set an API key (or OPENAI_API_KEY env var).";
@@ -5194,7 +5220,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         SetAiPromptKind(kind);
         AiPromptError = string.Empty;
-        AiPromptInput = string.Empty;
+        AiPromptInput = prefill ?? string.Empty;
         IsAiPromptOpen = true;
     }
 
@@ -5484,6 +5510,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (failure is not null)
             {
                 var title = presetLabel is null ? "AI transform failed" : $"AI preset '{presetLabel}' failed";
+                System.Diagnostics.Trace.TraceError($"{title}: {failure}");
                 _notificationService.PublishError(title, failure.Message);
                 await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => StatusText = failure.Message);
                 return;
@@ -5603,6 +5630,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
+            System.Diagnostics.Trace.TraceError($"{actionLabel} failed: {ex}");
             _notificationService.PublishError($"{actionLabel} failed", ex.Message);
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => StatusText = ex.Message);
         }
@@ -6117,6 +6145,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         IsDatabasePasswordVisible = false;
     }
 
+    private void OnCopilotSignedInChanged()
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            this.RaisePropertyChanged(nameof(IsCopilotSignedIn));
+            this.RaisePropertyChanged(nameof(IsAiMenuVisible));
+        });
+    }
+
     private void OnSettingsChanged(object? sender, AppSettings settings)
     {
         if (!IsSettingsOpen)
@@ -6139,6 +6176,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(FuzzyFilterTooltip));
         this.RaisePropertyChanged(nameof(SemanticFilterTooltip));
         this.RaisePropertyChanged(nameof(IsSemanticSearchEnabled));
+        this.RaisePropertyChanged(nameof(IsAiMenuVisible));
     }
 
     private void SyncUserScripts(AppSettings settings)

@@ -21,39 +21,39 @@ public sealed record AppSettings
     public const int MinMaxEntryCount = 1;
     public const int MaxMaxEntryCount = 5_000_000;
 
-    public bool EnableToggleRegexHotkey { get; init; }
+    public bool EnableToggleRegexHotkey { get; init; } = true;
 
     public string ToggleRegexHotkey { get; init; } = "Ctrl+R";
 
-    public bool EnableToggleFavoritesHotkey { get; init; }
+    public bool EnableToggleFavoritesHotkey { get; init; } = true;
 
     public string ToggleFavoritesHotkey { get; init; } = "Ctrl+D";
 
-    public bool EnableToggleSensitiveHotkey { get; init; }
+    public bool EnableToggleSensitiveHotkey { get; init; } = true;
 
     public string ToggleSensitiveHotkey { get; init; } = "Ctrl+L";
 
-    public bool EnableToggleCaseSensitiveHotkey { get; init; }
+    public bool EnableToggleCaseSensitiveHotkey { get; init; } = true;
 
     public string ToggleCaseSensitiveHotkey { get; init; } = "Ctrl+K";
 
-    public bool EnableToggleWildcardHotkey { get; init; }
+    public bool EnableToggleWildcardHotkey { get; init; } = true;
 
     public string ToggleWildcardHotkey { get; init; } = "Ctrl+M";
 
-    public bool EnableToggleWholeWordHotkey { get; init; }
+    public bool EnableToggleWholeWordHotkey { get; init; } = true;
 
     public string ToggleWholeWordHotkey { get; init; } = "Ctrl+E";
 
-    public bool EnableTogglePastedHotkey { get; init; }
+    public bool EnableTogglePastedHotkey { get; init; } = true;
 
     public string TogglePastedHotkey { get; init; } = "Ctrl+U";
 
-    public bool EnableToggleFuzzyHotkey { get; init; }
+    public bool EnableToggleFuzzyHotkey { get; init; } = true;
 
     public string ToggleFuzzyHotkey { get; init; } = "Ctrl+T";
 
-    public bool EnableToggleSemanticHotkey { get; init; }
+    public bool EnableToggleSemanticHotkey { get; init; } = true;
 
     public string ToggleSemanticHotkey { get; init; } = "Ctrl+J";
 
@@ -277,6 +277,7 @@ public sealed record AppSettings
                 Gesture = h.Gesture.Trim(),
                 Target = h.Target.Trim(),
                 PasteAfter = h.PasteAfter,
+                IsGlobal = h.IsGlobal,
             })
             .ToList(),
         UpdateFeedUrl = UpdateFeedUrl?.Trim() ?? string.Empty,

@@ -8,6 +8,7 @@ public sealed class CustomHotkeyDraft : ReactiveObject
     private string _gesture = string.Empty;
     private string _target = string.Empty;
     private bool _pasteAfter = true;
+    private bool _isGlobal;
 
     public string Id
     {
@@ -33,12 +34,19 @@ public sealed class CustomHotkeyDraft : ReactiveObject
         set => this.RaiseAndSetIfChanged(ref _pasteAfter, value);
     }
 
+    public bool IsGlobal
+    {
+        get => _isGlobal;
+        set => this.RaiseAndSetIfChanged(ref _isGlobal, value);
+    }
+
     public CustomHotkeyBinding ToBinding() => new()
     {
         Id = string.IsNullOrWhiteSpace(Id) ? System.Guid.NewGuid().ToString() : Id,
         Gesture = Gesture?.Trim() ?? string.Empty,
         Target = Target?.Trim() ?? string.Empty,
         PasteAfter = PasteAfter,
+        IsGlobal = IsGlobal,
     };
 
     public static CustomHotkeyDraft From(CustomHotkeyBinding binding) => new()
@@ -47,5 +55,6 @@ public sealed class CustomHotkeyDraft : ReactiveObject
         Gesture = binding.Gesture ?? string.Empty,
         Target = binding.Target ?? string.Empty,
         PasteAfter = binding.PasteAfter,
+        IsGlobal = binding.IsGlobal,
     };
 }

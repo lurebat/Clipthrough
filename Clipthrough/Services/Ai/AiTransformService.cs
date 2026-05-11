@@ -23,6 +23,13 @@ public sealed class AiTransformService : IAiTransformService, IDisposable
     private const string DefaultCopilotModel = "gpt-4o";
     private const string DefaultImageModel = "gpt-image-1";
 
+    // Headers Copilot's chat-completions API expects from IDE integrations.
+    // Values mirror what the public Copilot CLI/Neovim clients send.
+    private const string CopilotEditorVersion = "Clipthrough/1.0";
+    private const string CopilotEditorPluginVersion = "Clipthrough/1.0";
+    private const string CopilotIntegrationId = "vscode-chat";
+    private const string CopilotUserAgent = "GitHubCopilotChat/0.26.7";
+
     private readonly ISettingsService _settings;
     private readonly ICopilotAuthService? _copilotAuth;
     private readonly HttpClient _http;
@@ -62,7 +69,7 @@ public sealed class AiTransformService : IAiTransformService, IDisposable
 
     public async Task<string> TransformAsync(string systemPrompt, string input, CancellationToken cancellationToken = default)
     {
-        var (baseUrl, apiKey, model, _) = await ResolveConfigAsync(cancellationToken).ConfigureAwait(false);
+        var (baseUrl, apiKey, model, _, isCopilot) = await ResolveConfigAsync(cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             throw new InvalidOperationException("AI is not configured. Set an API key in settings or the OPENAI_API_KEY environment variable.");
@@ -90,6 +97,7 @@ public sealed class AiTransformService : IAiTransformService, IDisposable
             Content = JsonContent.Create(payload),
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        ApplyProviderHeaders(request, isCopilot);
 
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
@@ -118,7 +126,7 @@ public sealed class AiTransformService : IAiTransformService, IDisposable
             throw new ArgumentException("Image bytes are required.", nameof(imageBytes));
         }
 
-        var (baseUrl, apiKey, model, _) = await ResolveConfigAsync(cancellationToken).ConfigureAwait(false);
+        var (baseUrl, apiKey, model, _, isCopilot) = await ResolveConfigAsync(cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             throw new InvalidOperationException("AI is not configured. Set an API key in settings or the OPENAI_API_KEY environment variable.");
@@ -157,6 +165,7 @@ public sealed class AiTransformService : IAiTransformService, IDisposable
             Content = JsonContent.Create(payload),
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        ApplyProviderHeaders(request, isCopilot);
 
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
@@ -194,7 +203,7 @@ public sealed class AiTransformService : IAiTransformService, IDisposable
             throw new ArgumentException("Prompt is required.", nameof(prompt));
         }
 
-        var (baseUrl, apiKey, _, imageModel) = await ResolveConfigAsync(cancellationToken).ConfigureAwait(false);
+        var (baseUrl, apiKey, _, imageModel, isCopilot) = await ResolveConfigAsync(cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             throw new InvalidOperationException("AI is not configured. Set an API key in settings or the OPENAI_API_KEY environment variable.");
@@ -219,6 +228,7 @@ public sealed class AiTransformService : IAiTransformService, IDisposable
 
         var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = form };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        ApplyProviderHeaders(request, isCopilot);
 
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
@@ -272,7 +282,7 @@ public sealed class AiTransformService : IAiTransformService, IDisposable
         return sb.ToString();
     }
 
-    private async Task<(string BaseUrl, string ApiKey, string Model, string ImageModel)> ResolveConfigAsync(CancellationToken cancellationToken)
+    private async Task<(string BaseUrl, string ApiKey, string Model, string ImageModel, bool IsCopilot)> ResolveConfigAsync(CancellationToken cancellationToken)
     {
         var s = _settings.Current;
         if (s.AiProvider == Models.AiProvider.Copilot && _copilotAuth is not null && _copilotAuth.IsSignedIn)
@@ -280,10 +290,25 @@ public sealed class AiTransformService : IAiTransformService, IDisposable
             var token = await _copilotAuth.GetTokenAsync(cancellationToken).ConfigureAwait(false);
             var model = !string.IsNullOrWhiteSpace(s.AiModel) ? s.AiModel : DefaultCopilotModel;
             var imageModel = !string.IsNullOrWhiteSpace(s.AiImageModel) ? s.AiImageModel : DefaultImageModel;
-            return (CopilotBaseUrl, token, model, imageModel);
+            return (CopilotBaseUrl, token, model, imageModel, true);
         }
 
-        return ResolveOpenAiConfig();
+        var (baseUrl, apiKey, openAiModel, openAiImageModel) = ResolveOpenAiConfig();
+        return (baseUrl, apiKey, openAiModel, openAiImageModel, false);
+    }
+
+    private static void ApplyProviderHeaders(HttpRequestMessage request, bool isCopilot)
+    {
+        if (!isCopilot)
+        {
+            return;
+        }
+
+        request.Headers.TryAddWithoutValidation("Editor-Version", CopilotEditorVersion);
+        request.Headers.TryAddWithoutValidation("Editor-Plugin-Version", CopilotEditorPluginVersion);
+        request.Headers.TryAddWithoutValidation("Copilot-Integration-Id", CopilotIntegrationId);
+        request.Headers.TryAddWithoutValidation("User-Agent", CopilotUserAgent);
+        request.Headers.TryAddWithoutValidation("Openai-Intent", "conversation-panel");
     }
 
     private (string BaseUrl, string ApiKey, string Model, string ImageModel) ResolveOpenAiConfig()

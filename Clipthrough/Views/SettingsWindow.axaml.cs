@@ -28,12 +28,28 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void OnSaveClick(object? sender, RoutedEventArgs e)
+    private async void OnSaveClick(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel viewModel)
+        if (DataContext is not MainWindowViewModel viewModel)
         {
-            viewModel.SaveSettingsCommand.Execute().Subscribe();
+            return;
         }
+
+        if (viewModel.IsPendingPlaintextEncryptionPasswordChange)
+        {
+            var confirmed = await ConfirmDialog.ShowAsync(
+                this,
+                Clipthrough.Localization.AppText.SettingsConfirmEncryptionPasswordTitle,
+                Clipthrough.Localization.AppText.SettingsConfirmEncryptionPasswordBody,
+                Clipthrough.Localization.AppText.SettingsConfirmEncryptionPasswordConfirm,
+                Clipthrough.Localization.AppText.SettingsConfirmEncryptionPasswordCancel);
+            if (!confirmed)
+            {
+                return;
+            }
+        }
+
+        viewModel.SaveSettingsCommand.Execute().Subscribe();
     }
 
     private void OnCancelClick(object? sender, RoutedEventArgs e)
