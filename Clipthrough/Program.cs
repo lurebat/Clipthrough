@@ -20,6 +20,7 @@ sealed class Program
     {
         SQLitePCL.Batteries_V2.Init();
         Clipthrough.Diagnostics.TraceConfiguration.Initialize();
+        CommandLineOptions.Parse(args);
 
         // Squirrel/Velopack hooks must run even if another copy holds the mutex (install/update may
         // spawn short-lived processes with --squirrel-* arguments). Let Velopack handle those first.

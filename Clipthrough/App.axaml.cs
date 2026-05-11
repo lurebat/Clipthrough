@@ -178,6 +178,10 @@ public partial class App : Application
     private void OnMainWindowOpened(object? sender, EventArgs e)
     {
         UpdateGlobalHotKeyRegistration();
+        if (_mainWindow?.DataContext is MainWindowViewModel vm)
+        {
+            vm.SetMainWindowVisible(true);
+        }
         _ = KickOffUpdateCheckAsync();
         _ = KickOffRemoteApiAsync();
     }
@@ -609,28 +613,61 @@ public partial class App : Application
     {
         Dispatcher.UIThread.Post(() =>
         {
+            var sw = CommandLineOptions.LogPopupTimings ? Stopwatch.StartNew() : null;
+            void Mark(string label)
+            {
+                if (sw is not null)
+                {
+                    Trace.TraceInformation($"[popup-timing] {label} @ {sw.ElapsedMilliseconds}ms");
+                }
+            }
+
             if (window.IsVisible && window.IsActive)
             {
                 _systemInteractionService?.ClearTargetWindowCapture();
                 if (window.DataContext is MainWindowViewModel viewModel)
                 {
-                    _ = viewModel.ClearSearchFilterAsync(forceRefresh: true);
+                    // Flip the visibility flag BEFORE clearing the search /
+                    // hiding so that any queued/throttled refresh that lands
+                    // after this point sees the window as hidden and skips
+                    // touching Clips on the UI thread.
+                    viewModel.SetMainWindowVisible(false);
+                    _ = viewModel.ClearSearchFilterAsync(forceRefresh: false);
                 }
                 window.Hide();
+                Mark("hide-complete");
                 return;
             }
 
             // Record what window had focus so SimulatePasteKeystroke can restore it.
             _systemInteractionService?.CaptureTargetWindowForPaste();
+            Mark("captured-target-window");
 
             PositionWindowNearCaret(window);
+            Mark("positioned-near-caret");
 
             if (!window.IsVisible)
             {
                 window.Show();
+                Mark("window.Show");
             }
 
             RestoreAndActivateWindow(window);
+            Mark("activated");
+
+            if (window.DataContext is MainWindowViewModel vm)
+            {
+                // Flip visibility AFTER Show()+Activate so the window is on
+                // screen before any refresh apply runs on the UI thread. If
+                // clips changed while hidden, the VM kicks off one refresh.
+                vm.SetMainWindowVisible(true);
+            }
+
+            if (sw is not null)
+            {
+                sw.Stop();
+                Trace.TraceInformation($"[popup-timing] show-total {sw.ElapsedMilliseconds}ms");
+            }
         });
     }
 
@@ -687,7 +724,8 @@ public partial class App : Application
             _systemInteractionService?.ClearTargetWindowCapture();
             if (_mainWindow.DataContext is MainWindowViewModel viewModel)
             {
-                _ = viewModel.ClearSearchFilterAsync(forceRefresh: true);
+                viewModel.SetMainWindowVisible(false);
+                _ = viewModel.ClearSearchFilterAsync(forceRefresh: false);
             }
             RestoreWindowState(_mainWindow);
             _mainWindow.Hide();
@@ -743,6 +781,11 @@ public partial class App : Application
             if (_mainWindow is MainWindow mainWindow)
             {
                 mainWindow.RestoreOwnedWindowsForCurrentState();
+            }
+
+            if (_mainWindow.DataContext is MainWindowViewModel vm)
+            {
+                vm.SetMainWindowVisible(true);
             }
         });
     }
