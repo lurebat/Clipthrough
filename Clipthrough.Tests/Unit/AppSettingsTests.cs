@@ -21,6 +21,15 @@ public sealed class AppSettingsTests
     }
 
     [Fact]
+    public void Defaults_AutoApplyUpdatesOnStartup_IsOffByDefault()
+    {
+        // The aggressive "silently restart on next launch when an update was
+        // previously downloaded" behavior is opt-in only; the friendly default
+        // surfaces a notification with explicit user consent.
+        Assert.False(AppSettings.Default.AutoApplyUpdatesOnStartup);
+    }
+
+    [Fact]
     public void Normalize_AllowsDefaultMaxClipSize()
     {
         var settings = new AppSettings

@@ -723,8 +723,19 @@
                     </Expander.Header>
                     <StackPanel Spacing="10" Margin="8,10,0,0">
                         <TextBlock Classes="body-muted" TextWrapping="Wrap"
-                                   Text="Clipthrough uses Velopack for auto-updates. When enabled, the app checks the feed URL on launch, downloads any newer build, and applies it when Clipthrough exits or starts next. Only effective when installed via a Velopack package." />
-                        <CheckBox Content="Enable auto-update" IsChecked="{Binding SettingsEnableAutoUpdate}" />
+                                   Text="Clipthrough uses Velopack for auto-updates. When enabled, the app checks the feed URL on launch and downloads any newer build in the background. Updates are NEVER applied automatically while you're using Clipthrough — you'll be notified and can choose to restart now or install the next time you close the app. Only effective when installed via a Velopack package." />
+                        <CheckBox Content="Check for updates on launch and download in the background"
+                                  IsChecked="{Binding SettingsEnableAutoUpdate}" />
+                        <CheckBox Content="Apply downloaded updates automatically on startup (legacy behavior — restarts the app silently)"
+                                  IsChecked="{Binding SettingsAutoApplyUpdatesOnStartup}" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Classes="secondary compact"
+                                    Content="Check for updates now"
+                                    Command="{Binding CheckForUpdatesNowCommand}" />
+                            <Button Classes="secondary compact"
+                                    Content="Restart and install downloaded update"
+                                    Command="{Binding RestartAndInstallUpdateCommand}" />
+                        </StackPanel>
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label" Text="Update feed URL (CLIPTHROUGH_UPDATE_FEED overrides this; blank uses the default GitHub Releases feed)" />
                             <TextBox PlaceholderText="https://github.com/owner/repo/releases/latest/download"

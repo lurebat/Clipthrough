@@ -25,7 +25,7 @@ public sealed class UpdateService : IUpdateService
         _settingsService = settingsService;
     }
 
-    public async Task<UpdateCheckResult> CheckAndApplyAsync(CancellationToken cancellationToken = default)
+    public async Task<UpdateCheckResult> CheckForUpdatesAsync(CancellationToken cancellationToken = default)
     {
         var settings = _settingsService.Current;
         if (!settings.EnableAutoUpdate)
@@ -48,12 +48,21 @@ public sealed class UpdateService : IUpdateService
                 return new UpdateCheckResult(false, null, "Not installed via Velopack");
             }
 
+            // An update from a previous run may already be sitting on disk.
+            // Don't auto-restart — surface it as "available, ready to install"
+            // so the user can apply it on their own schedule.
             if (mgr.UpdatePendingRestart is { } pendingUpdate)
             {
-                var pendingVersion = pendingUpdate.Version?.ToString();
-                Trace.TraceInformation($"Applying downloaded update {pendingVersion}.");
-                mgr.ApplyUpdatesAndRestart(pendingUpdate);
-                return new UpdateCheckResult(true, pendingVersion, $"Applying update {pendingVersion}");
+                if (settings.AutoApplyUpdatesOnStartup)
+                {
+                    var pendingVersion = pendingUpdate.Version?.ToString();
+                    Trace.TraceInformation($"Applying downloaded update {pendingVersion} on startup (AutoApplyUpdatesOnStartup=true).");
+                    mgr.ApplyUpdatesAndRestart(pendingUpdate);
+                    return new UpdateCheckResult(true, pendingVersion, $"Applying update {pendingVersion}");
+                }
+
+                var readyVersion = pendingUpdate.Version?.ToString();
+                return new UpdateCheckResult(true, readyVersion, $"Update {readyVersion} downloaded and ready to install");
             }
 
             var info = await mgr.CheckForUpdatesAsync().ConfigureAwait(false);
@@ -64,12 +73,41 @@ public sealed class UpdateService : IUpdateService
 
             await mgr.DownloadUpdatesAsync(info, cancelToken: cancellationToken).ConfigureAwait(false);
             var version = info.TargetFullRelease?.Version?.ToString();
-            return new UpdateCheckResult(true, version, $"Update {version} downloaded; will apply when Clipthrough exits");
+            return new UpdateCheckResult(true, version, $"Update {version} downloaded and ready to install");
         }
         catch (Exception ex)
         {
             Trace.TraceWarning($"Update check failed: {ex.Message}");
             return new UpdateCheckResult(false, null, ex.Message);
+        }
+    }
+
+    public bool ApplyDownloadedUpdateAndRestart()
+    {
+        var settings = _settingsService.Current;
+        var feedUrl = ResolveFeedUrl(settings);
+        if (string.IsNullOrWhiteSpace(feedUrl))
+        {
+            return false;
+        }
+
+        try
+        {
+            var mgr = new UpdateManager(new SimpleWebSource(feedUrl));
+            if (!mgr.IsInstalled || mgr.UpdatePendingRestart is not { } pendingUpdate)
+            {
+                return false;
+            }
+
+            var version = pendingUpdate.Version?.ToString();
+            Trace.TraceInformation($"User-initiated apply: restarting to install update {version}.");
+            mgr.ApplyUpdatesAndRestart(pendingUpdate);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"User-initiated update apply failed: {ex.Message}");
+            return false;
         }
     }
 

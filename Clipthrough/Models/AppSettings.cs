@@ -171,6 +171,15 @@ public sealed record AppSettings
 
     public bool EnableAutoUpdate { get; init; } = true;
 
+    /// <summary>
+    /// When true, an update that finished downloading in a previous run is
+    /// applied silently on the next startup (the app restarts itself before
+    /// the user sees the window). Defaults to false so users are never
+    /// surprised by an automatic restart; instead they are notified and can
+    /// install on their own schedule.
+    /// </summary>
+    public bool AutoApplyUpdatesOnStartup { get; init; }
+
     public string UpdateFeedUrl { get; init; } = DefaultUpdateFeedUrl;
 
     public string OcrLanguages { get; init; } = "en";
@@ -271,6 +280,7 @@ public sealed record AppSettings
             })
             .ToList(),
         UpdateFeedUrl = UpdateFeedUrl?.Trim() ?? string.Empty,
+        AutoApplyUpdatesOnStartup = AutoApplyUpdatesOnStartup,
         OcrLanguages = string.IsNullOrWhiteSpace(OcrLanguages) ? "en" : OcrLanguages.Trim(),
         AutoOcrImageClips = AutoOcrImageClips,
         EnableRemoteApi = EnableRemoteApi,
