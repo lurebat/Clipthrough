@@ -8,26 +8,26 @@ namespace Clipthrough.Tests.Unit;
 public sealed class UpdateServiceTests
 {
     [Fact]
-    public async Task CheckAndApplyAsync_RespectsDisabledAutoUpdateByDefault()
+    public async Task CheckForUpdatesAsync_RespectsDisabledAutoUpdateByDefault()
     {
         var settings = new TestSettingsService();
         settings.SetCurrent(AppSettings.Default with { EnableAutoUpdate = false });
         var service = new UpdateService(settings);
 
-        var result = await service.CheckAndApplyAsync();
+        var result = await service.CheckForUpdatesAsync();
 
         Assert.False(result.HasUpdate);
         Assert.Equal("Auto-update disabled", result.Message);
     }
 
     [Fact]
-    public async Task CheckAndApplyAsync_ManualCheckBypassesDisabledAutoUpdate()
+    public async Task CheckForUpdatesAsync_ManualCheckBypassesDisabledAutoUpdate()
     {
         var settings = new TestSettingsService();
         settings.SetCurrent(AppSettings.Default with { EnableAutoUpdate = false });
         var service = new UpdateService(settings);
 
-        var result = await service.CheckAndApplyAsync(ignoreAutoUpdateDisabled: true);
+        var result = await service.CheckForUpdatesAsync(ignoreAutoUpdateDisabled: true);
 
         Assert.False(result.HasUpdate);
         Assert.NotEqual("Auto-update disabled", result.Message);

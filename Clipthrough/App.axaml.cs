@@ -212,12 +212,58 @@ public partial class App : Application
             {
                 return;
             }
-            await svc.CheckAndApplyAsync().ConfigureAwait(false);
+            var result = await svc.CheckForUpdatesAsync().ConfigureAwait(false);
+            if (result.HasUpdate && !string.IsNullOrWhiteSpace(result.Version))
+            {
+                PublishUpdateReadyNotification(result.Version!);
+            }
         }
         catch (Exception ex)
         {
             System.Diagnostics.Trace.TraceWarning($"Update check failed: {ex}");
         }
+    }
+
+    /// <summary>
+    /// Surfaces a downloaded update to the user with explicit consent actions.
+    /// We deliberately do NOT shut the app down on the user's behalf — the
+    /// running app stays put until the user clicks "Restart and install" or
+    /// closes Clipthrough normally (in which case the on-exit handler swaps
+    /// the binaries before relaunch is possible).
+    /// </summary>
+    private void PublishUpdateReadyNotification(string version)
+    {
+        if (_notificationService is null)
+        {
+            return;
+        }
+
+        var notification = new AppNotification
+        {
+            Title = $"Clipthrough update {version} ready",
+            Message = "The new version is downloaded. Restart now to install, or it will be applied next time you close Clipthrough.",
+            Level = AppNotificationLevel.Information,
+            IsPersistent = true,
+            Actions = new[]
+            {
+                new AppNotificationAction
+                {
+                    Label = "Restart and install",
+                    ExecuteAsync = () =>
+                    {
+                        _updateService?.ApplyDownloadedUpdateAndRestart();
+                        return Task.CompletedTask;
+                    },
+                },
+                new AppNotificationAction
+                {
+                    Label = "Install on exit",
+                    ExecuteAsync = () => Task.CompletedTask,
+                },
+            },
+        };
+
+        _notificationService.Publish(notification);
     }
 
     private void OnMainWindowClosed(object? sender, EventArgs e)

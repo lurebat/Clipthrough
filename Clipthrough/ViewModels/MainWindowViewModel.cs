@@ -199,6 +199,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _settingsAiModel = AppSettings.Default.AiModel;
     private string _settingsAiReasoningEffort = AppSettings.Default.AiReasoningEffort;
     private bool _settingsEnableAutoUpdate = AppSettings.Default.EnableAutoUpdate;
+    private bool _settingsAutoApplyUpdatesOnStartup = AppSettings.Default.AutoApplyUpdatesOnStartup;
     private string _settingsUpdateFeedUrl = AppSettings.Default.UpdateFeedUrl;
     private string _settingsOcrLanguages = AppSettings.Default.OcrLanguages;
     private bool _settingsAutoOcrImageClips = AppSettings.Default.AutoOcrImageClips;
@@ -353,6 +354,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             await _systemInteractionService.OpenUrlAsync(RemoteApiDocsUrl));
         OpenRemoteApiSchemaUrlCommand = ReactiveCommand.CreateFromTask(async () =>
             await _systemInteractionService.OpenUrlAsync(RemoteApiSchemaUrl));
+
+        CheckForUpdatesNowCommand = ReactiveCommand.CreateFromTask(CheckForUpdatesNowAsync);
+        RestartAndInstallUpdateCommand = ReactiveCommand.Create(RestartAndInstallUpdate);
 
         _settingsService.SettingsChanged += OnSettingsChanged;
         SyncUserScripts(_settingsService.Current);
@@ -574,6 +578,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> CopyRemoteApiSchemaUrlCommand { get; }
     public ReactiveCommand<Unit, Unit> OpenRemoteApiDocsUrlCommand { get; }
     public ReactiveCommand<Unit, Unit> OpenRemoteApiSchemaUrlCommand { get; }
+
+    /// <summary>
+    /// User-initiated update check. Surfaces "checking…", success, "no update",
+    /// or error in <see cref="StatusText"/>; if an update is found and
+    /// downloaded, publishes the same notification the background check uses.
+    /// </summary>
+    public ReactiveCommand<Unit, Unit> CheckForUpdatesNowCommand { get; }
+
+    /// <summary>
+    /// User-initiated "restart now to install the downloaded update". No-op
+    /// when nothing is pending.
+    /// </summary>
+    public ReactiveCommand<Unit, Unit> RestartAndInstallUpdateCommand { get; }
 
     public ObservableCollection<UserScript> UserScripts { get; } = new();
 
@@ -1936,6 +1953,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get => _settingsEnableAutoUpdate;
         set => this.RaiseAndSetIfChanged(ref _settingsEnableAutoUpdate, value);
+    }
+
+    public bool SettingsAutoApplyUpdatesOnStartup
+    {
+        get => _settingsAutoApplyUpdatesOnStartup;
+        set => this.RaiseAndSetIfChanged(ref _settingsAutoApplyUpdatesOnStartup, value);
     }
 
     public string SettingsUpdateFeedUrl
@@ -5074,7 +5097,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             var result = await _jobIndicator.TrackAsync(
                 AppText.CheckingForUpdateStatus,
-                () => _updateService.CheckAndApplyAsync(ignoreAutoUpdateDisabled: true));
+                () => _updateService.CheckForUpdatesAsync(ignoreAutoUpdateDisabled: true));
             var message = string.IsNullOrWhiteSpace(result.Message)
                 ? AppText.UpdateCheckCompleteStatus
                 : result.Message;
@@ -5820,6 +5843,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             AiImageModel = (SettingsAiImageModel ?? string.Empty).Trim(),
             AiReasoningEffort = (SettingsAiReasoningEffort ?? string.Empty).Trim(),
             EnableAutoUpdate = SettingsEnableAutoUpdate,
+            AutoApplyUpdatesOnStartup = SettingsAutoApplyUpdatesOnStartup,
             UpdateFeedUrl = (SettingsUpdateFeedUrl ?? string.Empty).Trim(),
             OcrLanguages = (SettingsOcrLanguages ?? string.Empty).Trim(),
             AutoOcrImageClips = SettingsAutoOcrImageClips,
@@ -5964,6 +5988,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsAiImageModel = settings.AiImageModel;
         SettingsAiReasoningEffort = settings.AiReasoningEffort;
         SettingsEnableAutoUpdate = settings.EnableAutoUpdate;
+        SettingsAutoApplyUpdatesOnStartup = settings.AutoApplyUpdatesOnStartup;
         SettingsUpdateFeedUrl = settings.UpdateFeedUrl;
         SettingsOcrLanguages = settings.OcrLanguages;
         SettingsAutoOcrImageClips = settings.AutoOcrImageClips;
@@ -6331,6 +6356,74 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.Shutdown();
+        }
+    }
+
+    private async Task CheckForUpdatesNowAsync()
+    {
+        if (_updateService is null)
+        {
+            StatusText = "Updates are not available in this build.";
+            return;
+        }
+
+        StatusText = "Checking for updates\u2026";
+        try
+        {
+            var result = await _updateService.CheckForUpdatesAsync().ConfigureAwait(true);
+            if (result.HasUpdate && !string.IsNullOrWhiteSpace(result.Version))
+            {
+                StatusText = $"Update {result.Version} downloaded. Restart Clipthrough to install.";
+                _notificationService.Publish(new AppNotification
+                {
+                    Title = $"Clipthrough update {result.Version} ready",
+                    Message = "Restart now to install, or it will be applied next time you close Clipthrough.",
+                    Level = AppNotificationLevel.Information,
+                    IsPersistent = true,
+                    Actions = new[]
+                    {
+                        new AppNotificationAction
+                        {
+                            Label = "Restart and install",
+                            ExecuteAsync = () =>
+                            {
+                                _updateService.ApplyDownloadedUpdateAndRestart();
+                                return Task.CompletedTask;
+                            },
+                        },
+                        new AppNotificationAction
+                        {
+                            Label = "Install on exit",
+                            ExecuteAsync = () => Task.CompletedTask,
+                        },
+                    },
+                });
+            }
+            else
+            {
+                StatusText = string.IsNullOrWhiteSpace(result.Message)
+                    ? "Clipthrough is up to date."
+                    : result.Message!;
+            }
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Manual update check failed: {ex}");
+            StatusText = AppText.FormatErrorStatus(ex.Message);
+        }
+    }
+
+    private void RestartAndInstallUpdate()
+    {
+        if (_updateService is null)
+        {
+            StatusText = "Updates are not available in this build.";
+            return;
+        }
+
+        if (!_updateService.ApplyDownloadedUpdateAndRestart())
+        {
+            StatusText = "No downloaded update is waiting to install. Check for updates first.";
         }
     }
 
