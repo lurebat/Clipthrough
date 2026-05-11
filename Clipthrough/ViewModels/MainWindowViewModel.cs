@@ -5133,9 +5133,40 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 : result.Message;
 
             StatusText = message;
-            _notificationService.PublishInfo(
-                result.HasUpdate ? AppText.UpdateAvailableTitle : AppText.UpdateCheckCompleteTitle,
-                message);
+            if (result.HasUpdate && !string.IsNullOrWhiteSpace(result.Version))
+            {
+                // Mirror the background-check notification: surface explicit
+                // "Restart and install" / "Install on exit" actions instead of
+                // leaving the user with a plain info toast.
+                _notificationService.Publish(new AppNotification
+                {
+                    Title = $"Clipthrough update {result.Version} ready",
+                    Message = "Restart now to install, or it will be applied next time you close Clipthrough.",
+                    Level = AppNotificationLevel.Information,
+                    IsPersistent = true,
+                    Actions = new[]
+                    {
+                        new AppNotificationAction
+                        {
+                            Label = "Restart and install",
+                            ExecuteAsync = () =>
+                            {
+                                _updateService.ApplyDownloadedUpdateAndRestart();
+                                return Task.CompletedTask;
+                            },
+                        },
+                        new AppNotificationAction
+                        {
+                            Label = "Install on exit",
+                            ExecuteAsync = () => Task.CompletedTask,
+                        },
+                    },
+                });
+            }
+            else
+            {
+                _notificationService.PublishInfo(AppText.UpdateCheckCompleteTitle, message);
+            }
         }
         catch (Exception ex)
         {

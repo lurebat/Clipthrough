@@ -101,5 +101,10 @@ jobs:
           draft: false
           generate_release_notes: true
           fail_on_unmatched_files: true
+          # Use GitHub's date+semver logic so that when two release workflows
+          # publish in parallel, the higher semver wins "latest" instead of
+          # whoever happens to finish second. Avoids breaking the Velopack
+          # /releases/latest/download/ feed for users on older versions.
+          make_latest: legacy
           files: |
             artifacts/release/*
