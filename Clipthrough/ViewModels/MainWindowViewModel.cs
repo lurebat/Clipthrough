@@ -107,6 +107,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isLoadingDatabase;
     private bool _areBackgroundServicesStarted;
     private bool _hasQueuedRefresh;
+    // Tracks whether the main window is currently visible. When false, optimistic
+    // clip-list mutations and the throttled background refresh are skipped to
+    // keep the UI thread idle so the popup snaps open quickly on the next show.
+    // See ApplyCapturedClipOptimistically / ApplyUpdatedClipOptimistically / PerformRefreshAsync.
+    private bool _isMainWindowVisible;
+    // Set true whenever a clip change (capture/update/OCR/maintenance) is observed
+    // while the window is hidden, or when a refresh result was discarded because
+    // the window became hidden mid-apply. On the next show we trigger one refresh.
+    private bool _isClipListStale;
+    // When the popup is reopened, mirror the typical clipboard-manager UX of
+    // always highlighting the newest captured clip rather than preserving the
+    // previous selection. Set by SetMainWindowVisible(true) and consumed by
+    // ApplyRefreshResult.
+    private bool _selectNewestOnNextRefresh;
     private int _recentSearchNavigationIndex = -1;
     private bool _isNavigatingSearchHistory;
     private bool _isSearchBoxFocused;
@@ -407,7 +421,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _subscriptions.Add(
             _clipboardMonitorService.UpdatedClips
                 .Throttle(TimeSpan.FromMilliseconds(250), RxSchedulers.MainThreadScheduler)
-                .SelectMany(clip => Observable.FromAsync(() => RefreshAsync(clip.Id)))
+                .SelectMany(clip =>
+                {
+                    if (!_isMainWindowVisible)
+                    {
+                        // Hidden — mark the list stale; the next show will pick
+                        // up the changes via a single authoritative refresh.
+                        _isClipListStale = true;
+                        return Observable.Return(System.Reactive.Unit.Default);
+                    }
+                    return Observable.FromAsync(() => RefreshAsync(clip.Id))
+                        .Select(_ => System.Reactive.Unit.Default);
+                })
                 .Subscribe(_ => { }, ex => StatusText = AppText.FormatErrorStatus(ex.Message)));
 
         _subscriptions.Add(
@@ -424,7 +449,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         _subscriptions.Add(
             _backgroundOcrQueue.OcrCompleted
-                .SelectMany(id => Observable.FromAsync(() => RefreshAsync(id)))
+                .SelectMany(id =>
+                {
+                    if (!_isMainWindowVisible)
+                    {
+                        _isClipListStale = true;
+                        return Observable.Return(System.Reactive.Unit.Default);
+                    }
+                    return Observable.FromAsync(() => RefreshAsync(id))
+                        .Select(_ => System.Reactive.Unit.Default);
+                })
                 .Subscribe(_ => { }, ex => Trace.TraceError($"OCR refresh failed: {ex}")));
 
         _subscriptions.Add(
@@ -2688,10 +2722,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             if (StorageOptionsService.RequiresPassword(_storageOptionsService.Current.DatabasePath))
             {
-                IsPasswordPromptOpen = true;
-                StatusText = "Enter your database password to continue.";
-                _isStarted = true;
-                return;
+                var preset = CommandLineOptions.PresetDatabasePassword;
+                if (!string.IsNullOrEmpty(preset))
+                {
+                    Trace.TraceInformation("Using database password supplied via --password command-line argument.");
+                    _storageOptionsService.SetInMemoryPassword(preset);
+                }
+                else
+                {
+                    IsPasswordPromptOpen = true;
+                    StatusText = "Enter your database password to continue.";
+                    _isStarted = true;
+                    return;
+                }
             }
 
             IsLoadingDatabase = true;
@@ -2789,14 +2832,35 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        var sw = CommandLineOptions.LogPopupTimings ? Stopwatch.StartNew() : null;
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => IsBusy = true);
         try
         {
             var request = await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => new RefreshRequest(BuildFilters(offset: 0), UseSemanticClipSearch));
+            if (sw is not null) Trace.TraceInformation($"[refresh-timing] built-request @ {sw.ElapsedMilliseconds}ms search='{request.Filters.SearchText}' semantic={request.UseSemanticClipSearch}");
             var result = await SearchClipsAsync(request.Filters, request.UseSemanticClipSearch).ConfigureAwait(false);
-            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => ApplyRefreshResult(result, preferredSelectionId));
+            if (sw is not null) Trace.TraceInformation($"[refresh-timing] db-search-complete @ {sw.ElapsedMilliseconds}ms items={result.Items.Count} total={result.TotalMatchingCount}");
 
-            if (!string.IsNullOrWhiteSpace(request.Filters.SearchText))
+            // Refresh-race guard: if the window became hidden while we were
+            // running the DB query, drop the apply and mark the list stale so
+            // the next show triggers a fresh refresh. Touching Clips while
+            // hidden produces the very freeze we are trying to fix.
+            var applied = await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (!_isMainWindowVisible)
+                {
+                    _isClipListStale = true;
+                    return false;
+                }
+
+                ApplyRefreshResult(result, preferredSelectionId);
+                _isClipListStale = false;
+                return true;
+            });
+
+            if (sw is not null) Trace.TraceInformation($"[refresh-timing] ui-applied={applied} @ {sw.ElapsedMilliseconds}ms");
+
+            if (applied && !string.IsNullOrWhiteSpace(request.Filters.SearchText))
             {
                 await _searchHistoryService.SaveSearchAsync(request.Filters.SearchText).ConfigureAwait(false);
             }
@@ -2804,6 +2868,58 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         finally
         {
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => IsBusy = false);
+            if (sw is not null)
+            {
+                sw.Stop();
+                Trace.TraceInformation($"[refresh-timing] total {sw.ElapsedMilliseconds}ms");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Called by the application shell whenever the main window's visibility
+    /// changes. While hidden, optimistic clip-list mutations and the throttled
+    /// refresh are bypassed; on transition back to visible we trigger one
+    /// authoritative refresh if anything changed in the meantime.
+    /// </summary>
+    public void SetMainWindowVisible(bool isVisible)
+    {
+        if (_isMainWindowVisible == isVisible)
+        {
+            return;
+        }
+
+        var wasVisible = _isMainWindowVisible;
+        _isMainWindowVisible = isVisible;
+        if (CommandLineOptions.LogPopupTimings)
+        {
+            Trace.TraceInformation($"[popup-timing] visibility={isVisible} stale={_isClipListStale}");
+        }
+
+        if (isVisible && !wasVisible)
+        {
+            // Match the typical clipboard-manager UX: every fresh popup
+            // surfaces the newest clip as the active selection, regardless of
+            // what was selected last time.
+            _selectNewestOnNextRefresh = true;
+
+            if (_isDatabaseReady)
+            {
+                if (_isClipListStale)
+                {
+                    // Refresh clears the stale flag once it successfully
+                    // applies. Selection is realigned to newest by the
+                    // _selectNewestOnNextRefresh flag.
+                    _ = RefreshAsync();
+                }
+                else
+                {
+                    // No data change while hidden, but still re-select newest
+                    // so the user always lands on the most recent clip.
+                    SelectedClip = GetDefaultAutoSelectedClip();
+                    _selectNewestOnNextRefresh = false;
+                }
+            }
         }
     }
 
@@ -4239,19 +4355,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void ApplyRefreshResult(ClipSearchResult result, long? preferredSelectionId = null)
     {
-        var previousSelectionId = preferredSelectionId ?? SelectedClip?.Id;
+        var sw = CommandLineOptions.LogPopupTimings ? Stopwatch.StartNew() : null;
+        var forceSelectNewest = _selectNewestOnNextRefresh;
+        _selectNewestOnNextRefresh = false;
+        var previousSelectionId = forceSelectNewest ? null : (preferredSelectionId ?? SelectedClip?.Id);
         var checkedIds = Clips
             .Where(static clip => clip.IsChecked)
             .Select(static clip => clip.Id)
             .ToHashSet();
+        var initialCount = Clips.Count;
 
         _suppressEditAutoSave = true;
         try
         {
-            ClearClips();
-            foreach (var item in result.Items.Select(clip => CreateClipItemViewModel(clip, checkedIds)))
+            var stats = ApplyRefreshResultIncremental(result.Items, checkedIds);
+            if (sw is not null)
             {
-                Clips.Add(item);
+                Trace.TraceInformation(
+                    $"[refresh-timing] apply-diff added={stats.Added} removed={stats.Removed} replaced={stats.Replaced} moved={stats.Moved} fullRebuild={stats.FullRebuild} forceNewest={forceSelectNewest} (before={initialCount}, after={Clips.Count}) @ {sw.ElapsedMilliseconds}ms");
             }
 
             _currentOffset = result.Items.Count;
@@ -4269,15 +4390,237 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaiseBulkSelectionProperties();
         UpdateStatus(result);
         UpdateClipDisplayIndices();
+
+        if (sw is not null)
+        {
+            Trace.TraceInformation($"[refresh-timing] apply-complete @ {sw.ElapsedMilliseconds}ms");
+        }
+    }
+
+    private readonly record struct ApplyDiffStats(int Added, int Removed, int Replaced, int Moved, bool FullRebuild);
+
+    /// <summary>
+    /// Reconciles <see cref="Clips"/> with <paramref name="newItems"/> by doing
+    /// the minimum number of ObservableCollection mutations — recreating only
+    /// VMs whose underlying ClipEntry changed, moving existing ones, and
+    /// disposing removed ones. Falls back to a full rebuild if the diff is so
+    /// large that incremental edits would cost more than a rebuild.
+    /// </summary>
+    private ApplyDiffStats ApplyRefreshResultIncremental(IReadOnlyList<ClipEntry> newItems, HashSet<long> checkedIds)
+    {
+        if (Clips.Count == 0)
+        {
+            foreach (var clip in newItems)
+            {
+                Clips.Add(CreateClipItemViewModel(clip, checkedIds));
+            }
+            return new ApplyDiffStats(Added: newItems.Count, Removed: 0, Replaced: 0, Moved: 0, FullRebuild: true);
+        }
+
+        var newById = new Dictionary<long, ClipEntry>(newItems.Count);
+        foreach (var entry in newItems)
+        {
+            newById[entry.Id] = entry;
+        }
+
+        var existingById = new Dictionary<long, ClipItemViewModel>(Clips.Count);
+        foreach (var existing in Clips)
+        {
+            existingById[existing.Id] = existing;
+        }
+
+        var added = 0;
+        var removed = 0;
+        foreach (var id in existingById.Keys)
+        {
+            if (!newById.ContainsKey(id)) removed++;
+        }
+        foreach (var id in newById.Keys)
+        {
+            if (!existingById.ContainsKey(id)) added++;
+        }
+        var changedEntry = 0;
+        foreach (var existing in Clips)
+        {
+            if (newById.TryGetValue(existing.Id, out var newEntry) && !ClipsAreMateriallyEqual(existing.Clip, newEntry))
+            {
+                changedEntry++;
+            }
+        }
+
+        // If most of the list is changing (filter/sort/search swap, large
+        // reorder) the cumulative cost of individual Move/Insert/Remove
+        // notifications can exceed a full rebuild. Threshold tuned to the
+        // common case where 1-5 clips change at a time.
+        var diffSize = added + removed + changedEntry;
+        var fullRebuildThreshold = Math.Max(50, newItems.Count / 2);
+        if (diffSize > fullRebuildThreshold)
+        {
+            ClearClips();
+            foreach (var clip in newItems)
+            {
+                Clips.Add(CreateClipItemViewModel(clip, checkedIds));
+            }
+            return new ApplyDiffStats(Added: added, Removed: removed, Replaced: changedEntry, Moved: 0, FullRebuild: true);
+        }
+
+        var movedCount = 0;
+        var replacedCount = 0;
+
+        // Step 1: drop VMs whose id is no longer in the result. Iterate
+        // backwards so RemoveAt does not shift the indices we still need.
+        for (var i = Clips.Count - 1; i >= 0; i--)
+        {
+            if (!newById.ContainsKey(Clips[i].Id))
+            {
+                DetachAndDisposeClip(Clips[i]);
+                Clips.RemoveAt(i);
+            }
+        }
+
+        // Step 2: walk the target list, reconciling each slot. Same-id items
+        // whose ClipEntry instance changed (icon/sensitivity/content update)
+        // are replaced wholesale because ClipItemViewModel caches several
+        // computed display values at construction time.
+        for (var targetIndex = 0; targetIndex < newItems.Count; targetIndex++)
+        {
+            var newEntry = newItems[targetIndex];
+
+            if (targetIndex >= Clips.Count)
+            {
+                Clips.Insert(targetIndex, CreateClipItemViewModel(newEntry, checkedIds));
+                continue;
+            }
+
+            var atIndex = Clips[targetIndex];
+            if (atIndex.Id == newEntry.Id)
+            {
+                if (!ClipsAreMateriallyEqual(atIndex.Clip, newEntry))
+                {
+                    var wasChecked = atIndex.IsChecked || checkedIds.Contains(newEntry.Id);
+                    DetachAndDisposeClip(atIndex);
+                    Clips.RemoveAt(targetIndex);
+                    Clips.Insert(targetIndex, CreateClipItemViewModel(
+                        newEntry,
+                        wasChecked ? new HashSet<long> { newEntry.Id } : checkedIds));
+                    replacedCount++;
+                }
+                continue;
+            }
+
+            // Search forward for the id; if present, move/replace.
+            var sourceIndex = -1;
+            for (var i = targetIndex + 1; i < Clips.Count; i++)
+            {
+                if (Clips[i].Id == newEntry.Id)
+                {
+                    sourceIndex = i;
+                    break;
+                }
+            }
+
+            if (sourceIndex >= 0)
+            {
+                var existing = Clips[sourceIndex];
+                if (!ClipsAreMateriallyEqual(existing.Clip, newEntry))
+                {
+                    var wasChecked = existing.IsChecked || checkedIds.Contains(newEntry.Id);
+                    DetachAndDisposeClip(existing);
+                    Clips.RemoveAt(sourceIndex);
+                    Clips.Insert(targetIndex, CreateClipItemViewModel(
+                        newEntry,
+                        wasChecked ? new HashSet<long> { newEntry.Id } : checkedIds));
+                    replacedCount++;
+                }
+                else
+                {
+                    Clips.Move(sourceIndex, targetIndex);
+                    movedCount++;
+                }
+            }
+            else
+            {
+                Clips.Insert(targetIndex, CreateClipItemViewModel(newEntry, checkedIds));
+            }
+        }
+
+        // Step 3: trim trailing extras (defensive — should be unreachable
+        // because Step 1 removed every id not in the new result).
+        while (Clips.Count > newItems.Count)
+        {
+            var last = Clips[^1];
+            DetachAndDisposeClip(last);
+            Clips.RemoveAt(Clips.Count - 1);
+        }
+
+        return new ApplyDiffStats(Added: added, Removed: removed, Replaced: replacedCount, Moved: movedCount, FullRebuild: false);
+    }
+
+    private void DetachAndDisposeClip(ClipItemViewModel item)
+    {
+        DetachClip(item);
+        item.Dispose();
+    }
+
+    /// <summary>
+    /// Compares two <see cref="ClipEntry"/> instances by the fields that
+    /// actually drive the row's rendered appearance. SearchAsync returns fresh
+    /// ClipEntry references every time, so reference equality is useless for
+    /// incremental diffing — but a quick scalar comparison lets us skip the
+    /// expensive rebuild when the row's data hasn't changed.
+    /// </summary>
+    private static bool ClipsAreMateriallyEqual(ClipEntry a, ClipEntry b)
+    {
+        if (ReferenceEquals(a, b)) return true;
+        if (a.Id != b.Id) return false;
+        if (a.IsFavorite != b.IsFavorite) return false;
+        if (a.IsSensitive != b.IsSensitive) return false;
+        if (a.IsPasted != b.IsPasted) return false;
+        if (a.PasteCount != b.PasteCount) return false;
+        if (a.CopyCount != b.CopyCount) return false;
+        if (a.PinnedAt != b.PinnedAt) return false;
+        if (a.LastCopiedAt != b.LastCopiedAt) return false;
+        if (a.ByteSize != b.ByteSize) return false;
+        if (a.ContentType != b.ContentType) return false;
+        if (a.ContentFormat != b.ContentFormat) return false;
+        if (a.OcrStatus != b.OcrStatus) return false;
+        if (!string.Equals(a.Hash, b.Hash, StringComparison.Ordinal)) return false;
+        if (!string.Equals(a.SourceApp, b.SourceApp, StringComparison.Ordinal)) return false;
+        if (!string.Equals(a.SourceWindowTitle, b.SourceWindowTitle, StringComparison.Ordinal)) return false;
+        if (!string.Equals(a.SourceUrl, b.SourceUrl, StringComparison.Ordinal)) return false;
+        // Icon bytes can transition from null -> populated during enrichment.
+        var aHasIcon = a.SourceAppIconBytes is { Length: > 0 };
+        var bHasIcon = b.SourceAppIconBytes is { Length: > 0 };
+        if (aHasIcon != bHasIcon) return false;
+        // Sensitivity matches collection size is a cheap proxy for change.
+        if ((a.SensitivityMatches?.Count ?? 0) != (b.SensitivityMatches?.Count ?? 0)) return false;
+        return true;
     }
 
     private void ApplyCapturedClipOptimistically(ClipEntry clip)
     {
+        if (!_isMainWindowVisible)
+        {
+            // Don't churn the Clips collection while the window is hidden. Each
+            // optimistic insert builds a new ClipItemViewModel (with several
+            // ReactiveCommands) and cascades a SelectedClip property storm,
+            // which is exactly what makes the popup feel frozen on the next
+            // show when many captures occurred while it was minimised.
+            _isClipListStale = true;
+            return;
+        }
+
         UpsertClipItem(clip, targetIndex: 0, select: true);
     }
 
     private void ApplyUpdatedClipOptimistically(ClipEntry clip)
     {
+        if (!_isMainWindowVisible)
+        {
+            _isClipListStale = true;
+            return;
+        }
+
         var existingIndex = IndexOfClip(clip.Id);
         if (existingIndex < 0)
         {
@@ -4293,7 +4636,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var wasChecked = existingIndex >= 0 && Clips[existingIndex].IsChecked;
         if (existingIndex >= 0)
         {
-            DetachClip(Clips[existingIndex]);
+            DetachAndDisposeClip(Clips[existingIndex]);
             Clips.RemoveAt(existingIndex);
             if (existingIndex < targetIndex)
             {
