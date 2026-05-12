@@ -2833,6 +2833,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     Trace.TraceInformation("Using database password supplied via --password command-line argument.");
                     _storageOptionsService.SetInMemoryPassword(preset);
                 }
+                else if (!string.IsNullOrEmpty(_storageOptionsService.Current.DatabasePassword)
+                    && StorageOptionsService.CanOpenWithPassword(
+                        _storageOptionsService.Current.DatabasePath,
+                        _storageOptionsService.Current.DatabasePassword))
+                {
+                    // Persisted ("Remember password" was on) and verified — skip the prompt.
+                    Trace.TraceInformation("Database auto-unlocked with the persisted password.");
+                }
                 else
                 {
                     IsPasswordPromptOpen = true;

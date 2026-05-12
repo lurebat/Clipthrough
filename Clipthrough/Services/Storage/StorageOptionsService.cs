@@ -72,6 +72,41 @@ public sealed class StorageOptionsService : IStorageOptionsService
         }
     }
 
+    /// <summary>
+    /// Returns true when the database at <paramref name="dbPath"/> can be
+    /// opened and read using <paramref name="password"/>. Used at startup to
+    /// validate a persisted "Remember password" entry before skipping the
+    /// unlock prompt.
+    /// </summary>
+    public static bool CanOpenWithPassword(string dbPath, string password)
+    {
+        if (!File.Exists(dbPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var builder = new SqliteConnectionStringBuilder
+            {
+                DataSource = dbPath,
+                Mode = SqliteOpenMode.ReadOnly,
+                Password = password,
+            };
+
+            using var connection = new SqliteConnection(builder.ToString());
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT count(*) FROM sqlite_master;";
+            command.ExecuteScalar();
+            return true;
+        }
+        catch (SqliteException)
+        {
+            return false;
+        }
+    }
+
     public async Task SaveAsync(StorageOptions options, CancellationToken cancellationToken = default)
     {
         var normalized = options.Normalize();
