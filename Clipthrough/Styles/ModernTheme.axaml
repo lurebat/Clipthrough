@@ -561,7 +561,7 @@
     </Style>
 
     <!-- Segmented radio button group -->
-    <Style Selector="RadioButton.segmented-left, RadioButton.segmented-center, RadioButton.segmented-right">
+    <Style Selector="RadioButton.segmented-left, RadioButton.segmented-center, RadioButton.segmented-right, ToggleButton.segmented-left, ToggleButton.segmented-center, ToggleButton.segmented-right">
         <Setter Property="Background" Value="{DynamicResource SurfaceSecondaryBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource AppMutedForegroundBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
@@ -590,33 +590,33 @@
             </ControlTemplate>
         </Setter>
     </Style>
-    <Style Selector="RadioButton.segmented-left">
+    <Style Selector="RadioButton.segmented-left, ToggleButton.segmented-left">
         <Setter Property="CornerRadius" Value="6,0,0,6" />
         <Setter Property="BorderThickness" Value="1,1,0,1" />
     </Style>
-    <Style Selector="RadioButton.segmented-center">
+    <Style Selector="RadioButton.segmented-center, ToggleButton.segmented-center">
         <Setter Property="CornerRadius" Value="0" />
         <Setter Property="BorderThickness" Value="1" />
     </Style>
-    <Style Selector="RadioButton.segmented-right">
+    <Style Selector="RadioButton.segmented-right, ToggleButton.segmented-right">
         <Setter Property="CornerRadius" Value="0,6,6,0" />
         <Setter Property="BorderThickness" Value="0,1,1,1" />
     </Style>
-    <Style Selector="RadioButton.segmented-left:checked /template/ Border#PART_Border, RadioButton.segmented-center:checked /template/ Border#PART_Border, RadioButton.segmented-right:checked /template/ Border#PART_Border">
+    <Style Selector="RadioButton.segmented-left:checked /template/ Border#PART_Border, RadioButton.segmented-center:checked /template/ Border#PART_Border, RadioButton.segmented-right:checked /template/ Border#PART_Border, ToggleButton.segmented-left:checked /template/ Border#PART_Border, ToggleButton.segmented-center:checked /template/ Border#PART_Border, ToggleButton.segmented-right:checked /template/ Border#PART_Border">
         <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>
-    <Style Selector="RadioButton.segmented-left:checked, RadioButton.segmented-center:checked, RadioButton.segmented-right:checked">
+    <Style Selector="RadioButton.segmented-left:checked, RadioButton.segmented-center:checked, RadioButton.segmented-right:checked, ToggleButton.segmented-left:checked, ToggleButton.segmented-center:checked, ToggleButton.segmented-right:checked">
         <Setter Property="Foreground" Value="White" />
     </Style>
-    <Style Selector="RadioButton.segmented-left:focus-visible /template/ Border#PART_Border, RadioButton.segmented-center:focus-visible /template/ Border#PART_Border, RadioButton.segmented-right:focus-visible /template/ Border#PART_Border">
+    <Style Selector="RadioButton.segmented-left:focus-visible /template/ Border#PART_Border, RadioButton.segmented-center:focus-visible /template/ Border#PART_Border, RadioButton.segmented-right:focus-visible /template/ Border#PART_Border, ToggleButton.segmented-left:focus-visible /template/ Border#PART_Border, ToggleButton.segmented-center:focus-visible /template/ Border#PART_Border, ToggleButton.segmented-right:focus-visible /template/ Border#PART_Border">
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
         <Setter Property="BorderThickness" Value="2" />
     </Style>
-    <Style Selector="RadioButton.segmented-left:pointerover /template/ Border#PART_Border, RadioButton.segmented-center:pointerover /template/ Border#PART_Border, RadioButton.segmented-right:pointerover /template/ Border#PART_Border">
+    <Style Selector="RadioButton.segmented-left:pointerover /template/ Border#PART_Border, RadioButton.segmented-center:pointerover /template/ Border#PART_Border, RadioButton.segmented-right:pointerover /template/ Border#PART_Border, ToggleButton.segmented-left:pointerover /template/ Border#PART_Border, ToggleButton.segmented-center:pointerover /template/ Border#PART_Border, ToggleButton.segmented-right:pointerover /template/ Border#PART_Border">
         <Setter Property="Background" Value="{DynamicResource SurfaceInteractiveHoverBrush}" />
     </Style>
-    <Style Selector="RadioButton.segmented-left:checked:pointerover /template/ Border#PART_Border, RadioButton.segmented-center:checked:pointerover /template/ Border#PART_Border, RadioButton.segmented-right:checked:pointerover /template/ Border#PART_Border">
+    <Style Selector="RadioButton.segmented-left:checked:pointerover /template/ Border#PART_Border, RadioButton.segmented-center:checked:pointerover /template/ Border#PART_Border, RadioButton.segmented-right:checked:pointerover /template/ Border#PART_Border, ToggleButton.segmented-left:checked:pointerover /template/ Border#PART_Border, ToggleButton.segmented-center:checked:pointerover /template/ Border#PART_Border, ToggleButton.segmented-right:checked:pointerover /template/ Border#PART_Border">
         <Setter Property="Background" Value="{DynamicResource AccentHoverBrush}" />
     </Style>
 </Styles>

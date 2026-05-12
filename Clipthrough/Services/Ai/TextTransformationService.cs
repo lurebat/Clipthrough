@@ -40,6 +40,15 @@ public static partial class TextTransformationService
             Models.TextTransformation.RemoveEmptyLines => RemoveEmptyLines(input),
             Models.TextTransformation.RemoveDuplicateLines => RemoveDuplicateLines(input),
             Models.TextTransformation.BoxTableToHtml => BoxTableToHtml(input),
+            Models.TextTransformation.JsonQuote => JsonQuote(input),
+            Models.TextTransformation.JsonUnquote => JsonUnquote(input),
+            Models.TextTransformation.JsonMinify => JsonReformat(input, indented: false),
+            Models.TextTransformation.JsonPretty => JsonReformat(input, indented: true),
+            Models.TextTransformation.UrlEncode => Uri.EscapeDataString(input),
+            Models.TextTransformation.UrlDecode => SafeUrlDecode(input),
+            Models.TextTransformation.Base64Encode => Convert.ToBase64String(Encoding.UTF8.GetBytes(input)),
+            Models.TextTransformation.Base64Decode => SafeBase64Decode(input),
+            Models.TextTransformation.CleanTerminalFormatting => CleanTerminalFormatting(input),
             _ => input,
         };
     }
@@ -542,4 +551,241 @@ public static partial class TextTransformationService
 
     [GeneratedRegex(@"\s{2,}")]
     private static partial Regex MultipleWhitespaceRegex();
+
+    [GeneratedRegex(@"\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1B]*(?:\x07|\x1B\\)|[@-Z\\-_])")]
+    private static partial Regex AnsiEscapeRegex();
+
+    // Only Unicode box-drawing & block-element chars count as "borders". ASCII
+    // '|' / '+' / '-' are *not* borders here — those collide with legitimate
+    // content (Kusto / SQL / shell pipes, options, math, etc.). If the user
+    // pasted a true ASCII-bordered table they should use `BoxTableToHtml`.
+    private static bool IsBoxBorderChar(char c) => c >= '\u2500' && c <= '\u259F';
+
+    private static string JsonQuote(string input)
+    {
+        try
+        {
+            return JsonSerializer.Serialize(input);
+        }
+        catch (JsonException)
+        {
+            // Serializing a plain string into JSON should never throw, but
+            // guard anyway so the user gets the original text rather than an
+            // exception.
+            return input;
+        }
+    }
+
+    // Forgiving JSON-string unquote. If the input is a well-formed JSON string
+    // literal (with or without surrounding quotes / leading whitespace), it
+    // returns the decoded value. If the input is bare text containing escape
+    // sequences (like "a\nb"), it applies the same escape rules. If neither
+    // applies, the input is returned unchanged so the operation is safe.
+    private static string JsonUnquote(string input)
+    {
+        var trimmed = input.Trim();
+        if (trimmed.Length == 0)
+        {
+            return input;
+        }
+
+        // Wrap bare content in quotes when it isn't already a JSON string
+        // literal, so we get one consistent decode path. We escape any
+        // unescaped double quotes inside bare content to keep the literal
+        // well-formed.
+        string toParse;
+        if (trimmed.Length >= 2 && trimmed[0] == '"' && trimmed[^1] == '"')
+        {
+            toParse = trimmed;
+        }
+        else
+        {
+            var sb = new StringBuilder(trimmed.Length + 2);
+            sb.Append('"');
+            for (var i = 0; i < trimmed.Length; i++)
+            {
+                var c = trimmed[i];
+                if (c == '"' && (i == 0 || trimmed[i - 1] != '\\'))
+                {
+                    sb.Append("\\\"");
+                }
+                else
+                {
+                    sb.Append(c);
+                }
+            }
+            sb.Append('"');
+            toParse = sb.ToString();
+        }
+
+        try
+        {
+            var result = JsonSerializer.Deserialize<string>(toParse);
+            return result ?? input;
+        }
+        catch (JsonException)
+        {
+            // Bail out gracefully so a bad payload still returns something
+            // useful for the user.
+            return input;
+        }
+    }
+
+    private static string JsonReformat(string input, bool indented)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(input);
+            return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = indented });
+        }
+        catch (JsonException)
+        {
+            return input;
+        }
+    }
+
+    private static string SafeUrlDecode(string input)
+    {
+        try
+        {
+            return Uri.UnescapeDataString(input);
+        }
+        catch (UriFormatException)
+        {
+            return input;
+        }
+    }
+
+    private static string SafeBase64Decode(string input)
+    {
+        var candidate = CollapseWhitespace(input).Replace(" ", string.Empty, StringComparison.Ordinal);
+        // Base64 strings are 4-byte aligned; pad if the user pasted without padding.
+        var padding = (4 - candidate.Length % 4) % 4;
+        if (padding > 0)
+        {
+            candidate += new string('=', padding);
+        }
+
+        try
+        {
+            var bytes = Convert.FromBase64String(candidate);
+            return Encoding.UTF8.GetString(bytes);
+        }
+        catch (FormatException)
+        {
+            return input;
+        }
+    }
+
+    // Pulls plain text out of CLI / TUI captures wrapped in box-drawing borders
+    // and scrollbar columns (the bordered Kusto / Claude / Copilot CLI panels).
+    // It:
+    //   - strips ANSI color / CSI escape sequences,
+    //   - drops lines that are 100% border characters (the top/bottom rules),
+    //   - removes leading/trailing border + space runs on each line so the
+    //     inner content survives even with double-bordered panels,
+    //   - rtrims each line so the giant whitespace pad columns disappear, and
+    //   - normalizes line endings.
+    private static string CleanTerminalFormatting(string input)
+    {
+        var stripped = AnsiEscapeRegex().Replace(input, string.Empty);
+        var lines = SplitLines(stripped);
+        var output = new System.Collections.Generic.List<string>(lines.Length);
+
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.Replace("\0", string.Empty, StringComparison.Ordinal);
+
+            // Drop pure-border rule lines (the top/bottom edges of a box).
+            if (IsTerminalRule(line))
+            {
+                continue;
+            }
+
+            line = StripTerminalBorders(line);
+            output.Add(line.TrimEnd());
+        }
+
+        // Drop leading/trailing blank lines introduced by stripped borders or
+        // empty padding rows.
+        var start = 0;
+        var end = output.Count;
+        while (start < end && output[start].Length == 0) start++;
+        while (end > start && output[end - 1].Length == 0) end--;
+
+        if (end <= start)
+        {
+            return input;
+        }
+
+        return string.Join('\n', output.GetRange(start, end - start));
+    }
+
+    // Removes leading box-drawing chars and up to two padding spaces (typical
+    // column padding) and any trailing run that contains a box-drawing char
+    // (the scrollbar / right border / `│ │` combo). Leading content
+    // whitespace beyond the 2-space padding budget is preserved so code
+    // indentation survives.
+    private static string StripTerminalBorders(string line)
+    {
+        var start = 0;
+        var sawLeadingBorder = false;
+        while (start < line.Length && IsBoxBorderChar(line[start]))
+        {
+            start++;
+            sawLeadingBorder = true;
+        }
+        if (sawLeadingBorder)
+        {
+            var padBudget = 2;
+            while (start < line.Length && line[start] == ' ' && padBudget > 0)
+            {
+                start++;
+                padBudget--;
+            }
+        }
+
+        // Scan back from the end consuming spaces+borders; only commit the
+        // truncation if at least one border was in that trailing run.
+        var scan = line.Length;
+        var sawTrailingBorder = false;
+        while (scan > start)
+        {
+            var c = line[scan - 1];
+            if (c == ' ')
+            {
+                scan--;
+                continue;
+            }
+            if (IsBoxBorderChar(c))
+            {
+                sawTrailingBorder = true;
+                scan--;
+                continue;
+            }
+            break;
+        }
+        var finalEnd = sawTrailingBorder ? scan : line.Length;
+
+        return line[start..finalEnd];
+    }
+
+    // A "rule" line is one that's made up only of box-drawing characters and
+    // whitespace (with at least one box-drawing char). Plain ASCII rules like
+    // `+----+----+` are intentionally not matched here so they survive into
+    // BoxTableToHtml.
+    private static bool IsTerminalRule(string line)
+    {
+        var sawBorder = false;
+        foreach (var c in line)
+        {
+            if (c == ' ') continue;
+            if (!IsBoxBorderChar(c))
+            {
+                return false;
+            }
+            sawBorder = true;
+        }
+        return sawBorder;
+    }
 }

@@ -74,6 +74,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _suppressEditAutoSave;
     private string _searchText = string.Empty;
     private ContentTypeOption _selectedContentTypeOption = new(null);
+    private readonly System.Collections.Generic.HashSet<ContentType> _selectedContentTypes = new();
     private bool _showFavoritesOnly;
     private bool _showSensitiveOnly;
     private bool _useRegexSearch;
@@ -332,7 +333,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SelectedCustomHotkeyDraft = SettingsCustomHotkeyDrafts.FirstOrDefault();
         });
         ApplyUserScriptCommand = ReactiveCommand.CreateFromTask<UserScript>(ApplyUserScriptAsync);
-        LoadDefaultScriptsCommand = ReactiveCommand.CreateFromTask(LoadDefaultScriptsAsync);
         RunOcrOnSelectedImageCommand = ReactiveCommand.CreateFromTask(RunOcrOnSelectedImageAsync);
         RerunAllEmbeddingsCommand = ReactiveCommand.CreateFromTask(RerunAllEmbeddingsAsync);
         RefreshSemanticCoverageCommand = ReactiveCommand.CreateFromTask(RefreshSemanticCoverageAsync);
@@ -569,8 +569,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ReactiveCommand<UserScript, Unit> ApplyUserScriptCommand { get; }
 
-    public ReactiveCommand<Unit, Unit> LoadDefaultScriptsCommand { get; }
-
     public ReactiveCommand<Unit, Unit> RunOcrOnSelectedImageCommand { get; }
 
     public ReactiveCommand<Unit, Unit> RerunAllEmbeddingsCommand { get; }
@@ -669,6 +667,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public System.Collections.ObjectModel.ObservableCollection<AiMenuEntry> VisibleAiMenuEntries { get; } = new();
 
     public bool IsAiMenuVisible => _aiTransformService.IsConfigured && VisibleAiMenuEntries.Count > 0;
+
+    public bool HasVisibleUserScripts => VisibleUserScripts.Count > 0;
 
     public ReactiveCommand<AiMenuEntry, Unit> InvokeAiMenuEntryCommand { get; }
 
@@ -871,44 +871,85 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool TrySelectContentTypeByShortcut(int shortcutNumber)
     {
-        var index = shortcutNumber - 1;
-        if (index < 0 || index >= ContentTypeOptions.Count)
+        // 1 = All (clear set); 2 = Text, 3 = Image, 4 = RichText, 5 = Files.
+        switch (shortcutNumber)
         {
-            return false;
+            case 1: IsAllTypeSelected = true; return true;
+            case 2: IsTextTypeSelected = !IsTextTypeSelected; return true;
+            case 3: IsImageTypeSelected = !IsImageTypeSelected; return true;
+            case 4: IsRichTextTypeSelected = !IsRichTextTypeSelected; return true;
+            case 5: IsFilesTypeSelected = !IsFilesTypeSelected; return true;
+            default: return false;
         }
-
-        SelectedContentTypeOption = ContentTypeOptions[index];
-        return true;
     }
 
     public bool IsAllTypeSelected
     {
-        get => _selectedContentTypeOption.Value is null;
-        set { if (value) SelectedContentTypeOption = ContentTypeOptions[0]; }
+        get => _selectedContentTypes.Count == 0;
+        set
+        {
+            if (value && _selectedContentTypes.Count > 0)
+            {
+                _selectedContentTypes.Clear();
+                OnContentTypeSelectionChanged();
+            }
+            else if (!value && _selectedContentTypes.Count == 0)
+            {
+                // User clicked "All" while it was already on — treat as a
+                // selection of every type by leaving the empty set (which
+                // already means "all"). Trigger a UI refresh so the toggle
+                // doesn't appear stuck unchecked.
+                this.RaisePropertyChanged(nameof(IsAllTypeSelected));
+            }
+        }
     }
 
     public bool IsTextTypeSelected
     {
-        get => _selectedContentTypeOption.Value == ContentType.Text;
-        set { if (value) SelectedContentTypeOption = ContentTypeOptions[1]; }
+        get => _selectedContentTypes.Contains(ContentType.Text);
+        set => ToggleContentType(ContentType.Text, value);
     }
 
     public bool IsImageTypeSelected
     {
-        get => _selectedContentTypeOption.Value == ContentType.Image;
-        set { if (value) SelectedContentTypeOption = ContentTypeOptions[2]; }
+        get => _selectedContentTypes.Contains(ContentType.Image);
+        set => ToggleContentType(ContentType.Image, value);
     }
 
     public bool IsRichTextTypeSelected
     {
-        get => _selectedContentTypeOption.Value == ContentType.RichText;
-        set { if (value) SelectedContentTypeOption = ContentTypeOptions[3]; }
+        get => _selectedContentTypes.Contains(ContentType.RichText);
+        set => ToggleContentType(ContentType.RichText, value);
     }
 
     public bool IsFilesTypeSelected
     {
-        get => _selectedContentTypeOption.Value == ContentType.Files;
-        set { if (value) SelectedContentTypeOption = ContentTypeOptions[4]; }
+        get => _selectedContentTypes.Contains(ContentType.Files);
+        set => ToggleContentType(ContentType.Files, value);
+    }
+
+    private void ToggleContentType(ContentType type, bool include)
+    {
+        var changed = include
+            ? _selectedContentTypes.Add(type)
+            : _selectedContentTypes.Remove(type);
+        if (changed)
+        {
+            OnContentTypeSelectionChanged();
+        }
+    }
+
+    private void OnContentTypeSelectionChanged()
+    {
+        // Keep the legacy single-value option in sync so any remaining
+        // consumer (e.g. ActiveFilterSummary, persisted-state save) reads
+        // something sensible.
+        _selectedContentTypeOption = _selectedContentTypes.Count == 1
+            ? ContentTypeOptions.FirstOrDefault(o => o.Value == _selectedContentTypes.First()) ?? ContentTypeOptions[0]
+            : ContentTypeOptions[0];
+        this.RaisePropertyChanged(nameof(SelectedContentTypeOption));
+        RaiseContentTypeToggleProperties();
+        RaiseFilterStateProperties();
     }
 
     public bool HasCheckedOrSelectedClip => HasCheckedClips || HasSelectedClip;
@@ -919,9 +960,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (_checkedClipCount > 0)
             {
-                return _checkedTransformableClipCount > 0;
+                if (_checkedTransformableClipCount > 0)
+                {
+                    return true;
+                }
+                // No text targets among the checked clips, but image clips
+                // are also "transformable" via the AI submenu.
+                return GetCheckedOrSelectedClips().Any(static clip =>
+                    clip.IsImageClip && clip.Clip.ContentBytes is { Length: > 0 });
             }
-            return SelectedClip?.CanTransform == true;
+            return SelectedClip?.CanAiTransform == true;
         }
     }
 
@@ -962,6 +1010,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
             UpdateSelectedClipPresentation();
             RaiseSelectionStateProperties();
+            // Selection drives which AI entries / user scripts are eligible
+            // (text vs. image). Without this the visible-entries collection
+            // stays stuck on whatever the previous selection allowed.
+            RefreshVisibleTransformMenus();
         }
     }
 
@@ -1725,9 +1777,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             var parts = new List<string>();
 
-            if (SelectedContentTypeOption.Value is not null)
+            if (_selectedContentTypes.Count > 0)
             {
-                parts.Add(SelectedContentTypeOption.Label);
+                var labels = _selectedContentTypes
+                    .Select(t => ContentTypeOptions.FirstOrDefault(o => o.Value == t)?.Label)
+                    .Where(static l => !string.IsNullOrEmpty(l))!
+                    .Cast<string>()
+                    .ToList();
+                if (labels.Count > 0)
+                {
+                    parts.Add(string.Join(", ", labels));
+                }
             }
 
             if (ShowFavoritesOnly)
@@ -3138,7 +3198,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private static bool MatchesNonTextFilters(ClipEntry clip, ClipSearchFilters filters)
     {
-        if (filters.ContentType.HasValue && clip.ContentType != filters.ContentType.Value) return false;
+        if (filters.ContentTypes is { Count: > 0 } types && !types.Contains(clip.ContentType)) return false;
         if (filters.FavoritesOnly && !clip.IsFavorite) return false;
         if (filters.SensitiveOnly && !clip.IsSensitive) return false;
         if (filters.PastedOnly && !clip.IsPasted) return false;
@@ -3998,22 +4058,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     // Old single-clip script body replaced above; keep old method signature for legacy callers (none left).
 
-    private async Task LoadDefaultScriptsAsync()
-    {
-        var existing = _settingsService.Current.UserScripts?.ToList() ?? new List<UserScript>();
-        var names = new HashSet<string>(existing.Select(s => s.Name), StringComparer.OrdinalIgnoreCase);
-        foreach (var def in ScriptingService.GetDefaultScripts())
-        {
-            if (names.Add(def.Name))
-            {
-                existing.Add(def);
-            }
-        }
-
-        await _settingsService.SaveAsync(_settingsService.Current with { UserScripts = existing });
-        StatusText = "Loaded default scripts";
-    }
-
     private async Task RunOcrOnSelectedImageAsync()
     {
         var clip = SelectedClip;
@@ -4385,7 +4429,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ClipSearchFilters BuildFilters(int offset) => new()
     {
         SearchText = SearchText,
-        ContentType = SelectedContentTypeOption.Value,
+        ContentTypes = _selectedContentTypes.Count == 0
+            ? null
+            : _selectedContentTypes.ToArray(),
         FavoritesOnly = ShowFavoritesOnly,
         SensitiveOnly = ShowSensitiveOnly,
         PastedOnly = ShowPastedOnly,
@@ -4921,8 +4967,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _wholeWordSearch = settings.LastWholeWordSearch;
         _useFuzzyClipSearch = settings.LastUseFuzzyClipSearch;
         _useSemanticClipSearch = settings.LastUseSemanticClipSearch;
-        _selectedContentTypeOption = settings.LastContentTypeFilter is { } savedType
-            ? ContentTypeOptions.FirstOrDefault(o => o.Value == savedType) ?? ContentTypeOptions[0]
+        _selectedContentTypes.Clear();
+        if (settings.LastContentTypeFilters is { Count: > 0 } persistedTypes)
+        {
+            foreach (var t in persistedTypes)
+            {
+                _selectedContentTypes.Add(t);
+            }
+        }
+        else if (settings.LastContentTypeFilter is { } legacy)
+        {
+            _selectedContentTypes.Add(legacy);
+        }
+        _selectedContentTypeOption = _selectedContentTypes.Count == 1
+            ? ContentTypeOptions.FirstOrDefault(o => o.Value == _selectedContentTypes.First()) ?? ContentTypeOptions[0]
             : ContentTypeOptions[0];
 
         if (!notify)
@@ -4956,7 +5014,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             LastWholeWordSearch = WholeWordSearch,
             LastUseFuzzyClipSearch = UseFuzzyClipSearch,
             LastUseSemanticClipSearch = UseSemanticClipSearch,
-            LastContentTypeFilter = SelectedContentTypeOption.Value,
+            LastContentTypeFilter = null,
+            LastContentTypeFilters = _selectedContentTypes.ToArray(),
         };
 
     private Task PersistCurrentFilterStateAsync()
@@ -5258,7 +5317,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         if (!_aiTransformService.IsConfigured)
         {
-            StatusText = "AI is not configured. Enable it in Settings → AI and set an API key (or OPENAI_API_KEY env var).";
+            ReportAiNotConfigured();
             return;
         }
 
@@ -5266,6 +5325,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         AiPromptError = string.Empty;
         AiPromptInput = prefill ?? string.Empty;
         IsAiPromptOpen = true;
+    }
+
+    private void ReportAiNotConfigured()
+    {
+        const string body = "Enable AI in Settings → AI and pick a provider (sign in to Copilot or paste an OpenAI API key) before running AI actions.";
+        System.Diagnostics.Trace.TraceError("AI action attempted while AI is not configured.");
+        StatusText = "AI is not configured. " + body;
+        _notificationService.PublishError("AI not configured", body);
     }
 
     private void CancelAiPrompt()
@@ -6246,14 +6313,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         AiMenuEntries.Clear();
         AiMenuEntries.Add(new AiMenuEntry("Custom prompt…", null, true, AiPresetKind.TextToText));
-        AiMenuEntries.Add(new AiMenuEntry("🖼→📝 Custom prompt…", null, true, AiPresetKind.ImageToText));
-        AiMenuEntries.Add(new AiMenuEntry("🖼→🖼 Custom prompt…", null, true, AiPresetKind.ImageToImage));
+        AiMenuEntries.Add(new AiMenuEntry("Image → Text · Custom prompt…", null, true, AiPresetKind.ImageToText));
+        AiMenuEntries.Add(new AiMenuEntry("Image → Image · Custom prompt…", null, true, AiPresetKind.ImageToImage));
         foreach (var p in settings.AiPresets)
         {
             var label = p.Kind switch
             {
-                AiPresetKind.ImageToText => $"🖼→📝 {p.Name}",
-                AiPresetKind.ImageToImage => $"🖼→🖼 {p.Name}",
+                AiPresetKind.ImageToText => $"Image → Text · {p.Name}",
+                AiPresetKind.ImageToImage => $"Image → Image · {p.Name}",
                 _ => p.Name,
             };
             AiMenuEntries.Add(new AiMenuEntry(label, p, false, p.Kind));
@@ -6331,16 +6398,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             AppSettings next = current;
             bool changed = false;
 
-            if (current.UserScripts?.Count == 0)
-            {
-                var defaults = ScriptingService.GetDefaultScripts().ToList();
-                if (defaults.Count > 0)
-                {
-                    next = next with { UserScripts = defaults };
-                    changed = true;
-                }
-            }
-
             if (current.AiPresets?.Count == 0)
             {
                 var presets = new List<AiPreset>
@@ -6413,7 +6470,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         if (!_aiTransformService.IsConfigured)
         {
-            StatusText = "AI is not configured. Enable it in Settings → AI and set an API key (or OPENAI_API_KEY env var).";
+            ReportAiNotConfigured();
             return;
         }
 
@@ -7150,6 +7207,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 (entry.Kind == AiPresetKind.TextToText && hasTextTargets)
                 || (entry.Kind is AiPresetKind.ImageToText or AiPresetKind.ImageToImage && hasImageTargets)));
         this.RaisePropertyChanged(nameof(IsAiMenuVisible));
+        this.RaisePropertyChanged(nameof(HasVisibleUserScripts));
     }
 
     private static void ReplaceVisibleCollection<T>(ObservableCollection<T> target, IEnumerable<T> source)

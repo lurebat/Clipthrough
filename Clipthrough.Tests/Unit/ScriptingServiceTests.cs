@@ -23,31 +23,24 @@ public class ScriptingServiceTests
     }
 
     [Fact]
-    public async Task EvaluateAsync_default_scripts_round_trip()
+    public async Task EvaluateAsync_caches_compiled_script_across_calls()
     {
         var svc = new ScriptingService();
-        var scripts = ScriptingService.GetDefaultScripts();
-        Assert.NotEmpty(scripts);
 
-        var quote = await svc.EvaluateAsync(FindCode(scripts, "JSON quote"), "hello \"world\"");
-        Assert.Equal("\"hello \\u0022world\\u0022\"", quote);
-
-        var unquoted = await svc.EvaluateAsync(FindCode(scripts, "JSON unquote"), quote);
-        Assert.Equal("hello \"world\"", unquoted);
-
-        var urlEnc = await svc.EvaluateAsync(FindCode(scripts, "URL encode"), "a b&c");
-        Assert.Equal("a%20b%26c", urlEnc);
-
-        var b64 = await svc.EvaluateAsync(FindCode(scripts, "Base64 encode"), "hi");
-        Assert.Equal("aGk=", b64);
+        // First call compiles, second should reuse the cache. We don't assert
+        // timing (flaky) but we do assert the script behaves identically
+        // across repeated invocations.
+        var first = await svc.EvaluateAsync("Input + Input", "ab");
+        var second = await svc.EvaluateAsync("Input + Input", "cd");
+        Assert.Equal("abab", first);
+        Assert.Equal("cdcd", second);
     }
 
-    private static string FindCode(System.Collections.Generic.IReadOnlyList<Models.UserScript> list, string name)
+    [Fact]
+    public async Task EvaluateAsync_surfaces_compilation_errors_as_invalid_operation()
     {
-        foreach (var s in list)
-        {
-            if (s.Name == name) return s.Code;
-        }
-        throw new System.InvalidOperationException($"missing default script {name}");
+        var svc = new ScriptingService();
+        await Assert.ThrowsAsync<System.InvalidOperationException>(
+            () => svc.EvaluateAsync("this is not valid c#", "x"));
     }
 }

@@ -22,4 +22,13 @@ public enum TextTransformation
     RemoveEmptyLines,
     RemoveDuplicateLines,
     BoxTableToHtml,
+    JsonQuote,
+    JsonUnquote,
+    JsonMinify,
+    JsonPretty,
+    UrlEncode,
+    UrlDecode,
+    Base64Encode,
+    Base64Decode,
+    CleanTerminalFormatting,
 }

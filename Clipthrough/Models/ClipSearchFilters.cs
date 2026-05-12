@@ -4,7 +4,11 @@ public sealed class ClipSearchFilters
 {
     public string SearchText { get; init; } = string.Empty;
 
-    public ContentType? ContentType { get; init; }
+    /// <summary>
+    /// Filter clips to one of these content types. <c>null</c> or an empty
+    /// collection means "no filter — include every content type".
+    /// </summary>
+    public System.Collections.Generic.IReadOnlyCollection<ContentType>? ContentTypes { get; init; }
 
     public bool FavoritesOnly { get; init; }
 

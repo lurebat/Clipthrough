@@ -1187,9 +1187,15 @@ public sealed class ClipStoreService : IClipStoreService
             clauses.Add("clips_fts MATCH $search");
         }
 
-        if (filters.ContentType is not null)
+        if (filters.ContentTypes is { Count: > 0 } types)
         {
-            clauses.Add("c.content_type = $contentType");
+            var placeholders = new System.Collections.Generic.List<string>(types.Count);
+            var i = 0;
+            foreach (var _ in types)
+            {
+                placeholders.Add($"$contentType{i++}");
+            }
+            clauses.Add("c.content_type IN (" + string.Join(", ", placeholders) + ")");
         }
 
         if (filters.FavoritesOnly)
@@ -1228,10 +1234,7 @@ public sealed class ClipStoreService : IClipStoreService
             command.Parameters.AddWithValue("$search", BuildFtsExpression(filters.SearchText, filters.UseFuzzy));
         }
 
-        if (filters.ContentType is { } contentType)
-        {
-            command.Parameters.AddWithValue("$contentType", contentType.ToStorageValue());
-        }
+        AddContentTypeParameters(command, filters);
 
         command.Parameters.AddWithValue("$limit", filters.Limit);
         command.Parameters.AddWithValue("$offset", filters.Offset);
@@ -1406,13 +1409,24 @@ public sealed class ClipStoreService : IClipStoreService
             command.Parameters.AddWithValue("$search", BuildFtsExpression(filters.SearchText, filters.UseFuzzy));
         }
 
-        if (filters.ContentType is { } contentType)
-        {
-            command.Parameters.AddWithValue("$contentType", contentType.ToStorageValue());
-        }
+        AddContentTypeParameters(command, filters);
 
         var scalar = await command.ExecuteScalarAsync(cancellationToken);
         return Convert.ToInt32(scalar, CultureInfo.InvariantCulture);
+    }
+
+    private static void AddContentTypeParameters(SqliteCommand command, ClipSearchFilters filters)
+    {
+        if (filters.ContentTypes is not { Count: > 0 } types)
+        {
+            return;
+        }
+
+        var i = 0;
+        foreach (var contentType in types)
+        {
+            command.Parameters.AddWithValue($"$contentType{i++}", contentType.ToStorageValue());
+        }
     }
 
     private static async Task<int> ExecuteScalarIntAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)

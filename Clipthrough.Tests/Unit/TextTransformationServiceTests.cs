@@ -299,4 +299,157 @@ public sealed class TextTransformationServiceTests
     [Fact]
     public void EmptyInput_ReturnsEmpty()
         => Assert.Equal(string.Empty, TextTransformationService.Apply(TextTransformation.UpperCase, string.Empty));
+
+    [Theory]
+    [InlineData("hello", "\"hello\"")]
+    [InlineData("a\nb", "\"a\\nb\"")]
+    [InlineData("with \"quotes\"", "\"with \\u0022quotes\\u0022\"")]
+    public void JsonQuote(string input, string expected)
+        => Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.JsonQuote, input));
+
+    [Theory]
+    [InlineData("\"hello\"", "hello")]
+    [InlineData("  \"a\\nb\"  ", "a\nb")]
+    // Forgiving: bare text without surrounding quotes is still unescaped.
+    [InlineData("a\\nb", "a\nb")]
+    [InlineData("plain text", "plain text")]
+    [InlineData("a\\tb", "a\tb")]
+    public void JsonUnquote(string input, string expected)
+        => Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.JsonUnquote, input));
+
+    [Fact]
+    public void JsonMinify_RemovesWhitespace()
+    {
+        var input = "{\n  \"a\": 1,\n  \"b\": [1, 2, 3]\n}";
+        Assert.Equal("{\"a\":1,\"b\":[1,2,3]}", TextTransformationService.Apply(TextTransformation.JsonMinify, input));
+    }
+
+    [Fact]
+    public void JsonPretty_FormatsCompactJson()
+    {
+        var result = TextTransformationService.Apply(TextTransformation.JsonPretty, "{\"a\":1,\"b\":2}");
+        Assert.Contains("\"a\": 1", result);
+        Assert.Contains("\"b\": 2", result);
+        Assert.Contains("\n", result);
+    }
+
+    [Fact]
+    public void JsonPretty_ReturnsInputUnchangedOnInvalid()
+    {
+        var result = TextTransformationService.Apply(TextTransformation.JsonPretty, "not json");
+        Assert.Equal("not json", result);
+    }
+
+    [Theory]
+    [InlineData("hello world", "hello%20world")]
+    [InlineData("a=b&c", "a%3Db%26c")]
+    public void UrlEncode(string input, string expected)
+        => Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.UrlEncode, input));
+
+    [Theory]
+    [InlineData("hello%20world", "hello world")]
+    [InlineData("a%3Db", "a=b")]
+    public void UrlDecode(string input, string expected)
+        => Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.UrlDecode, input));
+
+    [Fact]
+    public void Base64Encode_RoundTrips()
+    {
+        var encoded = TextTransformationService.Apply(TextTransformation.Base64Encode, "hello");
+        Assert.Equal("aGVsbG8=", encoded);
+        var decoded = TextTransformationService.Apply(TextTransformation.Base64Decode, encoded);
+        Assert.Equal("hello", decoded);
+    }
+
+    [Fact]
+    public void Base64Decode_AcceptsMissingPadding()
+    {
+        // "hello" -> "aGVsbG8=" — drop the padding and confirm it still decodes.
+        Assert.Equal("hello", TextTransformationService.Apply(TextTransformation.Base64Decode, "aGVsbG8"));
+    }
+
+    [Fact]
+    public void Base64Decode_ReturnsInputOnInvalid()
+    {
+        Assert.Equal("not base64!", TextTransformationService.Apply(TextTransformation.Base64Decode, "not base64!"));
+    }
+
+    [Fact]
+    public void CleanTerminalFormatting_StripsBoxBordersAndKeepsInnerContent()
+    {
+        var input =
+            "┌────────────┐\n" +
+            "│  let x = 1; │\n" +
+            "│  let y = 2; │\n" +
+            "└────────────┘\n";
+
+        var expected = "let x = 1;\nlet y = 2;";
+
+        Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.CleanTerminalFormatting, input));
+    }
+
+    [Fact]
+    public void CleanTerminalFormatting_HandlesDoubleBorderAndScrollbarColumn()
+    {
+        // Mirrors the Kusto / Copilot CLI dashboard format with an outer box,
+        // an inner box and a scrollbar character on the right.
+        var input =
+            "│  let lookback = 90d;                                                   │ │\n" +
+            "│  let bin = 1d;                                                         │ │\n" +
+            "│                                                                       │ │\n";
+
+        var expected = "let lookback = 90d;\nlet bin = 1d;";
+
+        Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.CleanTerminalFormatting, input));
+    }
+
+    [Fact]
+    public void CleanTerminalFormatting_StripsAnsiColorEscapes()
+    {
+        var input = "\x1B[31mred\x1B[0m and \x1B[1mbold\x1B[22m text";
+        Assert.Equal("red and bold text", TextTransformationService.Apply(TextTransformation.CleanTerminalFormatting, input));
+    }
+
+    [Fact]
+    public void CleanTerminalFormatting_LeavesUnrelatedTextAlone()
+    {
+        var input = "Just a regular paragraph.\nWith two lines.";
+        Assert.Equal(input, TextTransformationService.Apply(TextTransformation.CleanTerminalFormatting, input));
+    }
+
+    [Fact]
+    public void CleanTerminalFormatting_PreservesKustoPipeOperator()
+    {
+        // Real-world capture from a Copilot CLI / Kusto Workbench panel: each
+        // line is wrapped in Unicode box-drawing borders with a scrollbar
+        // column on the right, and the inside of the box contains real Kusto
+        // code that uses the ASCII `|` pipe operator. The cleaner must strip
+        // the outer borders but leave the pipe alone.
+        var input =
+            "│  let lookback = 90d;                                          │ │\n" +
+            "│  let Incidents =                                              │ │\n" +
+            "│      IcMIncidents                                             │ │\n" +
+            "│      | where TimeCreated > ago(lookback)                      │ │\n" +
+            "│      | where ServiceName in (\"Kusto\",\"Fabric RTI\",\"ADX\")     │ │\n" +
+            "│      | extend Severity = tostring(Severity)                   │";
+
+        var expected =
+            "let lookback = 90d;\n" +
+            "let Incidents =\n" +
+            "    IcMIncidents\n" +
+            "    | where TimeCreated > ago(lookback)\n" +
+            "    | where ServiceName in (\"Kusto\",\"Fabric RTI\",\"ADX\")\n" +
+            "    | extend Severity = tostring(Severity)";
+
+        Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.CleanTerminalFormatting, input));
+    }
+
+    [Fact]
+    public void CleanTerminalFormatting_DoesNotStripAsciiPipeWhenNoUnicodeBorders()
+    {
+        // Pure ASCII content with `|` characters (Kusto / SQL / shell pipes)
+        // must survive untouched — ASCII '|' is not a terminal border.
+        var input = "data\n| project x\n| where y == 1";
+        Assert.Equal(input, TextTransformationService.Apply(TextTransformation.CleanTerminalFormatting, input));
+    }
 }

@@ -6,27 +6,35 @@ Use this reference when the user wants to add, modify, or bind a clip transforma
 
 All values live in the `Clipthrough.Models.TextTransformation` enum and are applied via `Clipthrough.Services.TextTransformationService.Apply(kind, input)`. Pure, no I/O, safe to unit-test.
 
-| Group      | Enum value              | Notes                                                         |
-| ---------- | ----------------------- | ------------------------------------------------------------- |
-| Case       | `UpperCase`             |                                                               |
-| Case       | `LowerCase`             |                                                               |
-| Case       | `TitleCase`             |                                                               |
-| Case       | `SentenceCase`          |                                                               |
-| Case       | `UpperCamelCase`        | PascalCase                                                    |
-| Case       | `LowerCamelCase`        |                                                               |
-| Case       | `FromCamelCase`         | Splits camel/Pascal into space-separated words                |
-| Whitespace | `TrimWhitespace`        | Per-line trim                                                 |
-| Whitespace | `CollapseWhitespace`    | Collapses runs of whitespace inside each line                 |
-| Whitespace | `TabsToSpaces`          | 4-space tab stop                                              |
-| Whitespace | `SpacesToTabs`          | Leading runs of 4 spaces → tab                                |
-| Whitespace | `NormalizeEol`          | Converts CRLF/CR → LF                                         |
-| Lines      | `SortLines`             | Ordinal, ascending                                            |
-| Lines      | `ReverseLines`          |                                                               |
-| Lines      | `RemoveEmptyLines`      |                                                               |
-| Lines      | `RemoveDuplicateLines`  | Keeps first occurrence                                        |
-| Lines      | `LinesToJsonArray`      | One line → one JSON string element                            |
-| Lines      | `JoinWithDelimiter`     | Default `, `; configurable in code only                       |
-| Tables     | `BoxTableToHtml`        | See below                                                     |
+| Group      | Enum value                  | Notes                                                         |
+| ---------- | --------------------------- | ------------------------------------------------------------- |
+| Case       | `UpperCase`                 |                                                               |
+| Case       | `LowerCase`                 |                                                               |
+| Case       | `TitleCase`                 |                                                               |
+| Case       | `SentenceCase`              |                                                               |
+| Case       | `UpperCamelCase`            | PascalCase                                                    |
+| Case       | `LowerCamelCase`            |                                                               |
+| Case       | `FromCamelCase`             | Splits camel/Pascal into space-separated words                |
+| Whitespace | `TrimWhitespace`            | Per-line trim                                                 |
+| Whitespace | `CollapseWhitespace`        | Collapses runs of whitespace inside each line                 |
+| Whitespace | `TabsToSpaces`              | 4-space tab stop                                              |
+| Whitespace | `SpacesToTabs`              | Leading runs of 4 spaces → tab                                |
+| Whitespace | `NormalizeEol`              | Converts CRLF/CR → LF                                         |
+| Whitespace | `CleanTerminalFormatting`   | Strips ANSI escapes + box-drawing borders + scrollbar columns |
+| Lines      | `SortLines`                 | Ordinal, ascending                                            |
+| Lines      | `ReverseLines`              |                                                               |
+| Lines      | `RemoveEmptyLines`          |                                                               |
+| Lines      | `RemoveDuplicateLines`      | Keeps first occurrence                                        |
+| Lines      | `LinesToJsonArray`          | One line → one JSON string element                            |
+| Lines      | `JoinWithDelimiter`         | Default `, `; configurable in code only                       |
+| Encoding   | `JsonQuote`                 | Wraps the input as a JSON string literal                      |
+| Encoding   | `JsonUnquote`               | Forgiving: accepts `"a\nb"`, `a\nb`, or `  "a\nb"  `          |
+| Encoding   | `JsonMinify`                | Returns the input unchanged if not valid JSON                 |
+| Encoding   | `JsonPretty`                | 2-space indent; falls back to input on parse failure          |
+| Encoding   | `UrlEncode` / `UrlDecode`   |                                                               |
+| Encoding   | `Base64Encode`              |                                                               |
+| Encoding   | `Base64Decode`              | Tolerates missing padding; returns input on bad payload       |
+| Tables     | `BoxTableToHtml`            | See below                                                     |
 
 ### `BoxTableToHtml` semantics
 
@@ -62,7 +70,8 @@ Multi-clip batch transforms intentionally skip auto-copy — only the final clip
 
 - Stored on `AppSettings.UserScripts` (`UserScript { Name, Code }`).
 - Executed by `IScriptingService.EvaluateAsync(code, input)` via Roslyn `CSharpScript`. Globals expose `Input` (string). Return value is coerced to string.
-- Defaults are seeded by `ScriptingService.GetDefaultScripts()` (JSON helpers, URL/Base64 encode-decode, etc.) and added by **Edit → Load default scripts**.
+- Compiled `Script<object?>` instances are cached per source string (bounded at 64 entries), so a script's second invocation skips the expensive Roslyn compile.
+- No defaults are seeded — everything that used to live in `GetDefaultScripts()` is now a built-in transform in the `Encoding` group.
 
 ## AI transforms
 

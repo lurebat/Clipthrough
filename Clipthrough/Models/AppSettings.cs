@@ -147,7 +147,19 @@ public sealed record AppSettings
     public bool LastWholeWordSearch { get; init; }
     public bool LastUseFuzzyClipSearch { get; init; }
     public bool LastUseSemanticClipSearch { get; init; }
+
+    /// <summary>
+    /// Legacy single-value content-type filter. Retained for backward
+    /// compatibility — at load time it's promoted into the
+    /// <see cref="LastContentTypeFilters"/> list and cleared on next save.
+    /// </summary>
     public ContentType? LastContentTypeFilter { get; init; }
+
+    /// <summary>
+    /// Content-type filter chips that were active at the end of the last
+    /// session. Empty/null means "no filter — show all content types".
+    /// </summary>
+    public System.Collections.Generic.IReadOnlyList<ContentType> LastContentTypeFilters { get; init; } = System.Array.Empty<ContentType>();
 
     public bool EnableAi { get; init; }
 
@@ -255,7 +267,15 @@ public sealed record AppSettings
         LastWholeWordSearch = LastWholeWordSearch,
         LastUseFuzzyClipSearch = LastUseFuzzyClipSearch,
         LastUseSemanticClipSearch = LastUseSemanticClipSearch,
-        LastContentTypeFilter = LastContentTypeFilter,
+        // Promote any legacy single-value LastContentTypeFilter into the new
+        // multi-value list. Save flow always writes both, but we only emit
+        // the legacy field as long as the list is empty to avoid drift.
+        LastContentTypeFilter = LastContentTypeFilters?.Count > 0 ? null : LastContentTypeFilter,
+        LastContentTypeFilters = (LastContentTypeFilters?.Count > 0
+            ? LastContentTypeFilters
+            : LastContentTypeFilter is { } legacy
+                ? new[] { legacy }
+                : System.Array.Empty<ContentType>()) ?? System.Array.Empty<ContentType>(),
         AiBaseUrl = AiBaseUrl?.Trim() ?? string.Empty,
         AiApiKey = AiApiKey?.Trim() ?? string.Empty,
         AiModel = AiModel?.Trim() ?? string.Empty,

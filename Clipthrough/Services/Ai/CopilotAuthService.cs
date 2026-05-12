@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -19,27 +20,90 @@ public sealed class CopilotAuthService : ICopilotAuthService, IDisposable
 
     private readonly HttpClient _http;
     private readonly bool _ownsHttpClient;
+    private readonly IDataProtectionService? _dataProtection;
+    private readonly string? _tokenPath;
 
     private string? _gitHubToken;
     private string? _copilotToken;
     private DateTimeOffset _copilotTokenExpiry;
 
+    public CopilotAuthService(IDataProtectionService dataProtection)
+        : this(new HttpClient(), ownsHttpClient: true, dataProtection)
+    {
+    }
+
+    // Parameterless ctor kept for legacy callers / DI fallback paths.
     public CopilotAuthService()
-        : this(new HttpClient(), ownsHttpClient: true)
+        : this(new HttpClient(), ownsHttpClient: true, dataProtection: null)
     {
     }
 
     public CopilotAuthService(HttpClient http)
-        : this(http, ownsHttpClient: false)
+        : this(http, ownsHttpClient: false, dataProtection: null)
     {
     }
 
-    private CopilotAuthService(HttpClient http, bool ownsHttpClient)
+    private CopilotAuthService(HttpClient http, bool ownsHttpClient, IDataProtectionService? dataProtection)
     {
         _http = http;
         _ownsHttpClient = ownsHttpClient;
         _http.DefaultRequestHeaders.Accept.Clear();
         _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        _dataProtection = dataProtection;
+        if (dataProtection is not null)
+        {
+            _tokenPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Clipthrough",
+                "copilot-token.bin");
+            TryLoadGitHubToken();
+        }
+    }
+
+    private void TryLoadGitHubToken()
+    {
+        if (_dataProtection is null || _tokenPath is null) return;
+        try
+        {
+            if (!File.Exists(_tokenPath)) return;
+            var protectedBytes = File.ReadAllBytes(_tokenPath);
+            if (protectedBytes.Length == 0) return;
+            var raw = _dataProtection.Unprotect(protectedBytes);
+            var token = System.Text.Encoding.UTF8.GetString(raw);
+            if (!string.IsNullOrEmpty(token))
+            {
+                _gitHubToken = token;
+            }
+        }
+        catch (Exception ex)
+        {
+            // Don't crash startup if the token file is corrupt or unprotect
+            // fails (e.g., user profile changed). Just sign the user out.
+            System.Diagnostics.Trace.TraceWarning($"Failed to load persisted Copilot token: {ex.Message}");
+            try { File.Delete(_tokenPath); } catch { /* best-effort */ }
+        }
+    }
+
+    private void TryPersistGitHubToken()
+    {
+        if (_dataProtection is null || _tokenPath is null) return;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_tokenPath)!);
+            if (string.IsNullOrEmpty(_gitHubToken))
+            {
+                if (File.Exists(_tokenPath)) File.Delete(_tokenPath);
+                return;
+            }
+            var raw = System.Text.Encoding.UTF8.GetBytes(_gitHubToken);
+            var protectedBytes = _dataProtection.Protect(raw);
+            File.WriteAllBytes(_tokenPath, protectedBytes);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"Failed to persist Copilot token: {ex.Message}");
+        }
     }
 
     public bool IsSignedIn => !string.IsNullOrEmpty(_gitHubToken);
@@ -98,6 +162,7 @@ public sealed class CopilotAuthService : ICopilotAuthService, IDisposable
                 _gitHubToken = token.GetString();
                 _copilotToken = null;
                 _copilotTokenExpiry = default;
+                TryPersistGitHubToken();
                 SignedInChanged?.Invoke();
                 return true;
             }
@@ -165,6 +230,7 @@ public sealed class CopilotAuthService : ICopilotAuthService, IDisposable
         _gitHubToken = null;
         _copilotToken = null;
         _copilotTokenExpiry = default;
+        TryPersistGitHubToken();
         SignedInChanged?.Invoke();
     }
 

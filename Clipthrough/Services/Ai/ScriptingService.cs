@@ -28,6 +28,13 @@ public sealed class ScriptingService : IScriptingService
             "System.Text.Json",
             "System.Text.RegularExpressions");
 
+    // Compiling a Roslyn script is expensive (~hundreds of ms first time, tens
+    // of ms subsequently). Cache compiled scripts so each unique source pays
+    // the cost only once per process. Bounded to keep memory in check —
+    // realistic libraries have a few dozen scripts at most.
+    private const int MaxCachedScripts = 64;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Script<object?>> _scriptCache = new();
+
     public sealed class ScriptGlobals
     {
         public string Input { get; init; } = string.Empty;
@@ -40,27 +47,49 @@ public sealed class ScriptingService : IScriptingService
             return input;
         }
 
+        var script = GetOrCreateScript(code);
         var globals = new ScriptGlobals { Input = input ?? string.Empty };
-        var result = await CSharpScript.EvaluateAsync<object?>(code, DefaultOptions, globals, typeof(ScriptGlobals), cancellationToken).ConfigureAwait(false);
-        return result switch
+        try
         {
-            null => string.Empty,
-            string s => s,
-            _ => result.ToString() ?? string.Empty,
-        };
+            var state = await script.RunAsync(globals, cancellationToken).ConfigureAwait(false);
+            return state.ReturnValue switch
+            {
+                null => string.Empty,
+                string s => s,
+                var other => other.ToString() ?? string.Empty,
+            };
+        }
+        catch (Microsoft.CodeAnalysis.Scripting.CompilationErrorException ex)
+        {
+            // Surface the first diagnostic — it's the most actionable for the user.
+            throw new InvalidOperationException(ex.Diagnostics.FirstOrDefault()?.GetMessage() ?? ex.Message, ex);
+        }
     }
 
-    public static IReadOnlyList<Models.UserScript> GetDefaultScripts() => new[]
+    private Script<object?> GetOrCreateScript(string code)
     {
-        new Models.UserScript { Name = "JSON quote", Code = "JsonSerializer.Serialize(Input)" },
-        new Models.UserScript { Name = "JSON unquote", Code = "JsonSerializer.Deserialize<string>(Input) ?? string.Empty" },
-        new Models.UserScript { Name = "JSON minify", Code = "JsonSerializer.Serialize(JsonSerializer.Deserialize<JsonElement>(Input))" },
-        new Models.UserScript { Name = "JSON pretty", Code = "JsonSerializer.Serialize(JsonSerializer.Deserialize<JsonElement>(Input), new JsonSerializerOptions { WriteIndented = true })" },
-        new Models.UserScript { Name = "URL encode", Code = "Uri.EscapeDataString(Input)" },
-        new Models.UserScript { Name = "URL decode", Code = "Uri.UnescapeDataString(Input)" },
-        new Models.UserScript { Name = "Base64 encode", Code = "Convert.ToBase64String(Encoding.UTF8.GetBytes(Input))" },
-        new Models.UserScript { Name = "Base64 decode", Code = "Encoding.UTF8.GetString(Convert.FromBase64String(Input))" },
-        new Models.UserScript { Name = "Collapse whitespace", Code = "Regex.Replace(Input, @\"\\s+\", \" \").Trim()" },
-        new Models.UserScript { Name = "Reverse lines", Code = "string.Join(Environment.NewLine, Input.Split(new[]{'\\n'}).Reverse().Select(l => l.TrimEnd('\\r')))" },
-    };
+        if (_scriptCache.TryGetValue(code, out var existing))
+        {
+            return existing;
+        }
+
+        var script = CSharpScript.Create<object?>(code, DefaultOptions, typeof(ScriptGlobals));
+        // Forcing Compile here surfaces compilation errors immediately and
+        // means subsequent RunAsync calls skip the compile step.
+        script.Compile();
+
+        if (_scriptCache.Count >= MaxCachedScripts)
+        {
+            // Cheap eviction: drop one entry. Avoids unbounded growth without
+            // adding an LRU dependency. Realistic libraries stay below the cap.
+            foreach (var key in _scriptCache.Keys)
+            {
+                _scriptCache.TryRemove(key, out _);
+                break;
+            }
+        }
+
+        _scriptCache[code] = script;
+        return script;
+    }
 }
