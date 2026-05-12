@@ -273,16 +273,28 @@
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label"
                                        Text="{Binding SettingsDatabasePasswordLabel}" />
+                            <TextBlock Classes="body-muted"
+                                       FontSize="11"
+                                       TextWrapping="Wrap"
+                                       Text="The password Clipthrough uses to open the database. Editing this only updates what is stored — the database itself is NOT re-encrypted. Use 'Re-encrypt database…' below to actually change the database password." />
                             <TextBox Text="{Binding SettingsDatabasePassword, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                      PasswordChar="*"
                                      RevealPassword="{Binding IsDatabasePasswordVisible}" />
                             <CheckBox Content="{Binding SettingsShowPasswordLabel}"
                                       IsChecked="{Binding IsDatabasePasswordVisible}" />
+                            <CheckBox Content="Remember password (saved as plaintext in storage.json)"
+                                      IsChecked="{Binding SettingsRememberDatabasePassword, Mode=TwoWay}" />
                             <TextBlock Classes="body-muted"
                                        Foreground="{DynamicResource DangerBrush}"
                                        TextWrapping="Wrap"
-                                       IsVisible="{Binding SettingsDatabasePassword, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                       IsVisible="{Binding IsRememberPasswordWarningVisible}"
                                        Text="{Binding SettingsDatabasePasswordWarningText}" />
+                            <Button Classes="secondary"
+                                    HorizontalAlignment="Left"
+                                    Margin="0,6,0,0"
+                                    Click="OnReencryptClick"
+                                    IsEnabled="{Binding StorageDatabaseExists}"
+                                    Content="Re-encrypt database…" />
                         </StackPanel>
 
                         <TextBlock Classes="body-muted"

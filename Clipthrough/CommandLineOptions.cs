@@ -24,6 +24,27 @@ public static class CommandLineOptions
     /// </summary>
     public static bool LogPopupTimings { get; private set; }
 
+    /// <summary>
+    /// Set when the user passed <c>--help</c> / <c>-h</c>. <see cref="Program.Main"/>
+    /// prints the usage block and exits before any other startup work runs.
+    /// </summary>
+    public static bool ShowHelp { get; private set; }
+
+    public const string UsageText =
+        "Clipthrough — clipboard manager\n" +
+        "\n" +
+        "Usage:\n" +
+        "  Clipthrough.exe [options]\n" +
+        "\n" +
+        "Options:\n" +
+        "  -h, --help                 Show this help and exit.\n" +
+        "  -p, --password <value>     Open the encrypted database with this password\n" +
+        "                             without prompting. Intended for development only —\n" +
+        "                             the value leaks into the process listing.\n" +
+        "      --log-popup-timings    Emit Trace lines around the popup show/hide and\n" +
+        "                             refresh pipeline so freezes can be diagnosed.\n" +
+        "                             Alias: --log-timings.\n";
+
     public static void Parse(string[]? args)
     {
         if (args is null || args.Length == 0)
@@ -36,6 +57,14 @@ public static class CommandLineOptions
             var arg = args[i];
             if (string.IsNullOrEmpty(arg))
             {
+                continue;
+            }
+
+            if (string.Equals(arg, "--help", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(arg, "-h", StringComparison.Ordinal)
+                || string.Equals(arg, "/?", StringComparison.Ordinal))
+            {
+                ShowHelp = true;
                 continue;
             }
 

@@ -1358,6 +1358,15 @@
                                                    FontSize="11" />
                                         <CheckBox Content="{Binding SettingsShowPasswordLabel}"
                                                   IsChecked="{Binding IsDatabasePasswordVisible}" />
+                                        <CheckBox Content="Remember password (saved as plaintext in storage.json)"
+                                                  IsChecked="{Binding SettingsRememberDatabasePassword, Mode=TwoWay}"
+                                                  IsVisible="{Binding SettingsDatabasePassword, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                        <TextBlock Classes="body-muted"
+                                                   Foreground="{DynamicResource DangerBrush}"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding IsRememberPasswordWarningVisible}"
+                                                   Text="{Binding SettingsDatabasePasswordWarningText}" />
                                         <TextBlock Text="Warning: if you forget this password, your database cannot be recovered."
                                                    Classes="body-muted"
                                                    FontSize="11"

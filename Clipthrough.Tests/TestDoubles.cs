@@ -40,12 +40,23 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
         return Task.CompletedTask;
     }
 
+    public Task RekeyAsync(string currentPassword, string newPassword, bool rememberNewPassword, CancellationToken cancellationToken = default)
+    {
+        Current = (Current with
+        {
+            DatabasePassword = newPassword ?? string.Empty,
+            RememberPassword = rememberNewPassword,
+        }).Normalize();
+        return Task.CompletedTask;
+    }
+
     public void SetInMemoryPassword(string password)
     {
         Current = new StorageOptions
         {
             DatabasePath = Current.DatabasePath,
             DatabasePassword = password,
+            RememberPassword = Current.RememberPassword,
         }.Normalize();
     }
 

@@ -13,6 +13,13 @@ public sealed record StorageOptions
 
     public string DatabasePassword { get; init; } = string.Empty;
 
+    /// <summary>
+    /// When true, the password is persisted to storage.json so the database
+    /// auto-unlocks on next launch. When false, the password lives only in
+    /// memory for the current session.
+    /// </summary>
+    public bool RememberPassword { get; init; }
+
     public static StorageOptions Default { get; } = new();
 
     public StorageOptions Normalize()
@@ -25,6 +32,7 @@ public sealed record StorageOptions
         {
             DatabasePath = normalizedPath,
             DatabasePassword = DatabasePassword?.Trim() ?? string.Empty,
+            RememberPassword = RememberPassword,
         };
     }
 

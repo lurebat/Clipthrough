@@ -1,0 +1,70 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Clipthrough.Views.RekeyDialog"
+        Title="Re-encrypt database"
+        Width="460"
+        SizeToContent="Height"
+        CanResize="False"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource AppBackgroundBrush}">
+    <Grid RowDefinitions="Auto,Auto,Auto"
+          RowSpacing="14"
+          Margin="20">
+        <StackPanel Grid.Row="0" Spacing="6">
+            <TextBlock Classes="hero-title"
+                       FontSize="16"
+                       Text="Re-encrypt database with a new password" />
+            <TextBlock Classes="body-muted"
+                       TextWrapping="Wrap"
+                       Text="This rewrites the SQLite key for the database file. Enter the current password (leave blank if the database is unencrypted) and the new password to use." />
+        </StackPanel>
+
+        <StackPanel Grid.Row="1" Spacing="10">
+            <StackPanel Spacing="4">
+                <TextBlock Classes="detail-label" Text="Current password" />
+                <TextBox Name="CurrentPasswordBox"
+                         PasswordChar="*"
+                         RevealPassword="{Binding #ShowPasswordsBox.IsChecked, FallbackValue=False}" />
+            </StackPanel>
+            <StackPanel Spacing="4">
+                <TextBlock Classes="detail-label" Text="New password" />
+                <TextBox Name="NewPasswordBox"
+                         PasswordChar="*"
+                         RevealPassword="{Binding #ShowPasswordsBox.IsChecked, FallbackValue=False}" />
+            </StackPanel>
+            <StackPanel Spacing="4">
+                <TextBlock Classes="detail-label" Text="Confirm new password" />
+                <TextBox Name="ConfirmPasswordBox"
+                         PasswordChar="*"
+                         RevealPassword="{Binding #ShowPasswordsBox.IsChecked, FallbackValue=False}" />
+            </StackPanel>
+            <CheckBox Name="ShowPasswordsBox" Content="Show passwords" />
+            <CheckBox Name="RememberPasswordBox"
+                      Content="Remember new password (saved as plaintext in storage.json)" />
+            <TextBlock Name="WarningText"
+                       Classes="body-muted"
+                       Foreground="{DynamicResource DangerBrush}"
+                       TextWrapping="Wrap"
+                       Text="⚠ The new password will be saved as plaintext in storage.json. Anyone with access to your user profile can read it." />
+            <TextBlock Name="ErrorText"
+                       Foreground="{DynamicResource DangerBrush}"
+                       TextWrapping="Wrap"
+                       IsVisible="False" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="2"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Spacing="8">
+            <Button Name="CancelButton"
+                    Classes="secondary compact"
+                    Content="Cancel"
+                    Click="OnCancelClick" />
+            <Button Name="ApplyButton"
+                    Classes="primary compact"
+                    Content="Re-encrypt"
+                    Click="OnApplyClick" />
+        </StackPanel>
+    </Grid>
+</Window>

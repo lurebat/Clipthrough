@@ -136,6 +136,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _passwordPromptError = string.Empty;
     private bool _isPasswordPromptPasswordVisible;
     private bool _isDatabasePasswordVisible;
+    private bool _settingsRememberDatabasePassword;
     private Task _queuedRefreshTask = Task.CompletedTask;
     private long? _queuedRefreshPreferredSelectionId;
     private string _settingsToggleRegexHotkey = AppSettings.Default.ToggleRegexHotkey;
@@ -2600,6 +2601,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             this.RaiseAndSetIfChanged(ref _settingsDatabasePassword, value);
             this.RaisePropertyChanged(nameof(IsPasswordMismatchVisible));
             this.RaisePropertyChanged(nameof(IsPendingPlaintextEncryptionPasswordChange));
+            this.RaisePropertyChanged(nameof(IsRememberPasswordWarningVisible));
         }
     }
 
@@ -2618,13 +2620,47 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         && !string.Equals(SettingsDatabasePassword, SettingsDatabasePasswordConfirm, StringComparison.Ordinal);
 
     /// <summary>
-    /// True when Save is about to persist a non-empty encryption password that
-    /// differs from the currently-active one. Used to gate the plaintext-storage
-    /// confirmation dialog.
+    /// True when Save is about to persist a non-empty encryption password as
+    /// plaintext to disk (i.e. the user enabled "Remember password" and the
+    /// stored value would change). Drives the plaintext-storage confirmation
+    /// dialog.
     /// </summary>
     public bool IsPendingPlaintextEncryptionPasswordChange =>
-        !string.IsNullOrEmpty(SettingsDatabasePassword)
-        && !string.Equals(SettingsDatabasePassword, _storageOptionsService.Current.DatabasePassword, StringComparison.Ordinal);
+        SettingsRememberDatabasePassword
+        && !string.IsNullOrEmpty(SettingsDatabasePassword)
+        && (!_storageOptionsService.Current.RememberPassword
+            || !string.Equals(SettingsDatabasePassword, _storageOptionsService.Current.DatabasePassword, StringComparison.Ordinal));
+
+    public bool SettingsRememberDatabasePassword
+    {
+        get => _settingsRememberDatabasePassword;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _settingsRememberDatabasePassword, value);
+            this.RaisePropertyChanged(nameof(IsPendingPlaintextEncryptionPasswordChange));
+            this.RaisePropertyChanged(nameof(IsRememberPasswordWarningVisible));
+        }
+    }
+
+    /// <summary>
+    /// True when the inline plaintext-storage warning under the password field
+    /// should be visible: user typed a password and ticked "Remember".
+    /// </summary>
+    public bool IsRememberPasswordWarningVisible =>
+        SettingsRememberDatabasePassword && !string.IsNullOrEmpty(SettingsDatabasePassword);
+
+    public bool StorageDatabaseExists => _storageOptionsService.DatabaseExists;
+
+    public IStorageOptionsService GetStorageOptionsService() => _storageOptionsService;
+
+    public void NotifyStorageOptionsChanged()
+    {
+        SettingsDatabasePassword = _storageOptionsService.Current.DatabasePassword;
+        SettingsDatabasePasswordConfirm = _storageOptionsService.Current.DatabasePassword;
+        SettingsRememberDatabasePassword = _storageOptionsService.Current.RememberPassword;
+        StatusText = "Database re-encrypted.";
+        this.RaisePropertyChanged(nameof(StorageDatabaseExists));
+    }
 
     public bool IsDatabasePasswordVisible
     {
@@ -5906,6 +5942,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 DatabasePath = SettingsDatabasePath,
                 DatabasePassword = SettingsDatabasePassword,
+                RememberPassword = SettingsRememberDatabasePassword,
             }.Normalize();
         }
         catch (Exception ex)
@@ -6070,6 +6107,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsDatabasePath = _storageOptionsService.Current.DatabasePath;
         SettingsDatabasePassword = _storageOptionsService.Current.DatabasePassword;
         SettingsDatabasePasswordConfirm = _storageOptionsService.Current.DatabasePassword;
+        SettingsRememberDatabasePassword = _storageOptionsService.Current.RememberPassword;
         SettingsCloseToTray = settings.CloseToTray;
         SettingsMinimizeToTray = settings.MinimizeToTray;
         SettingsStartWithWindows = settings.StartWithWindows;

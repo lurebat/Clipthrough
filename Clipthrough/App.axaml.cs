@@ -41,6 +41,7 @@ public partial class App : Application
     private bool _isExitRequested;
     private bool _hasShownTrayNotification;
     private int _incrementalPasteOffset = 0;
+    private bool _firstOpenComplete;
     private readonly System.Collections.Generic.List<Avalonia.Input.KeyBinding> _customLocalKeyBindings = new();
 
     public App()
@@ -178,11 +179,24 @@ public partial class App : Application
 
     private void OnMainWindowOpened(object? sender, EventArgs e)
     {
-        UpdateGlobalHotKeyRegistration();
         if (_mainWindow?.DataContext is MainWindowViewModel vm)
         {
             vm.SetMainWindowVisible(true);
         }
+
+        // Avalonia fires `Opened` on every Show() after a Hide(). The hotkey
+        // registration, update check, and remote-API kick-off are one-time
+        // startup concerns — running them on every popup costs ~3s because
+        // RegisterHotKey is synchronous and we now register a dozen filter
+        // hotkeys by default. Settings changes already re-apply hotkeys via
+        // OnSettingsChanged, so guarding by _firstOpenComplete is safe.
+        if (_firstOpenComplete)
+        {
+            return;
+        }
+
+        _firstOpenComplete = true;
+        UpdateGlobalHotKeyRegistration();
         _ = KickOffUpdateCheckAsync();
         _ = KickOffRemoteApiAsync();
     }

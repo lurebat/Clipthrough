@@ -17,12 +17,19 @@ public sealed class StorageOptionsService : IStorageOptionsService
     private readonly IDataProtectionService _dataProtection;
 
     public StorageOptionsService(IDataProtectionService dataProtection)
-    {
-        _dataProtection = dataProtection;
-        _configPath = Path.Combine(
+        : this(dataProtection, Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Clipthrough",
-            "storage.json");
+            "storage.json"))
+    {
+    }
+
+    // Test-only seam: allow the config path to be overridden so tests don't
+    // pollute the user's real storage.json.
+    public StorageOptionsService(IDataProtectionService dataProtection, string configPath)
+    {
+        _dataProtection = dataProtection;
+        _configPath = configPath;
 
         Current = LoadFromDisk();
     }
@@ -73,14 +80,9 @@ public sealed class StorageOptionsService : IStorageOptionsService
         try
         {
             var previous = Current;
-            if (string.Equals(previous.DatabasePath, normalized.DatabasePath, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(previous.DatabasePassword, normalized.DatabasePassword, StringComparison.Ordinal))
-            {
-                await SaveToDiskAsync(normalized, cancellationToken);
-                Current = normalized;
-                return;
-            }
-
+            // Path move still copies the DB. Same-path password edits are now
+            // metadata-only — they no longer invoke the rekey pragma. Use
+            // RekeyAsync to actually re-encrypt.
             await ApplyStorageChangesAsync(previous, normalized, cancellationToken);
             await SaveToDiskAsync(normalized, cancellationToken);
             Current = normalized;
@@ -102,32 +104,69 @@ public sealed class StorageOptionsService : IStorageOptionsService
             return;
         }
 
-        if (!string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase))
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
-            if (File.Exists(newPath))
+            // Same path. Password edits no longer trigger rekey here — that's
+            // explicit through RekeyAsync.
+            return;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
+        if (File.Exists(newPath))
+        {
+            File.Delete(newPath);
+        }
+
+        await using var sourceConnection = OpenConnection(previous);
+        await using var targetConnection = OpenConnection(next);
+        await sourceConnection.OpenAsync(cancellationToken);
+        await targetConnection.OpenAsync(cancellationToken);
+        sourceConnection.BackupDatabase(targetConnection);
+    }
+
+    public async Task RekeyAsync(string currentPassword, string newPassword, bool rememberNewPassword, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var current = Current;
+            var openWith = current with { DatabasePassword = currentPassword ?? string.Empty };
+
+            await using var connection = OpenConnection(openWith);
+            try
             {
-                File.Delete(newPath);
+                await connection.OpenAsync(cancellationToken);
+                // Ensure the supplied password actually decrypts the DB before rekeying.
+                await using (var verify = connection.CreateCommand())
+                {
+                    verify.CommandText = "SELECT count(*) FROM sqlite_master;";
+                    await verify.ExecuteScalarAsync(cancellationToken);
+                }
+            }
+            catch (SqliteException ex)
+            {
+                throw new InvalidOperationException("Current password is incorrect.", ex);
             }
 
-            await using var sourceConnection = OpenConnection(previous);
-            await using var targetConnection = OpenConnection(next);
-            await sourceConnection.OpenAsync(cancellationToken);
-            await targetConnection.OpenAsync(cancellationToken);
-            sourceConnection.BackupDatabase(targetConnection);
-            return;
-        }
+            await using (var rekey = connection.CreateCommand())
+            {
+                rekey.CommandText = $"PRAGMA rekey = '{EscapeSqlLiteral(newPassword ?? string.Empty)}';";
+                await rekey.ExecuteNonQueryAsync(cancellationToken);
+            }
 
-        if (string.Equals(previous.DatabasePassword, next.DatabasePassword, StringComparison.Ordinal))
+            var updated = (current with
+            {
+                DatabasePassword = newPassword ?? string.Empty,
+                RememberPassword = rememberNewPassword,
+            }).Normalize();
+
+            await SaveToDiskAsync(updated, cancellationToken);
+            Current = updated;
+        }
+        finally
         {
-            return;
+            _gate.Release();
         }
-
-        await using var connection = OpenConnection(previous);
-        await connection.OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = $"PRAGMA rekey = '{EscapeSqlLiteral(next.DatabasePassword)}';";
-        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private SqliteConnection OpenConnection(StorageOptions options)
@@ -154,6 +193,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
         {
             DatabasePath = Current.DatabasePath,
             DatabasePassword = password,
+            RememberPassword = Current.RememberPassword,
         }.Normalize();
     }
 
@@ -173,10 +213,18 @@ public sealed class StorageOptionsService : IStorageOptionsService
                 return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize());
             }
 
+            // Back-compat: v0.8.0 wrote DatabasePassword without a RememberPassword
+            // field. Treat any persisted password as "remember on" so existing
+            // installs keep auto-unlocking.
+            var rememberPassword = stored.RememberPassword
+                ?? !string.IsNullOrEmpty(stored.DatabasePassword);
+            var loadedPassword = rememberPassword ? (stored.DatabasePassword ?? string.Empty) : string.Empty;
+
             var options = new StorageOptions
             {
                 DatabasePath = stored.DatabasePath ?? StorageOptions.GetDefaultDatabasePath(),
-                DatabasePassword = stored.DatabasePassword ?? string.Empty,
+                DatabasePassword = loadedPassword,
+                RememberPassword = rememberPassword,
             }.Normalize();
             return EnsureLegacyDefaultDatabaseCopied(options);
         }
@@ -240,7 +288,10 @@ public sealed class StorageOptionsService : IStorageOptionsService
         var document = new StorageOptionsDocument
         {
             DatabasePath = options.DatabasePath,
-            DatabasePassword = string.IsNullOrEmpty(options.DatabasePassword) ? null : options.DatabasePassword,
+            RememberPassword = options.RememberPassword,
+            DatabasePassword = options.RememberPassword && !string.IsNullOrEmpty(options.DatabasePassword)
+                ? options.DatabasePassword
+                : null,
         };
 
         await File.WriteAllTextAsync(_configPath, JsonSerializer.Serialize(document, JsonOptions), cancellationToken);
@@ -253,8 +304,16 @@ public sealed class StorageOptionsService : IStorageOptionsService
         public string? DatabasePath { get; init; }
 
         /// <summary>
-        /// Database password stored as plaintext to enable automatic unlocking. The
-        /// settings UI surfaces a warning about this trade-off.
+        /// True when the user opted in to persist the database password as
+        /// plaintext so the DB auto-unlocks on next launch.
+        /// </summary>
+        public bool? RememberPassword { get; init; }
+
+        /// <summary>
+        /// Database password stored as plaintext (only when
+        /// <see cref="RememberPassword"/> is true). The settings UI surfaces a
+        /// warning about this trade-off and gates writing it on an explicit
+        /// confirmation dialog.
         /// </summary>
         public string? DatabasePassword { get; init; }
     }

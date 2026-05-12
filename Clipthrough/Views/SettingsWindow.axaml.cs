@@ -52,6 +52,21 @@ public partial class SettingsWindow : Window
         viewModel.SaveSettingsCommand.Execute().Subscribe();
     }
 
+    private async void OnReencryptClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        var storage = viewModel.GetStorageOptionsService();
+        var ok = await Views.RekeyDialog.ShowAsync(this, storage);
+        if (ok)
+        {
+            viewModel.NotifyStorageOptionsChanged();
+        }
+    }
+
     private void OnCancelClick(object? sender, RoutedEventArgs e)
     {
         if (DataContext is MainWindowViewModel viewModel)

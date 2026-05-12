@@ -19,4 +19,15 @@ public interface IStorageOptionsService
     /// Used after validating the password at unlock time.
     /// </summary>
     void SetInMemoryPassword(string password);
+
+    /// <summary>
+    /// Re-encrypts the database file in place. Opens the database with
+    /// <paramref name="currentPassword"/>, runs the rekey pragma to set the
+    /// new key, and updates <see cref="Current"/> with the new password.
+    /// The new password is persisted to disk only when
+    /// <paramref name="rememberNewPassword"/> is <c>true</c>.
+    /// Throws <see cref="System.InvalidOperationException"/> when
+    /// <paramref name="currentPassword"/> does not unlock the database.
+    /// </summary>
+    Task RekeyAsync(string currentPassword, string newPassword, bool rememberNewPassword, CancellationToken cancellationToken = default);
 }

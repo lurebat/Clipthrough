@@ -22,6 +22,12 @@ sealed class Program
         Clipthrough.Diagnostics.TraceConfiguration.Initialize();
         CommandLineOptions.Parse(args);
 
+        if (CommandLineOptions.ShowHelp)
+        {
+            Console.Write(CommandLineOptions.UsageText);
+            return;
+        }
+
         // Squirrel/Velopack hooks must run even if another copy holds the mutex (install/update may
         // spawn short-lived processes with --squirrel-* arguments). Let Velopack handle those first.
         try
