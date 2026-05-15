@@ -182,6 +182,10 @@ public partial class App : Application
         if (_mainWindow?.DataContext is MainWindowViewModel vm)
         {
             vm.SetMainWindowVisible(true);
+            if (_mainWindow is MainWindow mainWindow)
+            {
+                mainWindow.FocusClipOnNextActivation();
+            }
         }
 
         // Avalonia fires `Opened` on every Show() after a Hide(). The hotkey
@@ -808,6 +812,10 @@ public partial class App : Application
                 // screen before any refresh apply runs on the UI thread. If
                 // clips changed while hidden, the VM kicks off one refresh.
                 vm.SetMainWindowVisible(true);
+                if (window is MainWindow mainWindow)
+                {
+                    mainWindow.FocusClipOnNextActivation();
+                }
             }
 
             if (sw is not null)

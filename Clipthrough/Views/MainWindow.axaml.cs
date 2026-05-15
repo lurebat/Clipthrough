@@ -24,7 +24,10 @@ public partial class MainWindow : Window
     private SessionLogsWindow? m_sessionLogsWindow;
     private MainWindowViewModel? m_subscribedViewModel;
     private SettingsWindow? m_settingsWindow;
+    private AiPromptWindow? m_aiPromptWindow;
     private ISystemInteractionService? m_systemInteractionService;
+    private bool m_focusClipOnNextActivation;
+    private bool m_focusClipOnNextSelectionChange;
 
     public MainWindow() : this(null) { }
 
@@ -43,7 +46,7 @@ public partial class MainWindow : Window
     {
         if (m_clipListScrollViewer is not null)
         {
-            FocusSearchBox();
+            FocusInitialPopupTarget();
             return;
         }
 
@@ -71,10 +74,17 @@ public partial class MainWindow : Window
             menu.GotFocus += OnTopMenuGotFocus;
         }
 
-        FocusSearchBox();
+        FocusInitialPopupTarget();
     }
 
-    private void OnActivated(object? sender, EventArgs e) => FocusSearchBox();
+    private void OnActivated(object? sender, EventArgs e)
+    {
+        if (m_focusClipOnNextActivation)
+        {
+            m_focusClipOnNextActivation = false;
+            FocusInitialPopupTarget();
+        }
+    }
 
     /// <summary>
     /// Lazily connects the clip list scroll viewer for scroll-to-load.
@@ -126,6 +136,13 @@ public partial class MainWindow : Window
             m_settingsWindow = null;
         }
 
+        if (m_aiPromptWindow is not null)
+        {
+            m_aiPromptWindow.Closing -= OnAiPromptWindowClosing;
+            try { m_aiPromptWindow.Close(); } catch { }
+            m_aiPromptWindow = null;
+        }
+
         if (m_clipListScrollViewer is null)
         {
             if (m_clipsListBox is not null)
@@ -172,6 +189,12 @@ public partial class MainWindow : Window
     {
         if (DataContext is not MainWindowViewModel viewModel)
         {
+            return;
+        }
+
+        if (TryRecoverFromTopMenuFocus(viewModel, e))
+        {
+            e.Handled = true;
             return;
         }
 
@@ -234,6 +257,53 @@ public partial class MainWindow : Window
         {
             e.Handled = true;
         }
+    }
+
+    private bool TryRecoverFromTopMenuFocus(MainWindowViewModel viewModel, KeyEventArgs e)
+    {
+        if (e.Key is not (Key.Up or Key.Down))
+        {
+            return false;
+        }
+
+        var modifiers = e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Meta);
+        if (modifiers != KeyModifiers.None)
+        {
+            return false;
+        }
+
+        if (e.Source is not Avalonia.Visual source
+            || source.GetSelfAndVisualAncestors().OfType<Menu>().FirstOrDefault(menu => menu.Name == "TopMenu") is not { } menu)
+        {
+            return false;
+        }
+
+        foreach (var item in menu.Items.OfType<MenuItem>())
+        {
+            item.IsSubMenuOpen = false;
+        }
+
+        if (viewModel.IsSettingsOpen || viewModel.IsWelcomeOpen || viewModel.IsPasswordPromptOpen
+            || viewModel.IsAiPromptOpen || viewModel.SessionLogs.IsOpen)
+        {
+            return false;
+        }
+
+        if (viewModel.SelectedClip is null)
+        {
+            viewModel.SelectedClip = viewModel.GetDefaultAutoSelectedClip();
+        }
+
+        if (viewModel.SelectedClip is null)
+        {
+            FocusSearchBox();
+        }
+        else
+        {
+            FocusSelectedClipInList();
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -447,8 +517,6 @@ public partial class MainWindow : Window
     /// <summary>
     /// Keyboard shortcuts when the clip list is focused:
     /// Delete — delete selected clip
-    /// F — toggle favorite
-    /// P — toggle pin
     /// Space — toggle checkbox for multi-selection
     /// </summary>
     private bool TryHandleClipListShortcuts(MainWindowViewModel viewModel, KeyEventArgs e)
@@ -493,12 +561,6 @@ public partial class MainWindow : Window
         {
             case Key.Delete:
                 viewModel.DeleteSelectedCommand.Execute().Subscribe();
-                return true;
-            case Key.F:
-                viewModel.ToggleFavoriteCommand.Execute().Subscribe();
-                return true;
-            case Key.P:
-                viewModel.TogglePinCommand.Execute().Subscribe();
                 return true;
             case Key.Space:
                 viewModel.ToggleClipCheckedSelection(viewModel.SelectedClip);
@@ -904,7 +966,7 @@ public partial class MainWindow : Window
         var controls = new System.Collections.Generic.List<Control>();
         var showTextTransforms = vm?.HasTextTransformTarget ?? false;
         var showScripts = vm?.VisibleUserScripts.Count > 0;
-        var showAi = vm?.VisibleAiMenuEntries.Count > 0;
+        var showAi = vm?.IsAiMenuVisible == true;
 
         if (showTextTransforms)
         {
@@ -1154,7 +1216,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        FocusSearchBox();
+        FocusInitialPopupTarget();
     }
 
     private async void OnSearchBoxGotFocus(object? sender, FocusChangedEventArgs e)
@@ -1218,6 +1280,7 @@ public partial class MainWindow : Window
             m_subscribedViewModel.HelpRequested += OnHelpRequested;
             m_subscribedViewModel.AboutRequested += OnAboutRequested;
             UpdateSettingsWindowVisibility(viewModel.IsSettingsOpen);
+            UpdateAiPromptWindowVisibility(viewModel.IsAiPromptOpen);
             PopulateTransformMenus();
         }
     }
@@ -1251,7 +1314,23 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (e.PropertyName == nameof(MainWindowViewModel.HasTextTransformTarget))
+        if (e.PropertyName == nameof(MainWindowViewModel.IsAiPromptOpen) && sender is MainWindowViewModel aiVm)
+        {
+            Dispatcher.UIThread.Post(() => UpdateAiPromptWindowVisibility(aiVm.IsAiPromptOpen));
+            return;
+        }
+
+        if (e.PropertyName == nameof(MainWindowViewModel.SelectedClip) && m_focusClipOnNextSelectionChange)
+        {
+            m_focusClipOnNextSelectionChange = false;
+            Dispatcher.UIThread.Post(FocusInitialPopupTarget, DispatcherPriority.Background);
+            return;
+        }
+
+        if (e.PropertyName == nameof(MainWindowViewModel.HasTextTransformTarget)
+            || e.PropertyName == nameof(MainWindowViewModel.HasImageTransformTarget)
+            || e.PropertyName == nameof(MainWindowViewModel.HasTransformableTarget)
+            || e.PropertyName == nameof(MainWindowViewModel.IsAiMenuVisible))
         {
             Dispatcher.UIThread.Post(PopulateTransformMenus);
         }
@@ -1297,6 +1376,51 @@ public partial class MainWindow : Window
         {
             m_subscribedViewModel.CloseSettingsCommand.Execute().Subscribe();
         }
+    }
+
+    private void UpdateAiPromptWindowVisibility(bool open)
+    {
+        if (open)
+        {
+            if (m_aiPromptWindow is null)
+            {
+                m_aiPromptWindow = new AiPromptWindow
+                {
+                    DataContext = m_subscribedViewModel,
+                };
+                m_aiPromptWindow.Closing += OnAiPromptWindowClosing;
+                m_aiPromptWindow.Show(this);
+            }
+            else
+            {
+                ShowOwnedWindow(m_aiPromptWindow);
+            }
+        }
+        else if (m_aiPromptWindow is not null)
+        {
+            var window = m_aiPromptWindow;
+            m_aiPromptWindow = null;
+            window.Closing -= OnAiPromptWindowClosing;
+            try { window.Close(); } catch { }
+            FocusInitialPopupTarget();
+        }
+    }
+
+    private void OnAiPromptWindowClosing(object? sender, WindowClosingEventArgs e)
+    {
+        if (sender is Window window)
+        {
+            window.Closing -= OnAiPromptWindowClosing;
+        }
+
+        m_aiPromptWindow = null;
+
+        if (m_subscribedViewModel is not null && m_subscribedViewModel.IsAiPromptOpen)
+        {
+            m_subscribedViewModel.CancelAiPromptCommand.Execute().Subscribe();
+        }
+
+        FocusInitialPopupTarget();
     }
 
     private void OnSessionLogsPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -1384,6 +1508,45 @@ public partial class MainWindow : Window
         }, DispatcherPriority.Input);
     }
 
+    public void FocusClipOnNextActivation()
+    {
+        m_focusClipOnNextActivation = true;
+        m_focusClipOnNextSelectionChange = true;
+        if (IsActive)
+        {
+            m_focusClipOnNextActivation = false;
+            FocusInitialPopupTarget();
+        }
+    }
+
+    private void FocusInitialPopupTarget()
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            FocusSearchBox();
+            return;
+        }
+
+        if (viewModel.IsSettingsOpen || viewModel.IsWelcomeOpen || viewModel.IsPasswordPromptOpen
+            || viewModel.IsAiPromptOpen || viewModel.SessionLogs.IsOpen)
+        {
+            return;
+        }
+
+        if (viewModel.SelectedClip is null)
+        {
+            viewModel.SelectedClip = viewModel.GetDefaultAutoSelectedClip();
+        }
+
+        if (viewModel.SelectedClip is null)
+        {
+            FocusSearchBox();
+            return;
+        }
+
+        FocusSelectedClipInList();
+    }
+
     private TextBox? GetSearchBox() => this.FindControl<TextBox>("SearchTextBox");
 
     private void FocusSortBox()
@@ -1445,27 +1608,11 @@ public partial class MainWindow : Window
         {
             UpdateSessionLogsWindowVisibility(true);
         }
+
+        if (m_subscribedViewModel?.IsAiPromptOpen == true)
+        {
+            UpdateAiPromptWindowVisibility(true);
+        }
     }
 
-    private void AiPromptTextBox_KeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Enter && e.Key != Key.Return)
-        {
-            return;
-        }
-
-        // Shift+Enter falls through so the TextBox inserts a newline.
-        if ((e.KeyModifiers & KeyModifiers.Shift) != 0)
-        {
-            return;
-        }
-
-        if (DataContext is not MainWindowViewModel vm)
-        {
-            return;
-        }
-
-        e.Handled = true;
-        vm.SubmitAiPromptCommand.Execute().Subscribe();
-    }
 }

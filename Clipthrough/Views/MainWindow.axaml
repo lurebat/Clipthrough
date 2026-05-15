@@ -1566,56 +1566,5 @@
             </StackPanel>
         </Border>
 
-        <!-- AI Prompt Panel -->
-        <Border IsVisible="{Binding IsAiPromptOpen}"
-                Background="{DynamicResource ModalBackdropBrush}">
-            <Border Classes="hero-surface"
-                    Padding="24"
-                    MaxWidth="560"
-                    MaxHeight="440"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center">
-                <Grid RowDefinitions="Auto,*,Auto"
-                      RowSpacing="12">
-                    <StackPanel Spacing="4">
-                        <TextBlock Classes="eyebrow" Text="AI transform" />
-                        <TextBlock Classes="hero-title" FontSize="18" Text="{Binding AiPromptTitle}" />
-                        <TextBlock Classes="body-muted"
-                                   FontSize="11"
-                                   TextWrapping="Wrap"
-                                   Text="{Binding AiPromptDescription}" />
-                    </StackPanel>
-
-                    <Border Grid.Row="1" Classes="surface-panel" Padding="12">
-                        <StackPanel Spacing="8">
-                            <TextBox Name="AiPromptInputTextBox"
-                                     AcceptsReturn="True"
-                                     MinHeight="100"
-                                     MaxHeight="180"
-                                     TextWrapping="Wrap"
-                                     PlaceholderText="{Binding AiPromptPlaceholder}"
-                                     Text="{Binding AiPromptInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                     KeyDown="AiPromptTextBox_KeyDown" />
-                            <TextBlock Text="{Binding AiPromptError}"
-                                       IsVisible="{Binding AiPromptError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                                       Foreground="{DynamicResource DangerBrush}"
-                                       TextWrapping="Wrap" />
-                        </StackPanel>
-                    </Border>
-
-                    <Grid Grid.Row="2" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
-                        <Button Classes="secondary"
-                                Command="{Binding CancelAiPromptCommand}"
-                                IsEnabled="{Binding !IsAiPromptBusy}"
-                                Content="Cancel" />
-                        <Button Grid.Column="2"
-                                Classes="primary"
-                                Command="{Binding SubmitAiPromptCommand}"
-                                IsEnabled="{Binding !IsAiPromptBusy}"
-                                Content="{Binding AiPromptApplyLabel}" />
-                    </Grid>
-                </Grid>
-            </Border>
-        </Border>
     </Grid>
 </Window>

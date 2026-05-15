@@ -440,7 +440,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         _isClipListStale = true;
                         return Observable.Return(System.Reactive.Unit.Default);
                     }
-                    return Observable.FromAsync(() => RefreshAsync(clip.Id))
+                    return Observable.FromAsync(() => RefreshAsync())
                         .Select(_ => System.Reactive.Unit.Default);
                 })
                 .Subscribe(_ => { }, ex => StatusText = AppText.FormatErrorStatus(ex.Message)));
@@ -466,7 +466,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         _isClipListStale = true;
                         return Observable.Return(System.Reactive.Unit.Default);
                     }
-                    return Observable.FromAsync(() => RefreshAsync(id))
+                    return Observable.FromAsync(() => RefreshAsync())
                         .Select(_ => System.Reactive.Unit.Default);
                 })
                 .Subscribe(_ => { }, ex => Trace.TraceError($"OCR refresh failed: {ex}")));
@@ -966,16 +966,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 }
                 // No text targets among the checked clips, but image clips
                 // are also "transformable" via the AI submenu.
-                return GetCheckedOrSelectedClips().Any(static clip =>
+                return _aiTransformService.IsConfigured && GetCheckedOrSelectedClips().Any(static clip =>
                     clip.IsImageClip && clip.Clip.ContentBytes is { Length: > 0 });
             }
-            return SelectedClip?.CanAiTransform == true;
+            return SelectedClip?.CanTransform == true
+                   || (_aiTransformService.IsConfigured
+                       && SelectedClip?.IsImageClip == true
+                       && SelectedClip.Clip.ContentBytes is { Length: > 0 });
         }
     }
 
     public bool HasTextTransformTarget => GetCheckedOrSelectedClips().Any(static clip => clip.CanTransform);
 
-    public bool HasImageTransformTarget => GetCheckedOrSelectedClips().Any(static clip =>
+    public bool HasImageTransformTarget => _aiTransformService.IsConfigured && GetCheckedOrSelectedClips().Any(static clip =>
         clip.IsImageClip && clip.Clip.ContentBytes is { Length: > 0 });
 
     public bool HasSelectedImageClip => SelectedClip?.IsImageClip == true;
@@ -4827,21 +4830,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return null;
         }
 
-        var first = Clips[0];
-        if (!first.IsPinned)
-        {
-            return first;
-        }
-
-        var firstUnpinned = Clips.FirstOrDefault(static clip => !clip.IsPinned);
-        if (firstUnpinned is null)
-        {
-            return first;
-        }
-
-        return first.Clip.LastCopiedAt >= firstUnpinned.Clip.LastCopiedAt
-            ? first
-            : firstUnpinned;
+        return Clips.FirstOrDefault(static clip => !clip.IsPinned) ?? Clips[0];
     }
 
     private void UpdateSelectedClipPresentation()
@@ -7195,7 +7184,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         var targets = GetCheckedOrSelectedClips();
         var hasTextTargets = targets.Any(static clip => clip.CanTransform);
-        var hasImageTargets = targets.Any(static clip => clip.IsImageClip && clip.Clip.ContentBytes is { Length: > 0 });
+        var hasImageTargets = _aiTransformService.IsConfigured
+                              && targets.Any(static clip => clip.IsImageClip && clip.Clip.ContentBytes is { Length: > 0 });
 
         ReplaceVisibleCollection(
             VisibleUserScripts,

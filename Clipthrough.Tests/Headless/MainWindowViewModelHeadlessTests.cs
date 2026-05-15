@@ -106,6 +106,71 @@ public sealed class MainWindowViewModelHeadlessTests
     }
 
     [AvaloniaFact]
+    public async Task DefaultAutoSelection_SkipsPinnedClips()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+        await viewModel.InitializeAsync();
+
+        var pinned = new ClipEntry
+        {
+            Id = 1,
+            Content = "pinned",
+            ContentBytes = Encoding.UTF8.GetBytes("pinned"),
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            SourceApp = "Tests",
+            Hash = "pinned",
+            PinnedAt = DateTimeOffset.UtcNow,
+            LastCopiedAt = DateTimeOffset.UtcNow,
+            FirstCopiedAt = DateTimeOffset.UtcNow,
+        };
+        var unpinned = new ClipEntry
+        {
+            Id = 2,
+            Content = "unpinned",
+            ContentBytes = Encoding.UTF8.GetBytes("unpinned"),
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            SourceApp = "Tests",
+            Hash = "unpinned",
+            LastCopiedAt = DateTimeOffset.UtcNow.AddSeconds(-1),
+            FirstCopiedAt = DateTimeOffset.UtcNow.AddSeconds(-1),
+        };
+
+        viewModel.Clips.Add(new ClipItemViewModel(pinned));
+        viewModel.Clips.Add(new ClipItemViewModel(unpinned));
+
+        Assert.Equal(unpinned.Id, viewModel.GetDefaultAutoSelectedClip()?.Id);
+    }
+
+    [AvaloniaFact]
+    public async Task ImageAiTransforms_AreHiddenWhenAiIsNotConfigured()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var clip = await CaptureImageClipAsync(scope.ClipStoreService, CreatePngBytes(0), "image");
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.False(viewModel.IsAiMenuVisible);
+        Assert.False(viewModel.HasImageTransformTarget);
+        Assert.False(viewModel.HasTransformableTarget);
+        Assert.Empty(viewModel.VisibleAiMenuEntries);
+    }
+
+    [AvaloniaFact]
     public async Task SelectAllAndFavoriteSelected_UpdateAllCheckedClips()
     {
         using var scope = new TemporaryDatabaseScope();

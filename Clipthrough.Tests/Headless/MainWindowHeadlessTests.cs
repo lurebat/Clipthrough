@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
+using Avalonia.Input;
 using Avalonia.Threading;
 using Clipthrough.Database;
 using Clipthrough.Controls;
@@ -166,6 +167,87 @@ public sealed class MainWindowHeadlessTests
     }
 
     [AvaloniaFact]
+    public async Task OpenAiPrompt_ShowsOwnedAiPromptWindow()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        scope.SettingsService.SetHasSavedSettings(true);
+        scope.StorageOptionsService.SetHasSavedConfig(true);
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = new MainWindowViewModel(
+            scope.ClipStoreService,
+            clipboardMonitor,
+            new TestClipSampleDataService(),
+            scope.SettingsService,
+            systemInteraction,
+            scope.StorageOptionsService,
+            scope.SensitivityService,
+            scope.NotificationService,
+            sessionLogService,
+            scope.ClipExportService,
+            new TestImageEditorService(),
+            scope.SearchHistoryService,
+            new TestAiTransformService(isConfigured: true),
+            new Clipthrough.Services.ScriptingService(),
+            new TestOcrService(),
+            new NoOpBackgroundOcrQueue(),
+            new BackgroundJobIndicator(),
+            scope.DatabaseInitializer);
+
+        await viewModel.InitializeAsync();
+
+        var window = new MainWindow
+        {
+            DataContext = viewModel,
+        };
+
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        await viewModel.OpenAiPromptCommand.Execute().ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        var aiPromptWindow = GetOwnedAiPromptWindow(window);
+        Assert.NotNull(aiPromptWindow);
+        Assert.True(aiPromptWindow!.IsVisible);
+
+        aiPromptWindow.Close();
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public void AiPromptWindow_CtrlEnterInsertsNewLine()
+    {
+        var window = new AiPromptWindow();
+
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        var textBox = window.FindControl<TextBox>("AiPromptInputTextBox");
+        Assert.NotNull(textBox);
+        textBox!.Text = "ab";
+        textBox.CaretIndex = 1;
+        textBox.SelectionStart = 1;
+        textBox.SelectionEnd = 1;
+
+        textBox.RaiseEvent(new KeyEventArgs
+        {
+            RoutedEvent = InputElement.KeyDownEvent,
+            Key = Key.Enter,
+            KeyModifiers = KeyModifiers.Control,
+            Source = textBox,
+        });
+
+        Assert.Equal($"a{Environment.NewLine}b", textBox.Text);
+        Assert.Equal(1 + Environment.NewLine.Length, textBox.CaretIndex);
+
+        window.Close();
+    }
+
+    [AvaloniaFact]
     public async Task CopyShortcut_KeepsWindowVisible()
     {
         using var scope = new TemporaryDatabaseScope();
@@ -296,6 +378,11 @@ public sealed class MainWindowHeadlessTests
     private static SettingsWindow? GetOwnedSettingsWindow(MainWindow window)
         => (SettingsWindow?)typeof(MainWindow)
             .GetField("m_settingsWindow", BindingFlags.Instance | BindingFlags.NonPublic)?
+            .GetValue(window);
+
+    private static AiPromptWindow? GetOwnedAiPromptWindow(MainWindow window)
+        => (AiPromptWindow?)typeof(MainWindow)
+            .GetField("m_aiPromptWindow", BindingFlags.Instance | BindingFlags.NonPublic)?
             .GetValue(window);
 
     private static void InvokeCopySelectedWithoutClosing(MainWindowViewModel viewModel)

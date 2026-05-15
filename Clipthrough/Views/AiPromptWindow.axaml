@@ -1,0 +1,54 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Clipthrough.ViewModels"
+        x:Class="Clipthrough.Views.AiPromptWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="{Binding AiPromptTitle}"
+        Width="560"
+        Height="440"
+        MinWidth="460"
+        MinHeight="320"
+        Background="{DynamicResource AppBackgroundBrush}"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+
+    <Grid RowDefinitions="Auto,*,Auto"
+          RowSpacing="12"
+          Margin="18">
+        <StackPanel Spacing="4">
+            <TextBlock Classes="eyebrow" Text="AI transform" />
+            <TextBlock Classes="hero-title" FontSize="18" Text="{Binding AiPromptTitle}" />
+            <TextBlock Classes="body-muted"
+                       FontSize="11"
+                       TextWrapping="Wrap"
+                       Text="{Binding AiPromptDescription}" />
+        </StackPanel>
+
+        <Border Grid.Row="1" Classes="surface-panel" Padding="12">
+            <StackPanel Spacing="8">
+                <TextBox Name="AiPromptInputTextBox"
+                         AcceptsReturn="True"
+                         MinHeight="100"
+                         TextWrapping="Wrap"
+                         PlaceholderText="{Binding AiPromptPlaceholder}"
+                         Text="{Binding AiPromptInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                <TextBlock Text="{Binding AiPromptError}"
+                           IsVisible="{Binding AiPromptError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                           Foreground="{DynamicResource DangerBrush}"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+        </Border>
+
+        <Grid Grid.Row="2" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+            <Button Classes="secondary"
+                    Command="{Binding CancelAiPromptCommand}"
+                    IsEnabled="{Binding !IsAiPromptBusy}"
+                    Content="Cancel" />
+            <Button Grid.Column="2"
+                    Classes="primary"
+                    Command="{Binding SubmitAiPromptCommand}"
+                    IsEnabled="{Binding !IsAiPromptBusy}"
+                    Content="{Binding AiPromptApplyLabel}" />
+        </Grid>
+    </Grid>
+</Window>
