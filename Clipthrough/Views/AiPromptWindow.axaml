@@ -5,14 +5,14 @@
         x:DataType="vm:MainWindowViewModel"
         Title="{Binding AiPromptTitle}"
         Width="560"
-        Height="440"
         MinWidth="460"
-        MinHeight="320"
+        MinHeight="260"
+        SizeToContent="Height"
         Background="{DynamicResource AppBackgroundBrush}"
         ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner">
 
-    <Grid RowDefinitions="Auto,*,Auto"
+    <Grid RowDefinitions="Auto,Auto,Auto"
           RowSpacing="12"
           Margin="18">
         <StackPanel Spacing="4">
@@ -29,6 +29,8 @@
                 <TextBox Name="AiPromptInputTextBox"
                          AcceptsReturn="True"
                          MinHeight="100"
+                         MaxHeight="180"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto"
                          TextWrapping="Wrap"
                          PlaceholderText="{Binding AiPromptPlaceholder}"
                          Text="{Binding AiPromptInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />

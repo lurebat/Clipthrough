@@ -3807,16 +3807,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        if (clip.Clip.ContentType != ContentType.Text && clip.Clip.ContentType != ContentType.RichText)
+        if (!clip.CanTransform)
         {
-            StatusText = "Only text clips can be transformed";
+            StatusText = "Only text and file clips can be transformed";
             return;
         }
 
-        var source = clip.Clip.Content ?? string.Empty;
+        var source = GetTransformSourceText(clip);
         if (string.IsNullOrEmpty(source))
         {
-            StatusText = "Selected clip has no text to transform";
+            StatusText = "Selected clip has no text or file paths to transform";
             return;
         }
 
@@ -3932,6 +3932,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private static string GetTransformSourceText(ClipItemViewModel clip)
+    {
+        if (clip.Clip.ContentType != ContentType.Files)
+        {
+            return clip.Clip.Content ?? string.Empty;
+        }
+
+        var fileItems = ClipDisplayFormatter.BuildFileItems(clip.Clip.Content);
+        return fileItems.Count == 0
+            ? clip.Clip.Content ?? string.Empty
+            : string.Join(Environment.NewLine, fileItems);
+    }
+
     private async Task ApplyTransformToTargetsAsync(
         Func<string, CancellationToken, Task<string>> transform,
         string singleLabel,
@@ -3957,7 +3970,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         string? lastResult = null;
         foreach (var target in targets)
         {
-            if (target.Clip.ContentType != ContentType.Text && target.Clip.ContentType != ContentType.RichText)
+            if (!target.CanTransform)
             {
                 continue;
             }
@@ -3980,7 +3993,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
             else
             {
-                source = target.Clip.Content ?? string.Empty;
+                source = GetTransformSourceText(target);
                 if (string.IsNullOrEmpty(source))
                 {
                     continue;
@@ -4044,7 +4057,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         else
         {
-            StatusText = $"No text clips changed by {singleLabel}";
+            StatusText = $"No text or file clips changed by {singleLabel}";
             if (noChangeNotificationTitle is not null && noChangeNotificationMessage is not null)
             {
                 _notificationService.PublishWarning(noChangeNotificationTitle, noChangeNotificationMessage);
@@ -5459,14 +5472,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             : SelectedClip is not null ? new List<ClipItemViewModel> { SelectedClip } : new List<ClipItemViewModel>();
 
         targets = targets
-            .Where(t => (t.Clip.ContentType == ContentType.Text || t.Clip.ContentType == ContentType.RichText)
-                && !string.IsNullOrEmpty(t.Clip.Content))
+            .Where(static t => t.CanTransform)
             .ToList();
 
         if (targets.Count == 0)
         {
             IsAiPromptBusy = false;
-            AiPromptError = "Select one or more text clips first.";
+            AiPromptError = "Select one or more text or file clips first.";
             return Task.CompletedTask;
         }
 
@@ -5475,7 +5487,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             && ReferenceEquals(targets[0], SelectedClip)
             && EditedClipSelectionLength > 0
             && EditedClipSelectionStart >= 0
-            && EditedClipSelectionStart + EditedClipSelectionLength <= (EditedClipText?.Length ?? 0);
+            && EditedClipSelectionStart + EditedClipSelectionLength <= (EditedClipText?.Length ?? 0)
+            && SelectedClip.CanTransform;
         var sliceStart = EditedClipSelectionStart;
         var sliceLength = EditedClipSelectionLength;
         var fullEditedText = EditedClipText ?? string.Empty;
@@ -5569,7 +5582,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     }
                     else
                     {
-                        source = target.Clip.Content ?? string.Empty;
+                        source = GetTransformSourceText(target);
                         result = await _aiTransformService.TransformAsync(prompt, source);
                     }
                 }

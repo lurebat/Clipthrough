@@ -218,10 +218,12 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     public bool IsImageClip => Clip.ContentType == ContentType.Image;
 
-    public bool CanTransform => IsTextClip && !string.IsNullOrEmpty(Clip.Content);
+    public bool CanTransform =>
+        (IsTextClip || Clip.ContentType == ContentType.Files)
+        && !string.IsNullOrEmpty(Clip.Content);
 
     public bool CanAiTransform =>
-        (IsTextClip && !string.IsNullOrEmpty(Clip.Content))
+        ((IsTextClip || Clip.ContentType == ContentType.Files) && !string.IsNullOrEmpty(Clip.Content))
         || (IsImageClip && Clip.ContentBytes is { Length: > 0 });
 
     public string CopyCountDisplay => AppText.FormatCopyCount(Clip.CopyCount);

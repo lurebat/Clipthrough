@@ -13,7 +13,7 @@ public partial class AiPromptWindow : Window
     public AiPromptWindow()
     {
         InitializeComponent();
-        KeyDown += OnKeyDown;
+        AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
         Opened += OnOpened;
     }
 

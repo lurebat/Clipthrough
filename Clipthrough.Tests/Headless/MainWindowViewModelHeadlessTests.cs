@@ -171,6 +171,31 @@ public sealed class MainWindowViewModelHeadlessTests
     }
 
     [AvaloniaFact]
+    public async Task FileClip_CanUseTextTransformations()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var clip = await CaptureFilesClipAsync(scope.ClipStoreService, ["C:\\Temp\\alpha.txt", "D:\\Data\\beta.txt"]);
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(viewModel.SelectedClip?.CanTransform);
+        Assert.True(viewModel.HasTextTransformTarget);
+
+        await viewModel.ApplyTextTransformationCommand.Execute(TextTransformation.UpperCase).ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal($"C:\\TEMP\\ALPHA.TXT{Environment.NewLine}D:\\DATA\\BETA.TXT", systemInteraction.LastCopiedText);
+    }
+
+    [AvaloniaFact]
     public async Task SelectAllAndFavoriteSelected_UpdateAllCheckedClips()
     {
         using var scope = new TemporaryDatabaseScope();
@@ -839,6 +864,19 @@ public sealed class MainWindowViewModelHeadlessTests
             ContentText = ClipDisplayFormatter.RenderRichContent(markup),
             ContentType = ContentType.RichText,
             ContentFormat = format,
+            SourceApp = "Tests"
+        }))!;
+    }
+
+    private static async Task<ClipEntry> CaptureFilesClipAsync(IClipStoreService clipStoreService, IReadOnlyList<string> paths)
+    {
+        var text = string.Join(Environment.NewLine, paths);
+        return (await clipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentBytes = Encoding.UTF8.GetBytes(text),
+            ContentText = text,
+            ContentType = ContentType.Files,
+            ContentFormat = ClipContentFormat.FileList,
             SourceApp = "Tests"
         }))!;
     }

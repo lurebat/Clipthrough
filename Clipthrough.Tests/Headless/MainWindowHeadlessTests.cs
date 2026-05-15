@@ -248,6 +248,70 @@ public sealed class MainWindowHeadlessTests
     }
 
     [AvaloniaFact]
+    public async Task AiPromptWindow_EnterSubmitsPrompt()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        scope.SettingsService.SetHasSavedSettings(true);
+        scope.StorageOptionsService.SetHasSavedConfig(true);
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = new MainWindowViewModel(
+            scope.ClipStoreService,
+            clipboardMonitor,
+            new TestClipSampleDataService(),
+            scope.SettingsService,
+            systemInteraction,
+            scope.StorageOptionsService,
+            scope.SensitivityService,
+            scope.NotificationService,
+            sessionLogService,
+            scope.ClipExportService,
+            new TestImageEditorService(),
+            scope.SearchHistoryService,
+            new TestAiTransformService(isConfigured: true),
+            new Clipthrough.Services.ScriptingService(),
+            new TestOcrService(),
+            new NoOpBackgroundOcrQueue(),
+            new BackgroundJobIndicator(),
+            scope.DatabaseInitializer);
+
+        await viewModel.InitializeAsync();
+        viewModel.OpenAiPromptCommand.Execute().Subscribe();
+        Dispatcher.UIThread.RunJobs();
+
+        var window = new AiPromptWindow
+        {
+            DataContext = viewModel,
+        };
+
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        var textBox = window.FindControl<TextBox>("AiPromptInputTextBox");
+        Assert.NotNull(textBox);
+        textBox!.Text = "what's in there";
+        textBox.CaretIndex = textBox.Text.Length;
+        viewModel.AiPromptInput = textBox.Text;
+
+        textBox.RaiseEvent(new KeyEventArgs
+        {
+            RoutedEvent = InputElement.KeyDownEvent,
+            Key = Key.Enter,
+            KeyModifiers = KeyModifiers.None,
+            Source = textBox,
+        });
+
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("Select one or more text or file clips first.", viewModel.AiPromptError);
+
+        window.Close();
+    }
+
+    [AvaloniaFact]
     public async Task CopyShortcut_KeepsWindowVisible()
     {
         using var scope = new TemporaryDatabaseScope();
