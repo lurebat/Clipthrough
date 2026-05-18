@@ -66,6 +66,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly Clipthrough.Services.Search.IEmbeddingWorker? _embeddingWorker;
     private readonly ICopilotAuthService? _copilotAuthService;
     private readonly DatabaseInitializer _databaseInitializer;
+    private readonly IDatabaseBackupService _databaseBackupService;
     private readonly CompositeDisposable _subscriptions = new();
     private readonly Dictionary<long, (ClipEntry Clip, CancellationTokenSource Cts)> _pendingDeletes = new();
     private readonly object _refreshQueueLock = new();
@@ -108,6 +109,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isLoadingDatabase;
     private string _startupErrorTitle = string.Empty;
     private string _startupErrorMessage = string.Empty;
+    private string _integrityCheckStatus = string.Empty;
     private bool _areBackgroundServicesStarted;
     private bool _hasQueuedRefresh;
     // Tracks whether the main window is currently visible. When false, optimistic
@@ -218,7 +220,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _editedClipSelectionLength;
     private long? _checkedSelectionAnchorId;
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, IClipAngelImportService? clipAngelImportService = null, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null, Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null, ICopilotAuthService? copilotAuthService = null, IUpdateService? updateService = null)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, IClipAngelImportService? clipAngelImportService = null, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null, Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null, ICopilotAuthService? copilotAuthService = null, IUpdateService? updateService = null, IDatabaseBackupService? databaseBackupService = null)
     {
         _clipStoreService = clipStoreService;
         _clipAngelImportService = clipAngelImportService ?? new ClipAngelImportService(clipStoreService);
@@ -247,6 +249,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _copilotAuthService.SignedInChanged += OnCopilotSignedInChanged;
         }
         _databaseInitializer = databaseInitializer;
+        _databaseBackupService = databaseBackupService ?? new DatabaseBackupService(storageOptionsService);
         SessionLogs = new SessionLogsViewModel(sessionLogService);
         ContentTypeOptions =
         [
@@ -298,6 +301,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         CheckForUpdateCommand = ReactiveCommand.CreateFromTask(CheckForUpdateAsync);
         OpenLogsFolderCommand = ReactiveCommand.CreateFromTask(OpenLogsFolderAsync);
         OpenDatabaseFolderCommand = ReactiveCommand.CreateFromTask(OpenDatabaseFolderAsync);
+        RunIntegrityCheckCommand = ReactiveCommand.CreateFromTask(RunIntegrityCheckAsync);
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
         SaveSettingsCommand = ReactiveCommand.CreateFromTask(SaveSettingsAsync);
         BrowseDatabasePathCommand = ReactiveCommand.CreateFromTask<Window?>(BrowseDatabasePathAsync);
@@ -617,6 +621,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> OpenLogsFolderCommand { get; }
 
     public ReactiveCommand<Unit, Unit> OpenDatabaseFolderCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> RunIntegrityCheckCommand { get; }
 
     public ReactiveCommand<Unit, Unit> CloseSettingsCommand { get; }
 
@@ -1084,6 +1090,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public bool HasStartupError => !string.IsNullOrEmpty(_startupErrorMessage);
+
+    public string IntegrityCheckStatus
+    {
+        get => _integrityCheckStatus;
+        private set => this.RaiseAndSetIfChanged(ref _integrityCheckStatus, value);
+    }
 
     public bool HasRunningJobs
     {
@@ -3018,6 +3030,63 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         catch (Exception ex)
         {
             ReportError("Open database folder", ex);
+        }
+    }
+
+    private async Task RunIntegrityCheckAsync()
+    {
+        IntegrityCheckStatus = "Running…";
+        try
+        {
+            var problems = await Task.Run(() =>
+            {
+                var found = new System.Collections.Generic.List<string>();
+                var dbPath = _storageOptionsService.Current.DatabasePath;
+                var password = _storageOptionsService.Current.DatabasePassword;
+                var builder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+                {
+                    DataSource = dbPath,
+                    Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly,
+                };
+                if (!string.IsNullOrEmpty(password))
+                {
+                    builder.Password = password;
+                }
+                using var connection = new Microsoft.Data.Sqlite.SqliteConnection(builder.ToString());
+                connection.Open();
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = "PRAGMA integrity_check;";
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    var row = reader.GetString(0);
+                    if (!string.Equals(row, "ok", StringComparison.Ordinal))
+                    {
+                        found.Add(row);
+                    }
+                }
+                return found;
+            });
+
+            if (problems.Count == 0)
+            {
+                IntegrityCheckStatus = "Integrity OK";
+            }
+            else
+            {
+                var summary = string.Join("; ", problems.Take(3));
+                if (problems.Count > 3)
+                {
+                    summary += $" (+{problems.Count - 3} more)";
+                }
+                IntegrityCheckStatus = $"Problems found: {summary}";
+                Trace.TraceError($"Integrity check found problems: {string.Join("; ", problems)}");
+            }
+        }
+        catch (Exception ex)
+        {
+            IntegrityCheckStatus = $"Check failed: {ex.Message}";
+            Trace.TraceError($"Integrity check failed: {ex}");
         }
     }
 
@@ -6444,6 +6513,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         await LoadSensitivityRulesAsync();
         _isDatabaseReady = true;
+
+        // Take a daily backup once the database has been opened, integrity-
+        // checked, and migrated. Fire-and-forget so a slow file-system copy
+        // never delays the first refresh.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _databaseBackupService.EnsureDailyBackupAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Trace.TraceWarning($"Daily backup failed: {ex.Message}");
+            }
+        });
     }
 
     private void StartBackgroundServices()

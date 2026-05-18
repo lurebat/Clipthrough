@@ -1,0 +1,129 @@
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Data.Sqlite;
+
+namespace Clipthrough.Services;
+
+/// <summary>
+/// Daily snapshot of the (potentially encrypted) clip database. After today's
+/// near-miss with a torn migration, having an automatic point-in-time copy on
+/// disk makes the difference between "we lost a day of clips" and "we lost
+/// nothing — restore yesterday's backup".
+///
+/// Snapshots are written next to the live database in a sibling
+/// <c>backups/</c> folder as <c>clipthrough-YYYYMMDD.db</c>. The file format
+/// is just a copy of the encrypted SQLite file (after WAL checkpoint) so it
+/// can be restored by simply replacing the live database.
+/// </summary>
+public sealed class DatabaseBackupService : IDatabaseBackupService
+{
+    public const int DefaultRetention = 7;
+
+    private readonly IStorageOptionsService _storageOptionsService;
+    private readonly int _retention;
+
+    public DatabaseBackupService(IStorageOptionsService storageOptionsService, int retention = DefaultRetention)
+    {
+        _storageOptionsService = storageOptionsService;
+        _retention = retention < 1 ? 1 : retention;
+    }
+
+    public async Task EnsureDailyBackupAsync(CancellationToken cancellationToken = default)
+    {
+        var dbPath = _storageOptionsService.Current.DatabasePath;
+        if (string.IsNullOrEmpty(dbPath) || !File.Exists(dbPath))
+        {
+            return;
+        }
+
+        var backupDir = Path.Combine(Path.GetDirectoryName(dbPath)!, "backups");
+        var stamp = DateTime.UtcNow.ToString("yyyyMMdd");
+        var todayPath = Path.Combine(backupDir, $"clipthrough-{stamp}.db");
+
+        if (File.Exists(todayPath))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(backupDir);
+
+            // Flush WAL into the main file first so the copy is consistent
+            // without us needing to know which .db-wal frames are committed.
+            await Task.Run(() => CheckpointSafely(dbPath, _storageOptionsService.Current.DatabasePassword), cancellationToken).ConfigureAwait(false);
+
+            var tempPath = todayPath + ".tmp";
+            File.Copy(dbPath, tempPath, overwrite: true);
+            File.Move(tempPath, todayPath, overwrite: true);
+            Trace.TraceInformation($"Database backup written: {todayPath}");
+
+            PruneOldBackups(backupDir);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException)
+        {
+            Trace.TraceWarning($"Database backup failed: {ex.Message}");
+        }
+    }
+
+    private static void CheckpointSafely(string dbPath, string? password)
+    {
+        try
+        {
+            var builder = new SqliteConnectionStringBuilder
+            {
+                DataSource = dbPath,
+                Mode = SqliteOpenMode.ReadWrite,
+            };
+            if (!string.IsNullOrEmpty(password))
+            {
+                builder.Password = password;
+            }
+
+            using var connection = new SqliteConnection(builder.ToString());
+            connection.Open();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "PRAGMA wal_checkpoint(PASSIVE);";
+            cmd.ExecuteNonQuery();
+        }
+        catch (Exception ex) when (ex is SqliteException or IOException)
+        {
+            // Non-fatal: copy ahead without the checkpoint. The snapshot will
+            // still be a valid (if slightly stale) SQLite file.
+            Trace.TraceWarning($"Backup checkpoint failed; copying without checkpoint: {ex.Message}");
+        }
+    }
+
+    private void PruneOldBackups(string backupDir)
+    {
+        try
+        {
+            var files = Directory.EnumerateFiles(backupDir, "clipthrough-*.db")
+                .Select(p => new FileInfo(p))
+                .OrderByDescending(f => f.LastWriteTimeUtc)
+                .Skip(_retention)
+                .ToArray();
+
+            foreach (var f in files)
+            {
+                try
+                {
+                    f.Delete();
+                    Trace.TraceInformation($"Pruned old backup: {f.Name}");
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Trace.TraceWarning($"Could not prune backup '{f.Name}': {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceWarning($"Backup pruning failed: {ex.Message}");
+        }
+    }
+}

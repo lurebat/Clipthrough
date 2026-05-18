@@ -303,6 +303,25 @@
 
                         <Border Classes="surface-panel" Padding="12" Margin="0,8,0,0">
                             <StackPanel Spacing="6">
+                                <TextBlock FontWeight="SemiBold" Text="Diagnostics" />
+                                <TextBlock Classes="body-muted"
+                                           Text="Runs SQLite's integrity check across the entire database. Safe to run anytime; takes a few seconds on a typical library."
+                                           TextWrapping="Wrap" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button Classes="secondary"
+                                            HorizontalAlignment="Left"
+                                            Command="{Binding RunIntegrityCheckCommand}"
+                                            IsEnabled="{Binding StorageDatabaseExists}"
+                                            Content="Run integrity check" />
+                                    <TextBlock VerticalAlignment="Center"
+                                               Classes="body-muted"
+                                               Text="{Binding IntegrityCheckStatus}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Classes="surface-panel" Padding="12" Margin="0,8,0,0">
+                            <StackPanel Spacing="6">
                                 <TextBlock FontWeight="SemiBold"
                                            Text="{Binding SettingsClipAngelImportTitle}" />
                                 <TextBlock Classes="body-muted"

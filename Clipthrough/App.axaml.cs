@@ -158,6 +158,7 @@ public partial class App : Application
         services.AddSingleton<ISearchHistoryService, SearchHistoryService>();
         services.AddSingleton<IImageEditorService, ShareXImageEditorService>();
         services.AddSingleton<IClipStoreService, ClipStoreService>();
+        services.AddSingleton<IDatabaseBackupService, DatabaseBackupService>();
         services.AddSingleton<IClipAngelImportService, ClipAngelImportService>();
         services.AddSingleton<IClipSampleDataService, ClipSampleDataService>();
         services.AddSingleton<IClipboardMonitorService, ClipboardMonitorService>();

@@ -1241,9 +1241,19 @@ public partial class MainWindow : Window
 
     private void OnSearchSuggestionSelected(object? sender, SelectionChangedEventArgs e)
     {
+        // Read the suggestion from the event's AddedItems instead of the
+        // ListBox's SelectedItem. Refreshing FilteredRecentSearches (via
+        // Clear/Add) can briefly null the selection and fire this handler
+        // with stale state; AddedItems is empty during such churn, so the
+        // guard below skips it cleanly.
         if (DataContext is not MainWindowViewModel viewModel
-            || sender is not ListBox listBox
-            || listBox.SelectedItem is not string suggestion)
+            || sender is not ListBox listBox)
+        {
+            return;
+        }
+
+        var suggestion = e.AddedItems?.OfType<string>().FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(suggestion))
         {
             return;
         }

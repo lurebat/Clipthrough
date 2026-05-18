@@ -274,7 +274,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
     {
         if (string.Equals(options.DatabasePath, StorageOptions.GetDefaultDatabasePath(), StringComparison.OrdinalIgnoreCase))
         {
-            TryCopyLegacyDatabase(StorageOptions.GetLegacyDefaultDatabasePath(), options.DatabasePath);
+            TryCopyLegacyDatabase(StorageOptions.GetLegacyDefaultDatabasePath(), options.DatabasePath, options.DatabasePassword);
             return options;
         }
 
@@ -284,11 +284,32 @@ public sealed class StorageOptionsService : IStorageOptionsService
         }
 
         var migrated = options with { DatabasePath = StorageOptions.GetDefaultDatabasePath() };
-        TryCopyLegacyDatabase(options.DatabasePath, migrated.DatabasePath);
+        TryCopyLegacyDatabase(options.DatabasePath, migrated.DatabasePath, migrated.DatabasePassword);
         return migrated.Normalize();
     }
 
-    private static void TryCopyLegacyDatabase(string legacyPath, string migratedPath)
+    /// <summary>
+    /// Migrates the legacy default database to its new location without leaving
+    /// a torn copy behind. Previously this method bit-copied <c>.db</c>,
+    /// <c>.db-wal</c>, and <c>.db-shm</c> in three separate <see cref="File.Copy"/>
+    /// calls, which produced a corrupt destination whenever the source had
+    /// pending WAL frames (the <c>-shm</c> file in particular is a per-process
+    /// shared-memory snapshot and is never safe to copy verbatim).
+    ///
+    /// The safe sequence is:
+    ///   1. Open the legacy database with its password.
+    ///   2. PRAGMA wal_checkpoint(TRUNCATE) to flush every pending frame into the
+    ///      main <c>.db</c> file, then close the connection so the OS releases
+    ///      its locks and the <c>-shm</c> file becomes stale.
+    ///   3. Copy only the <c>.db</c> file. The destination starts with a fresh
+    ///      WAL on next open.
+    ///
+    /// If we don't have a working password we skip the migration entirely
+    /// rather than risk a torn copy — the legacy file stays in place and the
+    /// user can re-run the migration later (once the password prompt has
+    /// completed) via <see cref="ImportLegacyDatabaseAsync"/>.
+    /// </summary>
+    private static void TryCopyLegacyDatabase(string legacyPath, string migratedPath, string? password)
     {
         if (!File.Exists(legacyPath) || File.Exists(migratedPath))
         {
@@ -298,20 +319,50 @@ public sealed class StorageOptionsService : IStorageOptionsService
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(migratedPath)!);
-            foreach (var suffix in new[] { string.Empty, "-wal", "-shm" })
-            {
-                var source = legacyPath + suffix;
-                if (File.Exists(source))
-                {
-                    File.Copy(source, migratedPath + suffix);
-                }
-            }
 
+            // Best-effort checkpoint so the legacy WAL is merged into the .db
+            // file. We only attempt this when we have the password — without it
+            // SQLCipher can't decrypt the pages enough to apply them.
+            TryCheckpointLegacyDatabase(legacyPath, password);
+
+            File.Copy(legacyPath, migratedPath);
             Trace.TraceInformation($"Copied legacy database from '{legacyPath}' to uninstall-safe path '{migratedPath}'.");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             Trace.TraceWarning($"Legacy database migration failed: {ex.Message}");
+        }
+    }
+
+    private static void TryCheckpointLegacyDatabase(string legacyPath, string? password)
+    {
+        // No password means we can't read encrypted pages, so the safest thing
+        // is to skip the checkpoint and accept that any uncheckpointed WAL
+        // frames will not make it into the migrated copy. That's strictly
+        // better than producing a structurally corrupt destination, which is
+        // what the previous raw .db + -wal + -shm copy did.
+        if (string.IsNullOrEmpty(password))
+        {
+            return;
+        }
+
+        try
+        {
+            var builder = new SqliteConnectionStringBuilder
+            {
+                DataSource = legacyPath,
+                Mode = SqliteOpenMode.ReadWrite,
+                Password = password,
+            };
+            using var connection = new SqliteConnection(builder.ToString());
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+            command.ExecuteNonQuery();
+        }
+        catch (Exception ex) when (ex is SqliteException or IOException)
+        {
+            Trace.TraceWarning($"Legacy database checkpoint failed; copying raw .db without merging WAL: {ex.Message}");
         }
     }
 
