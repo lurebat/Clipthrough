@@ -192,6 +192,16 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Fast path: a plain printable keystroke inside a text input control
+        // cannot match any of our shortcut handlers (they all require either
+        // a non-text source or a Ctrl/Alt modifier), so we can bail out before
+        // the ten TryHandle* probes below run. This avoids ten visual-tree
+        // walks per character of typing in the search box and clip editors.
+        if (IsKeyEventFromTextInput(e) && IsPlainPrintableShortcut(e))
+        {
+            return;
+        }
+
         if (TryRecoverFromTopMenuFocus(viewModel, e))
         {
             e.Handled = true;
@@ -1558,6 +1568,46 @@ public partial class MainWindow : Window
     }
 
     private TextBox? GetSearchBox() => this.FindControl<TextBox>("SearchTextBox");
+
+    /// <summary>
+    /// True when the key event is a plain printable keystroke (letters,
+    /// digits, space, punctuation, navigation keys that text inputs handle
+    /// natively) with no Ctrl/Alt/Meta modifier — i.e. something that
+    /// definitely belongs to the focused text control and not to any of our
+    /// shortcut helpers. Shift alone is allowed (capitalisation).
+    /// </summary>
+    private static bool IsPlainPrintableShortcut(KeyEventArgs e)
+    {
+        var modifiers = e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Alt | KeyModifiers.Meta);
+        if (modifiers != KeyModifiers.None)
+        {
+            return false;
+        }
+
+        // Enter, Escape, Tab, F-keys etc. drive global behaviour even from
+        // inside a text input, so the shortcut chain still needs to see them.
+        return e.Key
+            is (>= Key.A and <= Key.Z)
+            or (>= Key.D0 and <= Key.D9)
+            or (>= Key.NumPad0 and <= Key.NumPad9)
+            or Key.Space
+            or Key.OemPeriod
+            or Key.OemComma
+            or Key.OemMinus
+            or Key.OemPlus
+            or Key.OemQuestion
+            or Key.OemQuotes
+            or Key.OemSemicolon
+            or Key.OemOpenBrackets
+            or Key.OemCloseBrackets
+            or Key.OemPipe
+            or Key.OemTilde
+            or Key.OemBackslash
+            or Key.Back
+            or Key.Delete
+            or Key.Left
+            or Key.Right;
+    }
 
     /// <summary>
     /// Returns true when the key event originated from a text input control or

@@ -35,6 +35,12 @@ public sealed class SyntaxTextEditor : UserControl
     private readonly RegistryOptions _darkRegistry = new(ThemeName.DarkPlus);
     private readonly RegistryOptions _lightRegistry = new(ThemeName.LightPlus);
     private bool _isSyncingText;
+    // When the control is hidden (one of the three stacked editors in the
+    // clip preview), there's no point paying for a full TextDocument
+    // replacement on every keystroke — the user can't see it. Stash the
+    // latest text and flush it on next visibility change instead.
+    private string? _pendingHiddenText;
+    private bool _hasPendingHiddenText;
 
     public SyntaxTextEditor()
     {
@@ -54,6 +60,7 @@ public sealed class SyntaxTextEditor : UserControl
         this.GetObservable(TextProperty).Subscribe(OnTextPropertyChanged);
         this.GetObservable(IsReadOnlyProperty).Subscribe(v => _editor.IsReadOnly = v);
         this.GetObservable(SyntaxHintProperty).Subscribe(_ => ApplyGrammar());
+        this.GetObservable(IsVisibleProperty).Subscribe(OnIsVisibleChanged);
     }
 
     public string? Text
@@ -112,12 +119,50 @@ public sealed class SyntaxTextEditor : UserControl
             return;
         }
 
+        // Defer the (expensive) Document replacement while we're hidden.
+        // The clip preview stacks three SyntaxTextEditors with different
+        // IsVisible bindings and only one shows at a time, so updating the
+        // other two on every keystroke is pure overhead.
+        if (!IsVisible)
+        {
+            _pendingHiddenText = newText;
+            _hasPendingHiddenText = true;
+            return;
+        }
+
         _isSyncingText = true;
         try
         {
             if (_editor.Text != newText)
             {
                 _editor.Text = newText ?? string.Empty;
+            }
+        }
+        finally
+        {
+            _isSyncingText = false;
+        }
+    }
+
+    private void OnIsVisibleChanged(bool isVisible)
+    {
+        if (!isVisible || !_hasPendingHiddenText)
+        {
+            return;
+        }
+
+        // We just became visible and missed a text update while hidden — apply
+        // the latest stashed value now so the editor catches up.
+        var pending = _pendingHiddenText;
+        _hasPendingHiddenText = false;
+        _pendingHiddenText = null;
+
+        _isSyncingText = true;
+        try
+        {
+            if (_editor.Text != pending)
+            {
+                _editor.Text = pending ?? string.Empty;
             }
         }
         finally

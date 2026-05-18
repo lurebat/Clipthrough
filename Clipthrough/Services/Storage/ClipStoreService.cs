@@ -1919,4 +1919,34 @@ public sealed class ClipStoreService : IClipStoreService
         }
         return result;
     }
+
+    public async Task PrewarmAsync(CancellationToken cancellationToken = default)
+    {
+        // Cheap-but-comprehensive warmup. The three queries touch:
+        //   1. the clips table b-tree (paged in by COUNT)
+        //   2. the captured_at sorted index (used by every default refresh)
+        //   3. the FTS5 index header (used by every search-with-text)
+        // Together they pay the SQLCipher key derivation, the SQLite page-cache
+        // initial population, and the FTS5 index header read up front, so the
+        // user's first refresh after startup doesn't.
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using (var c = connection.CreateCommand())
+        {
+            c.CommandText = "SELECT COUNT(*) FROM clips;";
+            await c.ExecuteScalarAsync(cancellationToken);
+        }
+        await using (var c = connection.CreateCommand())
+        {
+            c.CommandText = "SELECT id FROM clips ORDER BY captured_at DESC LIMIT 1;";
+            await c.ExecuteScalarAsync(cancellationToken);
+        }
+        await using (var c = connection.CreateCommand())
+        {
+            c.CommandText = "SELECT rowid FROM clips_fts WHERE clips_fts MATCH 'clipthrough_prewarm_token' LIMIT 1;";
+            try { await c.ExecuteScalarAsync(cancellationToken); }
+            catch (Microsoft.Data.Sqlite.SqliteException) { /* expected if FTS rejects the token */ }
+        }
+    }
 }

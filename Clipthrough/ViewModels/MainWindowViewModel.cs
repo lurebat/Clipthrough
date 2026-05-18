@@ -6503,7 +6503,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task StartDatabaseAsync()
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         await _databaseInitializer.InitializeAsync();
+        Trace.TraceInformation($"[startup-timing] DatabaseInitializer @ {sw.ElapsedMilliseconds}ms");
+
         if (!_settingsService.HasSavedSettings)
         {
             await _settingsService.InitializeAsync();
@@ -6512,6 +6515,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await EnsureDefaultScriptsLoadedAsync();
 
         await LoadSensitivityRulesAsync();
+        Trace.TraceInformation($"[startup-timing] sensitivity rules loaded @ {sw.ElapsedMilliseconds}ms");
+
+        // Prewarm: run a tiny FTS-touching query so the OS file cache, the
+        // SQLCipher key derivation and the FTS5 index header are all hot by
+        // the time the visible refresh runs. Without this, the first
+        // SearchAsync after startup paid all three costs on the UI thread.
+        await Task.Run(async () =>
+        {
+            try
+            {
+                await _clipStoreService.PrewarmAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Trace.TraceWarning($"Database prewarm failed: {ex.Message}");
+            }
+        }).ConfigureAwait(false);
+        Trace.TraceInformation($"[startup-timing] prewarm @ {sw.ElapsedMilliseconds}ms");
+
         _isDatabaseReady = true;
 
         // Take a daily backup once the database has been opened, integrity-

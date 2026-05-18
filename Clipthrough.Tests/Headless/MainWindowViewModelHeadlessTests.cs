@@ -835,6 +835,7 @@ public sealed class MainWindowViewModelHeadlessTests
         public Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default) => Task.FromResult(new EmbeddingCoverage(0, 0, 0, 0, 0));
         public Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task PrewarmAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private static async Task PrepareInitializedScopeAsync(TemporaryDatabaseScope scope)

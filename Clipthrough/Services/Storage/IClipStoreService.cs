@@ -71,4 +71,11 @@ public interface IClipStoreService
     Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default);
 
     Task<System.Collections.Generic.IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Runs a tiny no-op query to warm up the SQLCipher key derivation cache,
+    /// the SQLite page cache, and the FTS5 index. Called once during startup
+    /// so the first user-visible search isn't paying these one-time costs.
+    /// </summary>
+    Task PrewarmAsync(CancellationToken cancellationToken = default);
 }
