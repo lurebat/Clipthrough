@@ -344,7 +344,7 @@ public partial class MainWindow : Window
         }
 
         // Don't interfere with arrow keys in multi-line text editors
-        if (e.Source is AvaloniaEdit.TextEditor or Controls.SyntaxTextEditor)
+        if (IsKeyEventFromTextInput(e))
         {
             return false;
         }
@@ -493,7 +493,7 @@ public partial class MainWindow : Window
         }
 
         // Don't capture Escape from multi-line text editors
-        if (e.Source is AvaloniaEdit.TextEditor or Controls.SyntaxTextEditor)
+        if (IsKeyEventFromMultiLineEditor(e))
         {
             return false;
         }
@@ -608,7 +608,7 @@ public partial class MainWindow : Window
         }
 
         // Don't redirect if already in a text input
-        if (e.Source is TextBox or AvaloniaEdit.TextEditor or Controls.SyntaxTextEditor)
+        if (IsKeyEventFromTextInput(e))
         {
             return false;
         }
@@ -784,7 +784,7 @@ public partial class MainWindow : Window
         }
 
         // Block Enter in multi-line inputs. Allow it from single-line TextBoxes (e.g., the search box).
-        if (e.Source is TextBox { AcceptsReturn: true } or AvaloniaEdit.TextEditor or Controls.SyntaxTextEditor)
+        if (IsKeyEventFromMultiLineEditor(e))
         {
             return false;
         }
@@ -832,7 +832,7 @@ public partial class MainWindow : Window
 
     private static bool TryHandleEditedClipShortcut(MainWindowViewModel viewModel, KeyEventArgs e)
     {
-        if (e.Source is not TextBox and not AvaloniaEdit.TextEditor and not Controls.SyntaxTextEditor)
+        if (!IsKeyEventFromTextInput(e))
         {
             return false;
         }
@@ -1133,7 +1133,7 @@ public partial class MainWindow : Window
         }
 
         // Don't intercept when inside a text input
-        if (e.Source is TextBox or AvaloniaEdit.TextEditor or Controls.SyntaxTextEditor)
+        if (IsKeyEventFromTextInput(e))
         {
             return false;
         }
@@ -1548,6 +1548,66 @@ public partial class MainWindow : Window
     }
 
     private TextBox? GetSearchBox() => this.FindControl<TextBox>("SearchTextBox");
+
+    /// <summary>
+    /// Returns true when the key event originated from a text input control or
+    /// any of its inner descendants. AvaloniaEdit's <see cref="AvaloniaEdit.TextEditor"/>
+    /// routes key events from its inner TextArea, so a direct <c>e.Source is TextEditor</c>
+    /// check misses real keystrokes typed into the editor. Walk the visual ancestry so
+    /// keystrokes from inside any TextBox / TextEditor / SyntaxTextEditor are recognised.
+    /// </summary>
+    private static bool IsKeyEventFromTextInput(KeyEventArgs e)
+    {
+        if (e.Source is not Visual source)
+        {
+            return false;
+        }
+
+        if (source is TextBox or AvaloniaEdit.TextEditor or SyntaxTextEditor)
+        {
+            return true;
+        }
+
+        foreach (var ancestor in source.GetVisualAncestors())
+        {
+            if (ancestor is TextBox or AvaloniaEdit.TextEditor or SyntaxTextEditor)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Same as <see cref="IsKeyEventFromTextInput"/> but limited to multi-line
+    /// editors (AvaloniaEdit's <see cref="AvaloniaEdit.TextEditor"/> and
+    /// <see cref="SyntaxTextEditor"/>, plus any TextBox with AcceptsReturn=true).
+    /// Used by handlers that should still process Escape / Enter from the
+    /// single-line search box.
+    /// </summary>
+    private static bool IsKeyEventFromMultiLineEditor(KeyEventArgs e)
+    {
+        if (e.Source is not Visual source)
+        {
+            return false;
+        }
+
+        if (source is AvaloniaEdit.TextEditor or SyntaxTextEditor or TextBox { AcceptsReturn: true })
+        {
+            return true;
+        }
+
+        foreach (var ancestor in source.GetVisualAncestors())
+        {
+            if (ancestor is AvaloniaEdit.TextEditor or SyntaxTextEditor or TextBox { AcceptsReturn: true })
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private void FocusSortBox()
     {
