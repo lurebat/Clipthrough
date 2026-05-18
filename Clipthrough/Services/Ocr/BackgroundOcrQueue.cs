@@ -162,6 +162,7 @@ public sealed class BackgroundOcrQueue : IBackgroundOcrQueue, IDisposable
         }
         catch (Exception ex)
         {
+            Trace.TraceWarning($"OCR queue: GetByIdAsync({clipId}) failed: {ex}");
             await _clipStoreService.SetOcrFailureAsync(clipId, ex.Message, cancellationToken).ConfigureAwait(false);
             _completed.OnNext(clipId);
             return;
@@ -189,6 +190,7 @@ public sealed class BackgroundOcrQueue : IBackgroundOcrQueue, IDisposable
         }
         catch (Exception ex)
         {
+            Trace.TraceWarning($"OCR clip {clipId} extraction threw: {ex}");
             await _clipStoreService.SetOcrFailureAsync(clipId, ex.Message, cancellationToken).ConfigureAwait(false);
         }
 

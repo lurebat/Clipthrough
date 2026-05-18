@@ -106,6 +106,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isDatabaseReady;
     private bool _isStarted;
     private bool _isLoadingDatabase;
+    private string _startupErrorTitle = string.Empty;
+    private string _startupErrorMessage = string.Empty;
     private bool _areBackgroundServicesStarted;
     private bool _hasQueuedRefresh;
     // Tracks whether the main window is currently visible. When false, optimistic
@@ -294,6 +296,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OpenHelpCommand = ReactiveCommand.Create(OpenHelp);
         OpenAboutCommand = ReactiveCommand.Create(OpenAbout);
         CheckForUpdateCommand = ReactiveCommand.CreateFromTask(CheckForUpdateAsync);
+        OpenLogsFolderCommand = ReactiveCommand.CreateFromTask(OpenLogsFolderAsync);
+        OpenDatabaseFolderCommand = ReactiveCommand.CreateFromTask(OpenDatabaseFolderAsync);
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
         SaveSettingsCommand = ReactiveCommand.CreateFromTask(SaveSettingsAsync);
         BrowseDatabasePathCommand = ReactiveCommand.CreateFromTask<Window?>(BrowseDatabasePathAsync);
@@ -421,12 +425,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _subscriptions.Add(
             _clipboardMonitorService.CapturedClips
                 .ObserveOn(RxSchedulers.MainThreadScheduler)
-                .Subscribe(ApplyCapturedClipOptimistically, ex => StatusText = AppText.FormatErrorStatus(ex.Message)));
+                .Subscribe(ApplyCapturedClipOptimistically, ex => ReportError("Captured-clip subscription", ex)));
 
         _subscriptions.Add(
             _clipboardMonitorService.UpdatedClips
                 .ObserveOn(RxSchedulers.MainThreadScheduler)
-                .Subscribe(ApplyUpdatedClipOptimistically, ex => StatusText = AppText.FormatErrorStatus(ex.Message)));
+                .Subscribe(ApplyUpdatedClipOptimistically, ex => ReportError("Updated-clip subscription", ex)));
 
         _subscriptions.Add(
             _clipboardMonitorService.UpdatedClips
@@ -443,7 +447,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     return Observable.FromAsync(() => RefreshAsync())
                         .Select(_ => System.Reactive.Unit.Default);
                 })
-                .Subscribe(_ => { }, ex => StatusText = AppText.FormatErrorStatus(ex.Message)));
+                .Subscribe(_ => { }, ex => ReportError("Throttled clip refresh", ex)));
 
         _subscriptions.Add(
             _clipboardMonitorService.CapturedClips
@@ -502,7 +506,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .Merge(BrowseDatabasePathCommand.ThrownExceptions)
                 .Merge(UnlockDatabaseCommand.ThrownExceptions)
                 .ObserveOn(RxSchedulers.MainThreadScheduler)
-                .Subscribe(ex => StatusText = AppText.FormatErrorStatus(ex.Message)));
+                .Subscribe(ex => ReportError("Command", ex)));
     }
 
     public ObservableCollection<ClipItemViewModel> Clips { get; } = [];
@@ -609,6 +613,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> OpenAboutCommand { get; }
 
     public ReactiveCommand<Unit, Unit> CheckForUpdateCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> OpenLogsFolderCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> OpenDatabaseFolderCommand { get; }
 
     public ReactiveCommand<Unit, Unit> CloseSettingsCommand { get; }
 
@@ -1058,6 +1066,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         get => _isLoadingDatabase;
         private set => this.RaiseAndSetIfChanged(ref _isLoadingDatabase, value);
     }
+
+    public string StartupErrorTitle
+    {
+        get => _startupErrorTitle;
+        private set => this.RaiseAndSetIfChanged(ref _startupErrorTitle, value);
+    }
+
+    public string StartupErrorMessage
+    {
+        get => _startupErrorMessage;
+        private set
+        {
+            this.RaiseAndSetIfChanged(ref _startupErrorMessage, value);
+            this.RaisePropertyChanged(nameof(HasStartupError));
+        }
+    }
+
+    public bool HasStartupError => !string.IsNullOrEmpty(_startupErrorMessage);
 
     public bool HasRunningJobs
     {
@@ -2943,9 +2969,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
+            Trace.TraceError($"Database startup failed: {ex}");
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
                 IsLoadingDatabase = false;
+                StartupErrorTitle = AppText.StartupErrorTitle;
+                StartupErrorMessage = ex.Message;
                 StatusText = AppText.FormatErrorStatus(ex.Message);
             });
         }
@@ -2953,6 +2982,55 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void ReportStartupFailure(Exception ex)
     {
+        Trace.TraceError($"Startup failure: {ex}");
+        StartupErrorTitle = AppText.StartupErrorTitle;
+        StartupErrorMessage = ex.Message;
+        StatusText = AppText.FormatErrorStatus(ex.Message);
+    }
+
+    private async Task OpenLogsFolderAsync()
+    {
+        try
+        {
+            var folder = System.IO.Path.GetDirectoryName(Diagnostics.TraceConfiguration.LogFilePath);
+            if (!string.IsNullOrEmpty(folder) && System.IO.Directory.Exists(folder))
+            {
+                await _systemInteractionService.OpenPathAsync(folder);
+            }
+        }
+        catch (Exception ex)
+        {
+            ReportError("Open logs folder", ex);
+        }
+    }
+
+    private async Task OpenDatabaseFolderAsync()
+    {
+        try
+        {
+            var dbPath = _storageOptionsService.Current.DatabasePath;
+            var folder = System.IO.Path.GetDirectoryName(dbPath);
+            if (!string.IsNullOrEmpty(folder) && System.IO.Directory.Exists(folder))
+            {
+                await _systemInteractionService.OpenPathAsync(folder);
+            }
+        }
+        catch (Exception ex)
+        {
+            ReportError("Open database folder", ex);
+        }
+    }
+
+    /// <summary>
+    /// Standard error reporter used by Rx subscriptions and async catch blocks.
+    /// Always traces the full exception (so the session log captures the type and
+    /// stack) and then surfaces a short message in <see cref="StatusText"/>. Use
+    /// this in preference to setting <see cref="StatusText"/> directly from a
+    /// catch — otherwise the error is invisible to anyone reading the log.
+    /// </summary>
+    private void ReportError(string context, Exception ex)
+    {
+        Trace.TraceError($"{context} failed: {ex}");
         StatusText = AppText.FormatErrorStatus(ex.Message);
     }
 
@@ -3458,6 +3536,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
+            Trace.TraceWarning($"OpenUrl failed: {ex}");
             StatusText = $"Open URL failed: {ex.Message}";
         }
     }
@@ -3478,6 +3557,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
+            Trace.TraceWarning($"CopySelectedClipWindowTitle failed: {ex}");
             StatusText = $"Copy title failed: {ex.Message}";
         }
     }
@@ -3508,6 +3588,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
+            Trace.TraceWarning($"NavigateToLineageSource({sourceId}) failed: {ex}");
             StatusText = $"Failed to load clip #{sourceId}: {ex.Message}";
         }
     }
@@ -3795,6 +3876,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
+            Trace.TraceWarning($"Apply text transformation '{label}' failed: {ex}");
             StatusText = $"Failed to apply {label}: {ex.Message}";
             _notificationService.PublishError($"Failed to apply {label}", ex.Message);
         }
@@ -3868,6 +3950,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
+            Trace.TraceWarning($"ApplyTransformationToSingleClip '{label}' failed: {ex}");
             StatusText = $"Failed to apply {label}: {ex.Message}";
             _notificationService.PublishError($"Failed to apply {label}", ex.Message);
         }
@@ -3892,6 +3975,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
+            Trace.TraceWarning($"User script '{script.Name}' failed: {ex}");
             StatusText = $"Script '{script.Name}' failed: {ex.Message}";
             _notificationService.PublishError($"Script '{script.Name}' failed", ex.Message);
             return;
@@ -4217,7 +4301,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
-            StatusText = AppText.FormatErrorStatus(ex.Message);
+            ReportError("Requeue all for embedding", ex);
         }
     }
 
@@ -5291,6 +5375,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
+            Trace.TraceWarning($"Update check failed: {ex}");
             StatusText = AppText.FormatUpdateCheckFailed(ex.Message);
             _notificationService.PublishError(AppText.UpdateCheckFailedTitle, ex.Message);
         }
@@ -5397,6 +5482,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
+            Trace.TraceWarning($"Copilot sign-in failed: {ex}");
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
                 CopilotUserCode = string.Empty;
@@ -5844,6 +5930,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
+            Trace.TraceError($"ClipAngel import failed: {ex}");
             StatusText = AppText.FormatClipAngelImportError(ex.Message);
             _notificationService.PublishError(AppText.SettingsClipAngelImportTitle, AppText.FormatClipAngelImportError(ex.Message));
         }
@@ -6594,6 +6681,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
+            Trace.TraceError($"Password unlock failed: {ex}");
             PasswordPromptError = $"Failed to start: {ex.Message}";
         }
     }
@@ -6853,7 +6941,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         maintenanceSubscription.Disposable = Observable.Interval(TimeSpan.FromMinutes(1), RxSchedulers.TaskpoolScheduler)
             .SelectMany(_ => Observable.FromAsync(() => ApplyMaintenanceAndRefreshAsync(false)))
             .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => { }, ex => StatusText = AppText.FormatErrorStatus(ex.Message));
+            .Subscribe(_ => { }, ex => ReportError("Maintenance loop", ex));
         _subscriptions.Add(maintenanceSubscription);
     }
 

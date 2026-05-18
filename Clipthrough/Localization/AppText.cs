@@ -129,6 +129,10 @@ public static class AppText
         [nameof(SettingsConfirmEncryptionPasswordBody)] = "The encryption password will be stored as plaintext in storage.json so Clipthrough can auto-unlock the database on startup.\n\nAnyone with access to your user profile can read it. Continue?",
         [nameof(SettingsConfirmEncryptionPasswordConfirm)] = "Save plaintext",
         [nameof(SettingsConfirmEncryptionPasswordCancel)] = "Cancel",
+        [nameof(StartupErrorTitle)] = "Clipthrough could not start",
+        [nameof(StartupErrorBody)] = "The clip library failed to load. Your data may be intact - check the log for details.",
+        [nameof(StartupErrorOpenLogs)] = "Open logs folder",
+        [nameof(StartupErrorOpenDatabase)] = "Open database folder",
         [nameof(WelcomeTitleText)] = "Welcome to Clipthrough",
         [nameof(WelcomeDescriptionText)] = "Set up your clipboard library before the app starts capturing. You can change these options later in Settings.",
         [nameof(WelcomeSaveButtonLabel)] = "Create library",
@@ -415,6 +419,10 @@ public static class AppText
     public static string SettingsConfirmEncryptionPasswordBody => Text(nameof(SettingsConfirmEncryptionPasswordBody));
     public static string SettingsConfirmEncryptionPasswordConfirm => Text(nameof(SettingsConfirmEncryptionPasswordConfirm));
     public static string SettingsConfirmEncryptionPasswordCancel => Text(nameof(SettingsConfirmEncryptionPasswordCancel));
+    public static string StartupErrorTitle => Text(nameof(StartupErrorTitle));
+    public static string StartupErrorBody => Text(nameof(StartupErrorBody));
+    public static string StartupErrorOpenLogs => Text(nameof(StartupErrorOpenLogs));
+    public static string StartupErrorOpenDatabase => Text(nameof(StartupErrorOpenDatabase));
     public static string WelcomeTitleText => Text(nameof(WelcomeTitleText));
     public static string WelcomeDescriptionText => Text(nameof(WelcomeDescriptionText));
     public static string WelcomeSaveButtonLabel => Text(nameof(WelcomeSaveButtonLabel));

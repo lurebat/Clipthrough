@@ -136,6 +136,8 @@ public sealed class DatabaseInitializer
         await ExecuteNonQueryAsync(connection, "PRAGMA journal_mode = WAL;", cancellationToken);
         await ExecuteNonQueryAsync(connection, "PRAGMA busy_timeout = 5000;", cancellationToken);
 
+        await VerifyIntegrityAsync(connection, cancellationToken);
+
         await MigrateFtsSchemaIfNeededAsync(connection, cancellationToken);
 
         await using (var schemaCommand = connection.CreateCommand())
@@ -641,6 +643,45 @@ public sealed class DatabaseInitializer
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs <c>PRAGMA quick_check</c> immediately after the connection opens so we
+    /// detect a structurally corrupt database before any migration step starts
+    /// rewriting pages. <c>quick_check</c> is much faster than
+    /// <c>integrity_check</c> and skips per-row content scans, so the cold-start
+    /// cost is negligible on healthy databases. On a corrupt DB the migration
+    /// would otherwise fail mid-way and leave the file in an even worse state.
+    /// </summary>
+    private static async Task VerifyIntegrityAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var problems = new List<string>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "PRAGMA quick_check(5);";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var row = reader.GetString(0);
+                if (!string.Equals(row, "ok", StringComparison.Ordinal))
+                {
+                    problems.Add(row);
+                }
+            }
+        }
+
+        if (problems.Count == 0)
+        {
+            return;
+        }
+
+        var summary = string.Join("; ", problems.Take(5));
+        if (problems.Count > 5)
+        {
+            summary += $" (+{problems.Count - 5} more)";
+        }
+        throw new InvalidOperationException(
+            $"Database integrity check failed: {summary}. The file is corrupted; restore a backup or contact support.");
     }
 
     private static DateTimeOffset? ParseTimestamp(string? value)

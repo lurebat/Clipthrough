@@ -79,6 +79,16 @@ public sealed class UpdateService : IUpdateService
         }
         catch (Exception ex)
         {
+            // Velopack throws "Failed to acquire exclusive lock file" when another
+            // Clipthrough process is already checking for updates (e.g. when a dev
+            // build is running alongside the Velopack-installed release). That is
+            // routine, not an error, so don't pollute the session log with it.
+            if (ex.Message.Contains("Failed to acquire exclusive lock", StringComparison.OrdinalIgnoreCase))
+            {
+                Trace.TraceInformation("Update check skipped: another Clipthrough instance is already checking.");
+                return new UpdateCheckResult(false, null, "Another Clipthrough instance is checking for updates");
+            }
+
             Trace.TraceWarning($"Update check failed: {ex.Message}");
             return new UpdateCheckResult(false, null, ex.Message);
         }
