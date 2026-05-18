@@ -302,6 +302,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OpenLogsFolderCommand = ReactiveCommand.CreateFromTask(OpenLogsFolderAsync);
         OpenDatabaseFolderCommand = ReactiveCommand.CreateFromTask(OpenDatabaseFolderAsync);
         RunIntegrityCheckCommand = ReactiveCommand.CreateFromTask(RunIntegrityCheckAsync);
+        RefreshBackupsCommand = ReactiveCommand.Create(RefreshBackups);
+        RestoreBackupCommand = ReactiveCommand.CreateFromTask<Window?>(RestoreBackupAsync);
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
         SaveSettingsCommand = ReactiveCommand.CreateFromTask(SaveSettingsAsync);
         BrowseDatabasePathCommand = ReactiveCommand.CreateFromTask<Window?>(BrowseDatabasePathAsync);
@@ -623,6 +625,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> OpenDatabaseFolderCommand { get; }
 
     public ReactiveCommand<Unit, Unit> RunIntegrityCheckCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> RefreshBackupsCommand { get; }
+
+    public ReactiveCommand<Window?, Unit> RestoreBackupCommand { get; }
+
+    public ObservableCollection<DatabaseBackupItem> Backups { get; } = new();
+
+    private DatabaseBackupItem? _selectedBackup;
+    public DatabaseBackupItem? SelectedBackup
+    {
+        get => _selectedBackup;
+        set => this.RaiseAndSetIfChanged(ref _selectedBackup, value);
+    }
+
+    private string _backupRestoreStatus = string.Empty;
+    public string BackupRestoreStatus
+    {
+        get => _backupRestoreStatus;
+        private set => this.RaiseAndSetIfChanged(ref _backupRestoreStatus, value);
+    }
 
     public ReactiveCommand<Unit, Unit> CloseSettingsCommand { get; }
 
@@ -3090,6 +3112,88 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public void RefreshBackups()
+    {
+        try
+        {
+            Backups.Clear();
+            foreach (var info in _databaseBackupService.ListBackups())
+            {
+                Backups.Add(new DatabaseBackupItem(info));
+            }
+            BackupRestoreStatus = Backups.Count switch
+            {
+                0 => "No backups yet (one is created per day).",
+                1 => "1 backup available",
+                _ => $"{Backups.Count} backups available",
+            };
+        }
+        catch (Exception ex)
+        {
+            BackupRestoreStatus = $"Listing failed: {ex.Message}";
+            Trace.TraceError($"List backups failed: {ex}");
+        }
+    }
+
+    private async Task RestoreBackupAsync(Window? owner)
+    {
+        var target = SelectedBackup;
+        if (target is null)
+        {
+            return;
+        }
+
+        var confirmed = owner is null
+            ? true
+            : await Clipthrough.Views.ConfirmDialog.ShowAsync(
+                owner,
+                "Restore from backup?",
+                $"Replace the current database with the snapshot from {target.Timestamp.LocalDateTime:yyyy-MM-dd HH:mm}?\n\nThe current database will be renamed with a .before-restore-* suffix so the swap is reversible. The application will exit afterwards; please restart it to load the restored data.",
+                "Restore",
+                "Cancel");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        try
+        {
+            BackupRestoreStatus = "Stopping background services…";
+
+            // Stop everything that holds a SqliteConnection open so the file
+            // moves below don't race against an active writer.
+            _clipboardMonitorService.Stop();
+            await _backgroundOcrQueue.StopAsync();
+            if (_embeddingWorker is not null)
+            {
+                await _embeddingWorker.StopAsync();
+            }
+
+            BackupRestoreStatus = "Restoring…";
+            await _databaseBackupService.RestoreAsync(target.Path);
+
+            BackupRestoreStatus = "Restored. The app will exit — restart to load the restored data.";
+            _notificationService.PublishInfo("Database restored", "Restart Clipthrough to load the restored snapshot.");
+
+            // Defer the shutdown so the user sees the status update first.
+            _ = Task.Delay(TimeSpan.FromMilliseconds(800)).ContinueWith(_ =>
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    if (Avalonia.Application.Current?.ApplicationLifetime
+                        is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+                    {
+                        desktop.Shutdown(0);
+                    }
+                }));
+        }
+        catch (Exception ex)
+        {
+            BackupRestoreStatus = $"Restore failed: {ex.Message}";
+            Trace.TraceError($"Restore from backup failed: {ex}");
+            _notificationService.PublishError("Restore failed", ex.Message);
+        }
+    }
+
     /// <summary>
     /// Standard error reporter used by Rx subscriptions and async catch blocks.
     /// Always traces the full exception (so the session log captures the type and
@@ -5378,6 +5482,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         SessionLogs.Close();
         LoadSettingsDraft(_settingsService.Current);
+        RefreshBackups();
         IsSettingsOpen = true;
     }
 

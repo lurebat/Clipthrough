@@ -652,7 +652,10 @@ public sealed class ClipStoreServiceTests
             IncrementExistingCopyCount = true,
         });
 
-        // Drop the column + table + index to simulate a pre-embedding DB, then re-initialize.
+        // Drop the column + table + index to simulate a pre-embedding DB,
+        // then clear the schema_version row so the version-gate in
+        // DatabaseInitializer treats this as an upgrade (not a no-op) and
+        // re-runs every Ensure helper.
         await using (var conn = scope.ConnectionFactory.CreateConnection())
         {
             await conn.OpenAsync();
@@ -661,6 +664,7 @@ public sealed class ClipStoreServiceTests
                 DROP INDEX IF EXISTS idx_clips_embedding_status;
                 DROP TABLE IF EXISTS clip_embeddings;
                 ALTER TABLE clips DROP COLUMN embedding_status;
+                DELETE FROM app_metadata WHERE key = 'schema_version';
                 """;
             await cmd.ExecuteNonQueryAsync();
         }

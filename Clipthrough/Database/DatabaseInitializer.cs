@@ -118,6 +118,18 @@ public sealed class DatabaseInitializer
         );
         """;
 
+    /// <summary>
+    /// Bump this constant whenever any of the schema-evolution helpers below
+    /// (Ensure*Columns / Backfill* / DeduplicateClipsByHash /
+    /// EnsureUniqueClipHashIndex / RebuildClipSearchIndex) gains new work that
+    /// needs to run on existing databases. On every startup we compare against
+    /// the value stored in <c>app_metadata.schema_version</c>; if the stored
+    /// value matches, all the migration helpers are skipped (they're idempotent
+    /// no-ops on a current database but still pay several SQLite round trips
+    /// each, which adds up to ~800ms on a cold OS file cache).
+    /// </summary>
+    private const int CurrentSchemaVersion = 1;
+
     private readonly SqliteConnectionFactory _connectionFactory;
     private readonly ISensitivityService _sensitivityService;
 
@@ -129,35 +141,69 @@ public sealed class DatabaseInitializer
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
+        TraceStep(sw, "connection-opened");
 
         // WAL mode allows concurrent readers during writes — critical for responsiveness.
         await ExecuteNonQueryAsync(connection, "PRAGMA journal_mode = WAL;", cancellationToken);
         await ExecuteNonQueryAsync(connection, "PRAGMA busy_timeout = 5000;", cancellationToken);
 
         await VerifyIntegrityAsync(connection, cancellationToken);
+        TraceStep(sw, "integrity-check");
 
         await MigrateFtsSchemaIfNeededAsync(connection, cancellationToken);
+        TraceStep(sw, "fts-schema-migrate");
 
         await using (var schemaCommand = connection.CreateCommand())
         {
             schemaCommand.CommandText = Schema;
             await schemaCommand.ExecuteNonQueryAsync(cancellationToken);
         }
+        TraceStep(sw, "schema-ddl");
 
-        await EnsureClipAggregationColumnsAsync(connection, cancellationToken);
-        await EnsureClipPayloadColumnsAsync(connection, cancellationToken);
-        await EnsureClipTrackingColumnsAsync(connection, cancellationToken);
-        await EnsureClipPinningColumnsAsync(connection, cancellationToken);
-        await EnsureClipOcrColumnsAsync(connection, cancellationToken);
-        await EnsureClipLineageColumnsAsync(connection, cancellationToken);
-        await EnsureClipEmbeddingSchemaAsync(connection, cancellationToken);
-        await BackfillClipAggregationColumnsAsync(connection, cancellationToken);
-        await BackfillClipPayloadColumnsAsync(connection, cancellationToken);
-        await DeduplicateClipsByHashAsync(connection, cancellationToken);
-        await EnsureUniqueClipHashIndexAsync(connection, cancellationToken);
-        await RebuildClipSearchIndexAsync(connection, cancellationToken);
+        // Schema-version gate. On an established DB this short-circuits all
+        // the Ensure*/Backfill* helpers (each of which costs at least one
+        // round trip and a PRAGMA table_info read) and goes straight to the
+        // sensitivity-rules seed. New installs and freshly-imported legacy
+        // databases stamp 0, so they still run the full path.
+        var storedVersion = await ReadSchemaVersionAsync(connection, cancellationToken);
+        TraceStep(sw, $"version-read (stored={storedVersion} current={CurrentSchemaVersion})");
+
+        if (storedVersion < CurrentSchemaVersion)
+        {
+            await EnsureClipAggregationColumnsAsync(connection, cancellationToken);
+            TraceStep(sw, "ensure-aggregation-columns");
+            await EnsureClipPayloadColumnsAsync(connection, cancellationToken);
+            TraceStep(sw, "ensure-payload-columns");
+            await EnsureClipTrackingColumnsAsync(connection, cancellationToken);
+            TraceStep(sw, "ensure-tracking-columns");
+            await EnsureClipPinningColumnsAsync(connection, cancellationToken);
+            TraceStep(sw, "ensure-pinning-columns");
+            await EnsureClipOcrColumnsAsync(connection, cancellationToken);
+            TraceStep(sw, "ensure-ocr-columns");
+            await EnsureClipLineageColumnsAsync(connection, cancellationToken);
+            TraceStep(sw, "ensure-lineage-columns");
+            await EnsureClipEmbeddingSchemaAsync(connection, cancellationToken);
+            TraceStep(sw, "ensure-embedding-schema");
+            await BackfillClipAggregationColumnsAsync(connection, cancellationToken);
+            TraceStep(sw, "backfill-aggregation");
+            await BackfillClipPayloadColumnsAsync(connection, cancellationToken);
+            TraceStep(sw, "backfill-payload");
+            await DeduplicateClipsByHashAsync(connection, cancellationToken);
+            TraceStep(sw, "dedupe-by-hash");
+            await EnsureUniqueClipHashIndexAsync(connection, cancellationToken);
+            TraceStep(sw, "ensure-unique-hash-index");
+            await RebuildClipSearchIndexAsync(connection, cancellationToken);
+            TraceStep(sw, "rebuild-search-index");
+            await WriteSchemaVersionAsync(connection, CurrentSchemaVersion, cancellationToken);
+            TraceStep(sw, $"version-write ({CurrentSchemaVersion})");
+        }
+        else
+        {
+            TraceStep(sw, "schema-up-to-date (migrations skipped)");
+        }
 
         foreach (var rule in _sensitivityService.GetDefaultRules())
         {
@@ -173,9 +219,39 @@ public sealed class DatabaseInitializer
             ruleCommand.Parameters.AddWithValue("$severity", rule.Severity);
             await ruleCommand.ExecuteNonQueryAsync(cancellationToken);
         }
+        TraceStep(sw, "sensitivity-rules-seeded");
 
         await _sensitivityService.ReloadAsync(cancellationToken);
+        TraceStep(sw, "sensitivity-reload (total)");
     }
+
+    /// <summary>
+    /// Reads the persisted schema version from <c>app_metadata</c>. Returns 0
+    /// if the row is missing (new install or pre-versioning database) so the
+    /// caller runs the full migration sequence at least once.
+    /// </summary>
+    private static async Task<int> ReadSchemaVersionAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT value FROM app_metadata WHERE key = 'schema_version';";
+        var raw = await command.ExecuteScalarAsync(cancellationToken);
+        if (raw is null or DBNull) return 0;
+        return int.TryParse(raw.ToString(), out var v) ? v : 0;
+    }
+
+    private static async Task WriteSchemaVersionAsync(SqliteConnection connection, int version, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO app_metadata (key, value) VALUES ('schema_version', $version)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+            """;
+        command.Parameters.AddWithValue("$version", version.ToString(CultureInfo.InvariantCulture));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static void TraceStep(System.Diagnostics.Stopwatch sw, string step)
+        => System.Diagnostics.Trace.TraceInformation($"[init-timing] {step} @ {sw.ElapsedMilliseconds}ms");
 
     private static async Task EnsureClipAggregationColumnsAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {

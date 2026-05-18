@@ -126,4 +126,74 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
             Trace.TraceWarning($"Backup pruning failed: {ex.Message}");
         }
     }
+
+    public System.Collections.Generic.IReadOnlyList<DatabaseBackupInfo> ListBackups()
+    {
+        var dbPath = _storageOptionsService.Current.DatabasePath;
+        if (string.IsNullOrEmpty(dbPath))
+        {
+            return System.Array.Empty<DatabaseBackupInfo>();
+        }
+
+        var backupDir = Path.Combine(Path.GetDirectoryName(dbPath)!, "backups");
+        if (!Directory.Exists(backupDir))
+        {
+            return System.Array.Empty<DatabaseBackupInfo>();
+        }
+
+        try
+        {
+            return Directory.EnumerateFiles(backupDir, "clipthrough-*.db")
+                .Select(p => new FileInfo(p))
+                .OrderByDescending(f => f.LastWriteTimeUtc)
+                .Select(f => new DatabaseBackupInfo(f.FullName, new DateTimeOffset(f.LastWriteTimeUtc, TimeSpan.Zero), f.Length))
+                .ToArray();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceWarning($"Listing backups failed: {ex.Message}");
+            return System.Array.Empty<DatabaseBackupInfo>();
+        }
+    }
+
+    public Task RestoreAsync(string backupPath, CancellationToken cancellationToken = default)
+        => Task.Run(() =>
+        {
+            if (string.IsNullOrEmpty(backupPath) || !File.Exists(backupPath))
+            {
+                throw new FileNotFoundException("Backup file not found.", backupPath);
+            }
+
+            var dbPath = _storageOptionsService.Current.DatabasePath;
+            if (string.IsNullOrEmpty(dbPath))
+            {
+                throw new InvalidOperationException("No database path is configured.");
+            }
+
+            var dir = Path.GetDirectoryName(dbPath)!;
+            Directory.CreateDirectory(dir);
+
+            // Stash whatever's currently live so the operation is reversible
+            // if the chosen backup turns out to be unreadable. Renaming is
+            // also atomic on NTFS, which avoids leaving a half-written .db
+            // behind if the process is killed mid-copy.
+            var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+            foreach (var suffix in new[] { string.Empty, "-wal", "-shm" })
+            {
+                var live = dbPath + suffix;
+                if (File.Exists(live))
+                {
+                    File.Move(live, $"{live}.before-restore-{stamp}");
+                }
+            }
+
+            // Copy via a temp file + atomic rename so the restore is also
+            // crash-safe: if we die between Copy and Move, the live path is
+            // still empty and the user re-runs the restore.
+            var tempPath = dbPath + ".restoring";
+            File.Copy(backupPath, tempPath);
+            File.Move(tempPath, dbPath);
+
+            Trace.TraceInformation($"Restored database from backup '{backupPath}'. Previous live files renamed with suffix '.before-restore-{stamp}'.");
+        }, cancellationToken);
 }

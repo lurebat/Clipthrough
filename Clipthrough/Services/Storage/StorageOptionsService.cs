@@ -309,7 +309,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
     /// user can re-run the migration later (once the password prompt has
     /// completed) via <see cref="ImportLegacyDatabaseAsync"/>.
     /// </summary>
-    private static void TryCopyLegacyDatabase(string legacyPath, string migratedPath, string? password)
+    internal static void TryCopyLegacyDatabase(string legacyPath, string migratedPath, string? password)
     {
         if (!File.Exists(legacyPath) || File.Exists(migratedPath))
         {
@@ -336,24 +336,17 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
     private static void TryCheckpointLegacyDatabase(string legacyPath, string? password)
     {
-        // No password means we can't read encrypted pages, so the safest thing
-        // is to skip the checkpoint and accept that any uncheckpointed WAL
-        // frames will not make it into the migrated copy. That's strictly
-        // better than producing a structurally corrupt destination, which is
-        // what the previous raw .db + -wal + -shm copy did.
-        if (string.IsNullOrEmpty(password))
-        {
-            return;
-        }
-
         try
         {
             var builder = new SqliteConnectionStringBuilder
             {
                 DataSource = legacyPath,
                 Mode = SqliteOpenMode.ReadWrite,
-                Password = password,
             };
+            if (!string.IsNullOrEmpty(password))
+            {
+                builder.Password = password;
+            }
             using var connection = new SqliteConnection(builder.ToString());
             connection.Open();
             using var command = connection.CreateCommand();
@@ -362,6 +355,11 @@ public sealed class StorageOptionsService : IStorageOptionsService
         }
         catch (Exception ex) when (ex is SqliteException or IOException)
         {
+            // Encrypted DB without a password, locked file, or schema-level
+            // failure. We accept that any uncheckpointed WAL frames will not
+            // make it into the migrated copy — that's strictly better than
+            // producing a structurally corrupt destination, which is what the
+            // previous raw .db + -wal + -shm copy did.
             Trace.TraceWarning($"Legacy database checkpoint failed; copying raw .db without merging WAL: {ex.Message}");
         }
     }

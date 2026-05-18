@@ -845,6 +845,71 @@ public sealed class MainWindowViewModelHeadlessTests
         await scope.DatabaseInitializer.InitializeAsync();
     }
 
+    [AvaloniaFact]
+    public async Task CorruptedDatabase_SurfacesStartupErrorOverlay()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        scope.SettingsService.SetHasSavedSettings(true);
+        scope.StorageOptionsService.SetHasSavedConfig(true);
+
+        // First, create a real, working SQLite database so the header is
+        // valid (RequiresPassword check passes), then corrupt one of the
+        // non-header pages so PRAGMA quick_check inside DatabaseInitializer
+        // fails. This is the scenario today's incident produced and the one
+        // the startup-error overlay is meant to cover.
+        using (var seed = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+        {
+            DataSource = scope.DatabasePath,
+            Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadWriteCreate,
+        }.ToString()))
+        {
+            seed.Open();
+            using var cmd = seed.CreateCommand();
+            cmd.CommandText = "CREATE TABLE widgets (id INTEGER PRIMARY KEY, label TEXT); " +
+                              // Insert enough rows to definitely spill past page 1 (~4 KB).
+                              "WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n < 400) " +
+                              "INSERT INTO widgets (label) SELECT printf('row-%04d-%s', n, hex(randomblob(40))) FROM seq;";
+            cmd.ExecuteNonQuery();
+        }
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+        // Zero out a chunk of the file past the header but inside the first
+        // table b-tree page. That preserves the SQLite magic (so the file
+        // still looks like a database to RequiresPassword) but breaks the
+        // pages quick_check walks.
+        var dbBytes = await System.IO.File.ReadAllBytesAsync(scope.DatabasePath);
+        Assert.True(dbBytes.Length > 8192, "Seeded database must be at least two pages.");
+        for (var offset = 4096; offset < 4096 + 512; offset++)
+        {
+            dbBytes[offset] = 0xFF;
+        }
+        await System.IO.File.WriteAllBytesAsync(scope.DatabasePath, dbBytes);
+
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+
+        await viewModel.InitializeAsync();
+
+        // Initialize kicks off StartDatabaseInBackgroundAsync as fire-and-
+        // forget. Spin briefly until the background task either succeeds
+        // (test setup wrong) or fails through to HasStartupError.
+        for (var attempt = 0; attempt < 50 && !viewModel.HasStartupError; attempt++)
+        {
+            await Task.Delay(50);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.True(viewModel.HasStartupError, "Corrupted database should set HasStartupError.");
+        Assert.False(string.IsNullOrWhiteSpace(viewModel.StartupErrorMessage),
+            "StartupErrorMessage should describe the failure for the user.");
+        Assert.False(string.IsNullOrWhiteSpace(viewModel.StartupErrorTitle),
+            "StartupErrorTitle should be set so the overlay has a heading.");
+        Assert.False(viewModel.IsLoadingDatabase,
+            "Loading overlay must close so the error overlay can replace it.");
+    }
+
     private static async Task<ClipEntry> CaptureTextClipAsync(IClipStoreService clipStoreService, string text)
     {
         return (await clipStoreService.CaptureAsync(new ClipCaptureRequest
