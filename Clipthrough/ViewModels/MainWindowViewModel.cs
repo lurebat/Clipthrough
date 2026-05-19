@@ -54,6 +54,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly ISensitivityService _sensitivityService;
     private readonly IAppNotificationService _notificationService;
     private readonly IClipExportService _clipExportService;
+    private readonly IDragDropService _dragDropService;
     private readonly IImageEditorService _imageEditorService;
     private readonly ISearchHistoryService _searchHistoryService;
     private readonly IAiTransformService _aiTransformService;
@@ -90,6 +91,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ClipFileItemViewModel? _selectedFileItem;
     private bool _hasMoreResults;
     private bool _isBusy;
+    private bool _isCapturing;
     private string _statusText = AppText.LoadingStatus;
     private bool _hasRunningJobs;
     private string _runningJobsLabel = string.Empty;
@@ -220,7 +222,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _editedClipSelectionLength;
     private long? _checkedSelectionAnchorId;
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, IClipAngelImportService? clipAngelImportService = null, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null, Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null, ICopilotAuthService? copilotAuthService = null, IUpdateService? updateService = null, IDatabaseBackupService? databaseBackupService = null)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, IClipAngelImportService? clipAngelImportService = null, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null, Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null, ICopilotAuthService? copilotAuthService = null, IUpdateService? updateService = null, IDatabaseBackupService? databaseBackupService = null, IDragDropService? dragDropService = null)
     {
         _clipStoreService = clipStoreService;
         _clipAngelImportService = clipAngelImportService ?? new ClipAngelImportService(clipStoreService);
@@ -232,6 +234,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _sensitivityService = sensitivityService;
         _notificationService = notificationService;
         _clipExportService = clipExportService;
+        _dragDropService = dragDropService ?? new DragDropService();
         _imageEditorService = imageEditorService;
         _searchHistoryService = searchHistoryService;
         _aiTransformService = aiTransformService;
@@ -485,6 +488,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _notificationService.Notifications
                 .ObserveOn(RxSchedulers.MainThreadScheduler)
                 .Subscribe(ShowNotification));
+
+        // Show the capture indicator only when a capture is slow enough to
+        // matter. Throttle leading-edge false→true transitions by 200 ms so
+        // ordinary fast captures don't flash the UI; once shown, keep it
+        // visible for at least 400 ms so the user can see it.
+        _subscriptions.Add(
+            _clipboardMonitorService.CaptureBusy
+                .DistinctUntilChanged()
+                .Select(busy => busy
+                    ? Observable.Return(true).Delay(TimeSpan.FromMilliseconds(200), RxSchedulers.MainThreadScheduler)
+                    : Observable.Return(false).Delay(TimeSpan.FromMilliseconds(150), RxSchedulers.MainThreadScheduler))
+                .Switch()
+                .ObserveOn(RxSchedulers.MainThreadScheduler)
+                .Subscribe(busy => IsCapturing = busy,
+                    ex => Trace.TraceError($"Capture-busy subscription failed: {ex}")));
 
         _subscriptions.Add(
             Observable.Interval(TimeSpan.FromSeconds(10), RxSchedulers.MainThreadScheduler)
@@ -1080,8 +1098,27 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             this.RaiseAndSetIfChanged(ref _isBusy, value);
             this.RaisePropertyChanged(nameof(ClipboardStateText));
             this.RaisePropertyChanged(nameof(EmptyListMessage));
+            this.RaisePropertyChanged(nameof(IsBusyOrCapturing));
         }
     }
+
+    /// <summary>
+    /// True while a clipboard capture is being processed (COM read +
+    /// DB write + enrichment). Driven by the clipboard monitor service and
+    /// debounced so it only flips visible for captures slower than a few
+    /// hundred milliseconds — short captures don't flash the indicator.
+    /// </summary>
+    public bool IsCapturing
+    {
+        get => _isCapturing;
+        private set
+        {
+            this.RaiseAndSetIfChanged(ref _isCapturing, value);
+            this.RaisePropertyChanged(nameof(IsBusyOrCapturing));
+        }
+    }
+
+    public bool IsBusyOrCapturing => IsBusy || IsCapturing;
 
     public string StatusText
     {
@@ -3268,18 +3305,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var result = await SearchClipsAsync(request.Filters, request.UseSemanticClipSearch).ConfigureAwait(false);
             if (sw is not null) Trace.TraceInformation($"[refresh-timing] db-search-complete @ {sw.ElapsedMilliseconds}ms items={result.Items.Count} total={result.TotalMatchingCount}");
 
-            // Refresh-race guard: if the window became hidden while we were
-            // running the DB query, drop the apply and mark the list stale so
-            // the next show triggers a fresh refresh. Touching Clips while
-            // hidden produces the very freeze we are trying to fix.
+            // Apply the refresh result regardless of visibility. With
+            // optimistic captures running continuously, ApplyRefreshResult's
+            // incremental diff is cheap; keeping the list current while hidden
+            // is what makes the next popup show instant.
             var applied = await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
-                if (!_isMainWindowVisible)
-                {
-                    _isClipListStale = true;
-                    return false;
-                }
-
                 ApplyRefreshResult(result, preferredSelectionId);
                 _isClipListStale = false;
                 return true;
@@ -5031,35 +5062,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void ApplyCapturedClipOptimistically(ClipEntry clip)
     {
-        if (!_isMainWindowVisible)
-        {
-            // Don't churn the Clips collection while the window is hidden. Each
-            // optimistic insert builds a new ClipItemViewModel (with several
-            // ReactiveCommands) and cascades a SelectedClip property storm,
-            // which is exactly what makes the popup feel frozen on the next
-            // show when many captures occurred while it was minimised.
-            _isClipListStale = true;
-            return;
-        }
-
-        UpsertClipItem(clip, targetIndex: 0, select: true);
+        // Keep the Clips collection current even while the popup is hidden so
+        // the next show is instant. We do skip the per-insert SelectedClip
+        // assignment in the hidden case: SetMainWindowVisible re-selects the
+        // newest clip on show, so paying for the SelectedClip property storm
+        // on every capture would be wasted work.
+        UpsertClipItem(clip, targetIndex: 0, select: _isMainWindowVisible);
     }
 
     private void ApplyUpdatedClipOptimistically(ClipEntry clip)
     {
-        if (!_isMainWindowVisible)
-        {
-            _isClipListStale = true;
-            return;
-        }
-
         var existingIndex = IndexOfClip(clip.Id);
         if (existingIndex < 0)
         {
             return;
         }
 
-        UpsertClipItem(clip, existingIndex, select: SelectedClip?.Id == clip.Id);
+        UpsertClipItem(clip, existingIndex, select: _isMainWindowVisible && SelectedClip?.Id == clip.Id);
     }
 
     private void UpsertClipItem(ClipEntry clip, int targetIndex, bool select)
@@ -7727,6 +7746,80 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Build a drag-and-drop payload for the currently checked clips (falling
+    /// back to <see cref="SelectedClip"/> when nothing is checked), so the
+    /// view can hand it to <c>DragDrop.DoDragDropAsync</c>.
+    /// </summary>
+    public async Task<Avalonia.Input.IDataTransfer?> BuildDragPayloadForCurrentSelectionAsync(Avalonia.Platform.Storage.IStorageProvider storageProvider)
+    {
+        var clips = GetCheckedOrSelectedClips();
+        if (clips.Length == 0)
+        {
+            return null;
+        }
+
+        var entries = clips.Select(static c => c.Clip).ToArray();
+        return await _dragDropService.BuildDragPayloadAsync(entries, storageProvider);
+    }
+
+    /// <summary>
+    /// Import the contents of an incoming drop as new clips. Each accepted
+    /// payload is routed through <see cref="IClipStoreService.CaptureFastAsync"/>
+    /// and emitted on the captured-clips stream so the UI sees it instantly.
+    /// Returns the number of clips imported.
+    /// </summary>
+    public async Task<int> ImportDroppedDataAsync(Avalonia.Input.IDataTransfer drop, ClipboardSourceApplicationInfo? sourceInfo)
+    {
+        if (drop is null)
+        {
+            return 0;
+        }
+
+        IReadOnlyList<ClipCaptureRequest> requests;
+        try
+        {
+            requests = await _dragDropService.TryBuildCaptureRequestsAsync(drop, sourceInfo);
+        }
+        catch (Exception ex)
+        {
+            ReportError("Drag-import parse", ex);
+            return 0;
+        }
+
+        if (requests.Count == 0)
+        {
+            return 0;
+        }
+
+        var imported = 0;
+        foreach (var request in requests)
+        {
+            try
+            {
+                var clip = await Task.Run(() => _clipStoreService.CaptureFastAsync(request));
+                if (clip is null)
+                {
+                    continue;
+                }
+
+                ApplyCapturedClipOptimistically(clip);
+                imported++;
+            }
+            catch (Exception ex)
+            {
+                ReportError("Drag-import capture", ex);
+            }
+        }
+
+        if (imported > 0)
+        {
+            _notificationService.PublishInfo(AppText.ClipDragImportTitle, AppText.FormatClipDragImportSummary(imported));
+        }
+
+        return imported;
     }
 
     private readonly record struct HotkeyDraft(string Name, bool IsEnabled, string HotkeyText);

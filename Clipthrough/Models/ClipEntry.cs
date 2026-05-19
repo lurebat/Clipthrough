@@ -67,6 +67,13 @@ public sealed class ClipEntry
 
     public string? TransformKind { get; init; }
 
+    /// <summary>
+    /// Marks how the clip entered Clipthrough. NULL = clipboard capture
+    /// (default); "drag_drop" = imported via the popup's drag-and-drop
+    /// surface. Surfaced as a small badge in the UI.
+    /// </summary>
+    public string? ImportKind { get; init; }
+
     public IReadOnlyList<SensitivityMatch> SensitivityMatches { get; set; } = Array.Empty<SensitivityMatch>();
 }
 

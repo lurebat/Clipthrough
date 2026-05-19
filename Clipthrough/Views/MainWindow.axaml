@@ -555,6 +555,14 @@
                                                                VerticalAlignment="Center"
                                                                FontSize="10"
                                                                ToolTip.Tip="Pinned" />
+                                                    <Border Classes="badge-chip"
+                                                            IsVisible="{Binding IsImported}"
+                                                            ToolTip.Tip="Imported via drag-and-drop"
+                                                            VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding ImportedBadgeLabel}"
+                                                                   FontSize="10"
+                                                                   FontWeight="SemiBold" />
+                                                    </Border>
                                                 </WrapPanel>
                                             </StackPanel>
                                         </Grid>
@@ -566,7 +574,7 @@
 
                     <ProgressBar Grid.Row="2"
                                  IsIndeterminate="True"
-                                 IsVisible="{Binding IsBusy}"
+                                 IsVisible="{Binding IsBusyOrCapturing}"
                                  Height="4"
                                  Margin="0,-4,0,0"
                                  VerticalAlignment="Bottom" />

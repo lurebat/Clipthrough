@@ -44,7 +44,8 @@ public sealed class DatabaseInitializer
             ocr_attempted_at TEXT,
             ocr_error    TEXT,
             source_clip_id INTEGER,
-            transform_kind TEXT
+            transform_kind TEXT,
+            import_kind  TEXT
         );
 
         CREATE VIRTUAL TABLE IF NOT EXISTS clips_fts USING fts5(
@@ -128,7 +129,7 @@ public sealed class DatabaseInitializer
     /// no-ops on a current database but still pay several SQLite round trips
     /// each, which adds up to ~800ms on a cold OS file cache).
     /// </summary>
-    private const int CurrentSchemaVersion = 1;
+    private const int CurrentSchemaVersion = 2;
 
     private readonly SqliteConnectionFactory _connectionFactory;
     private readonly ISensitivityService _sensitivityService;
@@ -455,6 +456,14 @@ public sealed class DatabaseInitializer
         if (!existingColumns.Contains("transform_kind"))
         {
             await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN transform_kind TEXT;", cancellationToken);
+        }
+
+        // import_kind marks how the clip entered Clipthrough so the UI can
+        // distinguish drag-and-drop imports from real clipboard captures.
+        // NULL = clipboard capture (default); "drag_drop" = imported via DnD.
+        if (!existingColumns.Contains("import_kind"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN import_kind TEXT;", cancellationToken);
         }
 
         await ExecuteNonQueryAsync(

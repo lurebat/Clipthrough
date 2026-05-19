@@ -9,6 +9,7 @@ using Avalonia.Media.Imaging;
 using Clipthrough.Localization;
 using Clipthrough.Models;
 using Clipthrough.Presentation;
+using Clipthrough.Services;
 using ReactiveUI;
 
 namespace Clipthrough.ViewModels;
@@ -343,6 +344,10 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     public bool IsPinned => Clip.IsPinned;
 
     public string PinMarker => IsPinned ? "📌" : string.Empty;
+
+    public bool IsImported => string.Equals(Clip.ImportKind, ClipImportKinds.DragDrop, StringComparison.Ordinal);
+
+    public string ImportedBadgeLabel => AppText.ClipDragImportBadgeLabel;
 
     public string PinActionLabel => IsPinned ? "Unpin" : "Pin";
 

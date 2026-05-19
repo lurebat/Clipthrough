@@ -115,10 +115,13 @@ internal sealed class TestClipboardMonitorService : IClipboardMonitorService
 {
     private readonly Subject<ClipEntry> _capturedClips = new();
     private readonly Subject<ClipEntry> _updatedClips = new();
+    private readonly BehaviorSubject<bool> _captureBusy = new(false);
 
     public IObservable<ClipEntry> CapturedClips => _capturedClips.AsObservable();
 
     public IObservable<ClipEntry> UpdatedClips => _updatedClips.AsObservable();
+
+    public IObservable<bool> CaptureBusy => _captureBusy.AsObservable();
 
     public void Start()
     {

@@ -2,6 +2,7 @@ using System.Threading.Tasks;
 using System.Text;
 using Clipthrough.Localization;
 using Clipthrough.Models;
+using Clipthrough.Services;
 using Xunit;
 
 namespace Clipthrough.Tests.Integration;
@@ -228,6 +229,30 @@ public sealed class ClipStoreServiceTests
         Assert.NotNull(second);
         Assert.Equal(first!.Id, second!.Id);
         Assert.Equal(2, second.CopyCount);
+    }
+
+    [Fact]
+    public async Task CaptureFastAsync_PersistsImportKind()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        var clip = await scope.ClipStoreService.CaptureFastAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "imported via drag",
+            ContentBytes = Encoding.UTF8.GetBytes("imported via drag"),
+            ImportKind = ClipImportKinds.DragDrop,
+        });
+
+        Assert.NotNull(clip);
+        Assert.Equal(ClipImportKinds.DragDrop, clip!.ImportKind);
+
+        var result = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters { Limit = 10 });
+        var loaded = Assert.Single(result.Items);
+        Assert.Equal(ClipImportKinds.DragDrop, loaded.ImportKind);
     }
 
     [Fact]

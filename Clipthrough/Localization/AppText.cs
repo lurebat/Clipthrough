@@ -215,6 +215,9 @@ public static class AppText
         [nameof(ClipCaptureFailedTitle)] = "Clip capture failed",
         [nameof(ClipCaptureFailedUnsupportedPayload)] = "The clipboard payload was not a supported text, rich text, image, or file format.",
         [nameof(ClipCaptureFailedEmptyPayload)] = "The clipboard payload was empty.",
+        [nameof(ClipDragImportTitle)] = "Imported by drag",
+        [nameof(ClipDragImportBadgeLabel)] = "Dropped",
+        [nameof(ClipDragImportDropHint)] = "Drop files, images, or text to import",
         ["ContentType.Text"] = "Text",
         ["ContentType.Image"] = "Image",
         ["ContentType.RichText"] = "Rich text",
@@ -503,6 +506,12 @@ public static class AppText
     public static string TrayNotificationTitle => Text(nameof(TrayNotificationTitle));
     public static string TrayNotificationMessage => Text(nameof(TrayNotificationMessage));
     public static string ClipCaptureFailedTitle => Text(nameof(ClipCaptureFailedTitle));
+
+    public static string ClipDragImportTitle => Text(nameof(ClipDragImportTitle));
+
+    public static string ClipDragImportBadgeLabel => Text(nameof(ClipDragImportBadgeLabel));
+
+    public static string ClipDragImportDropHint => Text(nameof(ClipDragImportDropHint));
     public static string ClipCaptureFailedUnsupportedPayload => Text(nameof(ClipCaptureFailedUnsupportedPayload));
     public static string ClipCaptureFailedEmptyPayload => Text(nameof(ClipCaptureFailedEmptyPayload));
 
@@ -611,6 +620,10 @@ public static class AppText
     public static string FormatClipCaptureFailedTooLarge(long bytes, long limitBytes) => Format("Format.ClipCaptureFailedTooLarge", bytes, limitBytes);
 
     public static string FormatClipCaptureFailedComSnapshot(int hresult) => Format("Format.ClipCaptureFailedComSnapshot", hresult);
+
+    public static string FormatClipDragImportSummary(int count) => count == 1
+        ? "1 clip imported via drag-and-drop."
+        : $"{count} clips imported via drag-and-drop.";
 
     public static string FormatCopiedPath(string fileName) => Format("Format.CopiedPathStatus", fileName);
 

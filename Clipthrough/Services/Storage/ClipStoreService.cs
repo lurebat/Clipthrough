@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -47,7 +48,8 @@ public sealed class ClipStoreService : IClipStoreService
             c.ocr_attempted_at,
             c.ocr_error,
             c.source_clip_id,
-            c.transform_kind
+            c.transform_kind,
+            c.import_kind
         """;
 
     private readonly SqliteConnectionFactory _connectionFactory;
@@ -666,12 +668,53 @@ public sealed class ClipStoreService : IClipStoreService
         await transaction.CommitAsync(cancellationToken);
         InvalidateStatsCache();
 
+        SweepDragTempFiles();
+
         return new ClipMaintenanceResult
         {
             PurgedClipCount = purgedClipCount,
             TotalClipCount = await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips;", cancellationToken),
             TotalStoredBytes = await ExecuteScalarLongAsync(connection, "SELECT COALESCE(SUM(byte_size), 0) FROM clips;", cancellationToken),
         };
+    }
+
+    // Drag-out writes temp PNG files under %TEMP%/Clipthrough/drag/ so drop
+    // targets can read them after the source process returns from
+    // DoDragDropAsync. We can't delete them synchronously without races, so
+    // sweep here as part of routine maintenance. Files older than 1 hour are
+    // safe to remove — any drop target will have read them long before then.
+    private static void SweepDragTempFiles()
+    {
+        try
+        {
+            if (!Directory.Exists(DragDropService.DragTempDirectory))
+            {
+                return;
+            }
+
+            var cutoff = DateTime.UtcNow.AddHours(-1);
+            foreach (var path in Directory.EnumerateFiles(DragDropService.DragTempDirectory))
+            {
+                try
+                {
+                    if (File.GetLastWriteTimeUtc(path) < cutoff)
+                    {
+                        File.Delete(path);
+                    }
+                }
+                catch (IOException)
+                {
+                    // Drop target may still hold the handle — skip and retry next sweep.
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            System.Diagnostics.Trace.TraceWarning($"Drag temp sweep failed: {ex.Message}");
+        }
     }
 
     public async Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default)
@@ -910,13 +953,13 @@ public sealed class ClipStoreService : IClipStoreService
                         source_app, source_app_path, source_app_icon, source_window_title, source_url,
                         hash, is_favorite, is_sensitive, captured_at, copy_count,
                         first_copied_at, last_copied_at, byte_size,
-                        image_width, image_height, source_clip_id, transform_kind)
+                        image_width, image_height, source_clip_id, transform_kind, import_kind)
                     VALUES (
                         $content, $contentBytes, $contentType, $contentFormat,
                         $sourceApp, $sourceAppPath, $sourceAppIcon, $sourceWindowTitle, $sourceUrl,
                         $hash, $isFavorite, $isSensitive, $capturedAt, 1,
                         $capturedAt, $capturedAt, $byteSize,
-                        $imageWidth, $imageHeight, $sourceClipId, $transformKind);
+                        $imageWidth, $imageHeight, $sourceClipId, $transformKind, $importKind);
                     SELECT last_insert_rowid();
                     """;
                 AddUpsertParameters(insertCommand, request, contentText, hash, matches.Count > 0, capturedAt, byteSize);
@@ -1016,7 +1059,8 @@ public sealed class ClipStoreService : IClipStoreService
                         image_width,
                         image_height,
                         source_clip_id,
-                        transform_kind)
+                        transform_kind,
+                        import_kind)
                     VALUES (
                         $content,
                         $contentBytes,
@@ -1038,7 +1082,8 @@ public sealed class ClipStoreService : IClipStoreService
                         $imageWidth,
                         $imageHeight,
                         $sourceClipId,
-                        $transformKind);
+                        $transformKind,
+                        $importKind);
                     SELECT last_insert_rowid();
                     """;
                 AddUpsertParameters(insertCommand, request, contentText, hash, matches.Count > 0, capturedAt, byteSize);
@@ -1316,6 +1361,7 @@ public sealed class ClipStoreService : IClipStoreService
             OcrError = reader.IsDBNull(26) ? null : reader.GetString(26),
             SourceClipId = reader.IsDBNull(27) ? null : reader.GetInt64(27),
             TransformKind = reader.IsDBNull(28) ? null : reader.GetString(28),
+            ImportKind = reader.IsDBNull(29) ? null : reader.GetString(29),
         };
     }
 
@@ -1606,6 +1652,7 @@ public sealed class ClipStoreService : IClipStoreService
         command.Parameters.AddWithValue("$imageHeight", request.ImageHeight is { } height ? height : DBNull.Value);
         command.Parameters.AddWithValue("$sourceClipId", request.SourceClipId is { } sourceClipId ? sourceClipId : DBNull.Value);
         command.Parameters.AddWithValue("$transformKind", string.IsNullOrWhiteSpace(request.TransformKind) ? DBNull.Value : request.TransformKind);
+        command.Parameters.AddWithValue("$importKind", string.IsNullOrWhiteSpace(request.ImportKind) ? DBNull.Value : request.ImportKind);
     }
 
     private static string BuildStoredContentText(ClipCaptureRequest request)

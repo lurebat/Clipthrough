@@ -9,7 +9,6 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
@@ -807,7 +806,7 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
                 if (contentFormat == ClipContentFormat.Rtf)
                 {
                     var rtfFormat = RegisterClipboardFormat("Rich Text Format");
-                    var normalizedRtf = NormalizeRtfForClipboard(richContent);
+                    var normalizedRtf = RichClipboardFormatting.NormalizeRtfForClipboard(richContent);
                     SetClipboardDataOrThrow(rtfFormat, CreateGlobalTextHandle(normalizedRtf, Encoding.ASCII), static handle => _ = GlobalFree(handle));
                     return;
                 }
@@ -815,7 +814,7 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
                 if (contentFormat == ClipContentFormat.Html)
                 {
                     var htmlFormat = RegisterClipboardFormat("HTML Format");
-                    var cfHtml = LooksLikeCfHtml(richContent) ? richContent : BuildCfHtml(richContent);
+                    var cfHtml = RichClipboardFormatting.LooksLikeCfHtml(richContent) ? richContent : RichClipboardFormatting.BuildCfHtml(richContent);
                     SetClipboardDataOrThrow(htmlFormat, CreateGlobalTextHandle(cfHtml, Encoding.UTF8), static handle => _ = GlobalFree(handle));
                 }
             });
@@ -987,67 +986,6 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
 
         return handle;
     }
-
-    private static string NormalizeRtfForClipboard(string richContent)
-    {
-        var builder = new StringBuilder(richContent.Length);
-        foreach (var character in richContent)
-        {
-            if (character <= sbyte.MaxValue)
-            {
-                builder.Append(character);
-                continue;
-            }
-
-            builder.Append("\\u");
-            builder.Append(unchecked((short)character));
-            builder.Append('?');
-        }
-
-        return builder.ToString();
-    }
-
-    private static bool LooksLikeCfHtml(string content)
-        => content.StartsWith("Version:", StringComparison.OrdinalIgnoreCase)
-           && content.Contains("StartHTML:", StringComparison.OrdinalIgnoreCase)
-           && content.Contains("StartFragment:", StringComparison.OrdinalIgnoreCase);
-
-    [SupportedOSPlatform("windows")]
-    private static string BuildCfHtml(string html)
-    {
-        const string startFragmentMarker = "<!--StartFragment-->";
-        const string endFragmentMarker = "<!--EndFragment-->";
-        const string headerTemplate = "Version:0.9\r\nStartHTML:{0:D10}\r\nEndHTML:{1:D10}\r\nStartFragment:{2:D10}\r\nEndFragment:{3:D10}\r\n";
-
-        var fragment = html;
-        if (LooksLikeCfHtml(fragment))
-        {
-            return fragment;
-        }
-
-        if (!LooksLikeHtml(fragment))
-        {
-            fragment = System.Net.WebUtility.HtmlEncode(fragment).Replace(Environment.NewLine, "<br>", StringComparison.Ordinal);
-        }
-
-        var document = $"<html><body>{startFragmentMarker}{fragment}{endFragmentMarker}</body></html>";
-        var header = string.Format(headerTemplate, 0, 0, 0, 0);
-        var startHtml = Encoding.UTF8.GetByteCount(header);
-        var startFragment = startHtml + Encoding.UTF8.GetByteCount("<html><body>");
-        var endFragment = startFragment + Encoding.UTF8.GetByteCount(startFragmentMarker) + Encoding.UTF8.GetByteCount(fragment);
-        var endHtml = startHtml + Encoding.UTF8.GetByteCount(document);
-
-        header = string.Format(headerTemplate, startHtml, endHtml, startFragment + Encoding.UTF8.GetByteCount(startFragmentMarker), endFragment);
-        return header + document;
-    }
-
-    private static bool LooksLikeHtml(string content)
-        => !string.IsNullOrWhiteSpace(content)
-           && Regex.IsMatch(content, @"<\s*([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-
-    private static bool LooksLikeRtf(string content)
-        => !string.IsNullOrWhiteSpace(content)
-           && content.TrimStart().StartsWith(@"{\rtf", StringComparison.OrdinalIgnoreCase);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

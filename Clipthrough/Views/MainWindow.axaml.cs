@@ -28,6 +28,11 @@ public partial class MainWindow : Window
     private ISystemInteractionService? m_systemInteractionService;
     private bool m_focusClipOnNextActivation;
     private bool m_focusClipOnNextSelectionChange;
+    private Point? m_dragStartPoint;
+    private ClipItemViewModel? m_dragCandidateClip;
+    private PointerPressedEventArgs? m_dragPressedArgs;
+    private bool m_dragInProgress;
+    private const double DragThreshold = 4.0;
 
     public MainWindow() : this(null) { }
 
@@ -55,7 +60,16 @@ public partial class MainWindow : Window
         {
             m_clipsListBox.AddHandler(InputElement.DoubleTappedEvent, OnClipsListDoubleTapped, RoutingStrategies.Bubble);
             m_clipsListBox.AddHandler(InputElement.PointerPressedEvent, OnClipsListPointerPressed, RoutingStrategies.Tunnel);
+            m_clipsListBox.AddHandler(InputElement.PointerMovedEvent, OnClipsListPointerMoved, RoutingStrategies.Tunnel);
+            m_clipsListBox.AddHandler(InputElement.PointerReleasedEvent, OnClipsListPointerReleased, RoutingStrategies.Tunnel);
         }
+
+        // Drag-in: accept files/images/text dropped onto the popup. The whole
+        // window is a drop target; ImportDroppedDataAsync routes through the
+        // normal capture path and stamps ImportKind="drag_drop".
+        DragDrop.SetAllowDrop(this, true);
+        AddHandler(DragDrop.DragOverEvent, OnPopupDragOver);
+        AddHandler(DragDrop.DropEvent, OnPopupDrop);
 
         TryConnectClipListScrollViewer();
 
@@ -160,8 +174,13 @@ public partial class MainWindow : Window
         {
             m_clipsListBox.RemoveHandler(InputElement.DoubleTappedEvent, OnClipsListDoubleTapped);
             m_clipsListBox.RemoveHandler(InputElement.PointerPressedEvent, OnClipsListPointerPressed);
+            m_clipsListBox.RemoveHandler(InputElement.PointerMovedEvent, OnClipsListPointerMoved);
+            m_clipsListBox.RemoveHandler(InputElement.PointerReleasedEvent, OnClipsListPointerReleased);
             m_clipsListBox = null;
         }
+
+        RemoveHandler(DragDrop.DragOverEvent, OnPopupDragOver);
+        RemoveHandler(DragDrop.DropEvent, OnPopupDrop);
     }
 
     private void OnClipListScrollChanged(object? sender, ScrollChangedEventArgs e)
@@ -709,6 +728,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Stash the pointer position so PointerMoved can detect a drag
+        // gesture once the pointer has travelled past the system threshold.
+        // Cache the original PressedEventArgs — Avalonia's DoDragDropAsync
+        // requires it as the trigger event.
+        m_dragStartPoint = e.GetPosition(this);
+        m_dragCandidateClip = clip;
+        m_dragPressedArgs = e;
+
         var modifiers = e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Shift);
         if ((modifiers & KeyModifiers.Shift) == KeyModifiers.Shift)
         {
@@ -721,6 +748,149 @@ public partial class MainWindow : Window
         {
             viewModel.ToggleClipCheckedSelection(clip);
             e.Handled = true;
+        }
+    }
+
+    private async void OnClipsListPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (m_dragInProgress
+            || m_dragStartPoint is not { } start
+            || m_dragCandidateClip is null
+            || m_dragPressedArgs is null
+            || DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        var properties = e.GetCurrentPoint(this).Properties;
+        if (!properties.IsLeftButtonPressed)
+        {
+            // Pointer released or button changed — abandon the drag candidate.
+            m_dragStartPoint = null;
+            m_dragCandidateClip = null;
+            m_dragPressedArgs = null;
+            return;
+        }
+
+        var current = e.GetPosition(this);
+        if (Math.Abs(current.X - start.X) < DragThreshold && Math.Abs(current.Y - start.Y) < DragThreshold)
+        {
+            return;
+        }
+
+        // We're committed to a drag — block re-entry and the pointer-released
+        // handler from re-running selection logic mid-drag.
+        m_dragInProgress = true;
+        var pressedArgs = m_dragPressedArgs;
+        try
+        {
+            // If the user hasn't checked anything, ensure SelectedClip is the
+            // row they pressed on so single-row drag uses the expected clip.
+            if (!viewModel.HasCheckedClips)
+            {
+                viewModel.SelectedClip = m_dragCandidateClip;
+            }
+
+            var storageProvider = StorageProvider;
+            if (storageProvider is null)
+            {
+                return;
+            }
+
+            var payload = await viewModel.BuildDragPayloadForCurrentSelectionAsync(storageProvider);
+            if (payload is null)
+            {
+                return;
+            }
+
+            DragDropEffects effect;
+            try
+            {
+                effect = await DragDrop.DoDragDropAsync(pressedArgs, payload, DragDropEffects.Copy | DragDropEffects.Link);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning($"Drag-out failed: {ex.Message}");
+                return;
+            }
+
+            if (effect != DragDropEffects.None)
+            {
+                HidePopupAfterDrag(viewModel);
+            }
+        }
+        finally
+        {
+            m_dragInProgress = false;
+            m_dragStartPoint = null;
+            m_dragCandidateClip = null;
+            m_dragPressedArgs = null;
+        }
+    }
+
+    private void OnClipsListPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (!m_dragInProgress)
+        {
+            m_dragStartPoint = null;
+            m_dragCandidateClip = null;
+            m_dragPressedArgs = null;
+        }
+    }
+
+    private void HidePopupAfterDrag(MainWindowViewModel viewModel)
+    {
+        _ = viewModel.ClearSearchFilterAsync(forceRefresh: false);
+        Hide();
+    }
+
+    private void OnPopupDragOver(object? sender, DragEventArgs e)
+    {
+        // Accept anything we know how to import — files, image bytes, or text.
+        var data = e.DataTransfer;
+        if (data is null)
+        {
+            e.DragEffects = DragDropEffects.None;
+            return;
+        }
+
+        if (data.Contains(DataFormat.File)
+            || data.Contains(DataFormat.Text)
+            || data.Contains(DataFormat.Bitmap))
+        {
+            e.DragEffects = DragDropEffects.Copy;
+            return;
+        }
+
+        e.DragEffects = DragDropEffects.None;
+    }
+
+    private async void OnPopupDrop(object? sender, DragEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel || e.DataTransfer is null)
+        {
+            return;
+        }
+
+        // Resolve the source app (if any) the same way the clipboard monitor
+        // does for normal captures — gives the imported clip a meaningful
+        // "Source app" badge.
+        ClipboardSourceApplicationInfo? sourceInfo = null;
+        try
+        {
+            sourceInfo = (Application.Current as App)?.Services.GetService(typeof(ISourceApplicationResolver)) is ISourceApplicationResolver resolver
+                ? resolver.TryResolve(includeIcon: false)
+                : null;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"Drag-in source resolve failed: {ex.Message}");
+        }
+
+        var imported = await viewModel.ImportDroppedDataAsync(e.DataTransfer, sourceInfo);
+        if (imported > 0)
+        {
+            e.DragEffects = DragDropEffects.Copy;
         }
     }
 

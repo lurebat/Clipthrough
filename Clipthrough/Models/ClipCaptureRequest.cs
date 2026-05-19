@@ -32,6 +32,13 @@ public sealed class ClipCaptureRequest
 
     public string? TransformKind { get; init; }
 
+    /// <summary>
+    /// Marks how this capture entered Clipthrough. Use null for normal
+    /// clipboard captures and "drag_drop" for drag-and-drop imports so the
+    /// store can stamp the matching column on the inserted row.
+    /// </summary>
+    public string? ImportKind { get; init; }
+
     public System.DateTimeOffset? CapturedAtOverride { get; init; }
 
     public bool SkipPostInsertMaintenance { get; init; }
