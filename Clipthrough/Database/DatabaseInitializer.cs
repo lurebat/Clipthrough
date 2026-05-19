@@ -56,7 +56,7 @@ public sealed class DatabaseInitializer
             ocr_text,
             content='clips',
             content_rowid='id',
-            tokenize='unicode61 remove_diacritics 2'
+            tokenize='trigram'
         );
 
         CREATE TRIGGER IF NOT EXISTS clips_ai AFTER INSERT ON clips BEGIN
@@ -129,7 +129,7 @@ public sealed class DatabaseInitializer
     /// no-ops on a current database but still pay several SQLite round trips
     /// each, which adds up to ~800ms on a cold OS file cache).
     /// </summary>
-    private const int CurrentSchemaVersion = 2;
+    private const int CurrentSchemaVersion = 3;
 
     private readonly SqliteConnectionFactory _connectionFactory;
     private readonly ISensitivityService _sensitivityService;
@@ -684,8 +684,9 @@ public sealed class DatabaseInitializer
 
     /// <summary>
     /// Detects if the existing FTS table has an older (2- or 4-column) schema
-    /// and drops it along with its triggers so the Schema DDL can recreate them
-    /// with the current 5-column schema (adds ocr_text).
+    /// or an older tokenizer (e.g. unicode61) and drops it along with its
+    /// triggers so the Schema DDL can recreate them with the current 5-column
+    /// schema and the trigram tokenizer (which supports substring matching).
     /// </summary>
     private static async Task MigrateFtsSchemaIfNeededAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
@@ -710,13 +711,25 @@ public sealed class DatabaseInitializer
             }
         }
 
-        // The current schema has 5 content columns; older versions had 2 or 4
-        if (columnCount >= 5)
+        // Inspect the stored CREATE statement to determine the tokenizer.
+        string storedSql = string.Empty;
+        await using (var sqlCommand = connection.CreateCommand())
+        {
+            sqlCommand.CommandText = "SELECT sql FROM sqlite_master WHERE type='table' AND name='clips_fts';";
+            var raw = await sqlCommand.ExecuteScalarAsync(cancellationToken);
+            storedSql = raw as string ?? string.Empty;
+        }
+
+        var hasTrigramTokenizer = storedSql.Contains("trigram", StringComparison.OrdinalIgnoreCase);
+
+        // The current schema has 5 content columns and uses the trigram tokenizer.
+        // Older versions had 2 or 4 content columns, or used unicode61.
+        if (columnCount >= 5 && hasTrigramTokenizer)
         {
             return;
         }
 
-        // Drop old triggers and FTS table so they're recreated with the new schema
+        // Drop old triggers and FTS table so they're recreated with the new schema/tokenizer.
         await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_ai;", cancellationToken);
         await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_ad;", cancellationToken);
         await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_au;", cancellationToken);

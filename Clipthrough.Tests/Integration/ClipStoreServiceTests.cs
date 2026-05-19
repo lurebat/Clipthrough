@@ -393,6 +393,34 @@ public sealed class ClipStoreServiceTests
     }
 
     [Fact]
+    public async Task SearchAsync_FindsSubstringWithinToken()
+    {
+        // Regression: with the unicode61 tokenizer, "poc1" failed to match
+        // "INGEST-DIRECTBONDPOC1" because FTS5 prefix queries can't match a
+        // substring inside an indexed token. The trigram tokenizer fixes this.
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "INGEST-DIRECTBONDPOC1",
+            ContentBytes = Encoding.UTF8.GetBytes("INGEST-DIRECTBONDPOC1"),
+        });
+
+        var fullMatch = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters { SearchText = "INGEST-DIRECTBONDPOC1" });
+        Assert.Single(fullMatch.Items);
+
+        var substringMatch = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters { SearchText = "poc1" });
+        Assert.Single(substringMatch.Items);
+
+        var caseInsensitiveMatch = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters { SearchText = "POC1" });
+        Assert.Single(caseInsensitiveMatch.Items);
+    }
+
+    [Fact]
     public async Task SearchAsync_WildcardMatchesPartialContent()
     {
         using var scope = new TemporaryDatabaseScope();

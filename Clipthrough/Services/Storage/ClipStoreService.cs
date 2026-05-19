@@ -246,7 +246,7 @@ public sealed class ClipStoreService : IClipStoreService
         await connection.OpenAsync(cancellationToken);
 
         var hasSearch = !string.IsNullOrWhiteSpace(filters.SearchText);
-        if (hasSearch && (filters.UseRegex || filters.CaseSensitive || filters.UseWildcard || filters.WholeWord))
+        if (hasSearch && (filters.UseRegex || filters.CaseSensitive || filters.UseWildcard || filters.WholeWord || !HasFtsCompatibleSearchTerm(filters.SearchText)))
         {
             return await SearchInMemoryAsync(connection, filters, cancellationToken);
         }
@@ -1285,17 +1285,34 @@ public sealed class ClipStoreService : IClipStoreService
         command.Parameters.AddWithValue("$offset", filters.Offset);
     }
 
+    private static bool HasFtsCompatibleSearchTerm(string searchText)
+    {
+        if (string.IsNullOrWhiteSpace(searchText))
+        {
+            return false;
+        }
+
+        var tokens = searchText
+            .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return tokens.Any(static t => t.Length >= 3);
+    }
+
     private static string BuildFtsExpression(string searchText, bool useFuzzy = false)
     {
         var tokens = searchText
-            .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(static t => t.Length >= 3)
+            .ToArray();
 
         if (tokens.Length == 0)
         {
             return "*";
         }
 
-        string Quote(string t) => "\"" + t.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"*";
+        // The trigram tokenizer indexes 3-char shingles, so a phrase query matches
+        // any substring of the indexed text. No prefix '*' suffix is needed (and it
+        // wouldn't be meaningful against 3-gram shingles anyway).
+        string Quote(string t) => "\"" + t.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
 
         if (!useFuzzy)
         {
@@ -1304,7 +1321,7 @@ public sealed class ClipStoreService : IClipStoreService
 
         // Fuzzy: OR between tokens and between 1-char deletion variants so that
         // "exammple" can still match "example". Each token becomes
-        // ("tok"* OR "tk"* OR "ok"* OR ...).
+        // ("tok" OR "tk" OR "ok" OR ...).
         var parts = new List<string>();
         foreach (var token in tokens)
         {
@@ -1313,7 +1330,11 @@ public sealed class ClipStoreService : IClipStoreService
             {
                 for (var i = 0; i < token.Length; i++)
                 {
-                    variants.Add(token.Remove(i, 1));
+                    var v = token.Remove(i, 1);
+                    if (v.Length >= 3)
+                    {
+                        variants.Add(v);
+                    }
                 }
             }
 
