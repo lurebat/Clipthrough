@@ -592,7 +592,17 @@ public partial class App : Application
                 return;
             }
 
-            var clip = await _clipStoreService.GetClipAtOffsetAsync(0);
+            // Use the selected clip from the UI when the window is open,
+            // falling back to the most recent clip for global hotkeys.
+            ClipEntry? clip;
+            if (_mainWindow?.DataContext is MainWindowViewModel mvm && mvm.SelectedClip is { } selectedVm)
+            {
+                clip = selectedVm.Clip;
+            }
+            else
+            {
+                clip = await _clipStoreService.GetClipAtOffsetAsync(0);
+            }
             if (clip is null || string.IsNullOrEmpty(clip.Content)) return;
 
             var input = clip.Content;
