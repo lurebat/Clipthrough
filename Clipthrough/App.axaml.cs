@@ -957,6 +957,7 @@ public partial class App : Application
             if (_mainWindow is MainWindow mainWindow)
             {
                 mainWindow.RestoreOwnedWindowsForCurrentState();
+                mainWindow.FocusClipOnNextActivation();
             }
 
             if (_mainWindow.DataContext is MainWindowViewModel vm)
@@ -973,11 +974,6 @@ public partial class App : Application
         window.Topmost = true;
         window.Topmost = false;
         window.Focus();
-
-        if (window is MainWindow mainWindow)
-        {
-            mainWindow.FocusSearchBox();
-        }
     }
 
     private static void RestoreWindowState(Window window)
