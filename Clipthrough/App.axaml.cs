@@ -582,7 +582,7 @@ public partial class App : Application
                 return;
             }
             var kind = target[..colon].Trim().ToLowerInvariant();
-            var name = target[(colon + 1)..];
+            var name = target[(colon + 1)..].Trim();
 
             // The "aiprompt:" target just opens the AI prompt dialog. It does not
             // need a recent clip and does not produce text to paste.
