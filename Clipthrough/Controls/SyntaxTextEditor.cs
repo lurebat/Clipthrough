@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Styling;
+using Avalonia.Threading;
 using AvaloniaEdit;
 using AvaloniaEdit.TextMate;
 using TextMateSharp.Grammars;
@@ -35,6 +36,7 @@ public sealed class SyntaxTextEditor : UserControl
     private readonly RegistryOptions _darkRegistry = new(ThemeName.DarkPlus);
     private readonly RegistryOptions _lightRegistry = new(ThemeName.LightPlus);
     private bool _isSyncingText;
+    private bool _grammarUpdateScheduled;
     // When the control is hidden (one of the three stacked editors in the
     // clip preview), there's no point paying for a full TextDocument
     // replacement on every keystroke — the user can't see it. Stash the
@@ -59,7 +61,7 @@ public sealed class SyntaxTextEditor : UserControl
 
         this.GetObservable(TextProperty).Subscribe(OnTextPropertyChanged);
         this.GetObservable(IsReadOnlyProperty).Subscribe(v => _editor.IsReadOnly = v);
-        this.GetObservable(SyntaxHintProperty).Subscribe(_ => ApplyGrammar());
+        this.GetObservable(SyntaxHintProperty).Subscribe(_ => ScheduleGrammarUpdate());
         this.GetObservable(IsVisibleProperty).Subscribe(OnIsVisibleChanged);
     }
 
@@ -208,6 +210,39 @@ public sealed class SyntaxTextEditor : UserControl
 
         _textMateInstall?.Dispose();
         var registry = isDark ? _darkRegistry : _lightRegistry;
+        _textMateInstall = _editor.InstallTextMate(registry);
+        // Safe to call directly — fresh installation has no running tokenizer.
+        ApplyGrammar();
+    }
+
+    private void ScheduleGrammarUpdate()
+    {
+        if (_grammarUpdateScheduled) return;
+        _grammarUpdateScheduled = true;
+        Dispatcher.UIThread.Post(() =>
+        {
+            _grammarUpdateScheduled = false;
+            ReinstallAndApplyGrammar();
+        }, DispatcherPriority.Background);
+    }
+
+    /// <summary>
+    /// Disposes the current TextMate installation (stopping its tokenizer
+    /// thread) and creates a fresh one before applying the grammar.  This
+    /// prevents an ABBA deadlock: <c>TextMateColoringTransformer.SetGrammar</c>
+    /// acquires the transformer lock then needs the TMModel lock, while the
+    /// tokenizer's <c>Emit</c> path holds the TMModel lock and needs the
+    /// transformer lock in <c>ModelTokensChanged</c>.  Disposing first stops
+    /// the tokenizer so it cannot hold any locks during <c>SetGrammar</c>.
+    /// </summary>
+    private void ReinstallAndApplyGrammar()
+    {
+        if (_textMateInstall is null) return;
+
+        var isDark = ActualThemeVariant != ThemeVariant.Light;
+        var registry = isDark ? _darkRegistry : _lightRegistry;
+
+        _textMateInstall.Dispose();
         _textMateInstall = _editor.InstallTextMate(registry);
         ApplyGrammar();
     }
