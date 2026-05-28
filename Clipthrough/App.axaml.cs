@@ -652,7 +652,25 @@ public partial class App : Application
             await _systemInteractionService.CopyTextAsync(output);
             if (binding.PasteAfter)
             {
-                await Task.Delay(120);
+                if (!binding.IsGlobal && _mainWindow is { } w)
+                {
+                    // For local hotkeys Clipthrough is the foreground window.
+                    // We must hide it and restore the target app before
+                    // simulating Ctrl+V, otherwise Clipthrough's own paste
+                    // handler intercepts the keystroke and overwrites the
+                    // transformed clipboard content with the original clip.
+                    _systemInteractionService.RestoreCapturedForeground();
+                    if (w.DataContext is MainWindowViewModel vm)
+                    {
+                        _ = vm.ClearSearchFilterAsync(forceRefresh: false);
+                    }
+                    w.Hide();
+                    await Task.Delay(150);
+                }
+                else
+                {
+                    await Task.Delay(120);
+                }
                 _systemInteractionService.SimulatePasteKeystroke();
             }
         }
