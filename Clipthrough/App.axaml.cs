@@ -597,6 +597,7 @@ public partial class App : Application
 
             var input = clip.Content;
             string output;
+            var isHtmlOutput = false;
 
             switch (kind)
             {
@@ -607,6 +608,7 @@ public partial class App : Application
                         return;
                     }
                     output = Clipthrough.Services.TextTransformationService.Apply(tx, input);
+                    isHtmlOutput = tx == TextTransformation.BoxTableToHtml;
                     break;
                 case "script":
                 {
@@ -648,8 +650,34 @@ public partial class App : Application
 
             if (string.IsNullOrEmpty(output)) return;
 
+            // Persist the transformed result as a new clip
+            var outputBytes = System.Text.Encoding.UTF8.GetBytes(output);
+            await Task.Run(() => _clipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentBytes = outputBytes,
+                ContentText = output,
+                ContentType = isHtmlOutput ? ContentType.RichText : ContentType.Text,
+                ContentFormat = isHtmlOutput ? ClipContentFormat.Html : ClipContentFormat.PlainText,
+                SourceApp = clip.SourceApp,
+                SourceAppPath = clip.SourceAppPath,
+                SourceAppIconBytes = clip.SourceAppIconBytes,
+                SourceWindowTitle = clip.SourceWindowTitle,
+                IncrementExistingCopyCount = false,
+                SourceClipId = clip.Id,
+                TransformKind = $"{kind}:{name}",
+                SkipPostInsertMaintenance = true,
+            }));
+
             _clipboardMonitorService.SuppressNext();
-            await _systemInteractionService.CopyTextAsync(output);
+            if (isHtmlOutput)
+            {
+                var plain = Presentation.ClipDisplayFormatter.RenderRichContent(output);
+                await _systemInteractionService.CopyRichContentAsync(output, plain, ClipContentFormat.Html);
+            }
+            else
+            {
+                await _systemInteractionService.CopyTextAsync(output);
+            }
             if (binding.PasteAfter)
             {
                 if (!binding.IsGlobal && _mainWindow is { } w)
