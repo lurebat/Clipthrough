@@ -434,16 +434,21 @@ public partial class App : Application
             }
             if (!HotkeyGesture.TryParse(binding.Gesture, out var gesture, out _) || gesture is null)
             {
+                Trace.TraceWarning($"Custom hotkey: failed to parse gesture '{binding.Gesture}' for target '{binding.Target}'");
                 continue;
             }
             var localBinding = binding;
             if (binding.IsGlobal)
             {
-                _systemInteractionService.TryRegisterGlobalHotKey(
+                var registered = _systemInteractionService.TryRegisterGlobalHotKey(
                     _mainWindow,
                     "custom-" + localBinding.Id,
                     gesture,
                     () => ExecuteCustomHotkey(localBinding));
+                if (!registered)
+                {
+                    Trace.TraceWarning($"Custom hotkey: failed to register global hotkey '{binding.Gesture}' for target '{binding.Target}'");
+                }
             }
             else
             {
@@ -571,13 +576,17 @@ public partial class App : Application
         {
             var target = binding.Target ?? string.Empty;
             var colon = target.IndexOf(':');
-            if (colon <= 0) return;
-            var kind = target.Substring(0, colon);
-            var name = target.Substring(colon + 1);
+            if (colon <= 0)
+            {
+                Trace.TraceWarning($"Custom hotkey '{binding.Gesture}': invalid target format '{target}' (missing ':')");
+                return;
+            }
+            var kind = target[..colon].Trim().ToLowerInvariant();
+            var name = target[(colon + 1)..];
 
             // The "aiprompt:" target just opens the AI prompt dialog. It does not
             // need a recent clip and does not produce text to paste.
-            if (string.Equals(kind, "aiprompt", StringComparison.OrdinalIgnoreCase))
+            if (kind == "aiprompt")
             {
                 ExecuteAiPromptHotkey(name);
                 return;
@@ -594,6 +603,7 @@ public partial class App : Application
                 case "builtin":
                     if (!Enum.TryParse<TextTransformation>(name, ignoreCase: true, out var tx) || tx == TextTransformation.None)
                     {
+                        Trace.TraceWarning($"Custom hotkey '{binding.Gesture}': unknown builtin transform '{name}'");
                         return;
                     }
                     output = Clipthrough.Services.TextTransformationService.Apply(tx, input);
@@ -603,7 +613,11 @@ public partial class App : Application
                     if (_scriptingService is null) return;
                     var script = _settingsService?.Current.UserScripts.FirstOrDefault(s =>
                         string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
-                    if (script is null) return;
+                    if (script is null)
+                    {
+                        Trace.TraceWarning($"Custom hotkey '{binding.Gesture}': user script '{name}' not found");
+                        return;
+                    }
                     output = await _scriptingService.EvaluateAsync(script.Code, input);
                     break;
                 }
@@ -612,7 +626,11 @@ public partial class App : Application
                     if (_aiTransformService is null || !_aiTransformService.IsConfigured) return;
                     var preset = _settingsService?.Current.AiPresets.FirstOrDefault(p =>
                         string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
-                    if (preset is null) return;
+                    if (preset is null)
+                    {
+                        Trace.TraceWarning($"Custom hotkey '{binding.Gesture}': AI preset '{name}' not found");
+                        return;
+                    }
                     output = await _aiTransformService.TransformAsync(preset.Prompt, input);
                     break;
                 }
@@ -624,6 +642,7 @@ public partial class App : Application
                     break;
                 }
                 default:
+                    Trace.TraceWarning($"Custom hotkey '{binding.Gesture}': unknown target kind '{kind}'");
                     return;
             }
 

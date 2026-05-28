@@ -326,12 +326,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var draft = new UserScriptDraft { Name = "New script", Code = "return input;" };
             SettingsUserScriptDrafts.Add(draft);
             SelectedScriptDraft = draft;
+            RebuildCustomHotkeyTargetSuggestions();
         });
         RemoveScriptDraftCommand = ReactiveCommand.Create<UserScriptDraft>(draft =>
         {
             if (draft is null) return;
             SettingsUserScriptDrafts.Remove(draft);
             SelectedScriptDraft = SettingsUserScriptDrafts.FirstOrDefault();
+            RebuildCustomHotkeyTargetSuggestions();
         });
         AddCustomHotkeyDraftCommand = ReactiveCommand.Create(() =>
         {
@@ -715,6 +717,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ReactiveCommand<Unit, Unit> AddCustomHotkeyDraftCommand { get; }
     public ReactiveCommand<CustomHotkeyDraft, Unit> RemoveCustomHotkeyDraftCommand { get; }
+
+    private List<string> _customHotkeyTargetSuggestions = new();
+    public List<string> CustomHotkeyTargetSuggestions
+    {
+        get => _customHotkeyTargetSuggestions;
+        private set => this.RaiseAndSetIfChanged(ref _customHotkeyTargetSuggestions, value);
+    }
 
     public System.Collections.ObjectModel.ObservableCollection<AiMenuEntry> AiMenuEntries { get; } = new();
 
@@ -6538,6 +6547,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsUseFuzzySearch = settings.UseFuzzySettingsSearch;
         SettingsEnableSemanticSearch = settings.EnableSemanticSearch;
         IsDatabasePasswordVisible = false;
+        RebuildCustomHotkeyTargetSuggestions();
     }
 
     private void OnCopilotSignedInChanged()
@@ -6558,6 +6568,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         SyncUserScripts(settings);
         SyncAiPresets(settings);
+        RebuildCustomHotkeyTargetSuggestions();
         UpdateSelectedClipPresentation();
         RaiseSelectionStateProperties();
         this.RaisePropertyChanged(nameof(IsCompareAvailable));
@@ -6583,6 +6594,37 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         RefreshVisibleTransformMenus();
+    }
+
+    private void RebuildCustomHotkeyTargetSuggestions()
+    {
+        var suggestions = new List<string>();
+
+        foreach (var tx in Enum.GetValues<TextTransformation>())
+        {
+            if (tx == TextTransformation.None) continue;
+            suggestions.Add($"builtin:{tx}");
+        }
+
+        foreach (var s in SettingsUserScriptDrafts)
+        {
+            if (!string.IsNullOrWhiteSpace(s.Name))
+                suggestions.Add($"script:{s.Name}");
+        }
+
+        foreach (var p in AiPresets)
+        {
+            if (!string.IsNullOrWhiteSpace(p.Name))
+                suggestions.Add($"ai:{p.Name}");
+        }
+
+        suggestions.Add("prompt:");
+        suggestions.Add("aiprompt:auto");
+        suggestions.Add("aiprompt:text");
+        suggestions.Add("aiprompt:image-to-text");
+        suggestions.Add("aiprompt:image-to-image");
+
+        CustomHotkeyTargetSuggestions = suggestions;
     }
 
     private void SyncAiPresets(AppSettings settings)

@@ -236,8 +236,11 @@
                                 <TextBlock Classes="detail-label" Text="Hotkey gesture (e.g. Ctrl+Alt+U)" />
                                 <TextBox Text="{Binding Gesture, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
                                 <TextBlock Classes="detail-label" Text="Target (builtin:Name | script:Name | ai:Name | prompt:Text | aiprompt:Kind[|Prefill])" />
-                                <TextBox FontFamily="Consolas,Cascadia Code,monospace"
-                                         Text="{Binding Target, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
+                                <AutoCompleteBox FontFamily="Consolas,Cascadia Code,monospace"
+                                                 FilterMode="ContainsOrdinal"
+                                                 MinimumPrefixLength="0"
+                                                 ItemsSource="{Binding $parent[Window].DataContext.CustomHotkeyTargetSuggestions}"
+                                                 Text="{Binding Target, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, FallbackValue=''}" />
                                 <CheckBox Content="Global (capture system-wide; otherwise only when Clipthrough is focused)"
                                           IsChecked="{Binding IsGlobal, Mode=TwoWay}" />
                                 <CheckBox Content="Paste after transforming (Ctrl+V into foreground window)"
