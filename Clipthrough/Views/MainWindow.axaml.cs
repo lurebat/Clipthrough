@@ -677,7 +677,12 @@ public partial class MainWindow : Window
         searchBox.Focus();
         if (DataContext is MainWindowViewModel vm)
         {
-            vm.SearchText = (vm.SearchText ?? string.Empty) + typed.Value;
+            var newText = (vm.SearchText ?? string.Empty) + typed.Value;
+            vm.SearchText = newText;
+            // Move the caret past the redirected character so that subsequent
+            // keystrokes (which land natively once focus has transferred) are
+            // appended in order rather than inserted at the start.
+            searchBox.CaretIndex = newText.Length;
         }
         return true;
     }
