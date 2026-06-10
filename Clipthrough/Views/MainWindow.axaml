@@ -69,8 +69,8 @@
                 <MenuItem Header="{x:Static loc:AppText.CheckForUpdateMenuHeader}"
                           Command="{Binding Update.CheckForUpdateCommand}" />
                 <Separator />
-                <MenuItem Header="Open _logs folder" Command="{Binding OpenLogsFolderCommand}" />
-                <MenuItem Header="Open _database folder" Command="{Binding OpenDatabaseFolderCommand}" />
+                <MenuItem Header="Open _logs folder" Command="{Binding Maintenance.OpenLogsFolderCommand}" />
+                <MenuItem Header="Open _database folder" Command="{Binding Maintenance.OpenDatabaseFolderCommand}" />
                 <Separator />
                 <MenuItem Header="_About" Command="{Binding OpenAboutCommand}" />
             </MenuItem>
@@ -1612,11 +1612,11 @@
                       ColumnDefinitions="Auto,Auto,*,Auto"
                       ColumnSpacing="12">
                     <Button Classes="secondary"
-                            Command="{Binding OpenLogsFolderCommand}"
+                            Command="{Binding Maintenance.OpenLogsFolderCommand}"
                             Content="Open logs folder" />
                     <Button Grid.Column="1"
                             Classes="secondary"
-                            Command="{Binding OpenDatabaseFolderCommand}"
+                            Command="{Binding Maintenance.OpenDatabaseFolderCommand}"
                             Content="Open database folder" />
                     <Button Grid.Column="3"
                             Classes="primary"

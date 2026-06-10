@@ -313,12 +313,12 @@
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <Button Classes="secondary"
                                             HorizontalAlignment="Left"
-                                            Command="{Binding RunIntegrityCheckCommand}"
+                                            Command="{Binding Maintenance.RunIntegrityCheckCommand}"
                                             IsEnabled="{Binding StorageDatabaseExists}"
                                             Content="Run integrity check" />
                                     <TextBlock VerticalAlignment="Center"
                                                Classes="body-muted"
-                                               Text="{Binding IntegrityCheckStatus}" />
+                                               Text="{Binding Maintenance.IntegrityCheckStatus}" />
                                 </StackPanel>
                             </StackPanel>
                         </Border>
@@ -331,19 +331,19 @@
                                            TextWrapping="Wrap" />
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <Button Classes="secondary"
-                                            Command="{Binding RefreshBackupsCommand}"
+                                            Command="{Binding Maintenance.RefreshBackupsCommand}"
                                             Content="Refresh list" />
                                     <Button Classes="secondary"
-                                            Command="{Binding RestoreBackupCommand}"
+                                            Command="{Binding Maintenance.RestoreBackupCommand}"
                                             CommandParameter="{Binding $parent[Window]}"
-                                            IsEnabled="{Binding SelectedBackup, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                            IsEnabled="{Binding Maintenance.SelectedBackup, Converter={x:Static ObjectConverters.IsNotNull}}"
                                             Content="Restore selected" />
                                     <TextBlock VerticalAlignment="Center"
                                                Classes="body-muted"
-                                               Text="{Binding BackupRestoreStatus}" />
+                                               Text="{Binding Maintenance.BackupRestoreStatus}" />
                                 </StackPanel>
-                                <ListBox ItemsSource="{Binding Backups}"
-                                         SelectedItem="{Binding SelectedBackup, Mode=TwoWay}"
+                                <ListBox ItemsSource="{Binding Maintenance.Backups}"
+                                         SelectedItem="{Binding Maintenance.SelectedBackup, Mode=TwoWay}"
                                          MaxHeight="160">
                                     <ListBox.ItemTemplate>
                                         <DataTemplate x:DataType="vm:DatabaseBackupItem">
