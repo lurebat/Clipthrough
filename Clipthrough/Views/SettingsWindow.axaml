@@ -44,8 +44,8 @@
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label"
                                        Text="{Binding SettingsThemeModeLabel}" />
-                            <ComboBox ItemsSource="{Binding ThemeModeOptions}"
-                                      SelectedItem="{Binding SettingsThemeMode}" />
+                            <ComboBox ItemsSource="{Binding Settings.ThemeModeOptions}"
+                                      SelectedItem="{Binding Settings.ThemeMode}" />
                         </StackPanel>
                         <CheckBox Content="{Binding SettingsCloseToTrayLabel}"
                                   IsChecked="{Binding SettingsCloseToTray}" />
@@ -725,11 +725,11 @@
                         <TextBlock Classes="body-muted" TextWrapping="Wrap"
                                    Text="OCR uses the built-in Windows.Media.Ocr engine. Install extra language packs from Windows Settings → Time &amp; Language → Language → Add a language (with the optional OCR feature) to recognize more scripts, then list their BCP-47 tags below (e.g. 'en+he')." />
                         <CheckBox Content="Automatically run OCR on new image clips in the background"
-                                  IsChecked="{Binding SettingsAutoOcrImageClips, Mode=TwoWay}" />
+                                  IsChecked="{Binding Settings.AutoOcrImageClips, Mode=TwoWay}" />
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label" Text="Languages (BCP-47 tags, separated by + , or space; blank = user profile)" />
                             <TextBox PlaceholderText="en+he"
-                                     Text="{Binding SettingsOcrLanguages, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                     Text="{Binding Settings.OcrLanguages, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </StackPanel>
                     </StackPanel>
                 </Expander>
@@ -823,9 +823,9 @@
                         <TextBlock Classes="body-muted" TextWrapping="Wrap"
                                    Text="Clipthrough uses Velopack for auto-updates. When enabled, the app checks the feed URL on launch and downloads any newer build in the background. Updates are NEVER applied automatically while you're using Clipthrough — you'll be notified and can choose to restart now or install the next time you close the app. Only effective when installed via a Velopack package." />
                         <CheckBox Content="Check for updates on launch and download in the background"
-                                  IsChecked="{Binding SettingsEnableAutoUpdate}" />
+                                  IsChecked="{Binding Settings.EnableAutoUpdate}" />
                         <CheckBox Content="Apply downloaded updates automatically on startup (legacy behavior — restarts the app silently)"
-                                  IsChecked="{Binding SettingsAutoApplyUpdatesOnStartup}" />
+                                  IsChecked="{Binding Settings.AutoApplyUpdatesOnStartup}" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button Classes="secondary compact"
                                     Content="Check for updates now"
@@ -837,7 +837,7 @@
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label" Text="Update feed URL (CLIPTHROUGH_UPDATE_FEED overrides this; blank uses the default GitHub Releases feed)" />
                             <TextBox PlaceholderText="https://github.com/owner/repo/releases/latest/download"
-                                     Text="{Binding SettingsUpdateFeedUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                     Text="{Binding Settings.UpdateFeedUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </StackPanel>
                     </StackPanel>
                 </Expander>

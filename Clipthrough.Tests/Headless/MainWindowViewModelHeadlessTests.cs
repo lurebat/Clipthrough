@@ -581,19 +581,19 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.Equal("img-char", viewModel.Settings.AiImageModel);
         Assert.Equal("high", viewModel.Settings.AiReasoningEffort);
         // Update section
-        Assert.False(viewModel.SettingsEnableAutoUpdate);
-        Assert.True(viewModel.SettingsAutoApplyUpdatesOnStartup);
-        Assert.Equal("https://feed.example/x", viewModel.SettingsUpdateFeedUrl);
+        Assert.False(viewModel.Settings.EnableAutoUpdate);
+        Assert.True(viewModel.Settings.AutoApplyUpdatesOnStartup);
+        Assert.Equal("https://feed.example/x", viewModel.Settings.UpdateFeedUrl);
         // OCR section
-        Assert.Equal("en-US,fr-FR", viewModel.SettingsOcrLanguages);
-        Assert.True(viewModel.SettingsAutoOcrImageClips);
+        Assert.Equal("en-US,fr-FR", viewModel.Settings.OcrLanguages);
+        Assert.True(viewModel.Settings.AutoOcrImageClips);
         // Remote-API section
         Assert.True(viewModel.SettingsEnableRemoteApi);
         Assert.Equal(12345, viewModel.SettingsRemoteApiPort);
         Assert.Equal("tok-char", viewModel.SettingsRemoteApiToken);
         Assert.Equal("127.0.0.1", viewModel.SettingsRemoteApiBindAddress);
         // Theme / misc
-        Assert.Equal(Models.ThemeMode.Light, viewModel.SettingsThemeMode);
+        Assert.Equal(Models.ThemeMode.Light, viewModel.Settings.ThemeMode);
         Assert.True(viewModel.SettingsCloseToTray);
     }
 

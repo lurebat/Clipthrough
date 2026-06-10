@@ -159,7 +159,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _settingsCloseToTray = AppSettings.Default.CloseToTray;
     private bool _settingsMinimizeToTray = AppSettings.Default.MinimizeToTray;
     private bool _settingsStartWithWindows = AppSettings.Default.StartWithWindows;
-    private ThemeMode _settingsThemeMode = AppSettings.Default.ThemeMode;
     private bool _settingsEnableNormalClipLifetime = AppSettings.Default.EnableNormalClipLifetime;
     private string _settingsNormalClipLifetimeDays = AppSettings.Default.NormalClipLifetimeDays.ToString(CultureInfo.InvariantCulture);
     private bool _settingsEnableSensitiveClipLifetime = AppSettings.Default.EnableSensitiveClipLifetime;
@@ -197,11 +196,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _settingsExternalEditorPath = AppSettings.Default.ExternalEditorPath;
     private string _settingsExternalImageEditorPath = AppSettings.Default.ExternalImageEditorPath;
     private string _settingsExternalDiffToolPath = AppSettings.Default.ExternalDiffToolPath;
-    private bool _settingsEnableAutoUpdate = AppSettings.Default.EnableAutoUpdate;
-    private bool _settingsAutoApplyUpdatesOnStartup = AppSettings.Default.AutoApplyUpdatesOnStartup;
-    private string _settingsUpdateFeedUrl = AppSettings.Default.UpdateFeedUrl;
-    private string _settingsOcrLanguages = AppSettings.Default.OcrLanguages;
-    private bool _settingsAutoOcrImageClips = AppSettings.Default.AutoOcrImageClips;
     private bool _settingsEnableRemoteApi = AppSettings.Default.EnableRemoteApi;
     private int _settingsRemoteApiPort = AppSettings.Default.RemoteApiPort;
     private string _settingsRemoteApiToken = AppSettings.Default.RemoteApiToken;
@@ -1988,35 +1982,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public CopilotViewModel Copilot { get; }
 
-    public bool SettingsEnableAutoUpdate
-    {
-        get => _settingsEnableAutoUpdate;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableAutoUpdate, value);
-    }
-
-    public bool SettingsAutoApplyUpdatesOnStartup
-    {
-        get => _settingsAutoApplyUpdatesOnStartup;
-        set => this.RaiseAndSetIfChanged(ref _settingsAutoApplyUpdatesOnStartup, value);
-    }
-
-    public string SettingsUpdateFeedUrl
-    {
-        get => _settingsUpdateFeedUrl;
-        set => this.RaiseAndSetIfChanged(ref _settingsUpdateFeedUrl, value);
-    }
-
-    public string SettingsOcrLanguages
-    {
-        get => _settingsOcrLanguages;
-        set => this.RaiseAndSetIfChanged(ref _settingsOcrLanguages, value);
-    }
-
-    public bool SettingsAutoOcrImageClips
-    {
-        get => _settingsAutoOcrImageClips;
-        set => this.RaiseAndSetIfChanged(ref _settingsAutoOcrImageClips, value);
-    }
 
     public bool SettingsEnableRemoteApi
     {
@@ -2688,13 +2653,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => this.RaiseAndSetIfChanged(ref _settingsStartWithWindows, value);
     }
 
-    public ThemeMode SettingsThemeMode
-    {
-        get => _settingsThemeMode;
-        set => this.RaiseAndSetIfChanged(ref _settingsThemeMode, value);
-    }
-
-    public ThemeMode[] ThemeModeOptions { get; } = Enum.GetValues<ThemeMode>();
 
     public string SettingsThemeModeLabel => AppText.SettingsThemeModeLabel;
 
@@ -5897,11 +5855,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             AiModel = (Settings.AiModel ?? string.Empty).Trim(),
             AiImageModel = (Settings.AiImageModel ?? string.Empty).Trim(),
             AiReasoningEffort = (Settings.AiReasoningEffort ?? string.Empty).Trim(),
-            EnableAutoUpdate = SettingsEnableAutoUpdate,
-            AutoApplyUpdatesOnStartup = SettingsAutoApplyUpdatesOnStartup,
-            UpdateFeedUrl = (SettingsUpdateFeedUrl ?? string.Empty).Trim(),
-            OcrLanguages = (SettingsOcrLanguages ?? string.Empty).Trim(),
-            AutoOcrImageClips = SettingsAutoOcrImageClips,
+            EnableAutoUpdate = Settings.EnableAutoUpdate,
+            AutoApplyUpdatesOnStartup = Settings.AutoApplyUpdatesOnStartup,
+            UpdateFeedUrl = (Settings.UpdateFeedUrl ?? string.Empty).Trim(),
+            OcrLanguages = (Settings.OcrLanguages ?? string.Empty).Trim(),
+            AutoOcrImageClips = Settings.AutoOcrImageClips,
             EnableRemoteApi = SettingsEnableRemoteApi,
             RemoteApiPort = SettingsRemoteApiPort,
             RemoteApiToken = (SettingsRemoteApiToken ?? string.Empty).Trim(),
@@ -5918,7 +5876,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             CloseToTray = SettingsCloseToTray,
             MinimizeToTray = SettingsMinimizeToTray,
             StartWithWindows = SettingsStartWithWindows,
-            ThemeMode = SettingsThemeMode,
+            ThemeMode = Settings.ThemeMode,
             EnableNormalClipLifetime = SettingsEnableNormalClipLifetime,
             NormalClipLifetimeDays = normalClipLifetimeDays,
             EnableSensitiveClipLifetime = SettingsEnableSensitiveClipLifetime,
@@ -6000,7 +5958,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsCloseToTray = settings.CloseToTray;
         SettingsMinimizeToTray = settings.MinimizeToTray;
         SettingsStartWithWindows = settings.StartWithWindows;
-        SettingsThemeMode = settings.ThemeMode;
+        Settings.ThemeMode = settings.ThemeMode;
         SettingsEnableNormalClipLifetime = settings.EnableNormalClipLifetime;
         SettingsNormalClipLifetimeDays = settings.NormalClipLifetimeDays.ToString(CultureInfo.InvariantCulture);
         SettingsEnableSensitiveClipLifetime = settings.EnableSensitiveClipLifetime;
@@ -6046,11 +6004,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.AiModel = settings.AiModel;
         Settings.AiImageModel = settings.AiImageModel;
         Settings.AiReasoningEffort = settings.AiReasoningEffort;
-        SettingsEnableAutoUpdate = settings.EnableAutoUpdate;
-        SettingsAutoApplyUpdatesOnStartup = settings.AutoApplyUpdatesOnStartup;
-        SettingsUpdateFeedUrl = settings.UpdateFeedUrl;
-        SettingsOcrLanguages = settings.OcrLanguages;
-        SettingsAutoOcrImageClips = settings.AutoOcrImageClips;
+        Settings.EnableAutoUpdate = settings.EnableAutoUpdate;
+        Settings.AutoApplyUpdatesOnStartup = settings.AutoApplyUpdatesOnStartup;
+        Settings.UpdateFeedUrl = settings.UpdateFeedUrl;
+        Settings.OcrLanguages = settings.OcrLanguages;
+        Settings.AutoOcrImageClips = settings.AutoOcrImageClips;
         SettingsEnableRemoteApi = settings.EnableRemoteApi;
         SettingsRemoteApiPort = settings.RemoteApiPort;
         SettingsRemoteApiToken = settings.RemoteApiToken;

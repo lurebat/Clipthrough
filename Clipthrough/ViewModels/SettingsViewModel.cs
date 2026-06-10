@@ -77,4 +77,54 @@ public sealed class SettingsViewModel : ViewModelBase
     public IReadOnlyList<string> AiReasoningEffortOptions { get; } = new[] { "", "none", "minimal", "low", "medium", "high" };
 
     public AiProvider[] AiProviderOptions { get; } = Enum.GetValues<AiProvider>();
+
+    // --- Update ---
+
+    private bool _enableAutoUpdate = AppSettings.Default.EnableAutoUpdate;
+    public bool EnableAutoUpdate
+    {
+        get => _enableAutoUpdate;
+        set => this.RaiseAndSetIfChanged(ref _enableAutoUpdate, value);
+    }
+
+    private bool _autoApplyUpdatesOnStartup = AppSettings.Default.AutoApplyUpdatesOnStartup;
+    public bool AutoApplyUpdatesOnStartup
+    {
+        get => _autoApplyUpdatesOnStartup;
+        set => this.RaiseAndSetIfChanged(ref _autoApplyUpdatesOnStartup, value);
+    }
+
+    private string _updateFeedUrl = AppSettings.Default.UpdateFeedUrl;
+    public string UpdateFeedUrl
+    {
+        get => _updateFeedUrl;
+        set => this.RaiseAndSetIfChanged(ref _updateFeedUrl, value);
+    }
+
+    // --- OCR ---
+
+    private string _ocrLanguages = AppSettings.Default.OcrLanguages;
+    public string OcrLanguages
+    {
+        get => _ocrLanguages;
+        set => this.RaiseAndSetIfChanged(ref _ocrLanguages, value);
+    }
+
+    private bool _autoOcrImageClips = AppSettings.Default.AutoOcrImageClips;
+    public bool AutoOcrImageClips
+    {
+        get => _autoOcrImageClips;
+        set => this.RaiseAndSetIfChanged(ref _autoOcrImageClips, value);
+    }
+
+    // --- Theme ---
+
+    private ThemeMode _themeMode = AppSettings.Default.ThemeMode;
+    public ThemeMode ThemeMode
+    {
+        get => _themeMode;
+        set => this.RaiseAndSetIfChanged(ref _themeMode, value);
+    }
+
+    public ThemeMode[] ThemeModeOptions { get; } = Enum.GetValues<ThemeMode>();
 }
