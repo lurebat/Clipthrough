@@ -645,15 +645,15 @@
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <Button Classes="primary compact"
                                         Content="Sign in with GitHub"
-                                        Command="{Binding CopilotSignInCommand}"
-                                        IsVisible="{Binding !IsCopilotSignedIn}" />
+                                        Command="{Binding Copilot.CopilotSignInCommand}"
+                                        IsVisible="{Binding !Copilot.IsCopilotSignedIn}" />
                                 <Button Classes="secondary compact"
                                         Content="Sign out"
-                                        Command="{Binding CopilotSignOutCommand}"
-                                        IsVisible="{Binding IsCopilotSignedIn}" />
+                                        Command="{Binding Copilot.CopilotSignOutCommand}"
+                                        IsVisible="{Binding Copilot.IsCopilotSignedIn}" />
                             </StackPanel>
-                            <TextBlock Classes="body-muted" Text="{Binding CopilotSignInStatus}"
-                                       IsVisible="{Binding CopilotSignInStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                            <TextBlock Classes="body-muted" Text="{Binding Copilot.CopilotSignInStatus}"
+                                       IsVisible="{Binding Copilot.CopilotSignInStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                                        TextWrapping="Wrap" />
                             <!--
                                 When a device-flow code is active, surface it
@@ -663,11 +663,11 @@
                                 offer a one-click "Copy code" alongside.
                             -->
                             <StackPanel Spacing="6"
-                                        IsVisible="{Binding HasCopilotUserCode}">
+                                        IsVisible="{Binding Copilot.HasCopilotUserCode}">
                                 <TextBlock Classes="detail-label"
                                            Text="Your GitHub device code (copied to clipboard)" />
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <TextBox Text="{Binding CopilotUserCode, Mode=OneWay}"
+                                    <TextBox Text="{Binding Copilot.CopilotUserCode, Mode=OneWay}"
                                              IsReadOnly="True"
                                              FontFamily="Consolas, Menlo, monospace"
                                              FontSize="20"
@@ -677,7 +677,7 @@
                                              ToolTip.Tip="Select to copy manually, or use the Copy code button." />
                                     <Button Classes="secondary compact"
                                             Content="Copy code"
-                                            Command="{Binding CopyCopilotUserCodeCommand}" />
+                                            Command="{Binding Copilot.CopyCopilotUserCodeCommand}" />
                                 </StackPanel>
                             </StackPanel>
                             <StackPanel Spacing="6">
