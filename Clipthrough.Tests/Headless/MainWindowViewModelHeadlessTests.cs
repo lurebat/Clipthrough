@@ -573,13 +573,13 @@ public sealed class MainWindowViewModelHeadlessTests
         Dispatcher.UIThread.RunJobs();
 
         // AI section
-        Assert.True(viewModel.SettingsEnableAi);
-        Assert.Equal(Models.AiProvider.Copilot, viewModel.SettingsAiProvider);
-        Assert.Equal("https://ai.example/v1", viewModel.SettingsAiBaseUrl);
-        Assert.Equal("sk-char-test", viewModel.SettingsAiApiKey);
-        Assert.Equal("gpt-char", viewModel.SettingsAiModel);
-        Assert.Equal("img-char", viewModel.SettingsAiImageModel);
-        Assert.Equal("high", viewModel.SettingsAiReasoningEffort);
+        Assert.True(viewModel.Settings.EnableAi);
+        Assert.Equal(Models.AiProvider.Copilot, viewModel.Settings.AiProvider);
+        Assert.Equal("https://ai.example/v1", viewModel.Settings.AiBaseUrl);
+        Assert.Equal("sk-char-test", viewModel.Settings.AiApiKey);
+        Assert.Equal("gpt-char", viewModel.Settings.AiModel);
+        Assert.Equal("img-char", viewModel.Settings.AiImageModel);
+        Assert.Equal("high", viewModel.Settings.AiReasoningEffort);
         // Update section
         Assert.False(viewModel.SettingsEnableAutoUpdate);
         Assert.True(viewModel.SettingsAutoApplyUpdatesOnStartup);

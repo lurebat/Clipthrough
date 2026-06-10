@@ -600,46 +600,46 @@
                                    TextWrapping="Wrap"
                                    Text="Send text clips to an AI chat-completions endpoint and save the result as a new clip. Choose a provider below." />
                         <CheckBox Content="Enable AI transforms"
-                                  IsChecked="{Binding SettingsEnableAi}" />
+                                  IsChecked="{Binding Settings.EnableAi}" />
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label" Text="Provider" />
-                            <ComboBox ItemsSource="{Binding AiProviderOptions}"
-                                      SelectedItem="{Binding SettingsAiProvider, Mode=TwoWay}"
+                            <ComboBox ItemsSource="{Binding Settings.AiProviderOptions}"
+                                      SelectedItem="{Binding Settings.AiProvider, Mode=TwoWay}"
                                       MinWidth="180" />
                         </StackPanel>
 
                         <!-- OpenAI settings -->
-                        <StackPanel Spacing="10" IsVisible="{Binding IsOpenAiSettingsVisible}">
+                        <StackPanel Spacing="10" IsVisible="{Binding Settings.IsOpenAiSettingsVisible}">
                             <StackPanel Spacing="6">
                                 <TextBlock Classes="detail-label" Text="Base URL (blank = https://api.openai.com/v1)" />
                                 <TextBox PlaceholderText="https://api.openai.com/v1"
-                                         Text="{Binding SettingsAiBaseUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                         Text="{Binding Settings.AiBaseUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
                             <StackPanel Spacing="6">
                                 <TextBlock Classes="detail-label" Text="API key (blank = use OPENAI_API_KEY env var)" />
                                 <TextBox PasswordChar="*"
                                          PlaceholderText="sk-…"
-                                         Text="{Binding SettingsAiApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                         Text="{Binding Settings.AiApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
                             <StackPanel Spacing="6">
                                 <TextBlock Classes="detail-label" Text="Model (blank = gpt-4o-mini)" />
                                 <TextBox PlaceholderText="gpt-4o-mini"
-                                         Text="{Binding SettingsAiModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                         Text="{Binding Settings.AiModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
                             <StackPanel Spacing="6">
                                 <TextBlock Classes="detail-label" Text="Image model (used for image→image presets; blank = gpt-image-1)" />
                                 <TextBox PlaceholderText="gpt-image-1"
-                                         Text="{Binding SettingsAiImageModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                         Text="{Binding Settings.AiImageModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
                             <StackPanel Spacing="6">
                                 <TextBlock Classes="detail-label" Text="Reasoning effort (only used by reasoning models; blank = off)" />
-                                <ComboBox ItemsSource="{Binding AiReasoningEffortOptions}"
-                                          SelectedItem="{Binding SettingsAiReasoningEffort, Mode=TwoWay}" />
+                                <ComboBox ItemsSource="{Binding Settings.AiReasoningEffortOptions}"
+                                          SelectedItem="{Binding Settings.AiReasoningEffort, Mode=TwoWay}" />
                             </StackPanel>
                         </StackPanel>
 
                         <!-- Copilot settings -->
-                        <StackPanel Spacing="10" IsVisible="{Binding IsCopilotSettingsVisible}">
+                        <StackPanel Spacing="10" IsVisible="{Binding Settings.IsCopilotSettingsVisible}">
                             <TextBlock Classes="body-muted" TextWrapping="Wrap"
                                        Text="Sign in with your GitHub account to use Copilot as the AI provider. Requires an active GitHub Copilot subscription." />
                             <StackPanel Orientation="Horizontal" Spacing="8">
@@ -683,7 +683,7 @@
                             <StackPanel Spacing="6">
                                 <TextBlock Classes="detail-label" Text="Model (blank = gpt-4o)" />
                                 <TextBox PlaceholderText="gpt-4o"
-                                         Text="{Binding SettingsAiModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                         Text="{Binding Settings.AiModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
                         </StackPanel>
                     </StackPanel>

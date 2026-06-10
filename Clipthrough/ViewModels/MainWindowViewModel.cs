@@ -197,11 +197,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _settingsExternalEditorPath = AppSettings.Default.ExternalEditorPath;
     private string _settingsExternalImageEditorPath = AppSettings.Default.ExternalImageEditorPath;
     private string _settingsExternalDiffToolPath = AppSettings.Default.ExternalDiffToolPath;
-    private bool _settingsEnableAi = AppSettings.Default.EnableAi;
-    private string _settingsAiBaseUrl = AppSettings.Default.AiBaseUrl;
-    private string _settingsAiApiKey = AppSettings.Default.AiApiKey;
-    private string _settingsAiModel = AppSettings.Default.AiModel;
-    private string _settingsAiReasoningEffort = AppSettings.Default.AiReasoningEffort;
     private bool _settingsEnableAutoUpdate = AppSettings.Default.EnableAutoUpdate;
     private bool _settingsAutoApplyUpdatesOnStartup = AppSettings.Default.AutoApplyUpdatesOnStartup;
     private string _settingsUpdateFeedUrl = AppSettings.Default.UpdateFeedUrl;
@@ -242,6 +237,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _semanticSearchService = semanticSearchService;
         _embeddingWorker = embeddingWorker;
         Copilot = new CopilotViewModel(copilotAuthService, _systemInteractionService, _clipboardMonitorService, () => this.RaisePropertyChanged(nameof(IsAiMenuVisible)));
+        Settings = new SettingsViewModel();
         _databaseInitializer = databaseInitializer;
         SessionLogs = new SessionLogsViewModel(sessionLogService);
         ContentTypeOptions =
@@ -1988,63 +1984,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string AiPromptApplyLabel => _aiPromptKind == AiPresetKind.ImageToImage ? "Generate" : "Apply";
 
-    public bool SettingsEnableAi
-    {
-        get => _settingsEnableAi;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableAi, value);
-    }
-
-    public string SettingsAiBaseUrl
-    {
-        get => _settingsAiBaseUrl;
-        set => this.RaiseAndSetIfChanged(ref _settingsAiBaseUrl, value);
-    }
-
-    public string SettingsAiApiKey
-    {
-        get => _settingsAiApiKey;
-        set => this.RaiseAndSetIfChanged(ref _settingsAiApiKey, value);
-    }
-
-    public string SettingsAiModel
-    {
-        get => _settingsAiModel;
-        set => this.RaiseAndSetIfChanged(ref _settingsAiModel, value);
-    }
-
-    private string _settingsAiImageModel = AppSettings.Default.AiImageModel;
-
-    public string SettingsAiImageModel
-    {
-        get => _settingsAiImageModel;
-        set => this.RaiseAndSetIfChanged(ref _settingsAiImageModel, value);
-    }
-
-    public string SettingsAiReasoningEffort
-    {
-        get => _settingsAiReasoningEffort;
-        set => this.RaiseAndSetIfChanged(ref _settingsAiReasoningEffort, value);
-    }
-
-    public System.Collections.Generic.IReadOnlyList<string> AiReasoningEffortOptions { get; } = new[] { "", "none", "minimal", "low", "medium", "high" };
-
-    private Models.AiProvider _settingsAiProvider = AppSettings.Default.AiProvider;
-
-    public Models.AiProvider SettingsAiProvider
-    {
-        get => _settingsAiProvider;
-        set
-        {
-            this.RaiseAndSetIfChanged(ref _settingsAiProvider, value);
-            this.RaisePropertyChanged(nameof(IsOpenAiSettingsVisible));
-            this.RaisePropertyChanged(nameof(IsCopilotSettingsVisible));
-        }
-    }
-
-    public Models.AiProvider[] AiProviderOptions { get; } = Enum.GetValues<Models.AiProvider>();
-
-    public bool IsOpenAiSettingsVisible => SettingsAiProvider == Models.AiProvider.OpenAi;
-    public bool IsCopilotSettingsVisible => SettingsAiProvider == Models.AiProvider.Copilot;
+    public SettingsViewModel Settings { get; }
 
     public CopilotViewModel Copilot { get; }
 
@@ -5950,13 +5890,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ExternalEditorPath = SettingsExternalEditorPath.Trim(),
             ExternalImageEditorPath = SettingsExternalImageEditorPath.Trim(),
             ExternalDiffToolPath = SettingsExternalDiffToolPath.Trim(),
-            EnableAi = SettingsEnableAi,
-            AiProvider = SettingsAiProvider,
-            AiBaseUrl = (SettingsAiBaseUrl ?? string.Empty).Trim(),
-            AiApiKey = (SettingsAiApiKey ?? string.Empty).Trim(),
-            AiModel = (SettingsAiModel ?? string.Empty).Trim(),
-            AiImageModel = (SettingsAiImageModel ?? string.Empty).Trim(),
-            AiReasoningEffort = (SettingsAiReasoningEffort ?? string.Empty).Trim(),
+            EnableAi = Settings.EnableAi,
+            AiProvider = Settings.AiProvider,
+            AiBaseUrl = (Settings.AiBaseUrl ?? string.Empty).Trim(),
+            AiApiKey = (Settings.AiApiKey ?? string.Empty).Trim(),
+            AiModel = (Settings.AiModel ?? string.Empty).Trim(),
+            AiImageModel = (Settings.AiImageModel ?? string.Empty).Trim(),
+            AiReasoningEffort = (Settings.AiReasoningEffort ?? string.Empty).Trim(),
             EnableAutoUpdate = SettingsEnableAutoUpdate,
             AutoApplyUpdatesOnStartup = SettingsAutoApplyUpdatesOnStartup,
             UpdateFeedUrl = (SettingsUpdateFeedUrl ?? string.Empty).Trim(),
@@ -6098,14 +6038,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsExternalEditorPath = settings.ExternalEditorPath;
         SettingsExternalImageEditorPath = settings.ExternalImageEditorPath;
         SettingsExternalDiffToolPath = settings.ExternalDiffToolPath;
-        SettingsEnableAi = settings.EnableAi;
+        Settings.EnableAi = settings.EnableAi;
         this.RaisePropertyChanged(nameof(IsAiMenuVisible));
-        SettingsAiProvider = settings.AiProvider;
-        SettingsAiBaseUrl = settings.AiBaseUrl;
-        SettingsAiApiKey = settings.AiApiKey;
-        SettingsAiModel = settings.AiModel;
-        SettingsAiImageModel = settings.AiImageModel;
-        SettingsAiReasoningEffort = settings.AiReasoningEffort;
+        Settings.AiProvider = settings.AiProvider;
+        Settings.AiBaseUrl = settings.AiBaseUrl;
+        Settings.AiApiKey = settings.AiApiKey;
+        Settings.AiModel = settings.AiModel;
+        Settings.AiImageModel = settings.AiImageModel;
+        Settings.AiReasoningEffort = settings.AiReasoningEffort;
         SettingsEnableAutoUpdate = settings.EnableAutoUpdate;
         SettingsAutoApplyUpdatesOnStartup = settings.AutoApplyUpdatesOnStartup;
         SettingsUpdateFeedUrl = settings.UpdateFeedUrl;
