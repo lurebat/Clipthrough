@@ -40,7 +40,7 @@
             </Border>
             <Button Classes="secondary"
                     HorizontalAlignment="Center"
-                    Command="{Binding CheckForUpdateCommand}"
+                    Command="{Binding Update.CheckForUpdateCommand}"
                     Content="{x:Static loc:AppText.CheckForUpdateButtonLabel}" />
             <TextBlock Classes="body-muted"
                        HorizontalAlignment="Center"

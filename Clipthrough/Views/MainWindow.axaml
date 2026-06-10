@@ -67,7 +67,7 @@
             <MenuItem Header="Help">
                 <MenuItem Header="_User guide" Command="{Binding OpenHelpCommand}" />
                 <MenuItem Header="{x:Static loc:AppText.CheckForUpdateMenuHeader}"
-                          Command="{Binding CheckForUpdateCommand}" />
+                          Command="{Binding Update.CheckForUpdateCommand}" />
                 <Separator />
                 <MenuItem Header="Open _logs folder" Command="{Binding OpenLogsFolderCommand}" />
                 <MenuItem Header="Open _database folder" Command="{Binding OpenDatabaseFolderCommand}" />
