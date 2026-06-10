@@ -1,9 +1,11 @@
 using System;
+using System.Data;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Clipthrough.Services.Search;
 using Microsoft.Data.Sqlite;
 
 namespace Clipthrough.Services;
@@ -24,11 +26,27 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
     public const int DefaultRetention = 7;
 
     private readonly IStorageOptionsService _storageOptionsService;
+    private readonly IClipboardMonitorService? _clipboardMonitor;
+    private readonly IBackgroundOcrQueue? _ocrQueue;
+    private readonly IEmbeddingWorker? _embeddingWorker;
     private readonly int _retention;
 
-    public DatabaseBackupService(IStorageOptionsService storageOptionsService, int retention = DefaultRetention)
+    /// <summary>
+    /// Primary constructor used by the DI container. Worker services are
+    /// injected so restore operations can quiesce them via
+    /// <see cref="DatabaseMaintenanceScope"/>.
+    /// </summary>
+    public DatabaseBackupService(
+        IStorageOptionsService storageOptionsService,
+        IClipboardMonitorService? clipboardMonitor,
+        IBackgroundOcrQueue? ocrQueue,
+        IEmbeddingWorker? embeddingWorker,
+        int retention = DefaultRetention)
     {
         _storageOptionsService = storageOptionsService;
+        _clipboardMonitor = clipboardMonitor;
+        _ocrQueue = ocrQueue;
+        _embeddingWorker = embeddingWorker;
         _retention = retention < 1 ? 1 : retention;
     }
 
@@ -55,6 +73,8 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
 
             // Flush WAL into the main file first so the copy is consistent
             // without us needing to know which .db-wal frames are committed.
+            // TRUNCATE (vs PASSIVE) ensures the WAL is fully flushed and
+            // then zeroed so the copy starts with a clean state.
             await Task.Run(() => CheckpointSafely(dbPath, _storageOptionsService.Current.DatabasePassword), cancellationToken).ConfigureAwait(false);
 
             var tempPath = todayPath + ".tmp";
@@ -85,18 +105,14 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
             }
 
             using var connection = new SqliteConnection(builder.ToString());
-            connection.StateChange += (_, e) =>
-            {
-                if (e.CurrentState == System.Data.ConnectionState.Open)
-                {
-                    using var pragmaCmd = connection.CreateCommand();
-                    pragmaCmd.CommandText = "PRAGMA busy_timeout = 5000;";
-                    pragmaCmd.ExecuteNonQuery();
-                }
-            };
+            connection.StateChange += ApplyBusyTimeoutOnOpen;
             connection.Open();
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = "PRAGMA wal_checkpoint(PASSIVE);";
+            // TRUNCATE: flushes all WAL frames to the main file AND zeros the WAL
+            // so a raw file copy captures a fully-consistent snapshot. The previous
+            // PASSIVE mode only checkpointed opportunistically and left WAL frames
+            // behind if any reader held the -wal file open.
+            cmd.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
             cmd.ExecuteNonQuery();
         }
         catch (Exception ex) when (ex is SqliteException or IOException)
@@ -104,6 +120,16 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
             // Non-fatal: copy ahead without the checkpoint. The snapshot will
             // still be a valid (if slightly stale) SQLite file.
             Trace.TraceWarning($"Backup checkpoint failed; copying without checkpoint: {ex.Message}");
+        }
+    }
+
+    private static void ApplyBusyTimeoutOnOpen(object? sender, StateChangeEventArgs e)
+    {
+        if (e.CurrentState == ConnectionState.Open && sender is SqliteConnection connection)
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "PRAGMA busy_timeout = 5000;";
+            cmd.ExecuteNonQuery();
         }
     }
 
@@ -165,44 +191,105 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         }
     }
 
-    public Task RestoreAsync(string backupPath, CancellationToken cancellationToken = default)
-        => Task.Run(() =>
+    /// <summary>
+    /// Restores the given backup over the live database.
+    ///
+    /// Pool-safe sequence (U7):
+    ///   1. Enter <see cref="DatabaseMaintenanceScope"/> — stops workers,
+    ///      clears the connection pool so no handle is open on the live DB.
+    ///   2. Validate the backup opens (is a readable SQLite file) before
+    ///      touching the live DB.
+    ///   3. Rename live .db/.db-wal/.db-shm to .before-restore-{stamp}.
+    ///   4. Copy backup → temp + atomic rename to live path.
+    ///   5. Validate the restored DB opens before returning.
+    ///
+    /// On any failure the live .before-restore files are preserved so the
+    /// pre-restore state remains recoverable.
+    /// </summary>
+    public async Task RestoreAsync(string backupPath, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(backupPath) || !File.Exists(backupPath))
         {
-            if (string.IsNullOrEmpty(backupPath) || !File.Exists(backupPath))
+            throw new FileNotFoundException("Backup file not found.", backupPath);
+        }
+
+        var dbPath = _storageOptionsService.Current.DatabasePath;
+        if (string.IsNullOrEmpty(dbPath))
+        {
+            throw new InvalidOperationException("No database path is configured.");
+        }
+
+        // Step 1: Enter maintenance scope — stops workers and clears the pool
+        // so no pooled connection holds the live file open during the swap.
+        await using var scope = await DatabaseMaintenanceScope.EnterAsync(
+            _clipboardMonitor, _ocrQueue, _embeddingWorker);
+
+        await Task.Run(() => RestoreCore(backupPath, dbPath), cancellationToken).ConfigureAwait(false);
+    }
+
+    private void RestoreCore(string backupPath, string dbPath)
+    {
+        // Step 2: Validate backup is readable before touching the live DB.
+        ValidateBackupReadable(backupPath, _storageOptionsService.Current.DatabasePassword);
+
+        var dir = Path.GetDirectoryName(dbPath)!;
+        Directory.CreateDirectory(dir);
+
+        // Step 3: Stash whatever's currently live so the operation is reversible.
+        var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+        foreach (var suffix in new[] { string.Empty, "-wal", "-shm" })
+        {
+            var live = dbPath + suffix;
+            if (File.Exists(live))
             {
-                throw new FileNotFoundException("Backup file not found.", backupPath);
+                File.Move(live, $"{live}.before-restore-{stamp}");
             }
+        }
 
-            var dbPath = _storageOptionsService.Current.DatabasePath;
-            if (string.IsNullOrEmpty(dbPath))
-            {
-                throw new InvalidOperationException("No database path is configured.");
-            }
+        // Step 4: Copy via a temp file + atomic rename so the restore is also
+        // crash-safe: if we die between Copy and Move, the live path is still
+        // empty and the user re-runs the restore.
+        var tempPath = dbPath + ".restoring";
+        File.Copy(backupPath, tempPath);
+        File.Move(tempPath, dbPath);
 
-            var dir = Path.GetDirectoryName(dbPath)!;
-            Directory.CreateDirectory(dir);
+        // Step 5: Validate the restored DB opens with the stored password.
+        var password = _storageOptionsService.Current.DatabasePassword;
+        if (!StorageOptionsService.CanOpenWithPassword(dbPath, password ?? string.Empty))
+        {
+            // The restored file is present but unreadable — likely a mismatched
+            // password or a corrupt backup. Roll back so the caller can retry
+            // with a different backup.
+            try { File.Delete(dbPath); } catch { /* best effort */ }
+            throw new InvalidOperationException(
+                "The restored database does not open with the current password. " +
+                "The previous database files are preserved as '.before-restore' copies.");
+        }
 
-            // Stash whatever's currently live so the operation is reversible
-            // if the chosen backup turns out to be unreadable. Renaming is
-            // also atomic on NTFS, which avoids leaving a half-written .db
-            // behind if the process is killed mid-copy.
-            var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
-            foreach (var suffix in new[] { string.Empty, "-wal", "-shm" })
-            {
-                var live = dbPath + suffix;
-                if (File.Exists(live))
-                {
-                    File.Move(live, $"{live}.before-restore-{stamp}");
-                }
-            }
+        Trace.TraceInformation($"Restored database from backup '{backupPath}'. Previous live files renamed with suffix '.before-restore-{stamp}'.");
+    }
 
-            // Copy via a temp file + atomic rename so the restore is also
-            // crash-safe: if we die between Copy and Move, the live path is
-            // still empty and the user re-runs the restore.
-            var tempPath = dbPath + ".restoring";
-            File.Copy(backupPath, tempPath);
-            File.Move(tempPath, dbPath);
+    /// <summary>
+    /// Validates that <paramref name="backupPath"/> is a readable SQLite file.
+    /// Throws <see cref="InvalidOperationException"/> if the file is unreadable
+    /// or corrupt, so <see cref="RestoreCore"/> can abort before touching the
+    /// live database.
+    /// </summary>
+    private static void ValidateBackupReadable(string backupPath, string? password)
+    {
+        // A backup that requires the same password as the live DB is fine.
+        // An unencrypted backup is also fine (password="" opens it).
+        bool opens = StorageOptionsService.CanOpenWithPassword(backupPath, password ?? string.Empty);
+        if (!opens)
+        {
+            // Try without password in case the backup is unencrypted.
+            opens = StorageOptionsService.CanOpenWithPassword(backupPath, string.Empty);
+        }
 
-            Trace.TraceInformation($"Restored database from backup '{backupPath}'. Previous live files renamed with suffix '.before-restore-{stamp}'.");
-        }, cancellationToken);
+        if (!opens)
+        {
+            throw new InvalidOperationException(
+                $"The backup file '{Path.GetFileName(backupPath)}' is unreadable or requires a different password.");
+        }
+    }
 }

@@ -7,7 +7,9 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Clipthrough.Models;
+using Clipthrough.Services.Search;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Clipthrough.Services;
 
@@ -17,24 +19,53 @@ public sealed class StorageOptionsService : IStorageOptionsService
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _configPath;
     private readonly IDataProtectionService _dataProtection;
+    private readonly IServiceProvider? _services;
 
-    public StorageOptionsService(IDataProtectionService dataProtection)
-        : this(dataProtection, Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Clipthrough",
-            "storage.json"))
+    /// <summary>
+    /// Primary constructor used by the DI container. The service provider is
+    /// injected (instead of the worker services directly) so lifecycle
+    /// operations can resolve the workers lazily at call time. This avoids a
+    /// constructor cycle: StorageOptionsService -> workers -> ClipStoreService
+    /// -> SqliteConnectionFactory -> StorageOptionsService.
+    /// </summary>
+    public StorageOptionsService(IDataProtectionService dataProtection, IServiceProvider services)
+        : this(
+            dataProtection,
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Clipthrough",
+                "storage.json"),
+            services)
     {
     }
 
     // Test-only seam: allow the config path to be overridden so tests don't
-    // pollute the user's real storage.json.
+    // pollute the user's real storage.json. No service provider — the quiesce
+    // scope degrades to pool-clear only (safe in tests).
     public StorageOptionsService(IDataProtectionService dataProtection, string configPath)
+        : this(dataProtection, configPath, null)
+    {
+    }
+
+    private StorageOptionsService(
+        IDataProtectionService dataProtection,
+        string configPath,
+        IServiceProvider? services)
     {
         _dataProtection = dataProtection;
         _configPath = configPath;
+        _services = services;
 
         Current = LoadFromDisk();
     }
+
+    // Resolves the live worker services (when running under DI) so the
+    // maintenance scope can quiesce them; null in test contexts.
+    private Task<DatabaseMaintenanceScope> EnterMaintenanceScopeAsync()
+        => DatabaseMaintenanceScope.EnterAsync(
+            _services?.GetService<IClipboardMonitorService>(),
+            _services?.GetService<IBackgroundOcrQueue>(),
+            _services?.GetService<IEmbeddingWorker>());
 
     public StorageOptions Current { get; private set; }
 
@@ -119,9 +150,9 @@ public sealed class StorageOptionsService : IStorageOptionsService
         try
         {
             var previous = Current;
-            // Path move still copies the DB. Same-path password edits are now
-            // metadata-only — they no longer invoke the rekey pragma. Use
-            // RekeyAsync to actually re-encrypt.
+            // Path move copies the DB (inside a maintenance scope).
+            // Same-path password edits are validated against the actual DB key
+            // but do NOT trigger rekey — use RekeyAsync to re-encrypt.
             await ApplyStorageChangesAsync(previous, normalized, cancellationToken);
             await SaveToDiskAsync(normalized, cancellationToken);
             Current = normalized;
@@ -145,62 +176,196 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
         if (string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase))
         {
-            // Same path. Password edits no longer trigger rekey here — that's
+            // Same path. Validate that the new password actually opens the DB
+            // before persisting to storage.json — a metadata-only write with a
+            // divergent key would lock the user out on next launch.
+            bool passwordChanged = !string.Equals(
+                previous.DatabasePassword,
+                next.DatabasePassword,
+                StringComparison.Ordinal);
+
+            if (passwordChanged && File.Exists(newPath))
+            {
+                if (!CanOpenWithPassword(newPath, next.DatabasePassword ?? string.Empty))
+                {
+                    throw new InvalidOperationException(
+                        "The database does not open with the new password. " +
+                        "Use 'Re-encrypt database…' to change the encryption key.");
+                }
+            }
+
+            // Password edits no longer trigger rekey here — that's
             // explicit through RekeyAsync.
             return;
         }
 
+        // --- Atomic path move (U6) ---
+        // Quiesce workers so no clip is written to the old path between the
+        // snapshot and the Current flip; clear the pool so no pooled connection
+        // holds the source file open.
+        await using var scope = await EnterMaintenanceScopeAsync();
+
         Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
+
+        // Checkpoint the source WAL so the raw file copy is consistent.
+        TryCheckpointLegacyDatabase(oldPath, previous.DatabasePassword);
+        SqliteConnection.ClearAllPools();
+
+        // If the destination already exists, keep a timestamped safety copy.
         if (File.Exists(newPath))
         {
-            File.Delete(newPath);
+            var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+            var safeguard = newPath + ".before-move-" + stamp;
+            File.Copy(newPath, safeguard, overwrite: false);
+            Trace.TraceInformation($"Existing target '{newPath}' backed up to '{safeguard}'.");
         }
 
-        await using var sourceConnection = OpenConnection(previous);
-        await using var targetConnection = OpenConnection(next);
-        await sourceConnection.OpenAsync(cancellationToken);
-        await targetConnection.OpenAsync(cancellationToken);
-        sourceConnection.BackupDatabase(targetConnection);
+        // Copy source → temp (in the destination directory for same-volume rename).
+        var tempPath = Path.Combine(Path.GetDirectoryName(newPath)!, Path.GetFileName(newPath) + ".moving-" + Guid.NewGuid().ToString("N"));
+        File.Copy(oldPath, tempPath, overwrite: false);
+
+        try
+        {
+            // Atomic rename: temp → newPath (overwrites any existing file).
+            File.Move(tempPath, newPath, overwrite: true);
+            tempPath = null; // newPath owns it now — don't delete in finally.
+
+            // Remove the source and its WAL/SHM sidecar files.
+            foreach (var suffix in new[] { string.Empty, "-wal", "-shm" })
+            {
+                var src = oldPath + suffix;
+                if (File.Exists(src))
+                {
+                    try { File.Delete(src); }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        Trace.TraceWarning($"Could not remove source file '{src}': {ex.Message}");
+                    }
+                }
+            }
+
+            Trace.TraceInformation($"Database moved from '{oldPath}' to '{newPath}'.");
+        }
+        finally
+        {
+            // Clean up the temp copy if the rename failed.
+            if (tempPath is not null && File.Exists(tempPath))
+            {
+                try { File.Delete(tempPath); } catch { /* best effort */ }
+            }
+        }
     }
 
+    /// <summary>
+    /// Re-encrypts the database in place using a copy-then-swap strategy so a
+    /// failure at any step leaves the original database intact and openable.
+    ///
+    /// Sequence:
+    ///   1. Verify current password opens the DB.
+    ///   2. Enter maintenance scope (stop workers, clear pool).
+    ///   3. Checkpoint source (WAL → main file).
+    ///   4. Copy DB to a temp file.
+    ///   5. Apply PRAGMA rekey to the copy.
+    ///   6. Verify the copy opens with the new password.
+    ///   7. Persist storage.json with the new password.
+    ///   8. Atomic rename: temp → live DB path.
+    ///   9. Update Current.
+    ///
+    /// If any step fails the original DB is untouched; the temp copy is cleaned up.
+    /// </summary>
     public async Task RekeyAsync(string currentPassword, string newPassword, bool rememberNewPassword, CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken);
         try
         {
             var current = Current;
-            var openWith = current with { DatabasePassword = currentPassword ?? string.Empty };
+            var dbPath = current.DatabasePath;
 
-            await using var connection = OpenConnection(openWith);
+            if (!File.Exists(dbPath))
+            {
+                throw new InvalidOperationException("No database file found to re-encrypt.");
+            }
+
+            // Step 1: Verify the current password opens the DB before touching anything.
+            var openWith = current with { DatabasePassword = currentPassword ?? string.Empty };
             try
             {
-                await connection.OpenAsync(cancellationToken);
-                // Ensure the supplied password actually decrypts the DB before rekeying.
-                await using (var verify = connection.CreateCommand())
-                {
-                    verify.CommandText = "SELECT count(*) FROM sqlite_master;";
-                    await verify.ExecuteScalarAsync(cancellationToken);
-                }
+                await using var probe = OpenConnection(openWith);
+                await probe.OpenAsync(cancellationToken);
+                await using var verify = probe.CreateCommand();
+                verify.CommandText = "SELECT count(*) FROM sqlite_master;";
+                await verify.ExecuteScalarAsync(cancellationToken);
             }
             catch (SqliteException ex)
             {
                 throw new InvalidOperationException("Current password is incorrect.", ex);
             }
 
-            await using (var rekey = connection.CreateCommand())
+            // Step 2: Enter maintenance scope (stop workers, clear pool).
+            await using var scope = await EnterMaintenanceScopeAsync();
+
+            // Step 3: Checkpoint so the WAL is merged into the main file and the raw copy is consistent.
+            TryCheckpointLegacyDatabase(dbPath, currentPassword);
+            SqliteConnection.ClearAllPools();
+
+            // Step 4: Copy DB to a temp file.
+            var tempPath = dbPath + ".rekeying-" + Guid.NewGuid().ToString("N");
+            File.Copy(dbPath, tempPath, overwrite: false);
+
+            try
             {
-                rekey.CommandText = $"PRAGMA rekey = '{EscapeSqlLiteral(newPassword ?? string.Empty)}';";
-                await rekey.ExecuteNonQueryAsync(cancellationToken);
+                // Step 5: Rekey the copy with the new password.
+                var tempOptions = current with
+                {
+                    DatabasePath = tempPath,
+                    DatabasePassword = currentPassword ?? string.Empty,
+                };
+
+                await using (var conn = OpenConnection(tempOptions))
+                {
+                    await conn.OpenAsync(cancellationToken);
+                    await using var cmd = conn.CreateCommand();
+                    cmd.CommandText = $"PRAGMA rekey = '{EscapeSqlLiteral(newPassword ?? string.Empty)}';";
+                    await cmd.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                // Flush pooled connections to the temp file before verifying.
+                SqliteConnection.ClearAllPools();
+
+                // Step 6: Verify the rekeyed copy opens with the new password.
+                if (!CanOpenWithPassword(tempPath, newPassword ?? string.Empty))
+                {
+                    throw new InvalidOperationException(
+                        "Rekey verification failed: the rekeyed copy does not open with the new password.");
+                }
+
+                // Step 7: Persist storage.json with the new password BEFORE the swap.
+                var updated = (current with
+                {
+                    DatabasePassword = newPassword ?? string.Empty,
+                    RememberPassword = rememberNewPassword,
+                }).Normalize();
+
+                await SaveToDiskAsync(updated, cancellationToken);
+
+                // Step 8: Atomic swap — temp becomes the live database.
+                SqliteConnection.ClearAllPools();
+                File.Move(tempPath, dbPath, overwrite: true);
+                tempPath = null; // dbPath owns it now.
+
+                // Step 9: Update in-memory state.
+                Current = updated;
+
+                Trace.TraceInformation($"Database rekeyed successfully.");
             }
-
-            var updated = (current with
+            finally
             {
-                DatabasePassword = newPassword ?? string.Empty,
-                RememberPassword = rememberNewPassword,
-            }).Normalize();
-
-            await SaveToDiskAsync(updated, cancellationToken);
-            Current = updated;
+                // Clean up the temp copy on any failure path.
+                if (tempPath is not null && File.Exists(tempPath))
+                {
+                    try { File.Delete(tempPath); } catch { /* best effort */ }
+                }
+            }
         }
         finally
         {
@@ -406,7 +571,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
         }
     }
 
-    private static void TryCheckpointLegacyDatabase(string legacyPath, string? password)
+    internal static void TryCheckpointLegacyDatabase(string legacyPath, string? password)
     {
         try
         {

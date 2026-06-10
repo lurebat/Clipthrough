@@ -97,8 +97,8 @@ public partial class App : Application
                     _clipboardMonitorService.UpdatedClips)
                 .Subscribe(_ => _embeddingWorker.Poke());
             var semanticSearch = Services.GetRequiredService<Clipthrough.Services.Search.ISemanticSearchService>();
-            _embeddingWorkerBatchSubscription = _embeddingWorker.BatchCompleted
-                .Subscribe((int count) => { _ = semanticSearch.RefreshCacheAsync(); });
+            _embeddingWorkerBatchSubscription = _embeddingWorker.BatchRecordsCompleted
+                .Subscribe(records => { _ = semanticSearch.AppendEmbeddingsAsync(records); });
 
             StartApplicationAsync(mainWindowViewModel);
         }

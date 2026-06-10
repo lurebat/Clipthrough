@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace Clipthrough.Models;
@@ -20,6 +20,12 @@ public sealed class ClipEntry
     public string? SourceAppPath { get; init; }
 
     public byte[]? SourceAppIconBytes { get; init; }
+
+    /// <summary>
+    /// True when the DB row has a non-empty source_app_icon blob. Populated even
+    /// when <see cref="SourceAppIconBytes"/> is <c>null</c> (e.g. metadata-only list reads).
+    /// </summary>
+    public bool SourceAppIconAvailable { get; init; }
 
     public string Hash { get; init; } = string.Empty;
 

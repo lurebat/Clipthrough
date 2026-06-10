@@ -52,6 +52,46 @@ public sealed class ClipStoreService : IClipStoreService
             c.import_kind
         """;
 
+    /// <summary>
+    /// Metadata-only column list for list/search queries. Omits <c>content_bytes</c> and
+    /// <c>source_app_icon</c> (the two large BLOBs) to avoid materialising image data for
+    /// every row. Column count and ordinal positions match <see cref="ClipSelectColumns"/>:
+    /// index 2 is always <c>NULL</c> (ContentBytes), index 7 is a 0/1 presence flag
+    /// (SourceAppIconAvailable). Use with <see cref="ReadClipMeta"/>.  (U12)
+    /// </summary>
+    private const string ClipListSelectColumns = """
+            c.id,
+            c.content,
+            NULL,
+            c.content_type,
+            c.content_format,
+            c.source_app,
+            c.source_app_path,
+            (CASE WHEN c.source_app_icon IS NOT NULL AND LENGTH(c.source_app_icon) > 0 THEN 1 ELSE 0 END),
+            c.hash,
+            c.is_favorite,
+            c.is_sensitive,
+            c.copy_count,
+            c.first_copied_at,
+            c.last_copied_at,
+            c.byte_size,
+            c.image_width,
+            c.image_height,
+            c.source_window_title,
+            c.source_url,
+            c.is_pasted,
+            c.paste_count,
+            c.last_pasted_at,
+            c.pinned_at,
+            c.ocr_text,
+            c.ocr_status,
+            c.ocr_attempted_at,
+            c.ocr_error,
+            c.source_clip_id,
+            c.transform_kind,
+            c.import_kind
+        """;
+
     private readonly SqliteConnectionFactory _connectionFactory;
     private readonly ISensitivityService _sensitivityService;
     private readonly ISettingsService _settingsService;
@@ -260,29 +300,38 @@ public sealed class ClipStoreService : IClipStoreService
             ? $"ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, bm25(clips_fts), COALESCE(c.last_copied_at, c.captured_at) DESC, c.id DESC"
             : BuildOrderClause(filters.SortOption);
 
-        var items = new List<ClipEntry>();
+        var items = new List<ClipEntry>(filters.Limit);
 
+        // Fetch Limit+1 rows so we can detect "there are more" without a separate COUNT query. (U15)
         await using (var queryCommand = connection.CreateCommand())
         {
             queryCommand.CommandText = $"""
-                SELECT {ClipSelectColumns}
+                SELECT {ClipListSelectColumns}
                 {fromClause}
                 {whereClause}
                 {orderClause}
                 LIMIT $limit OFFSET $offset;
                 """;
-            AddSearchParameters(queryCommand, filters, hasSearch);
+            // Pass Limit+1 so we can detect whether more results exist.
+            AddSearchParametersWithOvercount(queryCommand, filters, hasSearch);
 
             await using var reader = await queryCommand.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                items.Add(ReadClip(reader));
+                items.Add(ReadClipMeta(reader));
             }
         }
 
+        // If we fetched limit+1 items there are more beyond this page; trim the extra.
+        var hasMore = items.Count > filters.Limit;
+        if (hasMore) items.RemoveAt(items.Count - 1);
+
         await LoadSensitivityMatchesAsync(connection, items, cancellationToken);
 
-        var totalMatchingCount = await ExecuteCountAsync(connection, $"SELECT COUNT(*) {fromClause} {whereClause};", filters, hasSearch, cancellationToken);
+        // Approximate total: exact when the page is partial; "at least Offset+Limit+1" when full. (U15)
+        var totalMatchingCount = hasMore
+            ? filters.Offset + filters.Limit + 1
+            : filters.Offset + items.Count;
 
         // Use cached aggregate stats when available; refresh them only when version has changed.
         var versionBefore = Interlocked.Read(ref _statsVersion);
@@ -1104,16 +1153,28 @@ public sealed class ClipStoreService : IClipStoreService
 
     private async Task<ClipSearchResult> SearchInMemoryAsync(SqliteConnection connection, ClipSearchFilters filters, CancellationToken cancellationToken)
     {
-        var regex = filters.UseRegex ? BuildSearchRegex(filters.SearchText, filters.CaseSensitive) : null;
-        var items = new List<ClipEntry>();
+        // Build the single regex for this search ONCE here — not per row. (U13)
+        // UseRegex / UseWildcard / WholeWord all become a single Regex reference.
+        var regex = filters.UseRegex
+            ? BuildSearchRegex(filters.SearchText, filters.CaseSensitive)
+            : filters.UseWildcard
+                ? BuildWildcardRegex(filters.SearchText, filters.CaseSensitive, filters.WholeWord)
+                : filters.WholeWord
+                    ? BuildWholeWordRegex(filters.SearchText, filters.CaseSensitive)
+                    : null;
+
+        var items = new List<ClipEntry>(filters.Limit);
         var whereClauses = BuildWhereClauses(filters, hasSearch: false);
         var whereClause = whereClauses.Count > 0 ? $"WHERE {string.Join(" AND ", whereClauses)}" : string.Empty;
         var totalMatchingCount = 0;
+        // Stop counting at Offset+Limit+1 so we know there are more without a full table scan. (U15)
+        var countCap = filters.Offset + filters.Limit + 1;
 
         await using (var queryCommand = connection.CreateCommand())
         {
+            // Use metadata-only columns (no content_bytes / source_app_icon BLOBs). (U12)
             queryCommand.CommandText = $"""
-                SELECT {ClipSelectColumns}
+                SELECT {ClipListSelectColumns}
                 FROM clips c
                 {whereClause}
                 ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, COALESCE(c.last_copied_at, c.captured_at) DESC, c.id DESC;
@@ -1123,7 +1184,7 @@ public sealed class ClipStoreService : IClipStoreService
             await using var reader = await queryCommand.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                var clip = ReadClip(reader);
+                var clip = ReadClipMeta(reader);
                 if (!MatchesSearch(clip, filters, regex))
                 {
                     continue;
@@ -1139,6 +1200,9 @@ public sealed class ClipStoreService : IClipStoreService
                 {
                     items.Add(clip);
                 }
+
+                // Stop scanning once we've confirmed "at least one more beyond this page". (U15)
+                if (totalMatchingCount >= countCap) break;
             }
         }
 
@@ -1155,6 +1219,13 @@ public sealed class ClipStoreService : IClipStoreService
         };
     }
 
+    /// <summary>
+    /// Returns true when <paramref name="clip"/> matches the current search filters.
+    /// <paramref name="regex"/> must already be built by the caller ONCE per search —
+    /// never build a new <see cref="Regex"/> inside this method. (U13)
+    /// Covers the same five columns as the FTS index: content, source_app,
+    /// source_window_title, source_url, ocr_text. (U13)
+    /// </summary>
     private static bool MatchesSearch(ClipEntry clip, ClipSearchFilters filters, Regex? regex)
     {
         if (string.IsNullOrWhiteSpace(filters.SearchText))
@@ -1162,23 +1233,13 @@ public sealed class ClipStoreService : IClipStoreService
             return true;
         }
 
+        // regex covers UseRegex, UseWildcard, and WholeWord — all pre-built by the caller.
         if (regex is not null)
         {
             return IsRegexMatch(clip, regex);
         }
 
-        if (filters.UseWildcard)
-        {
-            var wildcardRegex = BuildWildcardRegex(filters.SearchText, filters.CaseSensitive, filters.WholeWord);
-            return IsRegexMatch(clip, wildcardRegex);
-        }
-
-        if (filters.WholeWord)
-        {
-            var wholeWordRegex = BuildWholeWordRegex(filters.SearchText, filters.CaseSensitive);
-            return IsRegexMatch(clip, wholeWordRegex);
-        }
-
+        // Plain-text token search over the same 5 columns as FTS.
         var comparison = filters.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
         var tokens = filters.SearchText
             .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -1187,7 +1248,8 @@ public sealed class ClipStoreService : IClipStoreService
             clip.Content.Contains(token, comparison) ||
             (!string.IsNullOrWhiteSpace(clip.SourceApp) && clip.SourceApp.Contains(token, comparison)) ||
             (!string.IsNullOrWhiteSpace(clip.SourceWindowTitle) && clip.SourceWindowTitle.Contains(token, comparison)) ||
-            (!string.IsNullOrWhiteSpace(clip.SourceUrl) && clip.SourceUrl.Contains(token, comparison)));
+            (!string.IsNullOrWhiteSpace(clip.SourceUrl) && clip.SourceUrl.Contains(token, comparison)) ||
+            (!string.IsNullOrWhiteSpace(clip.OcrText) && clip.OcrText.Contains(token, comparison)));
     }
 
     private static Regex BuildWildcardRegex(string pattern, bool caseSensitive, bool wholeWord)
@@ -1285,6 +1347,23 @@ public sealed class ClipStoreService : IClipStoreService
         command.Parameters.AddWithValue("$offset", filters.Offset);
     }
 
+    /// <summary>
+    /// Like <see cref="AddSearchParameters"/> but adds <c>Limit+1</c> as the SQL LIMIT so the
+    /// caller can detect "has more results beyond this page" without a separate COUNT query. (U15)
+    /// </summary>
+    private static void AddSearchParametersWithOvercount(SqliteCommand command, ClipSearchFilters filters, bool hasSearch)
+    {
+        if (hasSearch && !filters.UseRegex)
+        {
+            command.Parameters.AddWithValue("$search", BuildFtsExpression(filters.SearchText, filters.UseFuzzy));
+        }
+
+        AddContentTypeParameters(command, filters);
+
+        command.Parameters.AddWithValue("$limit", filters.Limit + 1);
+        command.Parameters.AddWithValue("$offset", filters.Offset);
+    }
+
     private static bool HasFtsCompatibleSearchTerm(string searchText)
     {
         if (string.IsNullOrWhiteSpace(searchText))
@@ -1344,7 +1423,60 @@ public sealed class ClipStoreService : IClipStoreService
         return string.Join(" AND ", parts);
     }
 
+    /// <summary>
+    /// Reads a full <see cref="ClipEntry"/> from a row produced by <see cref="ClipSelectColumns"/>.
+    /// Sets <see cref="ClipEntry.SourceAppIconAvailable"/> based on whether icon bytes were loaded.
+    /// </summary>
     private static ClipEntry ReadClip(SqliteDataReader reader)
+    {
+        var lastCopiedAt = ParseTimestamp(reader.IsDBNull(13) ? null : reader.GetString(13))
+            ?? DateTimeOffset.UtcNow;
+        var firstCopiedAt = ParseTimestamp(reader.IsDBNull(12) ? null : reader.GetString(12))
+            ?? lastCopiedAt;
+
+        var iconBytes = ReadBytes(reader, 7);
+        return new ClipEntry
+        {
+            Id = reader.GetInt64(0),
+            Content = reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
+            ContentBytes = ReadBytes(reader, 2),
+            ContentType = ContentTypeExtensions.FromStorageValue(reader.GetString(3)),
+            ContentFormat = ClipContentFormatExtensions.FromStorageValue(reader.GetString(4)),
+            SourceApp = reader.IsDBNull(5) ? null : reader.GetString(5),
+            SourceAppPath = reader.IsDBNull(6) ? null : reader.GetString(6),
+            SourceAppIconBytes = iconBytes,
+            SourceAppIconAvailable = iconBytes is { Length: > 0 },
+            Hash = reader.GetString(8),
+            IsFavorite = reader.GetInt64(9) == 1,
+            IsSensitive = reader.GetInt64(10) == 1,
+            CopyCount = reader.IsDBNull(11) ? 1 : Convert.ToInt32(reader.GetInt64(11), CultureInfo.InvariantCulture),
+            FirstCopiedAt = firstCopiedAt,
+            LastCopiedAt = lastCopiedAt,
+            ByteSize = reader.GetInt64(14),
+            ImageWidth = reader.IsDBNull(15) ? null : reader.GetInt32(15),
+            ImageHeight = reader.IsDBNull(16) ? null : reader.GetInt32(16),
+            SourceWindowTitle = reader.IsDBNull(17) ? null : reader.GetString(17),
+            SourceUrl = reader.IsDBNull(18) ? null : reader.GetString(18),
+            IsPasted = !reader.IsDBNull(19) && reader.GetInt64(19) == 1,
+            PasteCount = reader.IsDBNull(20) ? 0 : Convert.ToInt32(reader.GetInt64(20), CultureInfo.InvariantCulture),
+            LastPastedAt = ParseTimestamp(reader.IsDBNull(21) ? null : reader.GetString(21)),
+            PinnedAt = ParseTimestamp(reader.IsDBNull(22) ? null : reader.GetString(22)),
+            OcrText = reader.IsDBNull(23) ? null : reader.GetString(23),
+            OcrStatus = reader.IsDBNull(24) ? null : reader.GetString(24),
+            OcrAttemptedAt = ParseTimestamp(reader.IsDBNull(25) ? null : reader.GetString(25)),
+            OcrError = reader.IsDBNull(26) ? null : reader.GetString(26),
+            SourceClipId = reader.IsDBNull(27) ? null : reader.GetInt64(27),
+            TransformKind = reader.IsDBNull(28) ? null : reader.GetString(28),
+            ImportKind = reader.IsDBNull(29) ? null : reader.GetString(29),
+        };
+    }
+
+    /// <summary>
+    /// Reads a metadata-only <see cref="ClipEntry"/> from a row produced by <see cref="ClipListSelectColumns"/>.
+    /// <c>ContentBytes</c> and <c>SourceAppIconBytes</c> are always <c>null</c>; the presence flag
+    /// <see cref="ClipEntry.SourceAppIconAvailable"/> is read from the integer at column index 7. (U12)
+    /// </summary>
+    private static ClipEntry ReadClipMeta(SqliteDataReader reader)
     {
         var lastCopiedAt = ParseTimestamp(reader.IsDBNull(13) ? null : reader.GetString(13))
             ?? DateTimeOffset.UtcNow;
@@ -1355,12 +1487,13 @@ public sealed class ClipStoreService : IClipStoreService
         {
             Id = reader.GetInt64(0),
             Content = reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
-            ContentBytes = ReadBytes(reader, 2),
+            ContentBytes = null,   // intentionally omitted for list/search scans (U12)
             ContentType = ContentTypeExtensions.FromStorageValue(reader.GetString(3)),
             ContentFormat = ClipContentFormatExtensions.FromStorageValue(reader.GetString(4)),
             SourceApp = reader.IsDBNull(5) ? null : reader.GetString(5),
             SourceAppPath = reader.IsDBNull(6) ? null : reader.GetString(6),
-            SourceAppIconBytes = ReadBytes(reader, 7),
+            SourceAppIconBytes = null,   // intentionally omitted (U12)
+            SourceAppIconAvailable = !reader.IsDBNull(7) && reader.GetInt64(7) == 1,
             Hash = reader.GetString(8),
             IsFavorite = reader.GetInt64(9) == 1,
             IsSensitive = reader.GetInt64(10) == 1,
@@ -1727,9 +1860,13 @@ public sealed class ClipStoreService : IClipStoreService
     private static Regex BuildSearchRegex(string searchText, bool caseSensitive)
         => new(searchText, (caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase) | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
+    /// <summary>Checks all five columns indexed by FTS: content, source_app, source_window_title, source_url, ocr_text. (U13)</summary>
     private static bool IsRegexMatch(ClipEntry clip, Regex regex)
         => regex.IsMatch(clip.Content) ||
-           (!string.IsNullOrWhiteSpace(clip.SourceApp) && regex.IsMatch(clip.SourceApp));
+           (!string.IsNullOrWhiteSpace(clip.SourceApp) && regex.IsMatch(clip.SourceApp)) ||
+           (!string.IsNullOrWhiteSpace(clip.SourceWindowTitle) && regex.IsMatch(clip.SourceWindowTitle)) ||
+           (!string.IsNullOrWhiteSpace(clip.SourceUrl) && regex.IsMatch(clip.SourceUrl)) ||
+           (!string.IsNullOrWhiteSpace(clip.OcrText) && regex.IsMatch(clip.OcrText));
 
     private static async Task<long> EnsureRuleAsync(SqliteConnection connection, SqliteTransaction transaction, SensitivityMatch match, CancellationToken cancellationToken)
     {

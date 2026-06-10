@@ -219,6 +219,15 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
             Trace.TraceWarning($"Clipboard snapshot skipped because the platform data object could not be enumerated (HRESULT 0x{ex.HResult:X8}): {ex.Message}");
             _notificationService.PublishWarning(AppText.ClipCaptureFailedTitle, AppText.FormatClipCaptureFailedComSnapshot(ex.HResult));
         }
+        catch (OperationCanceledException)
+        {
+            // Shutdown in progress — not an error.
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceError($"Clipboard capture failed unexpectedly: {ex}");
+            _notificationService.PublishError(AppText.ClipCaptureFailedTitle, ex.Message);
+        }
         finally
         {
             if (publishedBusy)
@@ -410,7 +419,11 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
             await Task.Run(() => _clipStoreService.ApplyMaintenanceAsync());
             Trace.TraceInformation($"Clipboard background enrichment completed in {enrichmentStopwatch.ElapsedMilliseconds} ms for clip {capturedClip.Id}.");
         }
-        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or COMException)
+        catch (OperationCanceledException)
+        {
+            // Expected during shutdown — suppress.
+        }
+        catch (Exception ex)
         {
             Trace.TraceWarning($"Clipboard background enrichment failed for clip {capturedClip.Id}: {ex}");
         }

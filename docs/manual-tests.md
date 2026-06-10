@@ -108,6 +108,103 @@ Not automatable below.
   clears the penalty and responds promptly.
 - [ ]
 
+## Phase 2 — Storage-lifecycle crash-safety (R2)
+
+Automated: `StorageOptionsServicePhase2Tests` (atomic rekey, same-path password validation,
+path-move atomicity, no temp leaks), `DatabaseBackupServiceTests` (WAL-resident rows, restore
+validation, prune). Not automatable below.
+
+### MT-2.1 — Cross-volume database move
+*Why manual:* cross-volume `File.Move` atomicity needs two physical drives/volumes.
+1. With the DB on `C:\`, change the DB location (Settings -> Database Location) to a different
+   drive (e.g. `D:\clips.db`). 2. Kill the process mid-copy (after the `.moving-*` temp appears,
+   before the rename).
+- **Expect:** on next launch the source DB is intact, the `.moving-*` temp is gone, and the
+  destination is empty/absent — no data loss or corrupt file at either path.
+- [ ]
+
+### MT-2.2 — Restore under disk-full
+*Why manual:* a disk-full condition can't be reliably simulated in `dotnet test`.
+1. Fill the target disk near capacity. 2. Restore from a backup.
+- **Expect:** failure is logged (InvalidOperationException), the `.before-restore-*` files are
+  intact for manual recovery, and the app does not crash.
+- [ ]
+
+### MT-2.3 — Rekey / restore with the DB open in another process
+*Why manual:* holding a handle from a separate OS process isn't reachable in-process.
+1. Open the DB in the `sqlite3` CLI. 2. Trigger a rekey or restore from the app.
+- **Expect:** the operation waits for/release-retries, or fails cleanly — the live DB is never
+  left torn; `ClearAllPools` in the maintenance scope releases the app's own handles first.
+- [ ]
+
+---
+
+## Phases 5 & 6 — Search scalability + worker robustness (R4, R5)
+
+Automated: `ClipStoreServiceTests` (list/search omit BLOBs, field parity, Limit+1 overcount),
+`SemanticSearchServiceTests` (race-free query, incremental append), `EmbeddingWorkerTests`
+(inference-failure idles, missing-model idles). Not automatable below.
+
+### MT-5.1 — Large image history stays memory-bounded
+*Why manual:* needs 10,000+ multi-MB image clips and OS-level RSS measurement.
+1. Accumulate 10,000+ image clips. 2. Scroll the list and run a text search while watching RSS.
+- **Expect:** RSS stays proportional to text metadata, not the image corpus; scrolling/search
+  does not load multi-MB BLOBs per visible row.
+- [ ]
+
+### MT-6.1 — Missing ONNX model does not pin the CPU
+*Why manual:* requires renaming the real model at runtime to trigger the real-service failure.
+1. Start with a valid ONNX model + semantic search on. 2. Rename the model file while running.
+   3. Wait ~60s and watch CPU.
+- **Expect:** embedding-worker CPU drops to near zero (idles); clips are NOT marked `failed`;
+  replacing the model + "Re-run all" resumes embedding.
+- [ ]
+
+### MT-6.2 — Incremental embedding cache (no per-batch full reload)
+*Why manual:* timing of O(M) vs O(N) cache loads is too noisy for `dotnet test`.
+1. Build a 1,000+ clip embedding cache. 2. Copy a new text item. 3. Run semantic search right
+   after the batch completes.
+- **Expect:** the new clip appears with no perceptible delay; the `AppendEmbeddingsAsync`
+  trace shows ~one batch appended, not a full-corpus reload.
+- [ ]
+
+---
+
+## Phase 7 — Capture & update robustness (R7, R8)
+
+Automated: `ClipboardMarkupDecoderTests` (CF_HTML overflow offsets), `ClipAngelImportServiceTests`
+(size caps, hostile-file rejection, no batch on failure), `UpdateServiceTests` (https +
+host-allowlist feed validation). Not automatable below.
+
+### MT-7.1 — Update package signature verification
+*Why manual:* needs a real signed Velopack release + the release pipeline.
+1. Confirm `VelopackApp.Build()`/`UpdateManager` is configured with an embedded code-signing
+   key. 2. Try to install a package signed with the wrong key. 3. Try a legitimately signed release.
+- **Expect:** wrong/absent-signature packages are rejected before `ApplyUpdatesAndRestart`;
+  correctly signed releases install. **This is the load-bearing check for R8 — verify before release.**
+- [ ]
+
+### MT-7.2 — Full update download -> apply -> restart
+*Why manual:* requires a Velopack-installed instance + real HTTPS release feed.
+1. Install via the Velopack installer. 2. Publish a newer version to the GitHub releases feed.
+   3. Trigger update check, then "Restart & Install".
+- **Expect:** the app restarts on the new version. (Feed http/allowlist rejection is unit-tested.)
+- [ ]
+
+### MT-7.3 — Live malformed/oversized RTF does not freeze the UI
+*Why manual:* needs a real pathological RTF payload on the OS clipboard.
+1. Copy a very large/malformed RTF (e.g. from a big Word doc). 2. Select that clip in the preview.
+- **Expect:** preview renders within ~3s or falls back to plain text on timeout; the UI never
+  freezes during conversion.
+- [ ]
+
+### MT-7.4 — SQLite failure during capture is surfaced, not swallowed
+*Why manual:* deterministically forcing a `SqliteException` mid-capture needs an external lock.
+1. Lock the DB from a SQLite browser. 2. Copy something while Clipthrough is capturing.
+- **Expect:** a user-visible error notification appears and a `TraceError` is logged ("capture
+  failed unexpectedly"); no crash, no silent data loss.
+- [ ]
+
 ---
 
 ## How to add to this file

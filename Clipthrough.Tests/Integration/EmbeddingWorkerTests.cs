@@ -119,6 +119,128 @@ public sealed class EmbeddingWorkerTests
         Assert.Equal(1, clipStore.SetFailureCallCount);
     }
 
+    [Fact]
+    public async Task Worker_InferenceFailure_IdlesInsteadOfHotLooping()
+    {
+        // EmbedBatchAsync throws persistently — worker must idle (return 0), not spin in a tight loop.
+        var store = new InferenceFailureClipStore();
+        var failingEmb = new ThrowingEmbeddingService();
+        var worker = new EmbeddingWorker(store, failingEmb, new BackgroundJobIndicator());
+
+        worker.Start();
+        worker.Poke();
+
+        // Wait for at least one inference attempt to be flagged.
+        await store.InferenceFailureFlagged.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        // Give it a short window to accumulate any tight-loop re-claims.
+        await Task.Delay(250);
+        await worker.StopAsync();
+
+        // After the initial batch, the worker should idle: ClaimCallCount must be very small.
+        // If it were hot-looping, it would be much larger in 250ms.
+        Assert.InRange(store.ClaimCallCount, 1, 3);
+        Assert.True(store.SetFailureCallCount >= 1, "Expected at least one SetEmbeddingFailureAsync call.");
+    }
+
+    [Fact]
+    public async Task Worker_MissingOnnxModel_IdlesWithoutMarkingFailure()
+    {
+        // FileNotFoundException from EmbedBatchAsync must idle the worker and NOT mark clips as failed
+        // (since the user might place the model file later).
+        var store = new InferenceFailureClipStore();
+        var missingModel = new FileNotFoundEmbeddingService();
+        var worker = new EmbeddingWorker(store, missingModel, new BackgroundJobIndicator());
+
+        worker.Start();
+        worker.Poke();
+
+        await store.ClaimAttempted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Delay(300);
+        await worker.StopAsync();
+
+        // Must have claimed once, but must NOT have called SetEmbeddingFailureAsync
+        // (model-missing should not poison the clip's status).
+        Assert.InRange(store.ClaimCallCount, 1, 2);
+        Assert.Equal(0, store.SetFailureCallCount);
+    }
+
+    private sealed class InferenceFailureClipStore : IClipStoreService
+    {
+        private int _claimCallCount;
+        private int _setFailureCallCount;
+        private bool _claimed;
+
+        public int ClaimCallCount => Volatile.Read(ref _claimCallCount);
+        public int SetFailureCallCount => Volatile.Read(ref _setFailureCallCount);
+        public TaskCompletionSource InferenceFailureFlagged { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ClaimAttempted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _claimCallCount);
+            ClaimAttempted.TrySetResult();
+            if (_claimed) return Task.FromResult<IReadOnlyList<ClipEmbeddingCandidate>>([]);
+            _claimed = true;
+            return Task.FromResult<IReadOnlyList<ClipEmbeddingCandidate>>([new ClipEmbeddingCandidate(42, "sample text")]);
+        }
+
+        public Task<bool> SetEmbeddingFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _setFailureCallCount);
+            InferenceFailureFlagged.TrySetResult();
+            return Task.FromResult(true);
+        }
+
+        public Task SaveEmbeddingBatchAsync(IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task PrewarmAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<BulkCaptureResult> CaptureBatchAsync(IReadOnlyList<ClipCaptureRequest> requests, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<ClipEntry?> CaptureAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<ClipEntry?> CaptureFastAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<ClipEntry?> UpdateDeferredContentAsync(long clipId, ClipCaptureRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<ClipEntry?> UpdateSourceAppIconAsync(long clipId, byte[] iconBytes, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<ClipEntry?> ApplySensitivityAsync(long clipId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task SetFavoriteAsync(long clipId, bool isFavorite, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task SetPinnedAsync(long clipId, bool isPinned, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task DeleteAsync(long clipId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task ClearSensitivityAsync(long clipId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task SetSensitiveAsync(long clipId, bool isSensitive, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task MarkPastedAsync(long clipId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> TryClaimForOcrAsync(long clipId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> SetOcrResultAsync(long clipId, string ocrText, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> SetOcrFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<long>> GetPendingOcrClipIdsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<bool> MarkOcrForRerunAsync(long clipId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<long>> MarkAllSucceededForRerunAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<ClipEntry>> GetByIdsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class ThrowingEmbeddingService : IEmbeddingService
+    {
+        public int Dimensions => 4;
+        public bool IsReady => true;
+        public Task<float[]> EmbedAsync(string text, CancellationToken cancellationToken = default) => throw new InvalidOperationException("inference broken");
+        public Task<IReadOnlyList<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("inference broken");
+    }
+
+    private sealed class FileNotFoundEmbeddingService : IEmbeddingService
+    {
+        public int Dimensions => 4;
+        public bool IsReady => true;
+        public Task<float[]> EmbedAsync(string text, CancellationToken cancellationToken = default) => throw new System.IO.FileNotFoundException("model.onnx not found");
+        public Task<IReadOnlyList<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken cancellationToken = default)
+            => throw new System.IO.FileNotFoundException("model.onnx not found");
+    }
+
     private sealed class FakeEmbeddingService : IEmbeddingService
     {
         private readonly int _dims;

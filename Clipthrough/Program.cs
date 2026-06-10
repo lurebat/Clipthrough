@@ -3,6 +3,7 @@ using ReactiveUI.Avalonia;
 using System;
 using System.Diagnostics;
 using System.Threading;
+using System.Threading.Tasks;
 using Clipthrough.Diagnostics;
 using Velopack;
 
@@ -20,6 +21,11 @@ sealed class Program
     {
         SQLitePCL.Batteries_V2.Init();
         Clipthrough.Diagnostics.TraceConfiguration.Initialize();
+        TaskScheduler.UnobservedTaskException += static (_, e) =>
+        {
+            Trace.TraceError($"Unobserved task exception: {e.Exception}");
+            e.SetObserved();
+        };
         CommandLineOptions.Parse(args);
 
         if (CommandLineOptions.ShowHelp)

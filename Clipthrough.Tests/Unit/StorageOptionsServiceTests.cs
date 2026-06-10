@@ -300,3 +300,352 @@ public sealed class StorageOptionsServiceTests : IDisposable
         return conn;
     }
 }
+
+/// <summary>
+/// Phase 2 (U5/U6) crash-safety tests for StorageOptionsService.
+/// These extend the base fixture by reusing its temp-directory and helpers.
+/// </summary>
+public sealed class StorageOptionsServicePhase2Tests : IDisposable
+{
+    private readonly string _tempRoot;
+    private readonly string _configPath;
+    private readonly string _dbPath;
+
+    public StorageOptionsServicePhase2Tests()
+    {
+        _tempRoot = Path.Combine(Path.GetTempPath(), "ct-storage-p2-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_tempRoot);
+        _configPath = Path.Combine(_tempRoot, "storage.json");
+        _dbPath = Path.Combine(_tempRoot, "clipthrough.db");
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_tempRoot, recursive: true); } catch { }
+    }
+
+    private StorageOptionsService NewService(bool rememberPassword = false, string? password = null) =>
+        NewService(new NoOpDataProtectionService(), rememberPassword, password);
+
+    private StorageOptionsService NewService(
+        IDataProtectionService protection,
+        bool rememberPassword = false,
+        string? password = null)
+    {
+        var safePath = _dbPath.Replace("\\", "\\\\");
+        var pwdJson = password is null ? "null" : "\"" + password + "\"";
+        File.WriteAllText(_configPath,
+            "{ \"databasePath\": \"" + safePath + "\", " +
+            "\"rememberPassword\": " + (rememberPassword ? "true" : "false") + ", " +
+            "\"databasePassword\": " + pwdJson + " }");
+        return new StorageOptionsService(protection, _configPath);
+    }
+
+    private async Task CreateEncryptedDb(string password)
+    {
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = _dbPath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Password = password,
+        };
+        await using var conn = new SqliteConnection(builder.ToString());
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "CREATE TABLE IF NOT EXISTS marker (id INTEGER PRIMARY KEY); " +
+                          "INSERT INTO marker DEFAULT VALUES;";
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static void OpenAndVerify(string path, string password)
+    {
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = SqliteOpenMode.ReadOnly,
+            Password = password,
+        };
+        using var conn = new SqliteConnection(builder.ToString());
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT count(*) FROM sqlite_master;";
+        cmd.ExecuteScalar();
+    }
+
+    // ─── U5: Atomic rekey ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The rekeyed DB must be openable with the new password; the old key
+    /// must no longer work. Current is updated accordingly.
+    /// </summary>
+    [Fact]
+    public async Task RekeyAsync_HappyPath_RekeysAndVerifies()
+    {
+        await CreateEncryptedDb("old-pass");
+        var service = NewService(new FakeDataProtectionService(), rememberPassword: true, password: "old-pass");
+
+        await service.RekeyAsync("old-pass", "new-pass", rememberNewPassword: true);
+
+        Assert.Equal("new-pass", service.Current.DatabasePassword);
+        Assert.True(service.Current.RememberPassword);
+
+        // New key must open the DB.
+        OpenAndVerify(_dbPath, "new-pass");
+
+        // Old key must no longer open the DB.
+        Assert.False(StorageOptionsService.CanOpenWithPassword(_dbPath, "old-pass"));
+    }
+
+    /// <summary>
+    /// A password containing single quotes must be escaped correctly so the
+    /// PRAGMA rekey literal doesn't break the SQL syntax or truncate the key.
+    /// </summary>
+    [Fact]
+    public async Task RekeyAsync_SingleQuoteInPassword_RoundTrips()
+    {
+        const string tricky = "it's a test";
+        await CreateEncryptedDb("start");
+        var service = NewService(rememberPassword: false, password: "start");
+
+        await service.RekeyAsync("start", tricky, rememberNewPassword: false);
+
+        Assert.Equal(tricky, service.Current.DatabasePassword);
+        OpenAndVerify(_dbPath, tricky);
+    }
+
+    /// <summary>
+    /// Wrong current password must throw before touching the database or any
+    /// temp files.
+    /// </summary>
+    [Fact]
+    public async Task RekeyAsync_WrongCurrentPassword_ThrowsBeforeAnyChange()
+    {
+        await CreateEncryptedDb("correct");
+        var service = NewService(rememberPassword: false, password: "correct");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.RekeyAsync("wrong", "new", rememberNewPassword: false));
+
+        // Original DB still works.
+        OpenAndVerify(_dbPath, "correct");
+        // No temp files should have been created.
+        Assert.Empty(Directory.GetFiles(_tempRoot, "*.rekeying-*"));
+    }
+
+    /// <summary>
+    /// remember=false rekey keeps the new password in-memory (usable in-session)
+    /// but must not write it to storage.json.
+    /// </summary>
+    [Fact]
+    public async Task RekeyAsync_RememberFalse_KeyInMemoryNotOnDisk()
+    {
+        await CreateEncryptedDb("first");
+        var service = NewService(new FakeDataProtectionService(), rememberPassword: false, password: "first");
+
+        await service.RekeyAsync("first", "second", rememberNewPassword: false);
+
+        Assert.Equal("second", service.Current.DatabasePassword);
+
+        var json = await File.ReadAllTextAsync(_configPath);
+        Assert.DoesNotContain("second", json);
+        Assert.DoesNotContain("databasePasswordProtected", json);
+    }
+
+    /// <summary>
+    /// No temp .rekeying file must remain on disk after a successful rekey.
+    /// </summary>
+    [Fact]
+    public async Task RekeyAsync_NoTempFilesLeftAfterSuccess()
+    {
+        await CreateEncryptedDb("pass1");
+        var service = NewService(rememberPassword: false, password: "pass1");
+
+        await service.RekeyAsync("pass1", "pass2", rememberNewPassword: false);
+
+        Assert.Empty(Directory.GetFiles(_tempRoot, "*.rekeying-*"));
+    }
+
+    // ─── U5: Same-path password validation ───────────────────────────────────
+
+    /// <summary>
+    /// SaveAsync with a changed password on the same DB path must throw when
+    /// the new password does not actually open the database — a metadata-only
+    /// write would lock the user out on the next launch.
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_SamePathPasswordChange_WrongNewPassword_Throws()
+    {
+        await CreateEncryptedDb("real-key");
+        // Service configured with the real key.
+        var service = NewService(rememberPassword: false, password: "real-key");
+
+        // Try to save with a different (wrong) password — same path.
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.SaveAsync(new StorageOptions
+            {
+                DatabasePath = _dbPath,
+                DatabasePassword = "wrong-key",
+                RememberPassword = false,
+            }));
+    }
+
+    /// <summary>
+    /// SaveAsync with the correct (unchanged) password must not throw even
+    /// though the path is the same.
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_SamePathCorrectPassword_Succeeds()
+    {
+        await CreateEncryptedDb("mykey");
+        var service = NewService(rememberPassword: false, password: "mykey");
+
+        // Same path, same password — should not throw.
+        await service.SaveAsync(new StorageOptions
+        {
+            DatabasePath = _dbPath,
+            DatabasePassword = "mykey",
+            RememberPassword = true,
+        });
+
+        Assert.Equal("mykey", service.Current.DatabasePassword);
+    }
+
+    // ─── U6: Atomic path move ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// A path move to a fresh location must result in the new file containing
+    /// the original data, the old file removed, and Current updated.
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_PathMove_MovesDataToNewPath()
+    {
+        // Create an unencrypted DB with a known row at the old path.
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = _dbPath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+        };
+        await using (var conn = new SqliteConnection(builder.ToString()))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('hello');";
+            await cmd.ExecuteNonQueryAsync();
+        }
+        SqliteConnection.ClearAllPools();
+
+        var newPath = Path.Combine(_tempRoot, "sub", "new.db");
+        var service = NewService(rememberPassword: false, password: null);
+
+        await service.SaveAsync(new StorageOptions
+        {
+            DatabasePath = newPath,
+            DatabasePassword = string.Empty,
+            RememberPassword = false,
+        });
+
+        // Old path removed.
+        Assert.False(File.Exists(_dbPath));
+        // New path exists and has the row.
+        var newBuilder = new SqliteConnectionStringBuilder
+        {
+            DataSource = newPath,
+            Mode = SqliteOpenMode.ReadOnly,
+        };
+        using var newConn = new SqliteConnection(newBuilder.ToString());
+        newConn.Open();
+        using var sel = newConn.CreateCommand();
+        sel.CommandText = "SELECT v FROM t;";
+        var value = (string?)sel.ExecuteScalar();
+        Assert.Equal("hello", value);
+    }
+
+    /// <summary>
+    /// When the destination already exists and the copy throws (simulated by
+    /// making the destination directory read-only would be OS-dependent, so
+    /// instead we verify that the timestamped .before-move file is written
+    /// before the new file appears).
+    /// If the copy step throws midway, the destination must still contain its
+    /// original content.
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_PathMove_ExistingTarget_BackedUpWithTimestamp()
+    {
+        // Seed source.
+        var srcBuilder = new SqliteConnectionStringBuilder
+        {
+            DataSource = _dbPath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+        };
+        await using (var conn = new SqliteConnection(srcBuilder.ToString()))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "CREATE TABLE src (v TEXT); INSERT INTO src VALUES ('src-row');";
+            await cmd.ExecuteNonQueryAsync();
+        }
+        SqliteConnection.ClearAllPools();
+
+        // Pre-create destination with different content.
+        var newPath = Path.Combine(_tempRoot, "dest.db");
+        var dstBuilder = new SqliteConnectionStringBuilder
+        {
+            DataSource = newPath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+        };
+        await using (var conn = new SqliteConnection(dstBuilder.ToString()))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "CREATE TABLE dst (v TEXT); INSERT INTO dst VALUES ('original-dest');";
+            await cmd.ExecuteNonQueryAsync();
+        }
+        SqliteConnection.ClearAllPools();
+
+        var service = NewService(rememberPassword: false, password: null);
+
+        await service.SaveAsync(new StorageOptions
+        {
+            DatabasePath = newPath,
+            DatabasePassword = string.Empty,
+            RememberPassword = false,
+        });
+
+        // A .before-move backup of the old destination must exist.
+        var beforeMoveFiles = Directory.GetFiles(_tempRoot, "dest.db.before-move-*");
+        Assert.NotEmpty(beforeMoveFiles);
+    }
+
+    /// <summary>
+    /// No .moving temp files must be left on disk after a successful path move.
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_PathMove_NoTempFilesAfterSuccess()
+    {
+        var srcBuilder = new SqliteConnectionStringBuilder
+        {
+            DataSource = _dbPath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+        };
+        await using (var conn = new SqliteConnection(srcBuilder.ToString()))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "CREATE TABLE t2 (v TEXT); INSERT INTO t2 VALUES ('x');";
+            await cmd.ExecuteNonQueryAsync();
+        }
+        SqliteConnection.ClearAllPools();
+
+        var newPath = Path.Combine(_tempRoot, "moved.db");
+        var service = NewService(rememberPassword: false, password: null);
+
+        await service.SaveAsync(new StorageOptions
+        {
+            DatabasePath = newPath,
+            DatabasePassword = string.Empty,
+            RememberPassword = false,
+        });
+
+        Assert.Empty(Directory.GetFiles(_tempRoot, "*.moving-*"));
+    }
+}

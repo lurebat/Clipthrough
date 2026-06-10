@@ -223,9 +223,11 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         (IsTextClip || Clip.ContentType == ContentType.Files)
         && !string.IsNullOrEmpty(Clip.Content);
 
+    // For image clips, ContentBytes may be null on metadata-only list reads (U12); use
+    // ContentType to decide availability — full bytes load when the clip is opened. (U12)
     public bool CanAiTransform =>
         ((IsTextClip || Clip.ContentType == ContentType.Files) && !string.IsNullOrEmpty(Clip.Content))
-        || (IsImageClip && Clip.ContentBytes is { Length: > 0 });
+        || IsImageClip;
 
     public string CopyCountDisplay => AppText.FormatCopyCount(Clip.CopyCount);
 
@@ -286,7 +288,9 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public bool HasSourceAppIcon => Clip.SourceAppIconBytes is { Length: > 0 };
+    // Uses SourceAppIconAvailable so the icon presence flag is correct even when
+    // SourceAppIconBytes is null (metadata-only list reads from U12). (U12)
+    public bool HasSourceAppIcon => Clip.SourceAppIconAvailable;
 
     public bool ShowTypeGlyph => !HasSourceAppIcon;
 
@@ -312,7 +316,9 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public bool ShowPreviewThumbnail => Clip.ContentType == ContentType.Image && Clip.ContentBytes is { Length: > 0 };
+    // ContentBytes may be null on metadata-only list reads (U12); test ContentType only so the
+    // thumbnail placeholder renders correctly. Actual bytes load when the clip is opened/selected.
+    public bool ShowPreviewThumbnail => Clip.ContentType == ContentType.Image;
 
     public bool ShowTextPreview => !ShowPreviewThumbnail;
 

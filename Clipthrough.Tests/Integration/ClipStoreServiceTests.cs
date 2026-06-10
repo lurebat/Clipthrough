@@ -1,3 +1,4 @@
+using System;
 using System.Threading.Tasks;
 using System.Text;
 using Clipthrough.Localization;
@@ -728,5 +729,213 @@ public sealed class ClipStoreServiceTests
         var coverage = await scope.ClipStoreService.GetEmbeddingCoverageAsync();
         Assert.Equal(1, coverage.EligibleTotal);
         Assert.Equal(0, coverage.Embedded);
+    }
+
+    // ======== U12: Split read model — no BLOBs in list/search queries ========
+
+    [Fact]
+    public async Task SearchAsync_ListQuery_DoesNotMaterializeContentBytesOrIconBytes()
+    {
+        // Arrange: seed an image clip with non-trivial content_bytes and source_app_icon.
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 1_048_576 });
+
+        var imageBytes = new byte[1024];
+        new Random(42).NextBytes(imageBytes);
+        var iconBytes = new byte[256];
+        new Random(43).NextBytes(iconBytes);
+
+        var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Image,
+            ContentFormat = ClipContentFormat.Bitmap,
+            ContentBytes = imageBytes,
+            SourceAppIconBytes = iconBytes,
+            ImageWidth = 16,
+            ImageHeight = 16,
+        });
+        Assert.NotNull(clip);
+
+        // Act: SearchAsync (the list/FTS path) must return the clip without loading BLOBs.
+        var result = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters { Limit = 50 });
+
+        Assert.Single(result.Items);
+        var listed = result.Items[0];
+        Assert.Equal(clip!.Id, listed.Id);
+        Assert.Null(listed.ContentBytes);           // BLOB omitted (U12)
+        Assert.Null(listed.SourceAppIconBytes);     // BLOB omitted (U12)
+        Assert.True(listed.SourceAppIconAvailable); // but flag is set (U12)
+        Assert.Equal(ContentType.Image, listed.ContentType);
+        Assert.Equal(16, listed.ImageWidth);
+        Assert.Equal(16, listed.ImageHeight);
+    }
+
+    [Fact]
+    public async Task GetByIdAsync_StillReturnsFullBytes()
+    {
+        // Full bytes must be available via GetByIdAsync (used on select/open).
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 1_048_576 });
+
+        var imageBytes = new byte[128];
+        new Random(7).NextBytes(imageBytes);
+
+        var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Image,
+            ContentFormat = ClipContentFormat.Bitmap,
+            ContentBytes = imageBytes,
+        });
+        Assert.NotNull(clip);
+
+        var full = await scope.ClipStoreService.GetByIdAsync(clip!.Id);
+        Assert.NotNull(full);
+        Assert.NotNull(full!.ContentBytes);
+        Assert.Equal(imageBytes.Length, full.ContentBytes!.Length);
+    }
+
+    [Fact]
+    public async Task SearchAsync_InMemoryPath_DoesNotMaterializeContentBytes()
+    {
+        // Regex / case-sensitive / wildcard paths also use ClipListSelectColumns.
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 1_048_576 });
+
+        var imageBytes = new byte[512];
+        new Random(11).NextBytes(imageBytes);
+
+        await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Image,
+            ContentFormat = ClipContentFormat.Bitmap,
+            ContentBytes = imageBytes,
+        });
+
+        // Force in-memory search path (regex flag).
+        var result = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters
+        {
+            SearchText = ".*",
+            UseRegex = true,
+            Limit = 50,
+        });
+
+        Assert.Single(result.Items);
+        Assert.Null(result.Items[0].ContentBytes);    // BLOB omitted (U12)
+    }
+
+    // ======== U13: Regex hoisted + field parity ========
+
+    [Fact]
+    public async Task SearchAsync_RegexPath_MatchesOcrText()
+    {
+        // OcrText must be searched in the regex path (was missing before U13).
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Image,
+            ContentFormat = ClipContentFormat.Bitmap,
+            ContentBytes = new byte[16],
+        });
+        Assert.NotNull(clip);
+        await scope.ClipStoreService.SetOcrResultAsync(clip!.Id, "UNIQUE_OCR_TOKEN_XYZ");
+
+        // Should match via OcrText.
+        var byRegex = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters
+        {
+            SearchText = "UNIQUE_OCR_TOKEN_XYZ",
+            UseRegex = true,
+            Limit = 50,
+        });
+        Assert.NotEmpty(byRegex.Items);
+        Assert.Contains(byRegex.Items, c => c.Id == clip.Id);
+    }
+
+    [Fact]
+    public async Task SearchAsync_RegexPath_MatchesSourceWindowTitle()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "hello",
+            ContentBytes = Encoding.UTF8.GetBytes("hello"),
+            SourceWindowTitle = "UniqueWindowTitle_ABC",
+        });
+
+        var result = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters
+        {
+            SearchText = "UniqueWindowTitle_ABC",
+            UseRegex = true,
+            Limit = 50,
+        });
+        Assert.Single(result.Items);
+    }
+
+    [Fact]
+    public async Task SearchAsync_PlainTextPath_MatchesOcrText()
+    {
+        // Plain-text (short token) in-memory path must also match OcrText.
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Image,
+            ContentFormat = ClipContentFormat.Bitmap,
+            ContentBytes = new byte[16],
+        });
+        Assert.NotNull(clip);
+        await scope.ClipStoreService.SetOcrResultAsync(clip!.Id, "INMEMORYTESTTOKEN");
+
+        // "IN" is 2 chars — below FTS 3-char minimum, forces in-memory path.
+        var result = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters
+        {
+            SearchText = "IN",
+            CaseSensitive = true,
+            Limit = 50,
+        });
+        Assert.NotEmpty(result.Items);
+        Assert.Contains(result.Items, c => c.Id == clip.Id);
+    }
+
+    // ======== U15: approximate count (no separate full COUNT per keystroke) ========
+
+    [Fact]
+    public async Task SearchAsync_FullPage_ReportsAtLeastLimitPlusOne()
+    {
+        // When more results exist than Limit, TotalMatchingCount > Limit (no exact COUNT scan).
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        const int Limit = 5;
+        for (var i = 0; i < Limit + 3; i++)
+        {
+            await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = $"item {i}",
+                ContentBytes = Encoding.UTF8.GetBytes($"item {i}"),
+                IncrementExistingCopyCount = true,
+            });
+        }
+
+        var result = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters { Limit = Limit, Offset = 0 });
+
+        Assert.Equal(Limit, result.Items.Count);
+        Assert.True(result.TotalMatchingCount > Limit,
+            $"Expected TotalMatchingCount > {Limit} but was {result.TotalMatchingCount}");
     }
 }

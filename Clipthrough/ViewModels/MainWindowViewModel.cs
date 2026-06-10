@@ -252,7 +252,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _copilotAuthService.SignedInChanged += OnCopilotSignedInChanged;
         }
         _databaseInitializer = databaseInitializer;
-        _databaseBackupService = databaseBackupService ?? new DatabaseBackupService(storageOptionsService);
+        _databaseBackupService = databaseBackupService ?? new DatabaseBackupService(storageOptionsService, null, null, null);
         SessionLogs = new SessionLogsViewModel(sessionLogService);
         ContentTypeOptions =
         [
@@ -474,7 +474,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         _subscriptions.Add(
             _backgroundOcrQueue.OcrCompleted
-                .SelectMany(id =>
+                .Throttle(TimeSpan.FromMilliseconds(250), RxSchedulers.MainThreadScheduler)
+                .SelectMany(_ =>
                 {
                     if (!_isMainWindowVisible)
                     {
@@ -3427,8 +3428,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             semantic = await _semanticSearchService.QueryAsync(filters.SearchText, topK);
         }
-        catch
+        catch (Exception ex)
         {
+            Trace.TraceWarning($"Semantic search query failed; returning FTS-only result: {ex.Message}");
             return ftsResult;
         }
         if (semantic.Count == 0)
@@ -4444,8 +4446,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 SemanticCoverageText = $"Semantic: {coverage.Embedded}/{eligible} ({pct}%){suffix}";
             }
         }
-        catch
+        catch (Exception ex)
         {
+            Trace.TraceWarning($"Semantic coverage refresh failed: {ex.Message}");
             SemanticCoverageText = string.Empty;
         }
         this.RaisePropertyChanged(nameof(IsSemanticCoverageVisible));
@@ -4490,8 +4493,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 OcrCoverageText = $"OCR: {coverage.Succeeded}/{coverage.EligibleTotal} ({pct}%){suffix}";
             }
         }
-        catch
+        catch (Exception ex)
         {
+            Trace.TraceWarning($"OCR coverage refresh failed: {ex.Message}");
             OcrCoverageText = string.Empty;
         }
 
@@ -4553,8 +4557,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             IncrementExistingCopyCount = false,
         };
 
-        await Task.Run(() => _clipStoreService.CaptureAsync(request));
-        _editedClipBaseline = _editedClipText;
+        try
+        {
+            await Task.Run(() => _clipStoreService.CaptureAsync(request));
+            _editedClipBaseline = _editedClipText;
+        }
+        catch (Exception ex)
+        {
+            ReportError("Auto-save edited clip", ex);
+        }
     }
 
     private async Task CopyClipAsync(ClipItemViewModel clip)

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Clipthrough.Models;
@@ -13,6 +14,12 @@ public interface IEmbeddingWorker
 {
     /// <summary>Pushes events whenever a batch has been successfully persisted, so UI/cache can react.</summary>
     IObservable<int> BatchCompleted { get; }
+
+    /// <summary>
+    /// Pushes the persisted <see cref="ClipEmbeddingRecord"/>s for every successfully saved batch,
+    /// allowing consumers to append them to the semantic cache incrementally.
+    /// </summary>
+    IObservable<IReadOnlyList<ClipEmbeddingRecord>> BatchRecordsCompleted { get; }
 
     /// <summary>Start the worker loop. No-op if already started.</summary>
     void Start();
