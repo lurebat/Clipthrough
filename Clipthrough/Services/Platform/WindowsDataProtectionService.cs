@@ -9,6 +9,8 @@ namespace Clipthrough.Services.Platform;
 [SupportedOSPlatform("windows")]
 public sealed class WindowsDataProtectionService : IDataProtectionService
 {
+    public bool CanPersistSecrets => true;
+
     public byte[] Protect(byte[] data)
     {
         return ProtectedData.Protect(data, null, DataProtectionScope.CurrentUser);

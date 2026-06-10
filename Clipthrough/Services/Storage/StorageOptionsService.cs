@@ -1,6 +1,8 @@
 using System;
+using System.Data;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -60,6 +62,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
             };
 
             using var connection = new SqliteConnection(builder.ToString());
+            connection.StateChange += ApplyBusyTimeoutOnOpen;
             connection.Open();
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT count(*) FROM sqlite_master;";
@@ -95,6 +98,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
             };
 
             using var connection = new SqliteConnection(builder.ToString());
+            connection.StateChange += ApplyBusyTimeoutOnOpen;
             connection.Open();
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT count(*) FROM sqlite_master;";
@@ -211,7 +215,10 @@ public sealed class StorageOptionsService : IStorageOptionsService
             DataSource = options.DatabasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
             ForeignKeys = true,
-            Cache = SqliteCacheMode.Shared,
+            // Private cache (the default) is required: shared cache surfaces
+            // in-process write contention as SQLITE_LOCKED, which busy_timeout
+            // does NOT retry. Private cache surfaces it as SQLITE_BUSY, which
+            // the 5-second busy_timeout below DOES retry.
         };
 
         if (!string.IsNullOrWhiteSpace(options.DatabasePassword))
@@ -219,7 +226,9 @@ public sealed class StorageOptionsService : IStorageOptionsService
             builder.Password = options.DatabasePassword;
         }
 
-        return new SqliteConnection(builder.ToString());
+        var connection = new SqliteConnection(builder.ToString());
+        connection.StateChange += ApplyBusyTimeoutOnOpen;
+        return connection;
     }
 
     public void SetInMemoryPassword(string password)
@@ -248,12 +257,43 @@ public sealed class StorageOptionsService : IStorageOptionsService
                 return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize());
             }
 
-            // Back-compat: v0.8.0 wrote DatabasePassword without a RememberPassword
-            // field. Treat any persisted password as "remember on" so existing
-            // installs keep auto-unlocking.
-            var rememberPassword = stored.RememberPassword
-                ?? !string.IsNullOrEmpty(stored.DatabasePassword);
-            var loadedPassword = rememberPassword ? (stored.DatabasePassword ?? string.Empty) : string.Empty;
+            bool rememberPassword;
+            string loadedPassword;
+            bool needsMigration = false;
+
+            if (!string.IsNullOrEmpty(stored.DatabasePasswordProtected))
+            {
+                // Protected blob is present — try to unprotect it.
+                rememberPassword = stored.RememberPassword ?? true;
+                loadedPassword = string.Empty;
+                try
+                {
+                    var protectedBytes = Convert.FromBase64String(stored.DatabasePasswordProtected);
+                    var raw = _dataProtection.Unprotect(protectedBytes);
+                    loadedPassword = Encoding.UTF8.GetString(raw);
+                }
+                catch (Exception ex)
+                {
+                    // Corrupt blob or user-profile change. Drop the key so the app
+                    // prompts for a password — mirror CopilotAuthService behaviour.
+                    Trace.TraceWarning($"DB password unprotect failed; dropping key: {ex.Message}");
+                    loadedPassword = string.Empty;
+                    needsMigration = true; // Rewrite file without the corrupt blob.
+                }
+            }
+            else if (!string.IsNullOrEmpty(stored.DatabasePassword))
+            {
+                // Legacy plaintext (written by older versions). Use it in-memory
+                // and immediately re-save as a protected blob (auto-migration, KTD2).
+                rememberPassword = stored.RememberPassword ?? true;
+                loadedPassword = rememberPassword ? stored.DatabasePassword! : string.Empty;
+                needsMigration = true;
+            }
+            else
+            {
+                rememberPassword = stored.RememberPassword ?? false;
+                loadedPassword = string.Empty;
+            }
 
             var options = new StorageOptions
             {
@@ -261,12 +301,44 @@ public sealed class StorageOptionsService : IStorageOptionsService
                 DatabasePassword = loadedPassword,
                 RememberPassword = rememberPassword,
             }.Normalize();
-            return EnsureLegacyDefaultDatabaseCopied(options);
+
+            options = EnsureLegacyDefaultDatabaseCopied(options);
+
+            if (needsMigration)
+            {
+                // Synchronous best-effort rewrite so the plaintext / corrupt blob
+                // is removed even if the app exits abnormally before the next
+                // explicit SaveAsync call.
+                TrySaveMigrationSync(options);
+            }
+
+            return options;
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
             Trace.TraceWarning($"Storage settings load failed: {ex.Message}");
             return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize());
+        }
+    }
+
+    /// <summary>
+    /// Synchronous variant of <see cref="SaveToDiskAsync"/> used only from the
+    /// constructor's auto-migration path. Failures are swallowed so that a
+    /// read-only or locked config directory does not prevent startup.
+    /// </summary>
+    private void TrySaveMigrationSync(StorageOptions options)
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(_configPath)!;
+            Directory.CreateDirectory(directory);
+
+            var document = BuildDocument(options);
+            File.WriteAllText(_configPath, JsonSerializer.Serialize(document, JsonOptions));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceWarning($"Storage settings migration save failed: {ex.Message}");
         }
     }
 
@@ -348,6 +420,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
                 builder.Password = password;
             }
             using var connection = new SqliteConnection(builder.ToString());
+            connection.StateChange += ApplyBusyTimeoutOnOpen;
             connection.Open();
             using var command = connection.CreateCommand();
             command.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
@@ -369,36 +442,89 @@ public sealed class StorageOptionsService : IStorageOptionsService
         var directory = Path.GetDirectoryName(_configPath)!;
         Directory.CreateDirectory(directory);
 
-        var document = new StorageOptionsDocument
-        {
-            DatabasePath = options.DatabasePath,
-            RememberPassword = options.RememberPassword,
-            DatabasePassword = options.RememberPassword && !string.IsNullOrEmpty(options.DatabasePassword)
-                ? options.DatabasePassword
-                : null,
-        };
-
+        var document = BuildDocument(options);
         await File.WriteAllTextAsync(_configPath, JsonSerializer.Serialize(document, JsonOptions), cancellationToken);
     }
 
+    /// <summary>
+    /// Builds a <see cref="StorageOptionsDocument"/> from <paramref name="options"/>.
+    /// When <see cref="IDataProtectionService.CanPersistSecrets"/> is true the
+    /// password is protected and stored as a base-64 blob; when false (no-op
+    /// protector on non-Windows) the password is kept in-memory only and the
+    /// document carries neither field.
+    /// </summary>
+    private StorageOptionsDocument BuildDocument(StorageOptions options)
+    {
+        string? protectedPassword = null;
+
+        if (options.RememberPassword
+            && !string.IsNullOrEmpty(options.DatabasePassword)
+            && _dataProtection.CanPersistSecrets)
+        {
+            try
+            {
+                var raw = Encoding.UTF8.GetBytes(options.DatabasePassword);
+                var protectedBytes = _dataProtection.Protect(raw);
+                protectedPassword = Convert.ToBase64String(protectedBytes);
+            }
+            catch (Exception ex)
+            {
+                Trace.TraceWarning($"DB password protect failed; not persisting: {ex.Message}");
+            }
+        }
+
+        return new StorageOptionsDocument
+        {
+            DatabasePath = options.DatabasePath,
+            RememberPassword = options.RememberPassword,
+            // DatabasePassword (plaintext) is intentionally omitted — never written.
+            DatabasePasswordProtected = protectedPassword,
+        };
+    }
+
     private static string EscapeSqlLiteral(string value) => value.Replace("'", "''", StringComparison.Ordinal);
+
+    /// <summary>
+    /// StateChange handler that applies <c>PRAGMA busy_timeout = 5000</c>
+    /// every time a connection transitions to the Open state. Mirrored from
+    /// <see cref="Clipthrough.Database.SqliteConnectionFactory"/> so that
+    /// every connection opened by this service (rekey probe, checkpoint,
+    /// path-move backup) also respects the contention retry budget.
+    /// </summary>
+    private static void ApplyBusyTimeoutOnOpen(object? sender, StateChangeEventArgs e)
+    {
+        if (e.CurrentState == ConnectionState.Open && sender is SqliteConnection connection)
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "PRAGMA busy_timeout = 5000;";
+            cmd.ExecuteNonQuery();
+        }
+    }
 
     private sealed class StorageOptionsDocument
     {
         public string? DatabasePath { get; init; }
 
         /// <summary>
-        /// True when the user opted in to persist the database password as
-        /// plaintext so the DB auto-unlocks on next launch.
+        /// True when the user opted in to persist the database password so the
+        /// DB auto-unlocks on next launch.
         /// </summary>
         public bool? RememberPassword { get; init; }
 
         /// <summary>
-        /// Database password stored as plaintext (only when
-        /// <see cref="RememberPassword"/> is true). The settings UI surfaces a
-        /// warning about this trade-off and gates writing it on an explicit
-        /// confirmation dialog.
+        /// Database password stored as a DPAPI-protected, base-64-encoded blob.
+        /// Written only when <see cref="IDataProtectionService.CanPersistSecrets"/>
+        /// is true. Replaces the legacy plaintext <see cref="DatabasePassword"/> field.
         /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? DatabasePasswordProtected { get; init; }
+
+        /// <summary>
+        /// Legacy plaintext password field (v0.x). Read-only: never written by
+        /// this version. Kept for JSON deserialization backward-compatibility so
+        /// that existing installs auto-migrate rather than lose their password.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? DatabasePassword { get; init; }
     }
 }

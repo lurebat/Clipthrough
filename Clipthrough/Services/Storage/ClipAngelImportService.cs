@@ -38,6 +38,15 @@ public sealed class ClipAngelImportService : IClipAngelImportService
         try
         {
             await using var conn = new SqliteConnection($"Data Source={temp};Mode=ReadOnly");
+            conn.StateChange += (_, e) =>
+            {
+                if (e.CurrentState == System.Data.ConnectionState.Open)
+                {
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText = "PRAGMA busy_timeout = 5000;";
+                    cmd.ExecuteNonQuery();
+                }
+            };
             await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             int total;
@@ -98,6 +107,15 @@ public sealed class ClipAngelImportService : IClipAngelImportService
         try
         {
             await using var conn = new SqliteConnection($"Data Source={temp};Mode=ReadOnly");
+            conn.StateChange += (_, e) =>
+            {
+                if (e.CurrentState == System.Data.ConnectionState.Open)
+                {
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText = "PRAGMA busy_timeout = 5000;";
+                    cmd.ExecuteNonQuery();
+                }
+            };
             await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             int total;

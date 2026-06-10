@@ -20,7 +20,10 @@ public sealed class SqliteConnectionFactory
             DataSource = options.DatabasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
             ForeignKeys = true,
-            Cache = SqliteCacheMode.Shared,
+            // Private cache (the default) is required: shared cache surfaces
+            // in-process write contention as SQLITE_LOCKED, which busy_timeout
+            // does NOT retry. Private cache surfaces it as SQLITE_BUSY, which
+            // the 5-second busy_timeout below DOES retry.
         };
 
         if (!string.IsNullOrWhiteSpace(options.DatabasePassword))

@@ -6413,8 +6413,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             UseFuzzySettingsSearch = SettingsUseFuzzySearch,
         };
 
-        await _storageOptionsService.SaveAsync(storageOptions);
-        await _settingsService.SaveAsync(settings);
+        await Task.Run(async () =>
+        {
+            await _storageOptionsService.SaveAsync(storageOptions).ConfigureAwait(false);
+            await _settingsService.SaveAsync(settings).ConfigureAwait(false);
+        });
         if (!_isDatabaseReady)
         {
             IsLoadingDatabase = true;

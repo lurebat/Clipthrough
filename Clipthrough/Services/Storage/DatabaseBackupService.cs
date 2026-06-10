@@ -85,6 +85,15 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
             }
 
             using var connection = new SqliteConnection(builder.ToString());
+            connection.StateChange += (_, e) =>
+            {
+                if (e.CurrentState == System.Data.ConnectionState.Open)
+                {
+                    using var pragmaCmd = connection.CreateCommand();
+                    pragmaCmd.CommandText = "PRAGMA busy_timeout = 5000;";
+                    pragmaCmd.ExecuteNonQuery();
+                }
+            };
             connection.Open();
             using var cmd = connection.CreateCommand();
             cmd.CommandText = "PRAGMA wal_checkpoint(PASSIVE);";
