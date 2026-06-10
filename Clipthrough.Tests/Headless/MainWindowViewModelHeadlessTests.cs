@@ -594,7 +594,7 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.Equal("127.0.0.1", viewModel.Settings.RemoteApiBindAddress);
         // Theme / misc
         Assert.Equal(Models.ThemeMode.Light, viewModel.Settings.ThemeMode);
-        Assert.True(viewModel.SettingsCloseToTray);
+        Assert.True(viewModel.Settings.CloseToTray);
     }
 
     [AvaloniaFact]

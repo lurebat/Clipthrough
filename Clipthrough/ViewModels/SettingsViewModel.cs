@@ -205,4 +205,64 @@ public sealed class SettingsViewModel : ViewModelBase
 
     public string RemoteApiDocsUrl => $"http://{RemoteApiUrlHost}:{_remoteApiPort}/docs";
     public string RemoteApiSchemaUrl => $"http://{RemoteApiUrlHost}:{_remoteApiPort}/openapi/v1.json";
+
+    // --- Storage paths / limits ---
+
+    private string _maxClipSizeKilobytes = (AppSettings.Default.MaxClipSizeBytes / 1024d).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    public string MaxClipSizeKilobytes
+    {
+        get => _maxClipSizeKilobytes;
+        set => this.RaiseAndSetIfChanged(ref _maxClipSizeKilobytes, value);
+    }
+
+    private string _databasePath = StorageOptions.Default.DatabasePath;
+    public string DatabasePath
+    {
+        get => _databasePath;
+        set => this.RaiseAndSetIfChanged(ref _databasePath, value);
+    }
+
+    private string _externalEditorPath = AppSettings.Default.ExternalEditorPath;
+    public string ExternalEditorPath
+    {
+        get => _externalEditorPath;
+        set => this.RaiseAndSetIfChanged(ref _externalEditorPath, value);
+    }
+
+    private string _externalImageEditorPath = AppSettings.Default.ExternalImageEditorPath;
+    public string ExternalImageEditorPath
+    {
+        get => _externalImageEditorPath;
+        set => this.RaiseAndSetIfChanged(ref _externalImageEditorPath, value);
+    }
+
+    private string _externalDiffToolPath = AppSettings.Default.ExternalDiffToolPath;
+    public string ExternalDiffToolPath
+    {
+        get => _externalDiffToolPath;
+        set => this.RaiseAndSetIfChanged(ref _externalDiffToolPath, value);
+    }
+
+    // --- Tray / startup ---
+
+    private bool _closeToTray = AppSettings.Default.CloseToTray;
+    public bool CloseToTray
+    {
+        get => _closeToTray;
+        set => this.RaiseAndSetIfChanged(ref _closeToTray, value);
+    }
+
+    private bool _minimizeToTray = AppSettings.Default.MinimizeToTray;
+    public bool MinimizeToTray
+    {
+        get => _minimizeToTray;
+        set => this.RaiseAndSetIfChanged(ref _minimizeToTray, value);
+    }
+
+    private bool _startWithWindows = AppSettings.Default.StartWithWindows;
+    public bool StartWithWindows
+    {
+        get => _startWithWindows;
+        set => this.RaiseAndSetIfChanged(ref _startWithWindows, value);
+    }
 }

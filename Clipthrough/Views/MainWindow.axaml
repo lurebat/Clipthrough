@@ -1375,7 +1375,7 @@
                                         <Grid ColumnDefinitions="*,Auto"
                                               ColumnSpacing="8">
                                             <TextBox x:Name="WelcomeDatabasePathTextBox"
-                                                     Text="{Binding SettingsDatabasePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                                     Text="{Binding Settings.DatabasePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                             <Button x:Name="WelcomeDatabasePathBrowseButton"
                                                     Grid.Column="1"
                                                     Classes="secondary compact"
@@ -1444,7 +1444,7 @@
                                                    Text="{Binding SettingsClipLimitLabel}" />
                                         <TextBox Grid.Row="1"
                                                  Grid.Column="2"
-                                                 Text="{Binding SettingsMaxClipSizeKilobytes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                                 Text="{Binding Settings.MaxClipSizeKilobytes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                     </Grid>
                                 </StackPanel>
                             </Border>
@@ -1455,11 +1455,11 @@
                                     <TextBlock Classes="panel-caption"
                                                Text="{Binding SettingsBehaviorTitle}" />
                                     <CheckBox Content="{Binding SettingsCloseToTrayLabel}"
-                                              IsChecked="{Binding SettingsCloseToTray}" />
+                                              IsChecked="{Binding Settings.CloseToTray}" />
                                     <CheckBox Content="{Binding SettingsMinimizeToTrayLabel}"
-                                              IsChecked="{Binding SettingsMinimizeToTray}" />
+                                              IsChecked="{Binding Settings.MinimizeToTray}" />
                                     <CheckBox Content="{Binding SettingsStartWithWindowsLabel}"
-                                              IsChecked="{Binding SettingsStartWithWindows}" />
+                                              IsChecked="{Binding Settings.StartWithWindows}" />
                                 </StackPanel>
                             </Border>
                         </StackPanel>

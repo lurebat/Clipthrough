@@ -48,11 +48,11 @@
                                       SelectedItem="{Binding Settings.ThemeMode}" />
                         </StackPanel>
                         <CheckBox Content="{Binding SettingsCloseToTrayLabel}"
-                                  IsChecked="{Binding SettingsCloseToTray}" />
+                                  IsChecked="{Binding Settings.CloseToTray}" />
                         <CheckBox Content="{Binding SettingsMinimizeToTrayLabel}"
-                                  IsChecked="{Binding SettingsMinimizeToTray}" />
+                                  IsChecked="{Binding Settings.MinimizeToTray}" />
                         <CheckBox Content="{Binding SettingsStartWithWindowsLabel}"
-                                  IsChecked="{Binding SettingsStartWithWindows}" />
+                                  IsChecked="{Binding Settings.StartWithWindows}" />
                     </StackPanel>
                 </Expander>
 
@@ -264,7 +264,7 @@
                                        Text="{Binding SettingsDatabasePathLabel}" />
                             <Grid ColumnDefinitions="*,Auto"
                                   ColumnSpacing="8">
-                                <TextBox Text="{Binding SettingsDatabasePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBox Text="{Binding Settings.DatabasePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                 <Button Grid.Column="1"
                                         Classes="secondary compact"
                                         Command="{Binding BrowseDatabasePathCommand}"
@@ -436,7 +436,7 @@
                         <TextBlock Grid.Row="2" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsClipLimitLabel}" />
                         <TextBox Grid.Row="2" Grid.Column="2"
-                                 Text="{Binding SettingsMaxClipSizeKilobytes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                 Text="{Binding Settings.MaxClipSizeKilobytes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                     </Grid>
                 </Expander>
 
@@ -516,7 +516,7 @@
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label"
                                        Text="{Binding SettingsExternalEditorPathLabel}" />
-                            <TextBox Text="{Binding SettingsExternalEditorPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBox Text="{Binding Settings.ExternalEditorPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             <TextBlock Classes="body-muted"
                                        FontSize="11"
                                        TextWrapping="Wrap"
@@ -525,7 +525,7 @@
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label"
                                        Text="{Binding SettingsExternalImageEditorPathLabel}" />
-                            <TextBox Text="{Binding SettingsExternalImageEditorPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBox Text="{Binding Settings.ExternalImageEditorPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             <TextBlock Classes="body-muted"
                                        FontSize="11"
                                        TextWrapping="Wrap"
@@ -534,7 +534,7 @@
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label"
                                        Text="{Binding SettingsExternalDiffToolPathLabel}" />
-                            <TextBox Text="{Binding SettingsExternalDiffToolPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBox Text="{Binding Settings.ExternalDiffToolPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             <TextBlock Classes="body-muted"
                                        FontSize="11"
                                        TextWrapping="Wrap"

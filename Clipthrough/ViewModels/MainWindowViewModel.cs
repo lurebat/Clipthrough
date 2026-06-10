@@ -152,13 +152,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _settingsEnableToggleCaseSensitiveHotkey = AppSettings.Default.EnableToggleCaseSensitiveHotkey;
     private string _settingsToggleWindowHotkey = AppSettings.Default.ToggleWindowHotkey;
     private bool _settingsEnableToggleWindowHotkey = AppSettings.Default.EnableToggleWindowHotkey;
-    private string _settingsMaxClipSizeKilobytes = (AppSettings.Default.MaxClipSizeBytes / 1024d).ToString("0.##", CultureInfo.InvariantCulture);
-    private string _settingsDatabasePath = StorageOptions.Default.DatabasePath;
     private string _settingsDatabasePassword = StorageOptions.Default.DatabasePassword;
     private string _settingsDatabasePasswordConfirm = StorageOptions.Default.DatabasePassword;
-    private bool _settingsCloseToTray = AppSettings.Default.CloseToTray;
-    private bool _settingsMinimizeToTray = AppSettings.Default.MinimizeToTray;
-    private bool _settingsStartWithWindows = AppSettings.Default.StartWithWindows;
     private bool _settingsEnableNormalClipLifetime = AppSettings.Default.EnableNormalClipLifetime;
     private string _settingsNormalClipLifetimeDays = AppSettings.Default.NormalClipLifetimeDays.ToString(CultureInfo.InvariantCulture);
     private bool _settingsEnableSensitiveClipLifetime = AppSettings.Default.EnableSensitiveClipLifetime;
@@ -193,9 +188,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _settingsEnablePasteAndFavoriteHotkey = AppSettings.Default.EnablePasteAndFavoriteHotkey;
     private string _settingsPasteAsPlainTextHotkey = AppSettings.Default.PasteAsPlainTextHotkey;
     private bool _settingsEnablePasteAsPlainTextHotkey = AppSettings.Default.EnablePasteAsPlainTextHotkey;
-    private string _settingsExternalEditorPath = AppSettings.Default.ExternalEditorPath;
-    private string _settingsExternalImageEditorPath = AppSettings.Default.ExternalImageEditorPath;
-    private string _settingsExternalDiffToolPath = AppSettings.Default.ExternalDiffToolPath;
     private string _editedClipText = string.Empty;
     private string _editedClipBaseline = string.Empty;
     private int _editedClipSelectionStart;
@@ -2454,35 +2446,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public string SettingsExternalEditorPath
-    {
-        get => _settingsExternalEditorPath;
-        set => this.RaiseAndSetIfChanged(ref _settingsExternalEditorPath, value);
-    }
-
-    public string SettingsExternalImageEditorPath
-    {
-        get => _settingsExternalImageEditorPath;
-        set => this.RaiseAndSetIfChanged(ref _settingsExternalImageEditorPath, value);
-    }
-
-    public string SettingsExternalDiffToolPath
-    {
-        get => _settingsExternalDiffToolPath;
-        set => this.RaiseAndSetIfChanged(ref _settingsExternalDiffToolPath, value);
-    }
-
-    public string SettingsMaxClipSizeKilobytes
-    {
-        get => _settingsMaxClipSizeKilobytes;
-        set => this.RaiseAndSetIfChanged(ref _settingsMaxClipSizeKilobytes, value);
-    }
-
-    public string SettingsDatabasePath
-    {
-        get => _settingsDatabasePath;
-        set => this.RaiseAndSetIfChanged(ref _settingsDatabasePath, value);
-    }
 
     public string SettingsDatabasePassword
     {
@@ -2559,23 +2522,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => this.RaiseAndSetIfChanged(ref _isDatabasePasswordVisible, value);
     }
 
-    public bool SettingsCloseToTray
-    {
-        get => _settingsCloseToTray;
-        set => this.RaiseAndSetIfChanged(ref _settingsCloseToTray, value);
-    }
-
-    public bool SettingsMinimizeToTray
-    {
-        get => _settingsMinimizeToTray;
-        set => this.RaiseAndSetIfChanged(ref _settingsMinimizeToTray, value);
-    }
-
-    public bool SettingsStartWithWindows
-    {
-        get => _settingsStartWithWindows;
-        set => this.RaiseAndSetIfChanged(ref _settingsStartWithWindows, value);
-    }
 
 
     public string SettingsThemeModeLabel => AppText.SettingsThemeModeLabel;
@@ -5465,10 +5411,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var selectedPath = await PickDatabasePathAsync(window.StorageProvider, SettingsDatabasePath);
+        var selectedPath = await PickDatabasePathAsync(window.StorageProvider, Settings.DatabasePath);
         if (!string.IsNullOrWhiteSpace(selectedPath))
         {
-            SettingsDatabasePath = selectedPath;
+            Settings.DatabasePath = selectedPath;
         }
     }
 
@@ -5666,7 +5612,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        if (!TryParseMaxClipSizeBytes(SettingsMaxClipSizeKilobytes, out var maxClipSizeBytes))
+        if (!TryParseMaxClipSizeBytes(Settings.MaxClipSizeKilobytes, out var maxClipSizeBytes))
         {
             StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidClipSize);
             return;
@@ -5708,7 +5654,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             storageOptions = new StorageOptions
             {
-                DatabasePath = SettingsDatabasePath,
+                DatabasePath = Settings.DatabasePath,
                 DatabasePassword = SettingsDatabasePassword,
                 RememberPassword = SettingsRememberDatabasePassword,
             }.Normalize();
@@ -5769,9 +5715,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             PasteAndFavoriteHotkey = normalizedExtended["paste-and-favorite"],
             EnablePasteAsPlainTextHotkey = SettingsEnablePasteAsPlainTextHotkey,
             PasteAsPlainTextHotkey = normalizedExtended["paste-as-plain-text"],
-            ExternalEditorPath = SettingsExternalEditorPath.Trim(),
-            ExternalImageEditorPath = SettingsExternalImageEditorPath.Trim(),
-            ExternalDiffToolPath = SettingsExternalDiffToolPath.Trim(),
+            ExternalEditorPath = Settings.ExternalEditorPath.Trim(),
+            ExternalImageEditorPath = Settings.ExternalImageEditorPath.Trim(),
+            ExternalDiffToolPath = Settings.ExternalDiffToolPath.Trim(),
             EnableAi = Settings.EnableAi,
             AiProvider = Settings.AiProvider,
             AiBaseUrl = (Settings.AiBaseUrl ?? string.Empty).Trim(),
@@ -5797,9 +5743,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .Where(b => !string.IsNullOrWhiteSpace(b.Gesture) && !string.IsNullOrWhiteSpace(b.Target))
                 .ToList(),
             MaxClipSizeBytes = maxClipSizeBytes,
-            CloseToTray = SettingsCloseToTray,
-            MinimizeToTray = SettingsMinimizeToTray,
-            StartWithWindows = SettingsStartWithWindows,
+            CloseToTray = Settings.CloseToTray,
+            MinimizeToTray = Settings.MinimizeToTray,
+            StartWithWindows = Settings.StartWithWindows,
             ThemeMode = Settings.ThemeMode,
             EnableNormalClipLifetime = SettingsEnableNormalClipLifetime,
             NormalClipLifetimeDays = normalClipLifetimeDays,
@@ -5874,14 +5820,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsToggleCaseSensitiveHotkey = settings.ToggleCaseSensitiveHotkey;
         SettingsEnableToggleWindowHotkey = settings.EnableToggleWindowHotkey;
         SettingsToggleWindowHotkey = settings.ToggleWindowHotkey;
-        SettingsMaxClipSizeKilobytes = (settings.MaxClipSizeBytes / 1024d).ToString("0.##", CultureInfo.InvariantCulture);
-        SettingsDatabasePath = _storageOptionsService.Current.DatabasePath;
+        Settings.MaxClipSizeKilobytes = (settings.MaxClipSizeBytes / 1024d).ToString("0.##", CultureInfo.InvariantCulture);
+        Settings.DatabasePath = _storageOptionsService.Current.DatabasePath;
         SettingsDatabasePassword = _storageOptionsService.Current.DatabasePassword;
         SettingsDatabasePasswordConfirm = _storageOptionsService.Current.DatabasePassword;
         SettingsRememberDatabasePassword = _storageOptionsService.Current.RememberPassword;
-        SettingsCloseToTray = settings.CloseToTray;
-        SettingsMinimizeToTray = settings.MinimizeToTray;
-        SettingsStartWithWindows = settings.StartWithWindows;
+        Settings.CloseToTray = settings.CloseToTray;
+        Settings.MinimizeToTray = settings.MinimizeToTray;
+        Settings.StartWithWindows = settings.StartWithWindows;
         Settings.ThemeMode = settings.ThemeMode;
         SettingsEnableNormalClipLifetime = settings.EnableNormalClipLifetime;
         SettingsNormalClipLifetimeDays = settings.NormalClipLifetimeDays.ToString(CultureInfo.InvariantCulture);
@@ -5917,9 +5863,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsPasteAndFavoriteHotkey = settings.PasteAndFavoriteHotkey;
         SettingsEnablePasteAsPlainTextHotkey = settings.EnablePasteAsPlainTextHotkey;
         SettingsPasteAsPlainTextHotkey = settings.PasteAsPlainTextHotkey;
-        SettingsExternalEditorPath = settings.ExternalEditorPath;
-        SettingsExternalImageEditorPath = settings.ExternalImageEditorPath;
-        SettingsExternalDiffToolPath = settings.ExternalDiffToolPath;
+        Settings.ExternalEditorPath = settings.ExternalEditorPath;
+        Settings.ExternalImageEditorPath = settings.ExternalImageEditorPath;
+        Settings.ExternalDiffToolPath = settings.ExternalDiffToolPath;
         Settings.EnableAi = settings.EnableAi;
         this.RaisePropertyChanged(nameof(IsAiMenuVisible));
         Settings.AiProvider = settings.AiProvider;
