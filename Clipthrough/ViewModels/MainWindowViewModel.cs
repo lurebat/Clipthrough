@@ -196,11 +196,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _settingsExternalEditorPath = AppSettings.Default.ExternalEditorPath;
     private string _settingsExternalImageEditorPath = AppSettings.Default.ExternalImageEditorPath;
     private string _settingsExternalDiffToolPath = AppSettings.Default.ExternalDiffToolPath;
-    private bool _settingsEnableRemoteApi = AppSettings.Default.EnableRemoteApi;
-    private int _settingsRemoteApiPort = AppSettings.Default.RemoteApiPort;
-    private string _settingsRemoteApiToken = AppSettings.Default.RemoteApiToken;
-
-    private string _settingsRemoteApiBindAddress = AppSettings.Default.RemoteApiBindAddress;
     private string _editedClipText = string.Empty;
     private string _editedClipBaseline = string.Empty;
     private int _editedClipSelectionStart;
@@ -324,29 +319,29 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RerunAllEmbeddingsCommand = ReactiveCommand.CreateFromTask(RerunAllEmbeddingsAsync);
         RefreshSemanticCoverageCommand = ReactiveCommand.CreateFromTask(RefreshSemanticCoverageAsync);
         GenerateRemoteApiTokenCommand = ReactiveCommand.Create(() =>
-            SettingsRemoteApiToken = System.Guid.NewGuid().ToString("N"));
+            Settings.RemoteApiToken = System.Guid.NewGuid().ToString("N"));
         CopyRemoteApiTokenCommand = ReactiveCommand.CreateFromTask(async () =>
         {
-            if (!string.IsNullOrWhiteSpace(SettingsRemoteApiToken))
+            if (!string.IsNullOrWhiteSpace(Settings.RemoteApiToken))
             {
-                await _systemInteractionService.CopyTextAsync(SettingsRemoteApiToken);
+                await _systemInteractionService.CopyTextAsync(Settings.RemoteApiToken);
                 StatusText = "Remote API token copied";
             }
         });
         CopyRemoteApiDocsUrlCommand = ReactiveCommand.CreateFromTask(async () =>
         {
-            await _systemInteractionService.CopyTextAsync(RemoteApiDocsUrl);
+            await _systemInteractionService.CopyTextAsync(Settings.RemoteApiDocsUrl);
             StatusText = "Swagger URL copied";
         });
         CopyRemoteApiSchemaUrlCommand = ReactiveCommand.CreateFromTask(async () =>
         {
-            await _systemInteractionService.CopyTextAsync(RemoteApiSchemaUrl);
+            await _systemInteractionService.CopyTextAsync(Settings.RemoteApiSchemaUrl);
             StatusText = "OpenAPI schema URL copied";
         });
         OpenRemoteApiDocsUrlCommand = ReactiveCommand.CreateFromTask(async () =>
-            await _systemInteractionService.OpenUrlAsync(RemoteApiDocsUrl));
+            await _systemInteractionService.OpenUrlAsync(Settings.RemoteApiDocsUrl));
         OpenRemoteApiSchemaUrlCommand = ReactiveCommand.CreateFromTask(async () =>
-            await _systemInteractionService.OpenUrlAsync(RemoteApiSchemaUrl));
+            await _systemInteractionService.OpenUrlAsync(Settings.RemoteApiSchemaUrl));
 
         Update = new UpdateViewModel(updateService ?? new UpdateService(settingsService), _jobIndicator, _notificationService, status => StatusText = status);
 
@@ -1983,77 +1978,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public CopilotViewModel Copilot { get; }
 
 
-    public bool SettingsEnableRemoteApi
-    {
-        get => _settingsEnableRemoteApi;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableRemoteApi, value);
-    }
-
-    public int SettingsRemoteApiPort
-    {
-        get => _settingsRemoteApiPort;
-        set
-        {
-            this.RaiseAndSetIfChanged(ref _settingsRemoteApiPort, value);
-            this.RaisePropertyChanged(nameof(RemoteApiDocsUrl));
-            this.RaisePropertyChanged(nameof(RemoteApiSchemaUrl));
-        }
-    }
-
-    public string SettingsRemoteApiToken
-    {
-        get => _settingsRemoteApiToken;
-        set => this.RaiseAndSetIfChanged(ref _settingsRemoteApiToken, value);
-    }
-
-    private bool _isRemoteApiTokenRevealed;
-    public bool IsRemoteApiTokenRevealed
-    {
-        get => _isRemoteApiTokenRevealed;
-        set => this.RaiseAndSetIfChanged(ref _isRemoteApiTokenRevealed, value);
-    }
-
-    public string SettingsRemoteApiBindAddress
-    {
-        get => _settingsRemoteApiBindAddress;
-        set
-        {
-            this.RaiseAndSetIfChanged(ref _settingsRemoteApiBindAddress, value);
-            this.RaisePropertyChanged(nameof(RemoteApiBindAddressIsNonLoopback));
-            this.RaisePropertyChanged(nameof(RemoteApiDocsUrl));
-            this.RaisePropertyChanged(nameof(RemoteApiSchemaUrl));
-        }
-    }
-
-    public bool RemoteApiBindAddressIsNonLoopback
-    {
-        get
-        {
-            var v = (_settingsRemoteApiBindAddress ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(v)) return false;
-            return !(v.Equals("127.0.0.1", StringComparison.Ordinal)
-                || v.Equals("localhost", StringComparison.OrdinalIgnoreCase)
-                || v.Equals("loopback", StringComparison.OrdinalIgnoreCase)
-                || v.Equals("::1", StringComparison.Ordinal));
-        }
-    }
-
-    private string RemoteApiUrlHost
-    {
-        get
-        {
-            var v = (_settingsRemoteApiBindAddress ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(v)) return "127.0.0.1";
-            if (v.Equals("0.0.0.0", StringComparison.Ordinal) || v.Equals("loopback", StringComparison.OrdinalIgnoreCase))
-                return "127.0.0.1";
-            if (v.Equals("::", StringComparison.Ordinal)) return "[::1]";
-            if (v.Contains(':') && !v.StartsWith("[", StringComparison.Ordinal)) return $"[{v}]";
-            return v;
-        }
-    }
-
-    public string RemoteApiDocsUrl => $"http://{RemoteApiUrlHost}:{_settingsRemoteApiPort}/docs";
-    public string RemoteApiSchemaUrl => $"http://{RemoteApiUrlHost}:{_settingsRemoteApiPort}/openapi/v1.json";
 
     public string SettingsToggleRegexHotkey
     {
@@ -5860,10 +5784,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             UpdateFeedUrl = (Settings.UpdateFeedUrl ?? string.Empty).Trim(),
             OcrLanguages = (Settings.OcrLanguages ?? string.Empty).Trim(),
             AutoOcrImageClips = Settings.AutoOcrImageClips,
-            EnableRemoteApi = SettingsEnableRemoteApi,
-            RemoteApiPort = SettingsRemoteApiPort,
-            RemoteApiToken = (SettingsRemoteApiToken ?? string.Empty).Trim(),
-            RemoteApiBindAddress = (SettingsRemoteApiBindAddress ?? string.Empty).Trim(),
+            EnableRemoteApi = Settings.EnableRemoteApi,
+            RemoteApiPort = Settings.RemoteApiPort,
+            RemoteApiToken = (Settings.RemoteApiToken ?? string.Empty).Trim(),
+            RemoteApiBindAddress = (Settings.RemoteApiBindAddress ?? string.Empty).Trim(),
             UserScripts = SettingsUserScriptDrafts
                 .Select(s => new UserScript { Name = s.Name.Trim(), Code = s.Code })
                 .Where(s => !string.IsNullOrWhiteSpace(s.Name) && !string.IsNullOrWhiteSpace(s.Code))
@@ -6009,10 +5933,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.UpdateFeedUrl = settings.UpdateFeedUrl;
         Settings.OcrLanguages = settings.OcrLanguages;
         Settings.AutoOcrImageClips = settings.AutoOcrImageClips;
-        SettingsEnableRemoteApi = settings.EnableRemoteApi;
-        SettingsRemoteApiPort = settings.RemoteApiPort;
-        SettingsRemoteApiToken = settings.RemoteApiToken;
-        SettingsRemoteApiBindAddress = settings.RemoteApiBindAddress;
+        Settings.EnableRemoteApi = settings.EnableRemoteApi;
+        Settings.RemoteApiPort = settings.RemoteApiPort;
+        Settings.RemoteApiToken = settings.RemoteApiToken;
+        Settings.RemoteApiBindAddress = settings.RemoteApiBindAddress;
         SettingsUserScriptDrafts.Clear();
         foreach (var s in settings.UserScripts)
         {

@@ -588,10 +588,10 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.Equal("en-US,fr-FR", viewModel.Settings.OcrLanguages);
         Assert.True(viewModel.Settings.AutoOcrImageClips);
         // Remote-API section
-        Assert.True(viewModel.SettingsEnableRemoteApi);
-        Assert.Equal(12345, viewModel.SettingsRemoteApiPort);
-        Assert.Equal("tok-char", viewModel.SettingsRemoteApiToken);
-        Assert.Equal("127.0.0.1", viewModel.SettingsRemoteApiBindAddress);
+        Assert.True(viewModel.Settings.EnableRemoteApi);
+        Assert.Equal(12345, viewModel.Settings.RemoteApiPort);
+        Assert.Equal("tok-char", viewModel.Settings.RemoteApiToken);
+        Assert.Equal("127.0.0.1", viewModel.Settings.RemoteApiBindAddress);
         // Theme / misc
         Assert.Equal(Models.ThemeMode.Light, viewModel.Settings.ThemeMode);
         Assert.True(viewModel.SettingsCloseToTray);
