@@ -531,6 +531,72 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.Equal(ContentType.Image, viewModel.SelectedContentTypeOption.Value);
     }
 
+    // Characterization guard for the SettingsViewModel extraction (#10): opening
+    // settings must load every section's draft from the current AppSettings.
+    // As sections move to MainWindowViewModel.Settings, repoint the property
+    // access here (SettingsX -> Settings.X); the asserted values stay constant.
+    [AvaloniaFact]
+    public async Task OpenSettings_LoadsDraftFromCurrentSettings()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        scope.StorageOptionsService.SetHasSavedConfig(true);
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrentOnInitialize(AppSettings.Default with
+        {
+            EnableAi = true,
+            AiProvider = Models.AiProvider.Copilot,
+            AiBaseUrl = "https://ai.example/v1",
+            AiApiKey = "sk-char-test",
+            AiModel = "gpt-char",
+            AiImageModel = "img-char",
+            AiReasoningEffort = "high",
+            EnableAutoUpdate = false,
+            AutoApplyUpdatesOnStartup = true,
+            UpdateFeedUrl = "https://feed.example/x",
+            OcrLanguages = "en-US,fr-FR",
+            AutoOcrImageClips = true,
+            EnableRemoteApi = true,
+            RemoteApiPort = 12345,
+            RemoteApiToken = "tok-char",
+            RemoteApiBindAddress = "127.0.0.1",
+            ThemeMode = Models.ThemeMode.Light,
+            CloseToTray = true,
+        });
+
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+        await viewModel.InitializeAsync();
+
+        viewModel.OpenSettingsCommand.Execute().Subscribe();
+        Dispatcher.UIThread.RunJobs();
+
+        // AI section
+        Assert.True(viewModel.SettingsEnableAi);
+        Assert.Equal(Models.AiProvider.Copilot, viewModel.SettingsAiProvider);
+        Assert.Equal("https://ai.example/v1", viewModel.SettingsAiBaseUrl);
+        Assert.Equal("sk-char-test", viewModel.SettingsAiApiKey);
+        Assert.Equal("gpt-char", viewModel.SettingsAiModel);
+        Assert.Equal("img-char", viewModel.SettingsAiImageModel);
+        Assert.Equal("high", viewModel.SettingsAiReasoningEffort);
+        // Update section
+        Assert.False(viewModel.SettingsEnableAutoUpdate);
+        Assert.True(viewModel.SettingsAutoApplyUpdatesOnStartup);
+        Assert.Equal("https://feed.example/x", viewModel.SettingsUpdateFeedUrl);
+        // OCR section
+        Assert.Equal("en-US,fr-FR", viewModel.SettingsOcrLanguages);
+        Assert.True(viewModel.SettingsAutoOcrImageClips);
+        // Remote-API section
+        Assert.True(viewModel.SettingsEnableRemoteApi);
+        Assert.Equal(12345, viewModel.SettingsRemoteApiPort);
+        Assert.Equal("tok-char", viewModel.SettingsRemoteApiToken);
+        Assert.Equal("127.0.0.1", viewModel.SettingsRemoteApiBindAddress);
+        // Theme / misc
+        Assert.Equal(Models.ThemeMode.Light, viewModel.SettingsThemeMode);
+        Assert.True(viewModel.SettingsCloseToTray);
+    }
+
     [AvaloniaFact]
     public void Dispose_PersistsCurrentFilterStateImmediately()
     {
