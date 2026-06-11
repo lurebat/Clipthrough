@@ -639,6 +639,66 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.Equal(1, hydrateCalls);
     }
 
+    // The per-row badge WrapPanel was collapsed into a single precomputed MetaLine
+    // (type · age · markers) for cheaper row realization. Guard that it composes the
+    // state markers and is rebuilt when favorite/pin toggle at runtime.
+    [AvaloniaFact]
+    public void MetaLine_ComposesStateMarkers_AndRebuildsOnToggle()
+    {
+        var clip = new Clipthrough.Models.ClipEntry
+        {
+            Id = 7,
+            ContentType = Clipthrough.Models.ContentType.Text,
+            Content = "hello",
+            Hash = "h",
+            CopyCount = 3,
+            PasteCount = 2,
+            IsFavorite = true,
+            PinnedAt = DateTimeOffset.UtcNow,
+            LastCopiedAt = DateTimeOffset.UtcNow,
+        };
+        var item = new Clipthrough.ViewModels.ClipItemViewModel(clip);
+
+        Assert.Contains(item.DisplayContentType, item.MetaLine);
+        Assert.Contains("★", item.MetaLine);      // favorite marker
+        Assert.Contains("📌", item.MetaLine);      // pinned marker
+        Assert.Contains("Pasted", item.MetaLine);  // pasted marker (PasteCount > 0)
+
+        item.SetFavoriteState(false);
+        Assert.DoesNotContain("★", item.MetaLine);
+
+        item.SetPinnedState(false);
+        Assert.DoesNotContain("📌", item.MetaLine);
+    }
+
+    // The row meta renders as colored inline Runs (controls:MetaInlines) so the line
+    // wraps and keeps per-token colour instead of one muted, truncated string.
+    [AvaloniaFact]
+    public void MetaSegments_RenderAsColoredInlineRuns()
+    {
+        var clip = new Clipthrough.Models.ClipEntry
+        {
+            Id = 8,
+            ContentType = Clipthrough.Models.ContentType.Text,
+            Content = "hello",
+            Hash = "h",
+            CopyCount = 3,
+            LastCopiedAt = DateTimeOffset.UtcNow,
+        };
+        var item = new Clipthrough.ViewModels.ClipItemViewModel(clip);
+
+        // type + age + copy-count => 3 colored tokens.
+        Assert.Equal(3, item.MetaSegments.Count);
+        Assert.Equal(item.DisplayContentType, item.MetaSegments[0].Text);
+
+        var textBlock = new Avalonia.Controls.TextBlock();
+        Clipthrough.Controls.MetaInlines.SetSegments(textBlock, item.MetaSegments);
+
+        // 3 segment runs + 2 separator runs = 5 inlines.
+        Assert.NotNull(textBlock.Inlines);
+        Assert.Equal(5, textBlock.Inlines!.Count);
+    }
+
     [AvaloniaFact]
     public void Dispose_PersistsCurrentFilterStateImmediately()
     {

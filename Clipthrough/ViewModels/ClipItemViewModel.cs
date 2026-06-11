@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reactive;
 using System.Threading.Tasks;
@@ -69,11 +70,15 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     private static readonly IBrush s_pastedBorder = new SolidColorBrush(Color.Parse("#7C3AED"));
     private static readonly IBrush s_pastedFg = new SolidColorBrush(Color.Parse("#C4B5FD"));
 
+    private static readonly IBrush s_metaMutedBrush = new SolidColorBrush(Color.Parse("#94A3B8"));
+
     private bool _isChecked;
     private int _displayIndex;
     private readonly string _title;
     private readonly string _previewSnippet;
     private readonly string _singleLinePreview;
+    private string _metaLine = string.Empty;
+    private IReadOnlyList<(string Text, IBrush Foreground)> _metaSegments = Array.Empty<(string, IBrush)>();
     private string? _fullContent;
     private Bitmap? _sourceAppIconImage;
     private Bitmap? _previewThumbnailImage;
@@ -98,6 +103,8 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         _title = ClipDisplayFormatter.BuildTitle(clip);
         _previewSnippet = ClipDisplayFormatter.BuildPreviewSnippet(clip);
         _singleLinePreview = ClipDisplayFormatter.BuildSingleLinePreview(clip);
+        _metaLine = BuildMetaLine();
+        _metaSegments = BuildMetaSegments();
         CopyCommand = ReactiveCommand.CreateFromTask(
             async () =>
             {
@@ -201,6 +208,83 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     public string PreviewSnippet => _previewSnippet;
 
     public string SingleLinePreview => _singleLinePreview;
+
+    // Single precomputed meta line for the list row (type · age · markers), built
+    // once at construction and rebuilt only on favorite/pin toggle. Replaces the
+    // per-row chip WrapPanel (~16 controls + ~13 bindings) with one TextBlock so
+    // row realization/recycling on scroll stays cheap.
+    public string MetaLine => _metaLine;
+
+    private string BuildMetaLine()
+    {
+        var sb = new System.Text.StringBuilder(64);
+        sb.Append(DisplayContentType).Append(" · ").Append(CapturedAtCompact);
+        if (ShowWindowTitleChipInRow && !string.IsNullOrEmpty(SourceWindowTitle))
+        {
+            sb.Append(" · ").Append(SourceWindowTitle);
+        }
+        if (HasBeenPasted)
+        {
+            sb.Append(" · ").Append(PastedMarker);
+        }
+        if (ShowCopyCountBadge)
+        {
+            sb.Append(" · ").Append(CopyCountCompact);
+        }
+        if (IsFavorite)
+        {
+            sb.Append(" · ★");
+        }
+        if (IsPinned)
+        {
+            sb.Append(" · 📌");
+        }
+        if (IsImported)
+        {
+            sb.Append(" · ").Append(ImportedBadgeLabel);
+        }
+        return sb.ToString();
+    }
+
+    // Colored token list backing the row meta line (rendered as inline Runs via
+    // controls:MetaInlines). Same tokens as MetaLine, each carrying the matching
+    // chip foreground colour so the row keeps per-token colour without a chip
+    // control per token. Rebuilt with MetaLine on favorite/pin toggle.
+    public IReadOnlyList<(string Text, IBrush Foreground)> MetaSegments => _metaSegments;
+
+    private IReadOnlyList<(string Text, IBrush Foreground)> BuildMetaSegments()
+    {
+        var segments = new List<(string Text, IBrush Foreground)>(7)
+        {
+            (DisplayContentType, TypeChipForeground),
+            (CapturedAtCompact, AgeChipForeground),
+        };
+        if (ShowWindowTitleChipInRow && !string.IsNullOrEmpty(SourceWindowTitle))
+        {
+            segments.Add((SourceWindowTitle!, s_metaMutedBrush));
+        }
+        if (HasBeenPasted)
+        {
+            segments.Add((PastedMarker, PastedChipForeground));
+        }
+        if (ShowCopyCountBadge)
+        {
+            segments.Add((CopyCountCompact, s_metaMutedBrush));
+        }
+        if (IsFavorite)
+        {
+            segments.Add(("★", StateAccentBrush));
+        }
+        if (IsPinned)
+        {
+            segments.Add(("📌", s_metaMutedBrush));
+        }
+        if (IsImported)
+        {
+            segments.Add((ImportedBadgeLabel, s_metaMutedBrush));
+        }
+        return segments;
+    }
 
     public string FullContent => _fullContent ??= ClipDisplayFormatter.GetRawContentDisplay(Clip);
 
@@ -548,6 +632,10 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(RowBorderThickness));
         this.RaisePropertyChanged(nameof(FavoriteMarker));
         this.RaisePropertyChanged(nameof(FavoriteActionLabel));
+        _metaLine = BuildMetaLine();
+        this.RaisePropertyChanged(nameof(MetaLine));
+        _metaSegments = BuildMetaSegments();
+        this.RaisePropertyChanged(nameof(MetaSegments));
     }
 
     public void SetPinnedState(bool isPinned)
@@ -562,6 +650,10 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(IsPinned));
         this.RaisePropertyChanged(nameof(PinMarker));
         this.RaisePropertyChanged(nameof(PinActionLabel));
+        _metaLine = BuildMetaLine();
+        this.RaisePropertyChanged(nameof(MetaLine));
+        _metaSegments = BuildMetaSegments();
+        this.RaisePropertyChanged(nameof(MetaSegments));
     }
 
     public void Dispose()

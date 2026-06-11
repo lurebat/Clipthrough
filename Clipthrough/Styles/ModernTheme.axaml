@@ -1,4 +1,4 @@
-﻿<Styles xmlns="https://github.com/avaloniaui"
+<Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Styles.Resources>
         <ResourceDictionary>
@@ -371,6 +371,11 @@
     </Style>
 
     <Style Selector="TextBlock.clip-row-date">
+        <Setter Property="Foreground" Value="{DynamicResource AppMutedForegroundBrush}" />
+        <Setter Property="FontSize" Value="11" />
+    </Style>
+
+    <Style Selector="TextBlock.clip-row-meta">
         <Setter Property="Foreground" Value="{DynamicResource AppMutedForegroundBrush}" />
         <Setter Property="FontSize" Value="11" />
     </Style>

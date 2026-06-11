@@ -496,74 +496,10 @@
                                                            Text="{Binding SingleLinePreview}"
                                                            TextTrimming="CharacterEllipsis"
                                                            IsVisible="{Binding ShowTextPreview}" />
-                                                <WrapPanel Orientation="Horizontal"
-                                                           ItemSpacing="4"
-                                                           LineSpacing="2">
-                                                    <Border Classes="meta-chip"
-                                                            Padding="6,1"
-                                                            Background="{Binding TypeChipBackground}"
-                                                            BorderBrush="{Binding TypeChipBorderBrush}"
-                                                            VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding DisplayContentType}"
-                                                                   Foreground="{Binding TypeChipForeground}"
-                                                                   FontSize="10"
-                                                                   FontWeight="SemiBold" />
-                                                    </Border>
-                                                    <Border Classes="meta-chip"
-                                                            Padding="6,1"
-                                                            Background="{Binding AgeChipBackground}"
-                                                            BorderBrush="{Binding AgeChipBorderBrush}"
-                                                            VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding CapturedAtCompact}"
-                                                                   Foreground="{Binding AgeChipForeground}"
-                                                                   FontSize="10"
-                                                                   FontWeight="SemiBold" />
-                                                    </Border>
-                                                    <Border Classes="meta-chip"
-                                                            Padding="6,1"
-                                                            IsVisible="{Binding ShowWindowTitleChipInRow}"
-                                                            VerticalAlignment="Center"
-                                                            ToolTip.Tip="{Binding SourceWindowTitle}">
-                                                        <TextBlock Text="{Binding SourceWindowTitle}"
-                                                                   FontSize="10"
-                                                                   MaxWidth="200"
-                                                                   TextTrimming="CharacterEllipsis" />
-                                                    </Border>
-                                                    <Border Classes="meta-chip"
-                                                            Padding="6,1"
-                                                            Background="{Binding PastedChipBackground}"
-                                                            BorderBrush="{Binding PastedChipBorderBrush}"
-                                                            IsVisible="{Binding HasBeenPasted}"
-                                                            VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding PastedMarker}"
-                                                                   Foreground="{Binding PastedChipForeground}"
-                                                                   FontSize="10"
-                                                                   FontWeight="SemiBold" />
-                                                    </Border>
-                                                    <TextBlock Classes="clip-row-date"
-                                                               Text="{Binding CopyCountCompact}"
-                                                               IsVisible="{Binding ShowCopyCountBadge}"
-                                                               VerticalAlignment="Center"
-                                                               FontSize="10" />
-                                                    <TextBlock Text="{Binding FavoriteMarker}"
-                                                               Foreground="{Binding StateAccentBrush}"
-                                                               IsVisible="{Binding IsFavorite}"
-                                                               VerticalAlignment="Center"
-                                                               FontSize="10" />
-                                                    <TextBlock Text="{Binding PinMarker}"
-                                                               IsVisible="{Binding IsPinned}"
-                                                               VerticalAlignment="Center"
-                                                               FontSize="10"
-                                                               ToolTip.Tip="Pinned" />
-                                                    <Border Classes="badge-chip"
-                                                            IsVisible="{Binding IsImported}"
-                                                            ToolTip.Tip="Imported via drag-and-drop"
-                                                            VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding ImportedBadgeLabel}"
-                                                                   FontSize="10"
-                                                                   FontWeight="SemiBold" />
-                                                    </Border>
-                                                </WrapPanel>
+                                                <TextBlock Classes="clip-row-meta"
+                                                           TextWrapping="Wrap"
+                                                           AutomationProperties.Name="{Binding MetaLine}"
+                                                           controls:MetaInlines.Segments="{Binding MetaSegments}" />
                                             </StackPanel>
                                         </Grid>
                                     </Border>
