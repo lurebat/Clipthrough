@@ -10,3 +10,4 @@ Clipthrough.Tests/artifacts/
 Clipthrough.Tests/testobj/
 **/TestResults/
 *.user
+.compound-engineering/config.local.yaml
