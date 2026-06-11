@@ -1367,12 +1367,12 @@
                                           ColumnSpacing="12"
                                           RowSpacing="10">
                                         <CheckBox Content="{Binding SettingsEnableShortcutLabel}"
-                                                  IsChecked="{Binding SettingsEnableToggleWindowHotkey}" />
+                                                  IsChecked="{Binding Settings.EnableToggleWindowHotkey}" />
                                         <TextBlock Grid.Column="1"
                                                    VerticalAlignment="Center"
                                                    Text="{Binding SettingsToggleWindowHotkeyLabel}" />
                                         <TextBox Grid.Column="2"
-                                                 Text="{Binding SettingsToggleWindowHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                                 Text="{Binding Settings.ToggleWindowHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                                         <TextBlock Grid.Row="1"
                                                    Grid.Column="1"

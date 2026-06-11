@@ -142,16 +142,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _settingsRememberDatabasePassword;
     private Task _queuedRefreshTask = Task.CompletedTask;
     private long? _queuedRefreshPreferredSelectionId;
-    private string _settingsToggleRegexHotkey = AppSettings.Default.ToggleRegexHotkey;
-    private bool _settingsEnableToggleRegexHotkey = AppSettings.Default.EnableToggleRegexHotkey;
-    private string _settingsToggleFavoritesHotkey = AppSettings.Default.ToggleFavoritesHotkey;
-    private bool _settingsEnableToggleFavoritesHotkey = AppSettings.Default.EnableToggleFavoritesHotkey;
-    private string _settingsToggleSensitiveHotkey = AppSettings.Default.ToggleSensitiveHotkey;
-    private bool _settingsEnableToggleSensitiveHotkey = AppSettings.Default.EnableToggleSensitiveHotkey;
-    private string _settingsToggleCaseSensitiveHotkey = AppSettings.Default.ToggleCaseSensitiveHotkey;
-    private bool _settingsEnableToggleCaseSensitiveHotkey = AppSettings.Default.EnableToggleCaseSensitiveHotkey;
-    private string _settingsToggleWindowHotkey = AppSettings.Default.ToggleWindowHotkey;
-    private bool _settingsEnableToggleWindowHotkey = AppSettings.Default.EnableToggleWindowHotkey;
     private string _settingsDatabasePassword = StorageOptions.Default.DatabasePassword;
     private string _settingsDatabasePasswordConfirm = StorageOptions.Default.DatabasePassword;
     private bool _settingsEnableNormalClipLifetime = AppSettings.Default.EnableNormalClipLifetime;
@@ -162,32 +152,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _settingsMaxLibrarySizeMegabytes = AppSettings.Default.MaxLibrarySizeMegabytes.ToString(CultureInfo.InvariantCulture);
     private bool _settingsEnableMaxEntryCount = AppSettings.Default.EnableMaxEntryCount;
     private string _settingsMaxEntryCount = AppSettings.Default.MaxEntryCount.ToString(CultureInfo.InvariantCulture);
-    private string _settingsToggleWildcardHotkey = AppSettings.Default.ToggleWildcardHotkey;
-    private bool _settingsEnableToggleWildcardHotkey = AppSettings.Default.EnableToggleWildcardHotkey;
-    private string _settingsToggleWholeWordHotkey = AppSettings.Default.ToggleWholeWordHotkey;
-    private bool _settingsEnableToggleWholeWordHotkey = AppSettings.Default.EnableToggleWholeWordHotkey;
-    private string _settingsTogglePastedHotkey = AppSettings.Default.TogglePastedHotkey;
-    private bool _settingsEnableTogglePastedHotkey = AppSettings.Default.EnableTogglePastedHotkey;
-    private string _settingsToggleFuzzyHotkey = AppSettings.Default.ToggleFuzzyHotkey;
-    private bool _settingsEnableToggleFuzzyHotkey = AppSettings.Default.EnableToggleFuzzyHotkey;
-    private string _settingsToggleSemanticHotkey = AppSettings.Default.ToggleSemanticHotkey;
-    private bool _settingsEnableToggleSemanticHotkey = AppSettings.Default.EnableToggleSemanticHotkey;
-    private string _settingsIncrementalPasteHotkey = AppSettings.Default.IncrementalPasteHotkey;
-    private bool _settingsEnableIncrementalPasteHotkey = AppSettings.Default.EnableIncrementalPasteHotkey;
-    private string _settingsDecrementalPasteHotkey = AppSettings.Default.DecrementalPasteHotkey;
-    private bool _settingsEnableDecrementalPasteHotkey = AppSettings.Default.EnableDecrementalPasteHotkey;
-    private string _settingsCopyAndFavoriteHotkey = AppSettings.Default.CopyAndFavoriteHotkey;
-    private bool _settingsEnableCopyAndFavoriteHotkey = AppSettings.Default.EnableCopyAndFavoriteHotkey;
-    private string _settingsCopyAndSensitiveHotkey = AppSettings.Default.CopyAndSensitiveHotkey;
-    private bool _settingsEnableCopyAndSensitiveHotkey = AppSettings.Default.EnableCopyAndSensitiveHotkey;
-    private string _settingsCopyWithoutSavingHotkey = AppSettings.Default.CopyWithoutSavingHotkey;
-    private bool _settingsEnableCopyWithoutSavingHotkey = AppSettings.Default.EnableCopyWithoutSavingHotkey;
-    private string _settingsPasteAndDeleteHotkey = AppSettings.Default.PasteAndDeleteHotkey;
-    private bool _settingsEnablePasteAndDeleteHotkey = AppSettings.Default.EnablePasteAndDeleteHotkey;
-    private string _settingsPasteAndFavoriteHotkey = AppSettings.Default.PasteAndFavoriteHotkey;
-    private bool _settingsEnablePasteAndFavoriteHotkey = AppSettings.Default.EnablePasteAndFavoriteHotkey;
-    private string _settingsPasteAsPlainTextHotkey = AppSettings.Default.PasteAsPlainTextHotkey;
-    private bool _settingsEnablePasteAsPlainTextHotkey = AppSettings.Default.EnablePasteAsPlainTextHotkey;
     private string _editedClipText = string.Empty;
     private string _editedClipBaseline = string.Empty;
     private int _editedClipSelectionStart;
@@ -1972,221 +1936,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
 
 
-    public string SettingsToggleRegexHotkey
-    {
-        get => _settingsToggleRegexHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsToggleRegexHotkey, value);
-    }
-
-    public bool SettingsEnableToggleRegexHotkey
-    {
-        get => _settingsEnableToggleRegexHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableToggleRegexHotkey, value);
-    }
-
-    public string SettingsToggleFavoritesHotkey
-    {
-        get => _settingsToggleFavoritesHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsToggleFavoritesHotkey, value);
-    }
-
-    public bool SettingsEnableToggleFavoritesHotkey
-    {
-        get => _settingsEnableToggleFavoritesHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableToggleFavoritesHotkey, value);
-    }
-
-    public string SettingsToggleSensitiveHotkey
-    {
-        get => _settingsToggleSensitiveHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsToggleSensitiveHotkey, value);
-    }
-
-    public bool SettingsEnableToggleSensitiveHotkey
-    {
-        get => _settingsEnableToggleSensitiveHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableToggleSensitiveHotkey, value);
-    }
-
-    public string SettingsToggleCaseSensitiveHotkey
-    {
-        get => _settingsToggleCaseSensitiveHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsToggleCaseSensitiveHotkey, value);
-    }
-
-    public bool SettingsEnableToggleCaseSensitiveHotkey
-    {
-        get => _settingsEnableToggleCaseSensitiveHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableToggleCaseSensitiveHotkey, value);
-    }
-
-    public string SettingsToggleWindowHotkey
-    {
-        get => _settingsToggleWindowHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsToggleWindowHotkey, value);
-    }
-
-    public bool SettingsEnableToggleWindowHotkey
-    {
-        get => _settingsEnableToggleWindowHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableToggleWindowHotkey, value);
-    }
-
-    public string SettingsToggleWildcardHotkey
-    {
-        get => _settingsToggleWildcardHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsToggleWildcardHotkey, value);
-    }
-
-    public bool SettingsEnableToggleWildcardHotkey
-    {
-        get => _settingsEnableToggleWildcardHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableToggleWildcardHotkey, value);
-    }
-
-    public string SettingsToggleWholeWordHotkey
-    {
-        get => _settingsToggleWholeWordHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsToggleWholeWordHotkey, value);
-    }
-
-    public bool SettingsEnableToggleWholeWordHotkey
-    {
-        get => _settingsEnableToggleWholeWordHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableToggleWholeWordHotkey, value);
-    }
-
-    public string SettingsTogglePastedHotkey
-    {
-        get => _settingsTogglePastedHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsTogglePastedHotkey, value);
-    }
-
-    public bool SettingsEnableTogglePastedHotkey
-    {
-        get => _settingsEnableTogglePastedHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableTogglePastedHotkey, value);
-    }
-
-    public string SettingsToggleFuzzyHotkey
-    {
-        get => _settingsToggleFuzzyHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsToggleFuzzyHotkey, value);
-    }
-
-    public bool SettingsEnableToggleFuzzyHotkey
-    {
-        get => _settingsEnableToggleFuzzyHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableToggleFuzzyHotkey, value);
-    }
-
-    public string SettingsToggleSemanticHotkey
-    {
-        get => _settingsToggleSemanticHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsToggleSemanticHotkey, value);
-    }
-
-    public bool SettingsEnableToggleSemanticHotkey
-    {
-        get => _settingsEnableToggleSemanticHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableToggleSemanticHotkey, value);
-    }
-
-    public string SettingsIncrementalPasteHotkey
-    {
-        get => _settingsIncrementalPasteHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsIncrementalPasteHotkey, value);
-    }
-
-    public bool SettingsEnableIncrementalPasteHotkey
-    {
-        get => _settingsEnableIncrementalPasteHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableIncrementalPasteHotkey, value);
-    }
-
-    public string SettingsDecrementalPasteHotkey
-    {
-        get => _settingsDecrementalPasteHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsDecrementalPasteHotkey, value);
-    }
-
-    public bool SettingsEnableDecrementalPasteHotkey
-    {
-        get => _settingsEnableDecrementalPasteHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableDecrementalPasteHotkey, value);
-    }
-
-    public string SettingsCopyAndFavoriteHotkey
-    {
-        get => _settingsCopyAndFavoriteHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsCopyAndFavoriteHotkey, value);
-    }
-
-    public bool SettingsEnableCopyAndFavoriteHotkey
-    {
-        get => _settingsEnableCopyAndFavoriteHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableCopyAndFavoriteHotkey, value);
-    }
-
-    public string SettingsCopyAndSensitiveHotkey
-    {
-        get => _settingsCopyAndSensitiveHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsCopyAndSensitiveHotkey, value);
-    }
-
-    public bool SettingsEnableCopyAndSensitiveHotkey
-    {
-        get => _settingsEnableCopyAndSensitiveHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableCopyAndSensitiveHotkey, value);
-    }
-
-    public string SettingsCopyWithoutSavingHotkey
-    {
-        get => _settingsCopyWithoutSavingHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsCopyWithoutSavingHotkey, value);
-    }
-
-    public bool SettingsEnableCopyWithoutSavingHotkey
-    {
-        get => _settingsEnableCopyWithoutSavingHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableCopyWithoutSavingHotkey, value);
-    }
-
-    public string SettingsPasteAndDeleteHotkey
-    {
-        get => _settingsPasteAndDeleteHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsPasteAndDeleteHotkey, value);
-    }
-
-    public bool SettingsEnablePasteAndDeleteHotkey
-    {
-        get => _settingsEnablePasteAndDeleteHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnablePasteAndDeleteHotkey, value);
-    }
-
-    public string SettingsPasteAndFavoriteHotkey
-    {
-        get => _settingsPasteAndFavoriteHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsPasteAndFavoriteHotkey, value);
-    }
-
-    public bool SettingsEnablePasteAndFavoriteHotkey
-    {
-        get => _settingsEnablePasteAndFavoriteHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnablePasteAndFavoriteHotkey, value);
-    }
-
-    public string SettingsPasteAsPlainTextHotkey
-    {
-        get => _settingsPasteAsPlainTextHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsPasteAsPlainTextHotkey, value);
-    }
-
-    public bool SettingsEnablePasteAsPlainTextHotkey
-    {
-        get => _settingsEnablePasteAsPlainTextHotkey;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnablePasteAsPlainTextHotkey, value);
-    }
 
     public string SettingsCopyAndFavoriteHotkeyLabel => AppText.SettingsCopyAndFavoriteHotkeyLabel;
     public string SettingsCopyAndSensitiveHotkeyLabel => AppText.SettingsCopyAndSensitiveHotkeyLabel;
@@ -5524,15 +5273,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         var localHotkeys = new[]
         {
-            new HotkeyDraft(nameof(AppSettings.ToggleRegexHotkey), SettingsEnableToggleRegexHotkey, SettingsToggleRegexHotkey),
-            new HotkeyDraft(nameof(AppSettings.ToggleFavoritesHotkey), SettingsEnableToggleFavoritesHotkey, SettingsToggleFavoritesHotkey),
-            new HotkeyDraft(nameof(AppSettings.ToggleSensitiveHotkey), SettingsEnableToggleSensitiveHotkey, SettingsToggleSensitiveHotkey),
-            new HotkeyDraft(nameof(AppSettings.ToggleCaseSensitiveHotkey), SettingsEnableToggleCaseSensitiveHotkey, SettingsToggleCaseSensitiveHotkey),
-            new HotkeyDraft(nameof(AppSettings.ToggleWildcardHotkey), SettingsEnableToggleWildcardHotkey, SettingsToggleWildcardHotkey),
-            new HotkeyDraft(nameof(AppSettings.ToggleWholeWordHotkey), SettingsEnableToggleWholeWordHotkey, SettingsToggleWholeWordHotkey),
-            new HotkeyDraft(nameof(AppSettings.TogglePastedHotkey), SettingsEnableTogglePastedHotkey, SettingsTogglePastedHotkey),
-            new HotkeyDraft(nameof(AppSettings.ToggleFuzzyHotkey), SettingsEnableToggleFuzzyHotkey, SettingsToggleFuzzyHotkey),
-            new HotkeyDraft(nameof(AppSettings.ToggleSemanticHotkey), SettingsEnableToggleSemanticHotkey, SettingsToggleSemanticHotkey),
+            new HotkeyDraft(nameof(AppSettings.ToggleRegexHotkey), Settings.EnableToggleRegexHotkey, Settings.ToggleRegexHotkey),
+            new HotkeyDraft(nameof(AppSettings.ToggleFavoritesHotkey), Settings.EnableToggleFavoritesHotkey, Settings.ToggleFavoritesHotkey),
+            new HotkeyDraft(nameof(AppSettings.ToggleSensitiveHotkey), Settings.EnableToggleSensitiveHotkey, Settings.ToggleSensitiveHotkey),
+            new HotkeyDraft(nameof(AppSettings.ToggleCaseSensitiveHotkey), Settings.EnableToggleCaseSensitiveHotkey, Settings.ToggleCaseSensitiveHotkey),
+            new HotkeyDraft(nameof(AppSettings.ToggleWildcardHotkey), Settings.EnableToggleWildcardHotkey, Settings.ToggleWildcardHotkey),
+            new HotkeyDraft(nameof(AppSettings.ToggleWholeWordHotkey), Settings.EnableToggleWholeWordHotkey, Settings.ToggleWholeWordHotkey),
+            new HotkeyDraft(nameof(AppSettings.TogglePastedHotkey), Settings.EnableTogglePastedHotkey, Settings.TogglePastedHotkey),
+            new HotkeyDraft(nameof(AppSettings.ToggleFuzzyHotkey), Settings.EnableToggleFuzzyHotkey, Settings.ToggleFuzzyHotkey),
+            new HotkeyDraft(nameof(AppSettings.ToggleSemanticHotkey), Settings.EnableToggleSemanticHotkey, Settings.ToggleSemanticHotkey),
         };
 
         var normalizedHotkeys = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -5553,54 +5302,54 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             normalizedHotkeys[pair.Name] = gesture.ToString();
         }
 
-        var normalizedGlobalHotkey = SettingsToggleWindowHotkey.Trim();
+        var normalizedGlobalHotkey = Settings.ToggleWindowHotkey.Trim();
         HotkeyGesture? parsedGlobalHotkey = null;
         string? globalHotkeyError = null;
-        if (SettingsEnableToggleWindowHotkey
-            && (!HotkeyGesture.TryParse(SettingsToggleWindowHotkey, out parsedGlobalHotkey, out globalHotkeyError) || parsedGlobalHotkey is null))
+        if (Settings.EnableToggleWindowHotkey
+            && (!HotkeyGesture.TryParse(Settings.ToggleWindowHotkey, out parsedGlobalHotkey, out globalHotkeyError) || parsedGlobalHotkey is null))
         {
             StatusText = AppText.FormatSettingsValidationError(globalHotkeyError ?? AppText.SettingsInvalidHotkeyFallback);
             return;
         }
-        else if (SettingsEnableToggleWindowHotkey)
+        else if (Settings.EnableToggleWindowHotkey)
         {
             normalizedGlobalHotkey = parsedGlobalHotkey!.ToString();
         }
 
-        var normalizedIncrementalHotkey = SettingsIncrementalPasteHotkey.Trim();
+        var normalizedIncrementalHotkey = Settings.IncrementalPasteHotkey.Trim();
         HotkeyGesture? parsedIncrementalHotkey = null;
-        if (SettingsEnableIncrementalPasteHotkey
-            && (!HotkeyGesture.TryParse(SettingsIncrementalPasteHotkey, out parsedIncrementalHotkey, out var incHotkeyError) || parsedIncrementalHotkey is null))
+        if (Settings.EnableIncrementalPasteHotkey
+            && (!HotkeyGesture.TryParse(Settings.IncrementalPasteHotkey, out parsedIncrementalHotkey, out var incHotkeyError) || parsedIncrementalHotkey is null))
         {
             StatusText = AppText.FormatSettingsValidationError(incHotkeyError ?? AppText.SettingsInvalidHotkeyFallback);
             return;
         }
-        else if (SettingsEnableIncrementalPasteHotkey)
+        else if (Settings.EnableIncrementalPasteHotkey)
         {
             normalizedIncrementalHotkey = parsedIncrementalHotkey!.ToString();
         }
 
-        var normalizedDecrementalHotkey = SettingsDecrementalPasteHotkey.Trim();
+        var normalizedDecrementalHotkey = Settings.DecrementalPasteHotkey.Trim();
         HotkeyGesture? parsedDecrementalHotkey = null;
-        if (SettingsEnableDecrementalPasteHotkey
-            && (!HotkeyGesture.TryParse(SettingsDecrementalPasteHotkey, out parsedDecrementalHotkey, out var decHotkeyError) || parsedDecrementalHotkey is null))
+        if (Settings.EnableDecrementalPasteHotkey
+            && (!HotkeyGesture.TryParse(Settings.DecrementalPasteHotkey, out parsedDecrementalHotkey, out var decHotkeyError) || parsedDecrementalHotkey is null))
         {
             StatusText = AppText.FormatSettingsValidationError(decHotkeyError ?? AppText.SettingsInvalidHotkeyFallback);
             return;
         }
-        else if (SettingsEnableDecrementalPasteHotkey)
+        else if (Settings.EnableDecrementalPasteHotkey)
         {
             normalizedDecrementalHotkey = parsedDecrementalHotkey!.ToString();
         }
 
         var extendedHotkeys = new[]
         {
-            ("copy-and-favorite", SettingsEnableCopyAndFavoriteHotkey, SettingsCopyAndFavoriteHotkey),
-            ("copy-and-sensitive", SettingsEnableCopyAndSensitiveHotkey, SettingsCopyAndSensitiveHotkey),
-            ("copy-without-saving", SettingsEnableCopyWithoutSavingHotkey, SettingsCopyWithoutSavingHotkey),
-            ("paste-and-delete", SettingsEnablePasteAndDeleteHotkey, SettingsPasteAndDeleteHotkey),
-            ("paste-and-favorite", SettingsEnablePasteAndFavoriteHotkey, SettingsPasteAndFavoriteHotkey),
-            ("paste-as-plain-text", SettingsEnablePasteAsPlainTextHotkey, SettingsPasteAsPlainTextHotkey),
+            ("copy-and-favorite", Settings.EnableCopyAndFavoriteHotkey, Settings.CopyAndFavoriteHotkey),
+            ("copy-and-sensitive", Settings.EnableCopyAndSensitiveHotkey, Settings.CopyAndSensitiveHotkey),
+            ("copy-without-saving", Settings.EnableCopyWithoutSavingHotkey, Settings.CopyWithoutSavingHotkey),
+            ("paste-and-delete", Settings.EnablePasteAndDeleteHotkey, Settings.PasteAndDeleteHotkey),
+            ("paste-and-favorite", Settings.EnablePasteAndFavoriteHotkey, Settings.PasteAndFavoriteHotkey),
+            ("paste-as-plain-text", Settings.EnablePasteAsPlainTextHotkey, Settings.PasteAsPlainTextHotkey),
         };
         var normalizedExtended = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (id, enabled, raw) in extendedHotkeys)
@@ -5621,9 +5370,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var duplicates = localHotkeys
             .Where(static draft => draft.IsEnabled)
             .Select(draft => normalizedHotkeys[draft.Name])
-            .Append(SettingsEnableToggleWindowHotkey ? normalizedGlobalHotkey : string.Empty)
-            .Append(SettingsEnableIncrementalPasteHotkey ? normalizedIncrementalHotkey : string.Empty)
-            .Append(SettingsEnableDecrementalPasteHotkey ? normalizedDecrementalHotkey : string.Empty)
+            .Append(Settings.EnableToggleWindowHotkey ? normalizedGlobalHotkey : string.Empty)
+            .Append(Settings.EnableIncrementalPasteHotkey ? normalizedIncrementalHotkey : string.Empty)
+            .Append(Settings.EnableDecrementalPasteHotkey ? normalizedDecrementalHotkey : string.Empty)
             .Concat(extendedHotkeys.Where(h => h.Item2).Select(h => normalizedExtended[h.Item1]))
             .Where(static value => !string.IsNullOrWhiteSpace(value))
             .GroupBy(static value => value, StringComparer.OrdinalIgnoreCase)
@@ -5701,41 +5450,41 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         var settings = _settingsService.Current with
         {
-            EnableToggleRegexHotkey = SettingsEnableToggleRegexHotkey,
+            EnableToggleRegexHotkey = Settings.EnableToggleRegexHotkey,
             ToggleRegexHotkey = normalizedHotkeys[nameof(AppSettings.ToggleRegexHotkey)],
-            EnableToggleFavoritesHotkey = SettingsEnableToggleFavoritesHotkey,
+            EnableToggleFavoritesHotkey = Settings.EnableToggleFavoritesHotkey,
             ToggleFavoritesHotkey = normalizedHotkeys[nameof(AppSettings.ToggleFavoritesHotkey)],
-            EnableToggleSensitiveHotkey = SettingsEnableToggleSensitiveHotkey,
+            EnableToggleSensitiveHotkey = Settings.EnableToggleSensitiveHotkey,
             ToggleSensitiveHotkey = normalizedHotkeys[nameof(AppSettings.ToggleSensitiveHotkey)],
-            EnableToggleCaseSensitiveHotkey = SettingsEnableToggleCaseSensitiveHotkey,
+            EnableToggleCaseSensitiveHotkey = Settings.EnableToggleCaseSensitiveHotkey,
             ToggleCaseSensitiveHotkey = normalizedHotkeys[nameof(AppSettings.ToggleCaseSensitiveHotkey)],
-            EnableToggleWindowHotkey = SettingsEnableToggleWindowHotkey,
+            EnableToggleWindowHotkey = Settings.EnableToggleWindowHotkey,
             ToggleWindowHotkey = normalizedGlobalHotkey,
-            EnableToggleWildcardHotkey = SettingsEnableToggleWildcardHotkey,
+            EnableToggleWildcardHotkey = Settings.EnableToggleWildcardHotkey,
             ToggleWildcardHotkey = normalizedHotkeys[nameof(AppSettings.ToggleWildcardHotkey)],
-            EnableToggleWholeWordHotkey = SettingsEnableToggleWholeWordHotkey,
+            EnableToggleWholeWordHotkey = Settings.EnableToggleWholeWordHotkey,
             ToggleWholeWordHotkey = normalizedHotkeys[nameof(AppSettings.ToggleWholeWordHotkey)],
-            EnableTogglePastedHotkey = SettingsEnableTogglePastedHotkey,
+            EnableTogglePastedHotkey = Settings.EnableTogglePastedHotkey,
             TogglePastedHotkey = normalizedHotkeys[nameof(AppSettings.TogglePastedHotkey)],
-            EnableToggleFuzzyHotkey = SettingsEnableToggleFuzzyHotkey,
+            EnableToggleFuzzyHotkey = Settings.EnableToggleFuzzyHotkey,
             ToggleFuzzyHotkey = normalizedHotkeys[nameof(AppSettings.ToggleFuzzyHotkey)],
-            EnableToggleSemanticHotkey = SettingsEnableToggleSemanticHotkey,
+            EnableToggleSemanticHotkey = Settings.EnableToggleSemanticHotkey,
             ToggleSemanticHotkey = normalizedHotkeys[nameof(AppSettings.ToggleSemanticHotkey)],
-            EnableIncrementalPasteHotkey = SettingsEnableIncrementalPasteHotkey,
+            EnableIncrementalPasteHotkey = Settings.EnableIncrementalPasteHotkey,
             IncrementalPasteHotkey = normalizedIncrementalHotkey,
-            EnableDecrementalPasteHotkey = SettingsEnableDecrementalPasteHotkey,
+            EnableDecrementalPasteHotkey = Settings.EnableDecrementalPasteHotkey,
             DecrementalPasteHotkey = normalizedDecrementalHotkey,
-            EnableCopyAndFavoriteHotkey = SettingsEnableCopyAndFavoriteHotkey,
+            EnableCopyAndFavoriteHotkey = Settings.EnableCopyAndFavoriteHotkey,
             CopyAndFavoriteHotkey = normalizedExtended["copy-and-favorite"],
-            EnableCopyAndSensitiveHotkey = SettingsEnableCopyAndSensitiveHotkey,
+            EnableCopyAndSensitiveHotkey = Settings.EnableCopyAndSensitiveHotkey,
             CopyAndSensitiveHotkey = normalizedExtended["copy-and-sensitive"],
-            EnableCopyWithoutSavingHotkey = SettingsEnableCopyWithoutSavingHotkey,
+            EnableCopyWithoutSavingHotkey = Settings.EnableCopyWithoutSavingHotkey,
             CopyWithoutSavingHotkey = normalizedExtended["copy-without-saving"],
-            EnablePasteAndDeleteHotkey = SettingsEnablePasteAndDeleteHotkey,
+            EnablePasteAndDeleteHotkey = Settings.EnablePasteAndDeleteHotkey,
             PasteAndDeleteHotkey = normalizedExtended["paste-and-delete"],
-            EnablePasteAndFavoriteHotkey = SettingsEnablePasteAndFavoriteHotkey,
+            EnablePasteAndFavoriteHotkey = Settings.EnablePasteAndFavoriteHotkey,
             PasteAndFavoriteHotkey = normalizedExtended["paste-and-favorite"],
-            EnablePasteAsPlainTextHotkey = SettingsEnablePasteAsPlainTextHotkey,
+            EnablePasteAsPlainTextHotkey = Settings.EnablePasteAsPlainTextHotkey,
             PasteAsPlainTextHotkey = normalizedExtended["paste-as-plain-text"],
             ExternalEditorPath = Settings.ExternalEditorPath.Trim(),
             ExternalImageEditorPath = Settings.ExternalImageEditorPath.Trim(),
@@ -5832,16 +5581,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void LoadSettingsDraft(AppSettings settings)
     {
-        SettingsEnableToggleRegexHotkey = settings.EnableToggleRegexHotkey;
-        SettingsToggleRegexHotkey = settings.ToggleRegexHotkey;
-        SettingsEnableToggleFavoritesHotkey = settings.EnableToggleFavoritesHotkey;
-        SettingsToggleFavoritesHotkey = settings.ToggleFavoritesHotkey;
-        SettingsEnableToggleSensitiveHotkey = settings.EnableToggleSensitiveHotkey;
-        SettingsToggleSensitiveHotkey = settings.ToggleSensitiveHotkey;
-        SettingsEnableToggleCaseSensitiveHotkey = settings.EnableToggleCaseSensitiveHotkey;
-        SettingsToggleCaseSensitiveHotkey = settings.ToggleCaseSensitiveHotkey;
-        SettingsEnableToggleWindowHotkey = settings.EnableToggleWindowHotkey;
-        SettingsToggleWindowHotkey = settings.ToggleWindowHotkey;
+        Settings.EnableToggleRegexHotkey = settings.EnableToggleRegexHotkey;
+        Settings.ToggleRegexHotkey = settings.ToggleRegexHotkey;
+        Settings.EnableToggleFavoritesHotkey = settings.EnableToggleFavoritesHotkey;
+        Settings.ToggleFavoritesHotkey = settings.ToggleFavoritesHotkey;
+        Settings.EnableToggleSensitiveHotkey = settings.EnableToggleSensitiveHotkey;
+        Settings.ToggleSensitiveHotkey = settings.ToggleSensitiveHotkey;
+        Settings.EnableToggleCaseSensitiveHotkey = settings.EnableToggleCaseSensitiveHotkey;
+        Settings.ToggleCaseSensitiveHotkey = settings.ToggleCaseSensitiveHotkey;
+        Settings.EnableToggleWindowHotkey = settings.EnableToggleWindowHotkey;
+        Settings.ToggleWindowHotkey = settings.ToggleWindowHotkey;
         Settings.MaxClipSizeKilobytes = (settings.MaxClipSizeBytes / 1024d).ToString("0.##", CultureInfo.InvariantCulture);
         Settings.DatabasePath = _storageOptionsService.Current.DatabasePath;
         SettingsDatabasePassword = _storageOptionsService.Current.DatabasePassword;
@@ -5859,32 +5608,32 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsMaxLibrarySizeMegabytes = settings.MaxLibrarySizeMegabytes.ToString(CultureInfo.InvariantCulture);
         SettingsEnableMaxEntryCount = settings.EnableMaxEntryCount;
         SettingsMaxEntryCount = settings.MaxEntryCount.ToString(CultureInfo.InvariantCulture);
-        SettingsEnableToggleWildcardHotkey = settings.EnableToggleWildcardHotkey;
-        SettingsToggleWildcardHotkey = settings.ToggleWildcardHotkey;
-        SettingsEnableToggleWholeWordHotkey = settings.EnableToggleWholeWordHotkey;
-        SettingsToggleWholeWordHotkey = settings.ToggleWholeWordHotkey;
-        SettingsEnableTogglePastedHotkey = settings.EnableTogglePastedHotkey;
-        SettingsTogglePastedHotkey = settings.TogglePastedHotkey;
-        SettingsEnableToggleFuzzyHotkey = settings.EnableToggleFuzzyHotkey;
-        SettingsToggleFuzzyHotkey = settings.ToggleFuzzyHotkey;
-        SettingsEnableToggleSemanticHotkey = settings.EnableToggleSemanticHotkey;
-        SettingsToggleSemanticHotkey = settings.ToggleSemanticHotkey;
-        SettingsEnableIncrementalPasteHotkey = settings.EnableIncrementalPasteHotkey;
-        SettingsIncrementalPasteHotkey = settings.IncrementalPasteHotkey;
-        SettingsEnableDecrementalPasteHotkey = settings.EnableDecrementalPasteHotkey;
-        SettingsDecrementalPasteHotkey = settings.DecrementalPasteHotkey;
-        SettingsEnableCopyAndFavoriteHotkey = settings.EnableCopyAndFavoriteHotkey;
-        SettingsCopyAndFavoriteHotkey = settings.CopyAndFavoriteHotkey;
-        SettingsEnableCopyAndSensitiveHotkey = settings.EnableCopyAndSensitiveHotkey;
-        SettingsCopyAndSensitiveHotkey = settings.CopyAndSensitiveHotkey;
-        SettingsEnableCopyWithoutSavingHotkey = settings.EnableCopyWithoutSavingHotkey;
-        SettingsCopyWithoutSavingHotkey = settings.CopyWithoutSavingHotkey;
-        SettingsEnablePasteAndDeleteHotkey = settings.EnablePasteAndDeleteHotkey;
-        SettingsPasteAndDeleteHotkey = settings.PasteAndDeleteHotkey;
-        SettingsEnablePasteAndFavoriteHotkey = settings.EnablePasteAndFavoriteHotkey;
-        SettingsPasteAndFavoriteHotkey = settings.PasteAndFavoriteHotkey;
-        SettingsEnablePasteAsPlainTextHotkey = settings.EnablePasteAsPlainTextHotkey;
-        SettingsPasteAsPlainTextHotkey = settings.PasteAsPlainTextHotkey;
+        Settings.EnableToggleWildcardHotkey = settings.EnableToggleWildcardHotkey;
+        Settings.ToggleWildcardHotkey = settings.ToggleWildcardHotkey;
+        Settings.EnableToggleWholeWordHotkey = settings.EnableToggleWholeWordHotkey;
+        Settings.ToggleWholeWordHotkey = settings.ToggleWholeWordHotkey;
+        Settings.EnableTogglePastedHotkey = settings.EnableTogglePastedHotkey;
+        Settings.TogglePastedHotkey = settings.TogglePastedHotkey;
+        Settings.EnableToggleFuzzyHotkey = settings.EnableToggleFuzzyHotkey;
+        Settings.ToggleFuzzyHotkey = settings.ToggleFuzzyHotkey;
+        Settings.EnableToggleSemanticHotkey = settings.EnableToggleSemanticHotkey;
+        Settings.ToggleSemanticHotkey = settings.ToggleSemanticHotkey;
+        Settings.EnableIncrementalPasteHotkey = settings.EnableIncrementalPasteHotkey;
+        Settings.IncrementalPasteHotkey = settings.IncrementalPasteHotkey;
+        Settings.EnableDecrementalPasteHotkey = settings.EnableDecrementalPasteHotkey;
+        Settings.DecrementalPasteHotkey = settings.DecrementalPasteHotkey;
+        Settings.EnableCopyAndFavoriteHotkey = settings.EnableCopyAndFavoriteHotkey;
+        Settings.CopyAndFavoriteHotkey = settings.CopyAndFavoriteHotkey;
+        Settings.EnableCopyAndSensitiveHotkey = settings.EnableCopyAndSensitiveHotkey;
+        Settings.CopyAndSensitiveHotkey = settings.CopyAndSensitiveHotkey;
+        Settings.EnableCopyWithoutSavingHotkey = settings.EnableCopyWithoutSavingHotkey;
+        Settings.CopyWithoutSavingHotkey = settings.CopyWithoutSavingHotkey;
+        Settings.EnablePasteAndDeleteHotkey = settings.EnablePasteAndDeleteHotkey;
+        Settings.PasteAndDeleteHotkey = settings.PasteAndDeleteHotkey;
+        Settings.EnablePasteAndFavoriteHotkey = settings.EnablePasteAndFavoriteHotkey;
+        Settings.PasteAndFavoriteHotkey = settings.PasteAndFavoriteHotkey;
+        Settings.EnablePasteAsPlainTextHotkey = settings.EnablePasteAsPlainTextHotkey;
+        Settings.PasteAsPlainTextHotkey = settings.PasteAsPlainTextHotkey;
         Settings.ExternalEditorPath = settings.ExternalEditorPath;
         Settings.ExternalImageEditorPath = settings.ExternalImageEditorPath;
         Settings.ExternalDiffToolPath = settings.ExternalDiffToolPath;

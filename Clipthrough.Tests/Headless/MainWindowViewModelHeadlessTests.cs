@@ -561,6 +561,17 @@ public sealed class MainWindowViewModelHeadlessTests
             RemoteApiBindAddress = "127.0.0.1",
             ThemeMode = Models.ThemeMode.Light,
             CloseToTray = true,
+            // Hotkeys section
+            EnableToggleRegexHotkey = true,
+            ToggleRegexHotkey = "Ctrl+R",
+            EnableToggleFavoritesHotkey = true,
+            ToggleFavoritesHotkey = "Ctrl+F",
+            EnableToggleWindowHotkey = true,
+            ToggleWindowHotkey = "Ctrl+Shift+V",
+            EnableIncrementalPasteHotkey = true,
+            IncrementalPasteHotkey = "Ctrl+OemOpenBrackets",
+            EnableCopyAndFavoriteHotkey = false,
+            CopyAndFavoriteHotkey = "Ctrl+Alt+F",
         });
 
         var clipboardMonitor = new TestClipboardMonitorService();
@@ -595,6 +606,17 @@ public sealed class MainWindowViewModelHeadlessTests
         // Theme / misc
         Assert.Equal(Models.ThemeMode.Light, viewModel.Settings.ThemeMode);
         Assert.True(viewModel.Settings.CloseToTray);
+        // Hotkeys section
+        Assert.True(viewModel.Settings.EnableToggleRegexHotkey);
+        Assert.Equal("Ctrl+R", viewModel.Settings.ToggleRegexHotkey);
+        Assert.True(viewModel.Settings.EnableToggleFavoritesHotkey);
+        Assert.Equal("Ctrl+F", viewModel.Settings.ToggleFavoritesHotkey);
+        Assert.True(viewModel.Settings.EnableToggleWindowHotkey);
+        Assert.Equal("Ctrl+Shift+V", viewModel.Settings.ToggleWindowHotkey);
+        Assert.True(viewModel.Settings.EnableIncrementalPasteHotkey);
+        Assert.Equal("Ctrl+OemOpenBrackets", viewModel.Settings.IncrementalPasteHotkey);
+        Assert.False(viewModel.Settings.EnableCopyAndFavoriteHotkey);
+        Assert.Equal("Ctrl+Alt+F", viewModel.Settings.CopyAndFavoriteHotkey);
     }
 
     // Regression guard for the U12 read-model split: list/search reads omit image

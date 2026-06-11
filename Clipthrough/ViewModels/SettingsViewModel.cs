@@ -265,4 +265,260 @@ public sealed class SettingsViewModel : ViewModelBase
         get => _startWithWindows;
         set => this.RaiseAndSetIfChanged(ref _startWithWindows, value);
     }
+
+    // --- Hotkeys (local filter toggles) ---
+
+    private string _toggleRegexHotkey = AppSettings.Default.ToggleRegexHotkey;
+    public string ToggleRegexHotkey
+    {
+        get => _toggleRegexHotkey;
+        set => this.RaiseAndSetIfChanged(ref _toggleRegexHotkey, value);
+    }
+
+    private bool _enableToggleRegexHotkey = AppSettings.Default.EnableToggleRegexHotkey;
+    public bool EnableToggleRegexHotkey
+    {
+        get => _enableToggleRegexHotkey;
+        set => this.RaiseAndSetIfChanged(ref _enableToggleRegexHotkey, value);
+    }
+
+    private string _toggleFavoritesHotkey = AppSettings.Default.ToggleFavoritesHotkey;
+    public string ToggleFavoritesHotkey
+    {
+        get => _toggleFavoritesHotkey;
+        set => this.RaiseAndSetIfChanged(ref _toggleFavoritesHotkey, value);
+    }
+
+    private bool _enableToggleFavoritesHotkey = AppSettings.Default.EnableToggleFavoritesHotkey;
+    public bool EnableToggleFavoritesHotkey
+    {
+        get => _enableToggleFavoritesHotkey;
+        set => this.RaiseAndSetIfChanged(ref _enableToggleFavoritesHotkey, value);
+    }
+
+    private string _toggleSensitiveHotkey = AppSettings.Default.ToggleSensitiveHotkey;
+    public string ToggleSensitiveHotkey
+    {
+        get => _toggleSensitiveHotkey;
+        set => this.RaiseAndSetIfChanged(ref _toggleSensitiveHotkey, value);
+    }
+
+    private bool _enableToggleSensitiveHotkey = AppSettings.Default.EnableToggleSensitiveHotkey;
+    public bool EnableToggleSensitiveHotkey
+    {
+        get => _enableToggleSensitiveHotkey;
+        set => this.RaiseAndSetIfChanged(ref _enableToggleSensitiveHotkey, value);
+    }
+
+    private string _toggleCaseSensitiveHotkey = AppSettings.Default.ToggleCaseSensitiveHotkey;
+    public string ToggleCaseSensitiveHotkey
+    {
+        get => _toggleCaseSensitiveHotkey;
+        set => this.RaiseAndSetIfChanged(ref _toggleCaseSensitiveHotkey, value);
+    }
+
+    private bool _enableToggleCaseSensitiveHotkey = AppSettings.Default.EnableToggleCaseSensitiveHotkey;
+    public bool EnableToggleCaseSensitiveHotkey
+    {
+        get => _enableToggleCaseSensitiveHotkey;
+        set => this.RaiseAndSetIfChanged(ref _enableToggleCaseSensitiveHotkey, value);
+    }
+
+    private string _toggleWildcardHotkey = AppSettings.Default.ToggleWildcardHotkey;
+    public string ToggleWildcardHotkey
+    {
+        get => _toggleWildcardHotkey;
+        set => this.RaiseAndSetIfChanged(ref _toggleWildcardHotkey, value);
+    }
+
+    private bool _enableToggleWildcardHotkey = AppSettings.Default.EnableToggleWildcardHotkey;
+    public bool EnableToggleWildcardHotkey
+    {
+        get => _enableToggleWildcardHotkey;
+        set => this.RaiseAndSetIfChanged(ref _enableToggleWildcardHotkey, value);
+    }
+
+    private string _toggleWholeWordHotkey = AppSettings.Default.ToggleWholeWordHotkey;
+    public string ToggleWholeWordHotkey
+    {
+        get => _toggleWholeWordHotkey;
+        set => this.RaiseAndSetIfChanged(ref _toggleWholeWordHotkey, value);
+    }
+
+    private bool _enableToggleWholeWordHotkey = AppSettings.Default.EnableToggleWholeWordHotkey;
+    public bool EnableToggleWholeWordHotkey
+    {
+        get => _enableToggleWholeWordHotkey;
+        set => this.RaiseAndSetIfChanged(ref _enableToggleWholeWordHotkey, value);
+    }
+
+    private string _togglePastedHotkey = AppSettings.Default.TogglePastedHotkey;
+    public string TogglePastedHotkey
+    {
+        get => _togglePastedHotkey;
+        set => this.RaiseAndSetIfChanged(ref _togglePastedHotkey, value);
+    }
+
+    private bool _enableTogglePastedHotkey = AppSettings.Default.EnableTogglePastedHotkey;
+    public bool EnableTogglePastedHotkey
+    {
+        get => _enableTogglePastedHotkey;
+        set => this.RaiseAndSetIfChanged(ref _enableTogglePastedHotkey, value);
+    }
+
+    private string _toggleFuzzyHotkey = AppSettings.Default.ToggleFuzzyHotkey;
+    public string ToggleFuzzyHotkey
+    {
+        get => _toggleFuzzyHotkey;
+        set => this.RaiseAndSetIfChanged(ref _toggleFuzzyHotkey, value);
+    }
+
+    private bool _enableToggleFuzzyHotkey = AppSettings.Default.EnableToggleFuzzyHotkey;
+    public bool EnableToggleFuzzyHotkey
+    {
+        get => _enableToggleFuzzyHotkey;
+        set => this.RaiseAndSetIfChanged(ref _enableToggleFuzzyHotkey, value);
+    }
+
+    private string _toggleSemanticHotkey = AppSettings.Default.ToggleSemanticHotkey;
+    public string ToggleSemanticHotkey
+    {
+        get => _toggleSemanticHotkey;
+        set => this.RaiseAndSetIfChanged(ref _toggleSemanticHotkey, value);
+    }
+
+    private bool _enableToggleSemanticHotkey = AppSettings.Default.EnableToggleSemanticHotkey;
+    public bool EnableToggleSemanticHotkey
+    {
+        get => _enableToggleSemanticHotkey;
+        set => this.RaiseAndSetIfChanged(ref _enableToggleSemanticHotkey, value);
+    }
+
+    // --- Hotkeys (global & paste) ---
+
+    private string _toggleWindowHotkey = AppSettings.Default.ToggleWindowHotkey;
+    public string ToggleWindowHotkey
+    {
+        get => _toggleWindowHotkey;
+        set => this.RaiseAndSetIfChanged(ref _toggleWindowHotkey, value);
+    }
+
+    private bool _enableToggleWindowHotkey = AppSettings.Default.EnableToggleWindowHotkey;
+    public bool EnableToggleWindowHotkey
+    {
+        get => _enableToggleWindowHotkey;
+        set => this.RaiseAndSetIfChanged(ref _enableToggleWindowHotkey, value);
+    }
+
+    private string _incrementalPasteHotkey = AppSettings.Default.IncrementalPasteHotkey;
+    public string IncrementalPasteHotkey
+    {
+        get => _incrementalPasteHotkey;
+        set => this.RaiseAndSetIfChanged(ref _incrementalPasteHotkey, value);
+    }
+
+    private bool _enableIncrementalPasteHotkey = AppSettings.Default.EnableIncrementalPasteHotkey;
+    public bool EnableIncrementalPasteHotkey
+    {
+        get => _enableIncrementalPasteHotkey;
+        set => this.RaiseAndSetIfChanged(ref _enableIncrementalPasteHotkey, value);
+    }
+
+    private string _decrementalPasteHotkey = AppSettings.Default.DecrementalPasteHotkey;
+    public string DecrementalPasteHotkey
+    {
+        get => _decrementalPasteHotkey;
+        set => this.RaiseAndSetIfChanged(ref _decrementalPasteHotkey, value);
+    }
+
+    private bool _enableDecrementalPasteHotkey = AppSettings.Default.EnableDecrementalPasteHotkey;
+    public bool EnableDecrementalPasteHotkey
+    {
+        get => _enableDecrementalPasteHotkey;
+        set => this.RaiseAndSetIfChanged(ref _enableDecrementalPasteHotkey, value);
+    }
+
+    private string _copyAndFavoriteHotkey = AppSettings.Default.CopyAndFavoriteHotkey;
+    public string CopyAndFavoriteHotkey
+    {
+        get => _copyAndFavoriteHotkey;
+        set => this.RaiseAndSetIfChanged(ref _copyAndFavoriteHotkey, value);
+    }
+
+    private bool _enableCopyAndFavoriteHotkey = AppSettings.Default.EnableCopyAndFavoriteHotkey;
+    public bool EnableCopyAndFavoriteHotkey
+    {
+        get => _enableCopyAndFavoriteHotkey;
+        set => this.RaiseAndSetIfChanged(ref _enableCopyAndFavoriteHotkey, value);
+    }
+
+    private string _copyAndSensitiveHotkey = AppSettings.Default.CopyAndSensitiveHotkey;
+    public string CopyAndSensitiveHotkey
+    {
+        get => _copyAndSensitiveHotkey;
+        set => this.RaiseAndSetIfChanged(ref _copyAndSensitiveHotkey, value);
+    }
+
+    private bool _enableCopyAndSensitiveHotkey = AppSettings.Default.EnableCopyAndSensitiveHotkey;
+    public bool EnableCopyAndSensitiveHotkey
+    {
+        get => _enableCopyAndSensitiveHotkey;
+        set => this.RaiseAndSetIfChanged(ref _enableCopyAndSensitiveHotkey, value);
+    }
+
+    private string _copyWithoutSavingHotkey = AppSettings.Default.CopyWithoutSavingHotkey;
+    public string CopyWithoutSavingHotkey
+    {
+        get => _copyWithoutSavingHotkey;
+        set => this.RaiseAndSetIfChanged(ref _copyWithoutSavingHotkey, value);
+    }
+
+    private bool _enableCopyWithoutSavingHotkey = AppSettings.Default.EnableCopyWithoutSavingHotkey;
+    public bool EnableCopyWithoutSavingHotkey
+    {
+        get => _enableCopyWithoutSavingHotkey;
+        set => this.RaiseAndSetIfChanged(ref _enableCopyWithoutSavingHotkey, value);
+    }
+
+    private string _pasteAndDeleteHotkey = AppSettings.Default.PasteAndDeleteHotkey;
+    public string PasteAndDeleteHotkey
+    {
+        get => _pasteAndDeleteHotkey;
+        set => this.RaiseAndSetIfChanged(ref _pasteAndDeleteHotkey, value);
+    }
+
+    private bool _enablePasteAndDeleteHotkey = AppSettings.Default.EnablePasteAndDeleteHotkey;
+    public bool EnablePasteAndDeleteHotkey
+    {
+        get => _enablePasteAndDeleteHotkey;
+        set => this.RaiseAndSetIfChanged(ref _enablePasteAndDeleteHotkey, value);
+    }
+
+    private string _pasteAndFavoriteHotkey = AppSettings.Default.PasteAndFavoriteHotkey;
+    public string PasteAndFavoriteHotkey
+    {
+        get => _pasteAndFavoriteHotkey;
+        set => this.RaiseAndSetIfChanged(ref _pasteAndFavoriteHotkey, value);
+    }
+
+    private bool _enablePasteAndFavoriteHotkey = AppSettings.Default.EnablePasteAndFavoriteHotkey;
+    public bool EnablePasteAndFavoriteHotkey
+    {
+        get => _enablePasteAndFavoriteHotkey;
+        set => this.RaiseAndSetIfChanged(ref _enablePasteAndFavoriteHotkey, value);
+    }
+
+    private string _pasteAsPlainTextHotkey = AppSettings.Default.PasteAsPlainTextHotkey;
+    public string PasteAsPlainTextHotkey
+    {
+        get => _pasteAsPlainTextHotkey;
+        set => this.RaiseAndSetIfChanged(ref _pasteAsPlainTextHotkey, value);
+    }
+
+    private bool _enablePasteAsPlainTextHotkey = AppSettings.Default.EnablePasteAsPlainTextHotkey;
+    public bool EnablePasteAsPlainTextHotkey
+    {
+        get => _enablePasteAsPlainTextHotkey;
+        set => this.RaiseAndSetIfChanged(ref _enablePasteAsPlainTextHotkey, value);
+    }
 }

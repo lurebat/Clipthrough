@@ -70,58 +70,58 @@
                           RowSpacing="10"
                           Margin="8,10,0,0">
                         <CheckBox Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableToggleRegexHotkey}" />
+                                  IsChecked="{Binding Settings.EnableToggleRegexHotkey}" />
                         <TextBlock Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsRegexHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Column="2" Hotkey="{Binding SettingsToggleRegexHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <ctrl:HotkeyBox Grid.Column="2" Hotkey="{Binding Settings.ToggleRegexHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="1" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableToggleFavoritesHotkey}" />
+                                  IsChecked="{Binding Settings.EnableToggleFavoritesHotkey}" />
                         <TextBlock Grid.Row="1" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsFavoritesHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="1" Grid.Column="2" Hotkey="{Binding SettingsToggleFavoritesHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <ctrl:HotkeyBox Grid.Row="1" Grid.Column="2" Hotkey="{Binding Settings.ToggleFavoritesHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="2" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableToggleSensitiveHotkey}" />
+                                  IsChecked="{Binding Settings.EnableToggleSensitiveHotkey}" />
                         <TextBlock Grid.Row="2" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsSensitiveHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="2" Grid.Column="2" Hotkey="{Binding SettingsToggleSensitiveHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <ctrl:HotkeyBox Grid.Row="2" Grid.Column="2" Hotkey="{Binding Settings.ToggleSensitiveHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="3" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableToggleCaseSensitiveHotkey}" />
+                                  IsChecked="{Binding Settings.EnableToggleCaseSensitiveHotkey}" />
                         <TextBlock Grid.Row="3" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsCaseSensitiveHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="3" Grid.Column="2" Hotkey="{Binding SettingsToggleCaseSensitiveHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <ctrl:HotkeyBox Grid.Row="3" Grid.Column="2" Hotkey="{Binding Settings.ToggleCaseSensitiveHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="4" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableToggleWildcardHotkey}" />
+                                  IsChecked="{Binding Settings.EnableToggleWildcardHotkey}" />
                         <TextBlock Grid.Row="4" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsWildcardHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="4" Grid.Column="2" Hotkey="{Binding SettingsToggleWildcardHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <ctrl:HotkeyBox Grid.Row="4" Grid.Column="2" Hotkey="{Binding Settings.ToggleWildcardHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="5" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableToggleWholeWordHotkey}" />
+                                  IsChecked="{Binding Settings.EnableToggleWholeWordHotkey}" />
                         <TextBlock Grid.Row="5" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsWholeWordHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="5" Grid.Column="2" Hotkey="{Binding SettingsToggleWholeWordHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <ctrl:HotkeyBox Grid.Row="5" Grid.Column="2" Hotkey="{Binding Settings.ToggleWholeWordHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="6" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableTogglePastedHotkey}" />
+                                  IsChecked="{Binding Settings.EnableTogglePastedHotkey}" />
                         <TextBlock Grid.Row="6" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsPastedHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="6" Grid.Column="2" Hotkey="{Binding SettingsTogglePastedHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <ctrl:HotkeyBox Grid.Row="6" Grid.Column="2" Hotkey="{Binding Settings.TogglePastedHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="7" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableToggleFuzzyHotkey}" />
+                                  IsChecked="{Binding Settings.EnableToggleFuzzyHotkey}" />
                         <TextBlock Grid.Row="7" Grid.Column="1" VerticalAlignment="Center"
                                    Text="Toggle fuzzy search" />
-                        <ctrl:HotkeyBox Grid.Row="7" Grid.Column="2" Hotkey="{Binding SettingsToggleFuzzyHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <ctrl:HotkeyBox Grid.Row="7" Grid.Column="2" Hotkey="{Binding Settings.ToggleFuzzyHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="8" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableToggleSemanticHotkey}" />
+                                  IsChecked="{Binding Settings.EnableToggleSemanticHotkey}" />
                         <TextBlock Grid.Row="8" Grid.Column="1" VerticalAlignment="Center"
                                    Text="Toggle semantic search" />
-                        <ctrl:HotkeyBox Grid.Row="8" Grid.Column="2" Hotkey="{Binding SettingsToggleSemanticHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <ctrl:HotkeyBox Grid.Row="8" Grid.Column="2" Hotkey="{Binding Settings.ToggleSemanticHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                     </Grid>
                 </Expander>
 
@@ -142,58 +142,58 @@
                               ColumnSpacing="12"
                               RowSpacing="10">
                         <CheckBox Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableToggleWindowHotkey}" />
+                                  IsChecked="{Binding Settings.EnableToggleWindowHotkey}" />
                         <TextBlock Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsToggleWindowHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Column="2" Hotkey="{Binding SettingsToggleWindowHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <ctrl:HotkeyBox Grid.Column="2" Hotkey="{Binding Settings.ToggleWindowHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="1" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableIncrementalPasteHotkey}" />
+                                  IsChecked="{Binding Settings.EnableIncrementalPasteHotkey}" />
                         <TextBlock Grid.Row="1" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsIncrementalPasteHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="1" Grid.Column="2" Hotkey="{Binding SettingsIncrementalPasteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <ctrl:HotkeyBox Grid.Row="1" Grid.Column="2" Hotkey="{Binding Settings.IncrementalPasteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="2" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableDecrementalPasteHotkey}" />
+                                  IsChecked="{Binding Settings.EnableDecrementalPasteHotkey}" />
                         <TextBlock Grid.Row="2" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsDecrementalPasteHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="2" Grid.Column="2" Hotkey="{Binding SettingsDecrementalPasteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <ctrl:HotkeyBox Grid.Row="2" Grid.Column="2" Hotkey="{Binding Settings.DecrementalPasteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="3" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableCopyAndFavoriteHotkey}" />
+                                  IsChecked="{Binding Settings.EnableCopyAndFavoriteHotkey}" />
                         <TextBlock Grid.Row="3" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsCopyAndFavoriteHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="3" Grid.Column="2" Hotkey="{Binding SettingsCopyAndFavoriteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <ctrl:HotkeyBox Grid.Row="3" Grid.Column="2" Hotkey="{Binding Settings.CopyAndFavoriteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="4" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableCopyAndSensitiveHotkey}" />
+                                  IsChecked="{Binding Settings.EnableCopyAndSensitiveHotkey}" />
                         <TextBlock Grid.Row="4" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsCopyAndSensitiveHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="4" Grid.Column="2" Hotkey="{Binding SettingsCopyAndSensitiveHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <ctrl:HotkeyBox Grid.Row="4" Grid.Column="2" Hotkey="{Binding Settings.CopyAndSensitiveHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="5" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableCopyWithoutSavingHotkey}" />
+                                  IsChecked="{Binding Settings.EnableCopyWithoutSavingHotkey}" />
                         <TextBlock Grid.Row="5" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsCopyWithoutSavingHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="5" Grid.Column="2" Hotkey="{Binding SettingsCopyWithoutSavingHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <ctrl:HotkeyBox Grid.Row="5" Grid.Column="2" Hotkey="{Binding Settings.CopyWithoutSavingHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="6" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnablePasteAndDeleteHotkey}" />
+                                  IsChecked="{Binding Settings.EnablePasteAndDeleteHotkey}" />
                         <TextBlock Grid.Row="6" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsPasteAndDeleteHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="6" Grid.Column="2" Hotkey="{Binding SettingsPasteAndDeleteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <ctrl:HotkeyBox Grid.Row="6" Grid.Column="2" Hotkey="{Binding Settings.PasteAndDeleteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="7" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnablePasteAndFavoriteHotkey}" />
+                                  IsChecked="{Binding Settings.EnablePasteAndFavoriteHotkey}" />
                         <TextBlock Grid.Row="7" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsPasteAndFavoriteHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="7" Grid.Column="2" Hotkey="{Binding SettingsPasteAndFavoriteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <ctrl:HotkeyBox Grid.Row="7" Grid.Column="2" Hotkey="{Binding Settings.PasteAndFavoriteHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="8" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnablePasteAsPlainTextHotkey}" />
+                                  IsChecked="{Binding Settings.EnablePasteAsPlainTextHotkey}" />
                         <TextBlock Grid.Row="8" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsPasteAsPlainTextHotkeyLabel}" />
-                        <ctrl:HotkeyBox Grid.Row="8" Grid.Column="2" Hotkey="{Binding SettingsPasteAsPlainTextHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <ctrl:HotkeyBox Grid.Row="8" Grid.Column="2" Hotkey="{Binding Settings.PasteAsPlainTextHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </Grid>
                     </StackPanel>
                 </Expander>
