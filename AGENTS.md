@@ -97,6 +97,8 @@ The headless filter is there because some Avalonia headless tests hang intermitt
 - `README.md`: user-facing. Keep setup, feature list, and screenshots current when behavior changes.
 - `AGENTS.md` (this file): developer/agent guidance. Update when architecture or conventions change.
 - `CONTRIBUTING.md`: PR and style guidance.
+- `CONCEPTS.md`: glossary of project-specific terms (ClipEntry, WAL, lazy hydration, MetaSegments, etc.). Consult before using a term you haven't seen in code, and update when introducing a new project-specific concept.
+- `docs/solutions/`: verified fix and pattern docs (regression-prevention knowledge base). Each doc has YAML frontmatter (`tags`, `version`, `severity`). Read relevant docs before touching persistence, threading, background workers, or search. Add a doc after landing a non-obvious bug fix. See `docs/solutions/README.md` for structure and frontmatter schema.
 - `.github/copilot-cli-skills/clipthrough-remote-api.md`: agent-facing reference for the local Remote API. Update it whenever the API surface, auth rules, or DTOs change.
 - `.github/copilot-cli-skills/clipthrough-transforms.md`: agent-facing reference for built-in transformations, the auto-copy contract, user scripts/AI presets, and the custom-hotkey `Target` syntax (`builtin:` / `script:` / `ai:` / `prompt:`). Update when adding transforms or new hotkey kinds.
 - `.github/copilot-cli-skills/clipthrough-storage-schema.md`: agent-facing reference for the SQLite schema, FTS5 triggers, indexes, and the migration pattern. Update on every schema change.
