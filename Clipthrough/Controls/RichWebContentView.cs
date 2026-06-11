@@ -131,8 +131,13 @@ public sealed class RichWebContentView : UserControl
                 try
                 {
                     var captured = content;
-                    document = await Task.Run(() => WrapFragmentDocument(RtfToHtmlConverter.Convert(captured), editable: false))
+                    // RtfPipe exposes no cancellation hook, so run it on a dedicated
+                    // background thread instead of a pool thread: if it hangs on
+                    // pathological input the abandoned (background) thread won't
+                    // starve the shared thread pool the rest of the app relies on.
+                    var html = await ConvertRtfOnDedicatedThreadAsync(captured)
                         .WaitAsync(TimeSpan.FromSeconds(3));
+                    document = WrapFragmentDocument(html, editable: false);
                 }
                 catch (TimeoutException)
                 {
@@ -156,6 +161,26 @@ public sealed class RichWebContentView : UserControl
         }
 
         ApplyDocument(document, content);
+    }
+
+    // Converts RTF→HTML on a dedicated background thread. RtfPipe is synchronous
+    // and uncancellable, so when the caller's WaitAsync timeout elapses the work
+    // is abandoned; using a background thread (not the shared pool) means a hung
+    // conversion can't exhaust the pool that DB writes and captures depend on.
+    private static Task<string> ConvertRtfOnDedicatedThreadAsync(string rtf)
+    {
+        var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try { tcs.TrySetResult(RtfToHtmlConverter.Convert(rtf)); }
+            catch (Exception ex) { tcs.TrySetException(ex); }
+        })
+        {
+            IsBackground = true,
+            Name = "rtf-to-html",
+        };
+        thread.Start();
+        return tcs.Task;
     }
 
     private void ApplyDocument(string document, string? content)

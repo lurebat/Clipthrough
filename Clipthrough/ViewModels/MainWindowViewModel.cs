@@ -993,6 +993,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 _checkedSelectionAnchorId = value.Id;
             }
             UpdateSelectedClipPresentation();
+            _ = EnsureSelectedClipHydratedAsync();
             RaiseSelectionStateProperties();
             // Selection drives which AI entries / user scripts are eligible
             // (text vs. image). Without this the visible-entries collection
@@ -2604,6 +2605,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedClipFiles.Clear();
         ClearClips();
         SessionLogs.Dispose();
+        Copilot.Dispose();
         _subscriptions.Dispose();
     }
 
@@ -3336,6 +3338,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private async Task EditSelectedImageAsync()
     {
         var clip = GetEffectiveSelectedClip();
+        if (clip is not null) await clip.EnsureContentHydratedAsync();
         if (clip?.Clip.ContentType != ContentType.Image || clip.Clip.ContentBytes is not { Length: > 0 } imageBytes)
         {
             return;
@@ -4629,6 +4632,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         return Clips.FirstOrDefault(static clip => !clip.IsPinned) ?? Clips[0];
+    }
+
+    // Image/icon bytes are omitted from list/search reads (U12). On selection, pull
+    // the selected clip's full bytes so the preview pane, edit, export, drag, and
+    // AI-image paths have them, then refresh the image-dependent presentation.
+    private async Task EnsureSelectedClipHydratedAsync()
+    {
+        var clip = SelectedClip;
+        if (clip is null)
+        {
+            return;
+        }
+        await clip.EnsureContentHydratedAsync();
+        if (ReferenceEquals(clip, SelectedClip))
+        {
+            UpdateSelectedClipPresentation();
+            this.RaisePropertyChanged(nameof(HasTransformableTarget));
+            this.RaisePropertyChanged(nameof(HasImageTransformTarget));
+        }
     }
 
     private void UpdateSelectedClipPresentation()
@@ -6089,7 +6111,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (_embeddingWorker is not null)
         {
             _subscriptions.Add(_embeddingWorker.BatchCompleted
-                .ObserveOn(RxSchedulers.MainThreadScheduler)
+                // Coalesce coverage refreshes: a large backlog fires BatchCompleted
+                // every batch (~32 clips) and each refresh runs a full-table
+                // aggregate. Throttle so the scan runs at most ~twice a second.
+                .Throttle(TimeSpan.FromMilliseconds(500), RxSchedulers.MainThreadScheduler)
                 .Subscribe((int count) => { _ = RefreshSemanticCoverageAsync(); }));
         }
     }
@@ -6179,6 +6204,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         var clip = GetEffectiveSelectedClip();
+        if (clip is not null) await clip.EnsureContentHydratedAsync();
         if (clip is null || clip.Clip.ContentType != ContentType.Image || clip.Clip.ContentBytes is not { Length: > 0 } imageBytes)
         {
             _notificationService.PublishWarning(
@@ -6767,7 +6793,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             DeleteClipAsync,
             ExportClipAsync,
             TogglePinClipAsync,
-            ApplyTransformationToSingleClipAsync)
+            ApplyTransformationToSingleClipAsync,
+            id => Task.Run(() => _clipStoreService.GetByIdAsync(id)))
         {
             IsChecked = checkedIds?.Contains(clip.Id) == true
         };

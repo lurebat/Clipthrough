@@ -866,7 +866,7 @@ public sealed class ClipStoreService : IClipStoreService
         }
 
         command.CommandText = $"""
-            SELECT {ClipSelectColumns}
+            SELECT {ClipListSelectColumns}
             FROM clips c
             WHERE c.id IN ({string.Join(",", placeholders)});
             """;
@@ -875,7 +875,7 @@ public sealed class ClipStoreService : IClipStoreService
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            var clip = ReadClip(reader);
+            var clip = ReadClipMeta(reader);
             map[clip.Id] = clip;
         }
 
@@ -1908,6 +1908,12 @@ public sealed class ClipStoreService : IClipStoreService
 
     private const string EmbeddingTextExpression = "CASE WHEN content_type = 'image' THEN ocr_text ELSE content END";
 
+    // After this many failed attempts a clip is no longer re-claimed by
+    // ClaimPendingEmbeddingsAsync, so a poison clip (content that always crashes
+    // inference) can't pin the worker re-embedding it every idle cycle forever.
+    // A RerunAll resets the counter to give every clip a fresh set of attempts.
+    private const int MaxEmbeddingAttempts = 3;
+
     public async Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default)
     {
         if (batchSize <= 0) return Array.Empty<ClipEmbeddingCandidate>();
@@ -1925,12 +1931,14 @@ public sealed class ClipStoreService : IClipStoreService
             selectCommand.CommandText = $"""
                 SELECT id, ({EmbeddingTextExpression}) AS etext
                 FROM clips
-                WHERE (embedding_status IS NULL OR embedding_status IN ('pending','rerun','failed'))
+                WHERE (embedding_status IS NULL OR embedding_status IN ('pending','rerun')
+                       OR (embedding_status = 'failed' AND embedding_attempts < $maxAttempts))
                   AND {EmbeddingEligibilityClause}
                 ORDER BY COALESCE(last_copied_at, captured_at) DESC
                 LIMIT $limit;
                 """;
             selectCommand.Parameters.AddWithValue("$limit", batchSize);
+            selectCommand.Parameters.AddWithValue("$maxAttempts", MaxEmbeddingAttempts);
 
             await using var reader = await selectCommand.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
@@ -2027,7 +2035,7 @@ public sealed class ClipStoreService : IClipStoreService
         await connection.OpenAsync(cancellationToken);
 
         await using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE clips SET embedding_status = 'failed' WHERE id = $id;";
+        command.CommandText = "UPDATE clips SET embedding_status = 'failed', embedding_attempts = embedding_attempts + 1 WHERE id = $id;";
         command.Parameters.AddWithValue("$id", clipId);
         // error message is logged by the caller; no dedicated column yet.
         _ = error;
@@ -2055,7 +2063,7 @@ public sealed class ClipStoreService : IClipStoreService
             update.Transaction = transaction;
             update.CommandText = $"""
                 UPDATE clips
-                SET embedding_status = 'rerun'
+                SET embedding_status = 'rerun', embedding_attempts = 0
                 WHERE {EmbeddingEligibilityClause}
                 RETURNING id;
                 """;

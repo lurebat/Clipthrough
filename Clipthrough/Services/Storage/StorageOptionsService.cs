@@ -47,7 +47,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
     {
     }
 
-    private StorageOptionsService(
+    internal StorageOptionsService(
         IDataProtectionService dataProtection,
         string configPath,
         IServiceProvider? services)
@@ -153,7 +153,11 @@ public sealed class StorageOptionsService : IStorageOptionsService
             // Path move copies the DB (inside a maintenance scope).
             // Same-path password edits are validated against the actual DB key
             // but do NOT trigger rekey — use RekeyAsync to re-encrypt.
-            await ApplyStorageChangesAsync(previous, normalized, cancellationToken);
+            // The path-move maintenance scope must outlive the Current flip: it
+            // restarts the workers on dispose, and they reopen Current — which must
+            // already be the new path, or they recreate an empty DB at the deleted
+            // old path and every later clip is lost. Null for non-move saves.
+            await using var scope = await ApplyStorageChangesAsync(previous, normalized, cancellationToken);
             await SaveToDiskAsync(normalized, cancellationToken);
             Current = normalized;
         }
@@ -163,7 +167,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
         }
     }
 
-    private async Task ApplyStorageChangesAsync(StorageOptions previous, StorageOptions next, CancellationToken cancellationToken)
+    private async Task<DatabaseMaintenanceScope?> ApplyStorageChangesAsync(StorageOptions previous, StorageOptions next, CancellationToken cancellationToken)
     {
         var oldPath = previous.DatabasePath;
         var newPath = next.DatabasePath;
@@ -171,7 +175,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
         if (!File.Exists(oldPath))
         {
             Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
-            return;
+            return null;
         }
 
         if (string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase))
@@ -196,64 +200,78 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
             // Password edits no longer trigger rekey here — that's
             // explicit through RekeyAsync.
-            return;
+            return null;
         }
 
         // --- Atomic path move (U6) ---
         // Quiesce workers so no clip is written to the old path between the
         // snapshot and the Current flip; clear the pool so no pooled connection
-        // holds the source file open.
-        await using var scope = await EnterMaintenanceScopeAsync();
-
-        Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
-
-        // Checkpoint the source WAL so the raw file copy is consistent.
-        TryCheckpointLegacyDatabase(oldPath, previous.DatabasePassword);
-        SqliteConnection.ClearAllPools();
-
-        // If the destination already exists, keep a timestamped safety copy.
-        if (File.Exists(newPath))
-        {
-            var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
-            var safeguard = newPath + ".before-move-" + stamp;
-            File.Copy(newPath, safeguard, overwrite: false);
-            Trace.TraceInformation($"Existing target '{newPath}' backed up to '{safeguard}'.");
-        }
-
-        // Copy source → temp (in the destination directory for same-volume rename).
-        var tempPath = Path.Combine(Path.GetDirectoryName(newPath)!, Path.GetFileName(newPath) + ".moving-" + Guid.NewGuid().ToString("N"));
-        File.Copy(oldPath, tempPath, overwrite: false);
-
+        // holds the source file open. The scope is returned to the caller, which
+        // disposes it only AFTER flipping Current to the new path — otherwise the
+        // restarted workers reopen Current (still the old, now-deleted path) and
+        // recreate an empty DB there, losing every subsequent clip.
+        var scope = await EnterMaintenanceScopeAsync();
         try
         {
-            // Atomic rename: temp → newPath (overwrites any existing file).
-            File.Move(tempPath, newPath, overwrite: true);
-            tempPath = null; // newPath owns it now — don't delete in finally.
+            Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
 
-            // Remove the source and its WAL/SHM sidecar files.
-            foreach (var suffix in new[] { string.Empty, "-wal", "-shm" })
+            // Checkpoint the source WAL so the raw file copy is consistent.
+            TryCheckpointLegacyDatabase(oldPath, previous.DatabasePassword);
+            SqliteConnection.ClearAllPools();
+
+            // If the destination already exists, keep a timestamped safety copy.
+            if (File.Exists(newPath))
             {
-                var src = oldPath + suffix;
-                if (File.Exists(src))
+                var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+                var safeguard = newPath + ".before-move-" + stamp;
+                File.Copy(newPath, safeguard, overwrite: false);
+                Trace.TraceInformation($"Existing target '{newPath}' backed up to '{safeguard}'.");
+            }
+
+            // Copy source → temp (in the destination directory for same-volume rename).
+            var tempPath = Path.Combine(Path.GetDirectoryName(newPath)!, Path.GetFileName(newPath) + ".moving-" + Guid.NewGuid().ToString("N"));
+            File.Copy(oldPath, tempPath, overwrite: false);
+
+            try
+            {
+                // Atomic rename: temp → newPath (overwrites any existing file).
+                File.Move(tempPath, newPath, overwrite: true);
+                tempPath = null; // newPath owns it now — don't delete in finally.
+
+                // Remove the source and its WAL/SHM sidecar files.
+                foreach (var suffix in new[] { string.Empty, "-wal", "-shm" })
                 {
-                    try { File.Delete(src); }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    var src = oldPath + suffix;
+                    if (File.Exists(src))
                     {
-                        Trace.TraceWarning($"Could not remove source file '{src}': {ex.Message}");
+                        try { File.Delete(src); }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                        {
+                            Trace.TraceWarning($"Could not remove source file '{src}': {ex.Message}");
+                        }
                     }
                 }
-            }
 
-            Trace.TraceInformation($"Database moved from '{oldPath}' to '{newPath}'.");
-        }
-        finally
-        {
-            // Clean up the temp copy if the rename failed.
-            if (tempPath is not null && File.Exists(tempPath))
+                Trace.TraceInformation($"Database moved from '{oldPath}' to '{newPath}'.");
+            }
+            finally
             {
-                try { File.Delete(tempPath); } catch { /* best effort */ }
+                // Clean up the temp copy if the rename failed.
+                if (tempPath is not null && File.Exists(tempPath))
+                {
+                    try { File.Delete(tempPath); } catch { /* best effort */ }
+                }
             }
         }
+        catch
+        {
+            // The move failed before Current was flipped; restart the workers on
+            // the original path (still intact) so the app stays functional.
+            await scope.DisposeAsync();
+            throw;
+        }
+
+        return scope;
     }
 
     /// <summary>
@@ -267,9 +285,9 @@ public sealed class StorageOptionsService : IStorageOptionsService
     ///   4. Copy DB to a temp file.
     ///   5. Apply PRAGMA rekey to the copy.
     ///   6. Verify the copy opens with the new password.
-    ///   7. Persist storage.json with the new password.
-    ///   8. Atomic rename: temp → live DB path.
-    ///   9. Update Current.
+    ///   7. Atomic rename: temp → live DB path (DB file is the source of truth).
+    ///   8. Update Current (key for the session + workers restarted on scope dispose).
+    ///   9. Persist storage.json with the new password.
     ///
     /// If any step fails the original DB is untouched; the temp copy is cleaned up.
     /// </summary>
@@ -339,22 +357,31 @@ public sealed class StorageOptionsService : IStorageOptionsService
                         "Rekey verification failed: the rekeyed copy does not open with the new password.");
                 }
 
-                // Step 7: Persist storage.json with the new password BEFORE the swap.
+                // Step 7: Atomic swap — the rekeyed copy (verified in step 6 to
+                // open with the new password) becomes the live database. Swap the
+                // file BEFORE persisting the password: the DB file is the source of
+                // truth for which key is required. A crash here leaves a freshly
+                // rekeyed DB with storage.json still on the old password, so the next
+                // launch falls back to the unlock prompt — which accepts the new
+                // password the user just chose. Persisting first would instead point
+                // storage.json at a key the still-old DB rejects, locking them out.
+                SqliteConnection.ClearAllPools();
+                File.Move(tempPath, dbPath, overwrite: true);
+                tempPath = null; // dbPath owns it now.
+
                 var updated = (current with
                 {
                     DatabasePassword = newPassword ?? string.Empty,
                     RememberPassword = rememberNewPassword,
                 }).Normalize();
 
-                await SaveToDiskAsync(updated, cancellationToken);
-
-                // Step 8: Atomic swap — temp becomes the live database.
-                SqliteConnection.ClearAllPools();
-                File.Move(tempPath, dbPath, overwrite: true);
-                tempPath = null; // dbPath owns it now.
-
-                // Step 9: Update in-memory state.
+                // Step 8: Update in-memory state so the running session (and the
+                // workers restarted on scope dispose) use the new key.
                 Current = updated;
+
+                // Step 9: Persist the remembered password last. If this throws the
+                // DB is already rekeyed and Current is correct for this session.
+                await SaveToDiskAsync(updated, cancellationToken);
 
                 Trace.TraceInformation($"Database rekeyed successfully.");
             }

@@ -686,6 +686,80 @@ public sealed class ClipStoreServiceTests
         Assert.Equal(c1.Id, claimedAgain[0].ClipId);
     }
 
+    // Bug #7: a clip whose inference always fails must stop being re-claimed after
+    // MaxEmbeddingAttempts (3) failures instead of being re-embedded every idle
+    // cycle forever. RerunAll resets the counter for a fresh set of attempts.
+    [Fact]
+    public async Task Embeddings_PoisonClip_StopsBeingReclaimedAfterMaxAttempts()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "poison",
+            ContentBytes = Encoding.UTF8.GetBytes("poison"),
+            SourceApp = "Editor",
+            IncrementExistingCopyCount = true,
+        });
+        Assert.NotNull(clip);
+
+        // Three claim+fail cycles (the retry cap). Each must still hand the clip out.
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var claimed = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10);
+            Assert.Single(claimed);
+            Assert.Equal(clip!.Id, claimed[0].ClipId);
+            await scope.ClipStoreService.SetEmbeddingFailureAsync(clip.Id, "boom");
+        }
+
+        // Fourth claim: the cap is reached, so the poison clip is no longer offered.
+        Assert.Empty(await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10));
+
+        // RerunAll resets the attempt counter — the clip becomes claimable again.
+        await scope.ClipStoreService.MarkAllEmbeddingsForRerunAsync();
+        var afterRerun = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10);
+        Assert.Single(afterRerun);
+        Assert.Equal(clip!.Id, afterRerun[0].ClipId);
+    }
+
+    // Bug #8: GetByIdsAsync feeds the list (semantic-search additions), so it must
+    // use the metadata-only read model and omit image bytes — the per-clip hydrator
+    // (GetByIdAsync) loads them on select. Loading every BLOB here is wasteful.
+    [Fact]
+    public async Task GetByIdsAsync_OmitsImageBytes_ButFullReadCarriesThem()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 1 << 20 });
+
+        var png = new byte[] { 0x89, 0x50, 0x4E, 0x47, 1, 2, 3, 4 };
+        var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Image,
+            ContentFormat = ClipContentFormat.Bitmap,
+            ContentText = string.Empty,
+            ContentBytes = png,
+            SourceApp = "Editor",
+            IncrementExistingCopyCount = true,
+        });
+        Assert.NotNull(clip);
+
+        var byIds = await scope.ClipStoreService.GetByIdsAsync(new[] { clip!.Id });
+        var fetched = Assert.Single(byIds);
+        Assert.Equal(clip.Id, fetched.Id);
+        Assert.Equal(ContentType.Image, fetched.ContentType);
+        Assert.Null(fetched.ContentBytes);
+
+        // The full-content read (the hydrator) still carries the bytes.
+        var full = await scope.ClipStoreService.GetByIdAsync(clip.Id);
+        Assert.NotNull(full!.ContentBytes);
+        Assert.Equal(png, full.ContentBytes);
+    }
+
     [Fact]
     public async Task InitializeAsync_IsIdempotent_AndSurvivesLegacySchema()
     {

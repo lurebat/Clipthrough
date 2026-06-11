@@ -137,6 +137,26 @@ validation, prune). Not automatable below.
   left torn; `ClearAllPools` in the maintenance scope releases the app's own handles first.
 - [ ]
 
+### MT-2.4 — Rekey crash-window is recoverable; large-DB rekey keeps the UI responsive
+*Why manual:* needs crash injection mid-rekey and human-perceived UI timing on a large DB.
+1. On a large encrypted DB (hundreds of MB), open "Re-encrypt database…", set a new password, apply;
+   watch the window during the copy/swap. 2. Separately, kill the process *after* the file swap but
+   *before* `storage.json` is rewritten (between steps 7 and 9 of `RekeyAsync`).
+- **Expect:** (a) the window stays responsive during the rekey — the file copy runs off the UI
+  thread; (b) after the mid-rekey kill, relaunch finds the **new**-key DB and the unlock prompt
+  accepts the **new** password — no lockout. (Pre-fix the password was persisted before the swap,
+  so a crash there pointed `storage.json` at a key the still-old DB rejected.)
+- [ ]
+
+### MT-2.5 — A clipboard copy during DB maintenance is not lost to the discarded database
+*Why manual:* requires racing a real OS clipboard copy against a live rekey/move/restore.
+1. Start a path-move, rekey, or restore. 2. While it runs, copy something new from another app.
+- **Expect:** the copy is either captured into the post-maintenance database or simply skipped —
+  never written into the old database about to be swapped out (which would silently lose it).
+  After maintenance the clipboard monitor resumes capturing, and a *failed* restore restarts the
+  workers so the session keeps capturing rather than going silently dead.
+- [ ]
+
 ---
 
 ## Phases 5 & 6 — Search scalability + worker robustness (R4, R5)
@@ -196,6 +216,10 @@ host-allowlist feed validation). Not automatable below.
 1. Copy a very large/malformed RTF (e.g. from a big Word doc). 2. Select that clip in the preview.
 - **Expect:** preview renders within ~3s or falls back to plain text on timeout; the UI never
   freezes during conversion.
+3. Repeat with several different pathological RTF clips back-to-back.
+- **Expect (thread leak):** the app stays responsive across repeats — the conversion runs on a
+  dedicated background thread, so a hung RtfPipe parse abandons one thread without starving the
+  shared thread pool that DB writes and captures depend on.
 - [ ]
 
 ### MT-7.4 — SQLite failure during capture is surfaced, not swallowed

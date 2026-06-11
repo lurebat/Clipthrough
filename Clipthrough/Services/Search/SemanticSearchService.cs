@@ -65,10 +65,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
         await _refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var loaded = await _clipStore.LoadAllEmbeddingsAsync(cancellationToken).ConfigureAwait(false);
-            var snapshot = BuildSnapshot(loaded);
-            Volatile.Write(ref _cache, snapshot);
-            _hasLoaded = true;
+            await ReloadLocked(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -76,54 +73,89 @@ public sealed class SemanticSearchService : ISemanticSearchService
         }
     }
 
+    // Reloads the whole cache from the store. Caller MUST hold _refreshGate.
+    private async Task ReloadLocked(CancellationToken cancellationToken)
+    {
+        var loaded = await _clipStore.LoadAllEmbeddingsAsync(cancellationToken).ConfigureAwait(false);
+        Volatile.Write(ref _cache, BuildSnapshot(loaded));
+        _hasLoaded = true;
+    }
+
     public async Task AppendEmbeddingsAsync(IReadOnlyList<ClipEmbeddingRecord> records, CancellationToken cancellationToken = default)
     {
         if (records is null || records.Count == 0) return;
 
-        var existing = Volatile.Read(ref _cache);
-
-        // If the cache is empty or has no established dimension, fall back to a full reload.
-        if (existing.Count == 0 || existing.Dim == 0)
+        // Hold the same gate as RefreshCacheAsync: the read-modify-write of _cache
+        // below must be atomic against a concurrent refresh or a second append, or
+        // one writer's snapshot silently clobbers the other's (lost embeddings).
+        await _refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            await RefreshCacheAsync(cancellationToken).ConfigureAwait(false);
-            return;
-        }
+            var existing = Volatile.Read(ref _cache);
 
-        var dim = existing.Dim;
-        var existingIds = new HashSet<long>(existing.Count);
-        for (var i = 0; i < existing.Count; i++)
-        {
-            existingIds.Add(existing.Ids[i]);
-        }
-
-        // Only append records that have the expected dimension and are not already cached.
-        var toAdd = new List<ClipEmbeddingRecord>(records.Count);
-        foreach (var r in records)
-        {
-            if (r.Vector is { Length: > 0 } v && v.Length == dim && !existingIds.Contains(r.ClipId))
+            // No established dimension yet — a full (locked) reload is the only way
+            // to learn it, and it subsumes these records once they are persisted.
+            if (existing.Count == 0 || existing.Dim == 0)
             {
-                toAdd.Add(r);
+                await ReloadLocked(cancellationToken).ConfigureAwait(false);
+                return;
             }
+
+            var dim = existing.Dim;
+            var slotById = new Dictionary<long, int>(existing.Count);
+            for (var i = 0; i < existing.Count; i++)
+            {
+                slotById[existing.Ids[i]] = i;
+            }
+
+            // Partition into in-place updates (clip already cached — its vector may
+            // have been recomputed, e.g. after OCR) and appends (new clips). A
+            // re-embedded clip MUST overwrite its stale vector, not be skipped.
+            var adds = new List<ClipEmbeddingRecord>(records.Count);
+            var updates = new List<ClipEmbeddingRecord>();
+            foreach (var r in records)
+            {
+                if (r.Vector is not { Length: > 0 } v || v.Length != dim)
+                {
+                    continue;
+                }
+                if (slotById.ContainsKey(r.ClipId))
+                {
+                    updates.Add(r);
+                }
+                else
+                {
+                    adds.Add(r);
+                }
+            }
+
+            if (adds.Count == 0 && updates.Count == 0) return;
+
+            var newCount = existing.Count + adds.Count;
+            var newIds = new long[newCount];
+            var newVectors = new float[newCount * dim];
+
+            Array.Copy(existing.Ids, newIds, existing.Count);
+            Buffer.BlockCopy(existing.Vectors, 0, newVectors, 0, existing.Count * dim * sizeof(float));
+
+            foreach (var u in updates)
+            {
+                var slot = slotById[u.ClipId];
+                Buffer.BlockCopy(u.Vector!, 0, newVectors, slot * dim * sizeof(float), dim * sizeof(float));
+            }
+
+            for (var i = 0; i < adds.Count; i++)
+            {
+                newIds[existing.Count + i] = adds[i].ClipId;
+                Buffer.BlockCopy(adds[i].Vector!, 0, newVectors, (existing.Count + i) * dim * sizeof(float), dim * sizeof(float));
+            }
+
+            Volatile.Write(ref _cache, new CacheSnapshot(newIds, newVectors, newCount, dim));
         }
-
-        if (toAdd.Count == 0) return;
-
-        // Build new snapshot: copy existing arrays + append new entries.  O(M) where M = toAdd.Count.
-        var newCount = existing.Count + toAdd.Count;
-        var newIds = new long[newCount];
-        var newVectors = new float[newCount * dim];
-
-        Array.Copy(existing.Ids, newIds, existing.Count);
-        Buffer.BlockCopy(existing.Vectors, 0, newVectors, 0, existing.Count * dim * sizeof(float));
-
-        for (var i = 0; i < toAdd.Count; i++)
+        finally
         {
-            newIds[existing.Count + i] = toAdd[i].ClipId;
-            Buffer.BlockCopy(toAdd[i].Vector!, 0, newVectors, (existing.Count + i) * dim * sizeof(float), dim * sizeof(float));
+            _refreshGate.Release();
         }
-
-        var newSnapshot = new CacheSnapshot(newIds, newVectors, newCount, dim);
-        Volatile.Write(ref _cache, newSnapshot);
     }
 
     public async Task<IReadOnlyList<(long ClipId, float Score)>> QueryAsync(

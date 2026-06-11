@@ -49,16 +49,28 @@ public sealed class DatabaseMaintenanceScope : System.IAsyncDisposable
     {
         var scope = new DatabaseMaintenanceScope(monitor, ocrQueue, embeddingWorker);
 
-        monitor?.Stop();
-
-        if (ocrQueue is not null)
+        try
         {
-            await ocrQueue.StopAsync().ConfigureAwait(false);
+            monitor?.Stop();
+
+            if (ocrQueue is not null)
+            {
+                await ocrQueue.StopAsync().ConfigureAwait(false);
+            }
+
+            if (embeddingWorker is not null)
+            {
+                await embeddingWorker.StopAsync().ConfigureAwait(false);
+            }
         }
-
-        if (embeddingWorker is not null)
+        catch
         {
-            await embeddingWorker.StopAsync().ConfigureAwait(false);
+            // A stop failed partway through; restart whatever was already stopped
+            // (Start is idempotent) so we never leave the workers permanently down,
+            // then surface the failure. Without this the caller never receives the
+            // scope, so its DisposeAsync — the only restart path — never runs.
+            await scope.DisposeAsync().ConfigureAwait(false);
+            throw;
         }
 
         // Release any pooled connections so the database file is not

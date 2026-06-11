@@ -325,4 +325,27 @@ public sealed class DatabaseBackupServiceTests : IDisposable
 
         Assert.Empty(Directory.GetFiles(_tempRoot, "*.restoring*"));
     }
+
+    // Bug #6: a prior restore that died between the copy and the move strands a
+    // fixed-name ".restoring" temp file. A retry must overwrite it rather than
+    // throw on File.Copy, otherwise restores are permanently blocked.
+    [Fact]
+    public async Task RestoreAsync_StaleRestoringTempFromPriorFailure_DoesNotBlockRetry()
+    {
+        await CreateDbWithRow(_dbPath, "live");
+        var service = NewService();
+        await service.EnsureDailyBackupAsync();
+        var backupPath = Directory.GetFiles(_backupDir, "clipthrough-*.db").Single();
+        SqliteConnection.ClearAllPools();
+
+        // Simulate a stranded temp from a crashed prior attempt.
+        File.WriteAllText(_dbPath + ".restoring", "stale garbage from a crashed restore");
+
+        // Retry must succeed despite the stale temp, and clean it up.
+        await service.RestoreAsync(backupPath);
+
+        SqliteConnection.ClearAllPools();
+        Assert.Equal("live", ReadSingleRow(_dbPath));
+        Assert.Empty(Directory.GetFiles(_tempRoot, "*.restoring"));
+    }
 }

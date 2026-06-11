@@ -248,6 +248,61 @@ public sealed class SemanticSearchServiceTests
         Assert.Equal(1, semantic.CachedCount);
     }
 
+    // U17 / bug #3: a clip that gets re-embedded (e.g. after OCR adds text) must
+    // have its cached vector REPLACED, not silently skipped as a duplicate id —
+    // otherwise semantic search keeps scoring against the stale vector forever.
+    [Fact]
+    public async Task AppendEmbeddingsAsync_ReembeddedClip_ReplacesStaleVector()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        var apple = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "apple",
+            ContentBytes = Encoding.UTF8.GetBytes("apple"),
+            IncrementExistingCopyCount = true,
+        });
+        var banana = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "banana",
+            ContentBytes = Encoding.UTF8.GetBytes("banana"),
+            IncrementExistingCopyCount = true,
+        });
+
+        var emb = new DeterministicEmbeddingService(dims: 8);
+        var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
+
+        await scope.ClipStoreService.SaveEmbeddingBatchAsync(new[]
+        {
+            new ClipEmbeddingRecord(apple!.Id, emb.VectorFor("apple")),
+            new ClipEmbeddingRecord(banana!.Id, emb.VectorFor("banana")),
+        }, "test");
+        await semantic.RefreshCacheAsync();
+        Assert.Equal(2, semantic.CachedCount);
+
+        // Re-embed the "apple" clip with the vector for a different concept.
+        // The id is already cached, so the old code would skip it (stale vector).
+        await semantic.AppendEmbeddingsAsync(new[]
+        {
+            new ClipEmbeddingRecord(apple.Id, emb.VectorFor("cherry")),
+        });
+
+        // Count is unchanged (update in place, not an add).
+        Assert.Equal(2, semantic.CachedCount);
+
+        // The apple clip now matches "cherry" best — proving its vector was replaced.
+        var hits = await semantic.QueryAsync("cherry", topK: 2);
+        Assert.NotEmpty(hits);
+        Assert.Equal(apple.Id, hits[0].ClipId);
+        Assert.True(hits[0].Score > 0.9f, $"expected near-1.0 cosine, got {hits[0].Score}");
+    }
+
     private static async Task<long> FindClipIdByText(TemporaryDatabaseScope scope, string text)
     {
         var result = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters { Limit = 50 });

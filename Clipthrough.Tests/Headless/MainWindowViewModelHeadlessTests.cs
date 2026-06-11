@@ -597,6 +597,48 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.True(viewModel.Settings.CloseToTray);
     }
 
+    // Regression guard for the U12 read-model split: list/search reads omit image
+    // bytes (ClipEntry.ContentBytes == null) to keep the list query light. When a
+    // clip is shown or selected, ClipItemViewModel must lazily reload the full entry
+    // by id so preview/edit/export/drag/AI-image have the bytes again.
+    [AvaloniaFact]
+    public async Task EnsureContentHydratedAsync_LoadsBytesForMetadataOnlyImageClip()
+    {
+        var metaOnly = new Clipthrough.Models.ClipEntry
+        {
+            Id = 42,
+            ContentType = Clipthrough.Models.ContentType.Image,
+            ByteSize = 3,
+            Hash = "h",
+        };
+        var bytes = new byte[] { 1, 2, 3 };
+        var full = new Clipthrough.Models.ClipEntry
+        {
+            Id = 42,
+            ContentType = Clipthrough.Models.ContentType.Image,
+            ContentBytes = bytes,
+            ByteSize = 3,
+            Hash = "h",
+        };
+        var hydrateCalls = 0;
+        var item = new Clipthrough.ViewModels.ClipItemViewModel(metaOnly, contentHydrator: id =>
+        {
+            hydrateCalls++;
+            return Task.FromResult<Clipthrough.Models.ClipEntry?>(id == 42 ? full : null);
+        });
+
+        Assert.Null(item.Clip.ContentBytes);
+
+        await item.EnsureContentHydratedAsync();
+
+        Assert.Same(bytes, item.Clip.ContentBytes);
+        Assert.Equal(1, hydrateCalls);
+
+        // Idempotent once hydrated: no extra store round-trip.
+        await item.EnsureContentHydratedAsync();
+        Assert.Equal(1, hydrateCalls);
+    }
+
     [AvaloniaFact]
     public void Dispose_PersistsCurrentFilterStateImmediately()
     {

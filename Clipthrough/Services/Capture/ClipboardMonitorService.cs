@@ -191,6 +191,14 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                 }
 
                 var (captureRequest, deferredContent) = captureResult.Value;
+                if (!_isStarted || _isDisposed)
+                {
+                    // The monitor was stopped (e.g. a database maintenance op began)
+                    // while we were reading the clipboard. Skip the write so we don't
+                    // persist into a database that's being swapped/rekeyed out from
+                    // under us — that write would be lost or hit a half-swapped file.
+                    return;
+                }
                 var capturedClip = await Task.Run(() => _clipStoreService.CaptureFastAsync(captureRequest));
                 if (capturedClip is not null)
                 {

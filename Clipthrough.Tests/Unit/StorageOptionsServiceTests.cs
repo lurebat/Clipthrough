@@ -648,4 +648,84 @@ public sealed class StorageOptionsServicePhase2Tests : IDisposable
 
         Assert.Empty(Directory.GetFiles(_tempRoot, "*.moving-*"));
     }
+
+    // U6 regression: the path-move maintenance scope restarts the background
+    // workers when it disposes. Current MUST already point at the new path by
+    // then — else a restarted worker reopens the (deleted) old path, recreates
+    // an empty DB there, and every subsequent clip is lost.
+    [Fact]
+    public async Task SaveAsync_PathMove_FlipsCurrentBeforeRestartingWorkers()
+    {
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = _dbPath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+        };
+        await using (var conn = new SqliteConnection(builder.ToString()))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('hello');";
+            await cmd.ExecuteNonQueryAsync();
+        }
+        SqliteConnection.ClearAllPools();
+
+        // storage.json initially points at the old DB.
+        File.WriteAllText(_configPath,
+            "{ \"databasePath\": \"" + _dbPath.Replace("\\", "\\\\") + "\" }");
+
+        string? pathSeenByRestartedWorker = null;
+        StorageOptionsService? service = null;
+        var monitor = new CurrentRecordingMonitor(
+            () => pathSeenByRestartedWorker = service!.Current.DatabasePath);
+        var provider = new SingleServiceProvider(typeof(IClipboardMonitorService), monitor);
+        service = new StorageOptionsService(new NoOpDataProtectionService(), _configPath, provider);
+
+        var newPath = Path.Combine(_tempRoot, "sub", "new.db");
+        await service.SaveAsync(new StorageOptions
+        {
+            DatabasePath = newPath,
+            DatabasePassword = string.Empty,
+            RememberPassword = false,
+        });
+
+        // The worker restart (scope dispose) happened AFTER Current flipped.
+        Assert.Equal(newPath, pathSeenByRestartedWorker);
+        Assert.Equal(newPath, service.Current.DatabasePath);
+        Assert.False(File.Exists(_dbPath));
+    }
+
+    private sealed class CurrentRecordingMonitor : IClipboardMonitorService
+    {
+        private readonly Action _onStart;
+
+        public CurrentRecordingMonitor(Action onStart) => _onStart = onStart;
+
+        public IObservable<ClipEntry> CapturedClips => System.Reactive.Linq.Observable.Empty<ClipEntry>();
+
+        public IObservable<ClipEntry> UpdatedClips => System.Reactive.Linq.Observable.Empty<ClipEntry>();
+
+        public IObservable<bool> CaptureBusy => System.Reactive.Linq.Observable.Empty<bool>();
+
+        public void Start() => _onStart();
+
+        public void Stop() { }
+
+        public void SuppressNext() { }
+    }
+
+    private sealed class SingleServiceProvider : IServiceProvider
+    {
+        private readonly Type _type;
+        private readonly object _instance;
+
+        public SingleServiceProvider(Type type, object instance)
+        {
+            _type = type;
+            _instance = instance;
+        }
+
+        public object? GetService(Type serviceType) =>
+            serviceType == _type ? _instance : null;
+    }
 }

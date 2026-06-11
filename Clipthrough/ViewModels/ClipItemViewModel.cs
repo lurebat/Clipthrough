@@ -80,6 +80,8 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     private bool _sourceAppIconLoaded;
     private bool _previewThumbnailLoaded;
     private bool _isDisposed;
+    private readonly Func<long, Task<ClipEntry?>>? _contentHydrator;
+    private bool _contentHydrationStarted;
 
     public ClipItemViewModel(
         ClipEntry clip,
@@ -88,9 +90,11 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         Func<ClipItemViewModel, Task>? deleteHandler = null,
         Func<ClipItemViewModel, Task>? exportHandler = null,
         Func<ClipItemViewModel, Task>? togglePinHandler = null,
-        Func<ClipItemViewModel, TextTransformation, Task>? applyTransformHandler = null)
+        Func<ClipItemViewModel, TextTransformation, Task>? applyTransformHandler = null,
+        Func<long, Task<ClipEntry?>>? contentHydrator = null)
     {
         Clip = clip;
+        _contentHydrator = contentHydrator;
         _title = ClipDisplayFormatter.BuildTitle(clip);
         _previewSnippet = ClipDisplayFormatter.BuildPreviewSnippet(clip);
         _singleLinePreview = ClipDisplayFormatter.BuildSingleLinePreview(clip);
@@ -144,7 +148,7 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
             });
     }
 
-    public ClipEntry Clip { get; }
+    public ClipEntry Clip { get; private set; }
 
     public long Id => Clip.Id;
 
@@ -278,6 +282,19 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
                 return _sourceAppIconImage;
             }
 
+            if (Clip.SourceAppIconBytes is null)
+            {
+                // Metadata-only list read (U12) omitted the icon bytes; pull the
+                // full entry, then this getter re-runs when SourceAppIconImage re-raises.
+                if (Clip.SourceAppIconAvailable && _contentHydrator is not null)
+                {
+                    _ = EnsureContentHydratedAsync();
+                    return null;
+                }
+                _sourceAppIconLoaded = true;
+                return null;
+            }
+
             _sourceAppIconLoaded = true;
             LoadBitmapInBackground(Clip.SourceAppIconBytes, bitmap =>
             {
@@ -303,16 +320,79 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
                 return _previewThumbnailImage;
             }
 
-            _previewThumbnailLoaded = true;
-            if (Clip.ContentType == ContentType.Image)
+            if (Clip.ContentType != ContentType.Image)
             {
-                LoadBitmapInBackground(Clip.ContentBytes, bitmap =>
-                {
-                    _previewThumbnailImage = bitmap;
-                    this.RaisePropertyChanged(nameof(PreviewThumbnailImage));
-                });
+                _previewThumbnailLoaded = true;
+                return null;
             }
+
+            if (Clip.ContentBytes is null)
+            {
+                // Metadata-only list read (U12) omitted the image bytes; pull the
+                // full entry, then this getter re-runs when PreviewThumbnailImage re-raises.
+                _ = EnsureContentHydratedAsync();
+                return null;
+            }
+
+            _previewThumbnailLoaded = true;
+            LoadBitmapInBackground(Clip.ContentBytes, bitmap =>
+            {
+                _previewThumbnailImage = bitmap;
+                this.RaisePropertyChanged(nameof(PreviewThumbnailImage));
+            });
             return _previewThumbnailImage;
+        }
+    }
+
+    /// <summary>
+    /// List/search reads omit image + source-app-icon BLOBs (U12). When this clip
+    /// is shown (thumbnail/icon) or selected, lazily reload the full entry by id so
+    /// the bytes are present for rendering, edit, export, drag, and AI-image. No-op
+    /// once started or when the entry already carries the bytes it needs.
+    /// </summary>
+    public async Task EnsureContentHydratedAsync()
+    {
+        if (_contentHydrator is null || _contentHydrationStarted || _isDisposed)
+        {
+            return;
+        }
+        var needsImage = Clip.ContentType == ContentType.Image && Clip.ContentBytes is null;
+        var needsIcon = Clip.SourceAppIconAvailable && Clip.SourceAppIconBytes is null;
+        if (!needsImage && !needsIcon)
+        {
+            return;
+        }
+        _contentHydrationStarted = true;
+        try
+        {
+            var full = await _contentHydrator(Clip.Id).ConfigureAwait(false);
+            if (full is null || _isDisposed)
+            {
+                return;
+            }
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (_isDisposed)
+                {
+                    return;
+                }
+                Clip = full;
+                if (needsImage)
+                {
+                    _previewThumbnailLoaded = false;
+                    this.RaisePropertyChanged(nameof(PreviewThumbnailImage));
+                }
+                if (needsIcon)
+                {
+                    _sourceAppIconLoaded = false;
+                    this.RaisePropertyChanged(nameof(SourceAppIconImage));
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _contentHydrationStarted = false; // allow a later retry
+            System.Diagnostics.Trace.TraceWarning($"Clip {Clip.Id} content hydration failed: {ex.Message}");
         }
     }
 

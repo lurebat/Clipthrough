@@ -14,7 +14,7 @@ namespace Clipthrough.ViewModels;
 /// <c>onAiMenuVisibilityChanged</c> so the host can refresh AI-menu visibility
 /// (signing in/out changes whether AI is configured).
 /// </summary>
-public sealed class CopilotViewModel : ViewModelBase
+public sealed class CopilotViewModel : ViewModelBase, IDisposable
 {
     private readonly ICopilotAuthService? _copilotAuthService;
     private readonly ISystemInteractionService _systemInteractionService;
@@ -186,5 +186,13 @@ public sealed class CopilotViewModel : ViewModelBase
         CopilotVerificationUri = string.Empty;
         CopilotSignInStatus = "Signed out.";
         this.RaisePropertyChanged(nameof(IsCopilotSignedIn));
+    }
+
+    public void Dispose()
+    {
+        if (_copilotAuthService is not null)
+        {
+            _copilotAuthService.SignedInChanged -= OnCopilotSignedInChanged;
+        }
     }
 }

@@ -250,8 +250,21 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         // crash-safe: if we die between Copy and Move, the live path is still
         // empty and the user re-runs the restore.
         var tempPath = dbPath + ".restoring";
-        File.Copy(backupPath, tempPath);
-        File.Move(tempPath, dbPath);
+        // overwrite: a prior attempt that died between the copy and the move would
+        // otherwise leave a stale .restoring file, and File.Copy throws when the
+        // destination exists — silently blocking every future restore.
+        File.Copy(backupPath, tempPath, overwrite: true);
+        try
+        {
+            File.Move(tempPath, dbPath);
+        }
+        catch
+        {
+            // The swap into the live path failed; remove the temp so the next
+            // restore attempt starts clean instead of tripping over a stray file.
+            try { File.Delete(tempPath); } catch { /* best effort */ }
+            throw;
+        }
 
         // Step 5: Validate the restored DB opens with the stored password.
         var password = _storageOptionsService.Current.DatabasePassword;

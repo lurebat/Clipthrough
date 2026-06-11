@@ -252,6 +252,13 @@ public sealed class DatabaseMaintenanceViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            // The restore failed before the app could exit; restart the workers we
+            // stopped above so the session keeps capturing clips instead of going
+            // silently dead until the next launch.
+            _clipboardMonitorService.Start();
+            _backgroundOcrQueue.Start();
+            _embeddingWorker?.Start();
+
             BackupRestoreStatus = $"Restore failed: {ex.Message}";
             System.Diagnostics.Trace.TraceError($"Restore from backup failed: {ex}");
             _notificationService.PublishError("Restore failed", ex.Message);

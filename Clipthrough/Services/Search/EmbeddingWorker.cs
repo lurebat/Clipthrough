@@ -96,7 +96,11 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            // Guard: if the ONNX model is missing, idle until poled/stopped.
+            // Guard: if the ONNX model is missing, idle until poked/stopped, then
+            // clear the flag and retry. The model may have been placed during the
+            // idle window (or a Poke woke us); if it is still absent ProcessOnceAsync
+            // re-sets the flag on the next FileNotFoundException. Without this reset
+            // the worker would idle forever once the model was ever missing. (#14)
             if (_modelMissing)
             {
                 try
@@ -109,6 +113,7 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
                 {
                     if (cancellationToken.IsCancellationRequested) return;
                 }
+                _modelMissing = false;
                 continue;
             }
 
@@ -173,17 +178,7 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
         catch (Exception ex)
         {
             Trace.TraceError($"Embedding inference failed for batch of {candidates.Count}: {ex}");
-            foreach (var c in candidates)
-            {
-                try
-                {
-                    await _clipStore.SetEmbeddingFailureAsync(c.ClipId, ex.Message, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception inner)
-                {
-                    Trace.TraceError($"Failed to flag embedding failure for clip {c.ClipId}: {inner}");
-                }
-            }
+            await FlagBatchFailedAsync(candidates, ex.Message, cancellationToken).ConfigureAwait(false);
             // Return 0 so RunAsync idles (30s back-off) instead of immediately re-claiming
             // the same failed clips in a tight CPU-pinning loop. (#4)
             return 0;
@@ -191,8 +186,12 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
 
         if (vectors.Count != candidates.Count)
         {
-            Trace.TraceError($"Embedding returned {vectors.Count} vectors for {candidates.Count} inputs; skipping batch.");
-            // Return 0: count mismatch is an inference anomaly — back off rather than hot-loop.
+            Trace.TraceError($"Embedding returned {vectors.Count} vectors for {candidates.Count} inputs; failing batch.");
+            // Count mismatch is an inference anomaly. Flag the claimed clips as
+            // failed (bounded retry) rather than leaving them stuck in
+            // 'processing' — the claim query never re-offers 'processing' rows,
+            // so they would be orphaned until the next app restart. (#13)
+            await FlagBatchFailedAsync(candidates, "embedding vector count mismatch", cancellationToken).ConfigureAwait(false);
             return 0;
         }
 
@@ -213,20 +212,28 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
         catch (Exception ex)
         {
             Trace.TraceError($"Embedding persist failed: {ex}");
-            foreach (var c in candidates)
-            {
-                try
-                {
-                    await _clipStore.SetEmbeddingFailureAsync(c.ClipId, ex.Message, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception inner)
-                {
-                    Trace.TraceError($"Failed to flag embedding persist failure for clip {c.ClipId}: {inner}");
-                }
-            }
+            await FlagBatchFailedAsync(candidates, ex.Message, cancellationToken).ConfigureAwait(false);
         }
 
         return 0;
+    }
+
+    // Flags every clip in a failed batch via SetEmbeddingFailureAsync (which
+    // increments the bounded attempt counter), releasing the claimed 'processing'
+    // rows instead of orphaning them until the next restart.
+    private async Task FlagBatchFailedAsync(IReadOnlyList<ClipEmbeddingCandidate> candidates, string reason, CancellationToken cancellationToken)
+    {
+        foreach (var c in candidates)
+        {
+            try
+            {
+                await _clipStore.SetEmbeddingFailureAsync(c.ClipId, reason, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception inner)
+            {
+                Trace.TraceError($"Failed to flag embedding failure for clip {c.ClipId}: {inner}");
+            }
+        }
     }
 
     public void Dispose()
