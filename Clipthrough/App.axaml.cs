@@ -97,8 +97,8 @@ public partial class App : Application
                     _clipboardMonitorService.UpdatedClips)
                 .Subscribe(_ => _embeddingWorker.Poke());
             var semanticSearch = Services.GetRequiredService<Clipthrough.Services.Search.ISemanticSearchService>();
-            _embeddingWorkerBatchSubscription = _embeddingWorker.BatchCompleted
-                .Subscribe((int count) => { _ = semanticSearch.RefreshCacheAsync(); });
+            _embeddingWorkerBatchSubscription = _embeddingWorker.BatchRecordsCompleted
+                .Subscribe(records => { _ = semanticSearch.AppendEmbeddingsAsync(records); });
 
             StartApplicationAsync(mainWindowViewModel);
         }
@@ -483,10 +483,10 @@ public partial class App : Application
             // Give the clipboard monitor a moment to capture the latest clip, then
             // mark the newest one as favorite.
             await Task.Delay(150);
-            var clip = await _clipStoreService.GetClipAtOffsetAsync(0);
+            var clip = await Task.Run(() => _clipStoreService.GetClipAtOffsetAsync(0));
             if (clip is not null)
             {
-                await _clipStoreService.SetFavoriteAsync(clip.Id, true);
+                await Task.Run(() => _clipStoreService.SetFavoriteAsync(clip.Id, true));
             }
         }
         catch (Exception ex) { Trace.TraceWarning($"CopyAndFavorite failed: {ex.Message}"); }
@@ -498,10 +498,10 @@ public partial class App : Application
         try
         {
             await Task.Delay(150);
-            var clip = await _clipStoreService.GetClipAtOffsetAsync(0);
+            var clip = await Task.Run(() => _clipStoreService.GetClipAtOffsetAsync(0));
             if (clip is not null)
             {
-                await _clipStoreService.SetSensitiveAsync(clip.Id, true);
+                await Task.Run(() => _clipStoreService.SetSensitiveAsync(clip.Id, true));
             }
         }
         catch (Exception ex) { Trace.TraceWarning($"CopyAndSensitive failed: {ex.Message}"); }
@@ -517,7 +517,7 @@ public partial class App : Application
         if (_clipStoreService is null || _systemInteractionService is null || _clipboardMonitorService is null) return;
         try
         {
-            var clip = await _clipStoreService.GetClipAtOffsetAsync(0);
+            var clip = await Task.Run(() => _clipStoreService.GetClipAtOffsetAsync(0));
             if (clip is null) return;
             _clipboardMonitorService.SuppressNext();
             if (!string.IsNullOrEmpty(clip.Content))
@@ -527,7 +527,7 @@ public partial class App : Application
             await Task.Delay(120);
             _systemInteractionService.SimulatePasteKeystroke();
             await Task.Delay(120);
-            await _clipStoreService.DeleteAsync(clip.Id);
+            await Task.Run(() => _clipStoreService.DeleteAsync(clip.Id));
         }
         catch (Exception ex) { Trace.TraceWarning($"PasteAndDelete failed: {ex.Message}"); }
     }
@@ -537,15 +537,15 @@ public partial class App : Application
         if (_clipStoreService is null || _systemInteractionService is null || _clipboardMonitorService is null) return;
         try
         {
-            var clip = await _clipStoreService.GetClipAtOffsetAsync(0);
+            var clip = await Task.Run(() => _clipStoreService.GetClipAtOffsetAsync(0));
             if (clip is null) return;
             _clipboardMonitorService.SuppressNext();
             if (!string.IsNullOrEmpty(clip.Content))
             {
                 await _systemInteractionService.CopyTextAsync(clip.Content);
             }
-            await _clipStoreService.MarkPastedAsync(clip.Id);
-            await _clipStoreService.SetFavoriteAsync(clip.Id, true);
+            await Task.Run(() => _clipStoreService.MarkPastedAsync(clip.Id));
+            await Task.Run(() => _clipStoreService.SetFavoriteAsync(clip.Id, true));
             await Task.Delay(120);
             _systemInteractionService.SimulatePasteKeystroke();
         }
@@ -557,12 +557,12 @@ public partial class App : Application
         if (_clipStoreService is null || _systemInteractionService is null || _clipboardMonitorService is null) return;
         try
         {
-            var clip = await _clipStoreService.GetClipAtOffsetAsync(0);
+            var clip = await Task.Run(() => _clipStoreService.GetClipAtOffsetAsync(0));
             if (clip is null || string.IsNullOrEmpty(clip.Content)) return;
             _clipboardMonitorService.SuppressNext();
             // Always copy the plain-text Content field, regardless of stored HTML/RTF.
             await _systemInteractionService.CopyTextAsync(clip.Content);
-            await _clipStoreService.MarkPastedAsync(clip.Id);
+            await Task.Run(() => _clipStoreService.MarkPastedAsync(clip.Id));
             await Task.Delay(120);
             _systemInteractionService.SimulatePasteKeystroke();
         }
@@ -601,7 +601,7 @@ public partial class App : Application
             }
             else
             {
-                clip = await _clipStoreService.GetClipAtOffsetAsync(0);
+                clip = await Task.Run(() => _clipStoreService.GetClipAtOffsetAsync(0));
             }
             if (clip is null || string.IsNullOrEmpty(clip.Content)) return;
 
@@ -810,7 +810,7 @@ public partial class App : Application
 
         try
         {
-            var clip = await _clipStoreService.GetClipAtOffsetAsync(offset);
+            var clip = await Task.Run(() => _clipStoreService.GetClipAtOffsetAsync(offset));
             if (clip is null)
             {
                 _incrementalPasteOffset = Math.Max(0, offset - 1);
@@ -824,7 +824,7 @@ public partial class App : Application
                 await _systemInteractionService.CopyTextAsync(clip.Content);
             }
 
-            await _clipStoreService.MarkPastedAsync(clip.Id);
+            await Task.Run(() => _clipStoreService.MarkPastedAsync(clip.Id));
 
             // Give the target window a moment to become ready and the clipboard
             // change to propagate before we synthesize the paste keystroke.

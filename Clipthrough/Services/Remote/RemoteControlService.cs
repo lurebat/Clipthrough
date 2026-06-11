@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -18,11 +18,21 @@ public sealed class RemoteControlService : IRemoteControlService
 {
     private readonly ISettingsService _settings;
     private readonly IClipStoreService _clipStore;
+    // retained: DI registered in App.axaml.cs; cleanup deferred
     private readonly IScriptingService _scripting;
+    // retained: DI registered in App.axaml.cs; cleanup deferred
     private readonly IAiTransformService _ai;
     private readonly SemaphoreSlim _sync = new(1, 1);
     private WebApplication? _app;
     private string? _baseUrl;
+
+    // Per-IP auth-failure backoff. Tracks consecutive failures to slow brute-force
+    // probes. State persists across server restarts (intentional — attacks restart too).
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (int Failures, DateTimeOffset LastFailAt)> _authFailures = new();
+
+    private const int AuthBackoffThreshold = 5;
+    private static readonly TimeSpan AuthBackoffDelay = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan AuthFailureTtl = TimeSpan.FromMinutes(10);
 
     public RemoteControlService(
         ISettingsService settings,
@@ -87,42 +97,52 @@ public sealed class RemoteControlService : IRemoteControlService
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
 
+        // ResolveBindAddress validates the configured address and logs a warning if a
+        // non-loopback address was supplied (non-loopback is refused; see method comment).
         var bind = ResolveBindAddress(settings.RemoteApiBindAddress);
+
         builder.WebHost.ConfigureKestrel(o =>
         {
-            if (bind.Equals(System.Net.IPAddress.Loopback))
-            {
-                o.ListenLocalhost(settings.RemoteApiPort);
-            }
-            else if (bind.Equals(System.Net.IPAddress.Any))
-            {
-                o.ListenAnyIP(settings.RemoteApiPort);
-            }
-            else
-            {
-                o.Listen(bind, settings.RemoteApiPort);
-            }
+            // bind is always loopback after ResolveBindAddress enforces the restriction.
+            o.ListenLocalhost(settings.RemoteApiPort);
         });
 
         builder.Services.AddOpenApi();
 
         var app = builder.Build();
 
+        // /openapi and /docs require a valid bearer token (they expose API surface details
+        // that should not be publicly readable on a shared machine).
         app.MapOpenApi();
         app.MapGet("/docs", () => Results.Content(BuildDocsHtml(), "text/html"));
 
         var token = settings.RemoteApiToken;
         var tokenBytes = Encoding.UTF8.GetBytes(token);
+        var authFailures = _authFailures;
+
         app.Use(async (ctx, next) =>
         {
-            // Allow unauthenticated access to health and API documentation only.
+            // Only the health probe is exempt from authentication.
             var path = ctx.Request.Path.Value ?? string.Empty;
-            if (path.Equals("/health", StringComparison.OrdinalIgnoreCase)
-                || path.StartsWith("/openapi", StringComparison.OrdinalIgnoreCase)
-                || path.Equals("/docs", StringComparison.OrdinalIgnoreCase))
+            if (path.Equals("/health", StringComparison.OrdinalIgnoreCase))
             {
                 await next().ConfigureAwait(false);
                 return;
+            }
+
+            var clientIp = ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
+
+            // Apply per-IP backoff before processing the credential to slow brute-force.
+            if (authFailures.TryGetValue(clientIp, out var fs))
+            {
+                if (fs.Failures >= AuthBackoffThreshold && DateTimeOffset.UtcNow - fs.LastFailAt < AuthFailureTtl)
+                {
+                    await Task.Delay(AuthBackoffDelay, ctx.RequestAborted).ConfigureAwait(false);
+                }
+                else if (DateTimeOffset.UtcNow - fs.LastFailAt >= AuthFailureTtl)
+                {
+                    authFailures.TryRemove(clientIp, out _); // stale — reset
+                }
             }
 
             if (string.IsNullOrWhiteSpace(token))
@@ -131,27 +151,39 @@ public sealed class RemoteControlService : IRemoteControlService
                 await ctx.Response.WriteAsJsonAsync(new { error = "remote_api_token_not_configured" }).ConfigureAwait(false);
                 return;
             }
+
+            void RecordFail() => authFailures.AddOrUpdate(clientIp,
+                _ => (1, DateTimeOffset.UtcNow),
+                (_, prev) => (prev.Failures + 1, DateTimeOffset.UtcNow));
+
             if (!ctx.Request.Headers.TryGetValue("Authorization", out var header))
             {
+                RecordFail();
                 ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 await ctx.Response.WriteAsJsonAsync(new { error = "unauthorized" }).ConfigureAwait(false);
                 return;
             }
+
             var raw = header.ToString();
             const string prefix = "Bearer ";
             if (!raw.StartsWith(prefix, StringComparison.Ordinal))
             {
+                RecordFail();
                 ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 await ctx.Response.WriteAsJsonAsync(new { error = "unauthorized" }).ConfigureAwait(false);
                 return;
             }
+
             var presented = Encoding.UTF8.GetBytes(raw.Substring(prefix.Length));
             if (!System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(presented, tokenBytes))
             {
+                RecordFail();
                 ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 await ctx.Response.WriteAsJsonAsync(new { error = "unauthorized" }).ConfigureAwait(false);
                 return;
             }
+
+            authFailures.TryRemove(clientIp, out _); // clear failures on successful auth
             await next().ConfigureAwait(false);
         });
 
@@ -203,77 +235,45 @@ public sealed class RemoteControlService : IRemoteControlService
             return Results.NoContent();
         });
 
-        app.MapPost("/clips/{id:long}/transform", async (long id, TransformRequest body, CancellationToken ct) =>
-        {
-            if (body is null || string.IsNullOrEmpty(body.Kind))
-            {
-                return Results.BadRequest(new { error = "kind required" });
-            }
-            var item = await _clipStore.GetByIdAsync(id, ct).ConfigureAwait(false);
-            if (item is null)
-            {
-                return Results.NotFound();
-            }
-            var source = item.Content ?? string.Empty;
-            string transformed;
-            try
-            {
-                transformed = body.Kind.ToLowerInvariant() switch
-                {
-                    "builtin" => TextTransformationService.Apply(ParseBuiltin(body.Name), source),
-                    "script" => await _scripting.EvaluateAsync(body.Code ?? string.Empty, source, ct).ConfigureAwait(false),
-                    "ai" => await _ai.TransformAsync(body.Prompt ?? string.Empty, source, ct).ConfigureAwait(false),
-                    _ => source,
-                };
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                return Results.Problem(ex.Message);
-            }
-
-            var captured = await _clipStore.CaptureAsync(new ClipCaptureRequest
-            {
-                ContentBytes = Encoding.UTF8.GetBytes(transformed),
-                ContentText = transformed,
-                ContentType = ContentType.Text,
-                ContentFormat = ClipContentFormat.PlainText,
-                SourceApp = item.SourceApp,
-                IncrementExistingCopyCount = false,
-            }, ct).ConfigureAwait(false);
-            return captured is null ? Results.Problem("capture failed") : Results.Ok(ToDto(captured));
-        });
+        // POST /clips/{id}/transform is intentionally removed (KTD1 / U10).
+        // The kind=script and kind=ai branches were remote code-execution surfaces;
+        // kind=builtin was deterministic but the endpoint is eliminated wholesale
+        // per the R3 requirement that the remote API exposes only read + capture.
 
         await app.StartAsync().ConfigureAwait(false);
         _app = app;
-        var host = bind.Equals(System.Net.IPAddress.Any) ? "0.0.0.0" : bind.ToString();
-        _baseUrl = $"http://{host}:{settings.RemoteApiPort}";
+        _baseUrl = $"http://{bind}:{settings.RemoteApiPort}";
     }
 
-    private static System.Net.IPAddress ResolveBindAddress(string? configured)
+    /// <summary>
+    /// Resolves the configured bind address. Non-loopback addresses are refused because
+    /// transport protection (TLS) is not implemented: binding to a non-loopback address
+    /// would expose the API to the local network in cleartext, enabling credential theft
+    /// and MITM. If non-loopback binding is required in a future release, add TLS support
+    /// before relaxing this restriction.
+    /// </summary>
+    internal static System.Net.IPAddress ResolveBindAddress(string? configured)
     {
         if (string.IsNullOrWhiteSpace(configured))
         {
             return System.Net.IPAddress.Loopback;
         }
+
         var trimmed = configured.Trim();
+
         if (trimmed.Equals("localhost", StringComparison.OrdinalIgnoreCase)
-            || trimmed.Equals("loopback", StringComparison.OrdinalIgnoreCase))
+            || trimmed.Equals("loopback", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("127.0.0.1", StringComparison.Ordinal)
+            || trimmed.Equals("::1", StringComparison.Ordinal))
         {
             return System.Net.IPAddress.Loopback;
         }
-        if (trimmed.Equals("*", StringComparison.Ordinal)
-            || trimmed.Equals("0.0.0.0", StringComparison.Ordinal)
-            || trimmed.Equals("any", StringComparison.OrdinalIgnoreCase))
-        {
-            return System.Net.IPAddress.Any;
-        }
-        return System.Net.IPAddress.TryParse(trimmed, out var parsed)
-            ? parsed
-            : System.Net.IPAddress.Loopback;
+
+        // Non-loopback addresses (*, 0.0.0.0, any routable IP) are refused.
+        System.Diagnostics.Trace.TraceWarning(
+            $"[RemoteControlService] Bind address '{trimmed}' is non-loopback; " +
+            "defaulting to 127.0.0.1. Configure TLS before enabling non-loopback binds.");
+        return System.Net.IPAddress.Loopback;
     }
 
     private static string BuildDocsHtml() => """
@@ -319,13 +319,17 @@ public sealed class RemoteControlService : IRemoteControlService
         _baseUrl = null;
     }
 
-    private static TextTransformation ParseBuiltin(string? name)
-        => Enum.TryParse<TextTransformation>(name, ignoreCase: true, out var t) ? t : TextTransformation.None;
-
+    /// <summary>
+    /// Maps a <see cref="ClipEntry"/> to a safe API response object.
+    /// Sensitive clips have their <c>content</c> withheld to prevent exfiltration
+    /// of passwords, tokens, and other PII over the remote API.
+    /// </summary>
     private static object ToDto(ClipEntry c) => new
     {
         id = c.Id,
-        content = c.ContentType == ContentType.Image ? null : c.Content,
+        // Withhold content for image clips (not text-serialisable) and for sensitive
+        // clips (passwords, tokens, PII — must not be exposed over the remote API).
+        content = (c.ContentType == ContentType.Image || c.IsSensitive) ? null : c.Content,
         contentType = c.ContentType.ToString(),
         format = c.ContentFormat.ToString(),
         sourceApp = c.SourceApp,
@@ -351,13 +355,5 @@ public sealed class RemoteControlService : IRemoteControlService
     {
         public string Text { get; set; } = string.Empty;
         public string? SourceApp { get; set; }
-    }
-
-    private sealed class TransformRequest
-    {
-        public string Kind { get; set; } = string.Empty;
-        public string? Name { get; set; }
-        public string? Code { get; set; }
-        public string? Prompt { get; set; }
     }
 }

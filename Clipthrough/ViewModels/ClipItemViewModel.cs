@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reactive;
 using System.Threading.Tasks;
@@ -69,17 +70,23 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     private static readonly IBrush s_pastedBorder = new SolidColorBrush(Color.Parse("#7C3AED"));
     private static readonly IBrush s_pastedFg = new SolidColorBrush(Color.Parse("#C4B5FD"));
 
+    private static readonly IBrush s_metaMutedBrush = new SolidColorBrush(Color.Parse("#94A3B8"));
+
     private bool _isChecked;
     private int _displayIndex;
     private readonly string _title;
     private readonly string _previewSnippet;
     private readonly string _singleLinePreview;
+    private string _metaLine = string.Empty;
+    private IReadOnlyList<(string Text, IBrush Foreground)> _metaSegments = Array.Empty<(string, IBrush)>();
     private string? _fullContent;
     private Bitmap? _sourceAppIconImage;
     private Bitmap? _previewThumbnailImage;
     private bool _sourceAppIconLoaded;
     private bool _previewThumbnailLoaded;
     private bool _isDisposed;
+    private readonly Func<long, Task<ClipEntry?>>? _contentHydrator;
+    private bool _contentHydrationStarted;
 
     public ClipItemViewModel(
         ClipEntry clip,
@@ -88,12 +95,16 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         Func<ClipItemViewModel, Task>? deleteHandler = null,
         Func<ClipItemViewModel, Task>? exportHandler = null,
         Func<ClipItemViewModel, Task>? togglePinHandler = null,
-        Func<ClipItemViewModel, TextTransformation, Task>? applyTransformHandler = null)
+        Func<ClipItemViewModel, TextTransformation, Task>? applyTransformHandler = null,
+        Func<long, Task<ClipEntry?>>? contentHydrator = null)
     {
         Clip = clip;
+        _contentHydrator = contentHydrator;
         _title = ClipDisplayFormatter.BuildTitle(clip);
         _previewSnippet = ClipDisplayFormatter.BuildPreviewSnippet(clip);
         _singleLinePreview = ClipDisplayFormatter.BuildSingleLinePreview(clip);
+        _metaLine = BuildMetaLine();
+        _metaSegments = BuildMetaSegments();
         CopyCommand = ReactiveCommand.CreateFromTask(
             async () =>
             {
@@ -144,7 +155,7 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
             });
     }
 
-    public ClipEntry Clip { get; }
+    public ClipEntry Clip { get; private set; }
 
     public long Id => Clip.Id;
 
@@ -198,6 +209,83 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     public string SingleLinePreview => _singleLinePreview;
 
+    // Single precomputed meta line for the list row (type · age · markers), built
+    // once at construction and rebuilt only on favorite/pin toggle. Replaces the
+    // per-row chip WrapPanel (~16 controls + ~13 bindings) with one TextBlock so
+    // row realization/recycling on scroll stays cheap.
+    public string MetaLine => _metaLine;
+
+    private string BuildMetaLine()
+    {
+        var sb = new System.Text.StringBuilder(64);
+        sb.Append(DisplayContentType).Append(" · ").Append(CapturedAtCompact);
+        if (ShowWindowTitleChipInRow && !string.IsNullOrEmpty(SourceWindowTitle))
+        {
+            sb.Append(" · ").Append(SourceWindowTitle);
+        }
+        if (HasBeenPasted)
+        {
+            sb.Append(" · ").Append(PastedMarker);
+        }
+        if (ShowCopyCountBadge)
+        {
+            sb.Append(" · ").Append(CopyCountCompact);
+        }
+        if (IsFavorite)
+        {
+            sb.Append(" · ★");
+        }
+        if (IsPinned)
+        {
+            sb.Append(" · 📌");
+        }
+        if (IsImported)
+        {
+            sb.Append(" · ").Append(ImportedBadgeLabel);
+        }
+        return sb.ToString();
+    }
+
+    // Colored token list backing the row meta line (rendered as inline Runs via
+    // controls:MetaInlines). Same tokens as MetaLine, each carrying the matching
+    // chip foreground colour so the row keeps per-token colour without a chip
+    // control per token. Rebuilt with MetaLine on favorite/pin toggle.
+    public IReadOnlyList<(string Text, IBrush Foreground)> MetaSegments => _metaSegments;
+
+    private IReadOnlyList<(string Text, IBrush Foreground)> BuildMetaSegments()
+    {
+        var segments = new List<(string Text, IBrush Foreground)>(7)
+        {
+            (DisplayContentType, TypeChipForeground),
+            (CapturedAtCompact, AgeChipForeground),
+        };
+        if (ShowWindowTitleChipInRow && !string.IsNullOrEmpty(SourceWindowTitle))
+        {
+            segments.Add((SourceWindowTitle!, s_metaMutedBrush));
+        }
+        if (HasBeenPasted)
+        {
+            segments.Add((PastedMarker, PastedChipForeground));
+        }
+        if (ShowCopyCountBadge)
+        {
+            segments.Add((CopyCountCompact, s_metaMutedBrush));
+        }
+        if (IsFavorite)
+        {
+            segments.Add(("★", StateAccentBrush));
+        }
+        if (IsPinned)
+        {
+            segments.Add(("📌", s_metaMutedBrush));
+        }
+        if (IsImported)
+        {
+            segments.Add((ImportedBadgeLabel, s_metaMutedBrush));
+        }
+        return segments;
+    }
+
     public string FullContent => _fullContent ??= ClipDisplayFormatter.GetRawContentDisplay(Clip);
 
     public string DisplayContentType => Clip.ContentType.ToDisplayName();
@@ -223,9 +311,11 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         (IsTextClip || Clip.ContentType == ContentType.Files)
         && !string.IsNullOrEmpty(Clip.Content);
 
+    // For image clips, ContentBytes may be null on metadata-only list reads (U12); use
+    // ContentType to decide availability — full bytes load when the clip is opened. (U12)
     public bool CanAiTransform =>
         ((IsTextClip || Clip.ContentType == ContentType.Files) && !string.IsNullOrEmpty(Clip.Content))
-        || (IsImageClip && Clip.ContentBytes is { Length: > 0 });
+        || IsImageClip;
 
     public string CopyCountDisplay => AppText.FormatCopyCount(Clip.CopyCount);
 
@@ -276,6 +366,19 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
                 return _sourceAppIconImage;
             }
 
+            if (Clip.SourceAppIconBytes is null)
+            {
+                // Metadata-only list read (U12) omitted the icon bytes; pull the
+                // full entry, then this getter re-runs when SourceAppIconImage re-raises.
+                if (Clip.SourceAppIconAvailable && _contentHydrator is not null)
+                {
+                    _ = EnsureContentHydratedAsync();
+                    return null;
+                }
+                _sourceAppIconLoaded = true;
+                return null;
+            }
+
             _sourceAppIconLoaded = true;
             LoadBitmapInBackground(Clip.SourceAppIconBytes, bitmap =>
             {
@@ -286,7 +389,9 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public bool HasSourceAppIcon => Clip.SourceAppIconBytes is { Length: > 0 };
+    // Uses SourceAppIconAvailable so the icon presence flag is correct even when
+    // SourceAppIconBytes is null (metadata-only list reads from U12). (U12)
+    public bool HasSourceAppIcon => Clip.SourceAppIconAvailable;
 
     public bool ShowTypeGlyph => !HasSourceAppIcon;
 
@@ -299,20 +404,85 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
                 return _previewThumbnailImage;
             }
 
-            _previewThumbnailLoaded = true;
-            if (Clip.ContentType == ContentType.Image)
+            if (Clip.ContentType != ContentType.Image)
             {
-                LoadBitmapInBackground(Clip.ContentBytes, bitmap =>
-                {
-                    _previewThumbnailImage = bitmap;
-                    this.RaisePropertyChanged(nameof(PreviewThumbnailImage));
-                });
+                _previewThumbnailLoaded = true;
+                return null;
             }
+
+            if (Clip.ContentBytes is null)
+            {
+                // Metadata-only list read (U12) omitted the image bytes; pull the
+                // full entry, then this getter re-runs when PreviewThumbnailImage re-raises.
+                _ = EnsureContentHydratedAsync();
+                return null;
+            }
+
+            _previewThumbnailLoaded = true;
+            LoadBitmapInBackground(Clip.ContentBytes, bitmap =>
+            {
+                _previewThumbnailImage = bitmap;
+                this.RaisePropertyChanged(nameof(PreviewThumbnailImage));
+            });
             return _previewThumbnailImage;
         }
     }
 
-    public bool ShowPreviewThumbnail => Clip.ContentType == ContentType.Image && Clip.ContentBytes is { Length: > 0 };
+    /// <summary>
+    /// List/search reads omit image + source-app-icon BLOBs (U12). When this clip
+    /// is shown (thumbnail/icon) or selected, lazily reload the full entry by id so
+    /// the bytes are present for rendering, edit, export, drag, and AI-image. No-op
+    /// once started or when the entry already carries the bytes it needs.
+    /// </summary>
+    public async Task EnsureContentHydratedAsync()
+    {
+        if (_contentHydrator is null || _contentHydrationStarted || _isDisposed)
+        {
+            return;
+        }
+        var needsImage = Clip.ContentType == ContentType.Image && Clip.ContentBytes is null;
+        var needsIcon = Clip.SourceAppIconAvailable && Clip.SourceAppIconBytes is null;
+        if (!needsImage && !needsIcon)
+        {
+            return;
+        }
+        _contentHydrationStarted = true;
+        try
+        {
+            var full = await _contentHydrator(Clip.Id).ConfigureAwait(false);
+            if (full is null || _isDisposed)
+            {
+                return;
+            }
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (_isDisposed)
+                {
+                    return;
+                }
+                Clip = full;
+                if (needsImage)
+                {
+                    _previewThumbnailLoaded = false;
+                    this.RaisePropertyChanged(nameof(PreviewThumbnailImage));
+                }
+                if (needsIcon)
+                {
+                    _sourceAppIconLoaded = false;
+                    this.RaisePropertyChanged(nameof(SourceAppIconImage));
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _contentHydrationStarted = false; // allow a later retry
+            System.Diagnostics.Trace.TraceWarning($"Clip {Clip.Id} content hydration failed: {ex.Message}");
+        }
+    }
+
+    // ContentBytes may be null on metadata-only list reads (U12); test ContentType only so the
+    // thumbnail placeholder renders correctly. Actual bytes load when the clip is opened/selected.
+    public bool ShowPreviewThumbnail => Clip.ContentType == ContentType.Image;
 
     public bool ShowTextPreview => !ShowPreviewThumbnail;
 
@@ -462,6 +632,10 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(RowBorderThickness));
         this.RaisePropertyChanged(nameof(FavoriteMarker));
         this.RaisePropertyChanged(nameof(FavoriteActionLabel));
+        _metaLine = BuildMetaLine();
+        this.RaisePropertyChanged(nameof(MetaLine));
+        _metaSegments = BuildMetaSegments();
+        this.RaisePropertyChanged(nameof(MetaSegments));
     }
 
     public void SetPinnedState(bool isPinned)
@@ -476,6 +650,10 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(IsPinned));
         this.RaisePropertyChanged(nameof(PinMarker));
         this.RaisePropertyChanged(nameof(PinActionLabel));
+        _metaLine = BuildMetaLine();
+        this.RaisePropertyChanged(nameof(MetaLine));
+        _metaSegments = BuildMetaSegments();
+        this.RaisePropertyChanged(nameof(MetaSegments));
     }
 
     public void Dispose()

@@ -145,7 +145,9 @@ public static class ClipboardMarkupDecoder
                 continue;
             }
 
-            return int.Parse(match.Groups["value"].Value, CultureInfo.InvariantCulture);
+            if (!long.TryParse(match.Groups["value"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var raw) || raw > int.MaxValue)
+                return null;
+            return (int)raw;
         }
 
         return null;

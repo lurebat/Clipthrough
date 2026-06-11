@@ -531,6 +531,174 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.Equal(ContentType.Image, viewModel.SelectedContentTypeOption.Value);
     }
 
+    // Characterization guard for the SettingsViewModel extraction (#10): opening
+    // settings must load every section's draft from the current AppSettings.
+    // As sections move to MainWindowViewModel.Settings, repoint the property
+    // access here (SettingsX -> Settings.X); the asserted values stay constant.
+    [AvaloniaFact]
+    public async Task OpenSettings_LoadsDraftFromCurrentSettings()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        scope.StorageOptionsService.SetHasSavedConfig(true);
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrentOnInitialize(AppSettings.Default with
+        {
+            EnableAi = true,
+            AiProvider = Models.AiProvider.Copilot,
+            AiBaseUrl = "https://ai.example/v1",
+            AiApiKey = "sk-char-test",
+            AiModel = "gpt-char",
+            AiImageModel = "img-char",
+            AiReasoningEffort = "high",
+            EnableAutoUpdate = false,
+            AutoApplyUpdatesOnStartup = true,
+            UpdateFeedUrl = "https://feed.example/x",
+            OcrLanguages = "en-US,fr-FR",
+            AutoOcrImageClips = true,
+            EnableRemoteApi = true,
+            RemoteApiPort = 12345,
+            RemoteApiToken = "tok-char",
+            RemoteApiBindAddress = "127.0.0.1",
+            ThemeMode = Models.ThemeMode.Light,
+            CloseToTray = true,
+        });
+
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+        await viewModel.InitializeAsync();
+
+        viewModel.OpenSettingsCommand.Execute().Subscribe();
+        Dispatcher.UIThread.RunJobs();
+
+        // AI section
+        Assert.True(viewModel.Settings.EnableAi);
+        Assert.Equal(Models.AiProvider.Copilot, viewModel.Settings.AiProvider);
+        Assert.Equal("https://ai.example/v1", viewModel.Settings.AiBaseUrl);
+        Assert.Equal("sk-char-test", viewModel.Settings.AiApiKey);
+        Assert.Equal("gpt-char", viewModel.Settings.AiModel);
+        Assert.Equal("img-char", viewModel.Settings.AiImageModel);
+        Assert.Equal("high", viewModel.Settings.AiReasoningEffort);
+        // Update section
+        Assert.False(viewModel.Settings.EnableAutoUpdate);
+        Assert.True(viewModel.Settings.AutoApplyUpdatesOnStartup);
+        Assert.Equal("https://feed.example/x", viewModel.Settings.UpdateFeedUrl);
+        // OCR section
+        Assert.Equal("en-US,fr-FR", viewModel.Settings.OcrLanguages);
+        Assert.True(viewModel.Settings.AutoOcrImageClips);
+        // Remote-API section
+        Assert.True(viewModel.Settings.EnableRemoteApi);
+        Assert.Equal(12345, viewModel.Settings.RemoteApiPort);
+        Assert.Equal("tok-char", viewModel.Settings.RemoteApiToken);
+        Assert.Equal("127.0.0.1", viewModel.Settings.RemoteApiBindAddress);
+        // Theme / misc
+        Assert.Equal(Models.ThemeMode.Light, viewModel.Settings.ThemeMode);
+        Assert.True(viewModel.Settings.CloseToTray);
+    }
+
+    // Regression guard for the U12 read-model split: list/search reads omit image
+    // bytes (ClipEntry.ContentBytes == null) to keep the list query light. When a
+    // clip is shown or selected, ClipItemViewModel must lazily reload the full entry
+    // by id so preview/edit/export/drag/AI-image have the bytes again.
+    [AvaloniaFact]
+    public async Task EnsureContentHydratedAsync_LoadsBytesForMetadataOnlyImageClip()
+    {
+        var metaOnly = new Clipthrough.Models.ClipEntry
+        {
+            Id = 42,
+            ContentType = Clipthrough.Models.ContentType.Image,
+            ByteSize = 3,
+            Hash = "h",
+        };
+        var bytes = new byte[] { 1, 2, 3 };
+        var full = new Clipthrough.Models.ClipEntry
+        {
+            Id = 42,
+            ContentType = Clipthrough.Models.ContentType.Image,
+            ContentBytes = bytes,
+            ByteSize = 3,
+            Hash = "h",
+        };
+        var hydrateCalls = 0;
+        var item = new Clipthrough.ViewModels.ClipItemViewModel(metaOnly, contentHydrator: id =>
+        {
+            hydrateCalls++;
+            return Task.FromResult<Clipthrough.Models.ClipEntry?>(id == 42 ? full : null);
+        });
+
+        Assert.Null(item.Clip.ContentBytes);
+
+        await item.EnsureContentHydratedAsync();
+
+        Assert.Same(bytes, item.Clip.ContentBytes);
+        Assert.Equal(1, hydrateCalls);
+
+        // Idempotent once hydrated: no extra store round-trip.
+        await item.EnsureContentHydratedAsync();
+        Assert.Equal(1, hydrateCalls);
+    }
+
+    // The per-row badge WrapPanel was collapsed into a single precomputed MetaLine
+    // (type · age · markers) for cheaper row realization. Guard that it composes the
+    // state markers and is rebuilt when favorite/pin toggle at runtime.
+    [AvaloniaFact]
+    public void MetaLine_ComposesStateMarkers_AndRebuildsOnToggle()
+    {
+        var clip = new Clipthrough.Models.ClipEntry
+        {
+            Id = 7,
+            ContentType = Clipthrough.Models.ContentType.Text,
+            Content = "hello",
+            Hash = "h",
+            CopyCount = 3,
+            PasteCount = 2,
+            IsFavorite = true,
+            PinnedAt = DateTimeOffset.UtcNow,
+            LastCopiedAt = DateTimeOffset.UtcNow,
+        };
+        var item = new Clipthrough.ViewModels.ClipItemViewModel(clip);
+
+        Assert.Contains(item.DisplayContentType, item.MetaLine);
+        Assert.Contains("★", item.MetaLine);      // favorite marker
+        Assert.Contains("📌", item.MetaLine);      // pinned marker
+        Assert.Contains("Pasted", item.MetaLine);  // pasted marker (PasteCount > 0)
+
+        item.SetFavoriteState(false);
+        Assert.DoesNotContain("★", item.MetaLine);
+
+        item.SetPinnedState(false);
+        Assert.DoesNotContain("📌", item.MetaLine);
+    }
+
+    // The row meta renders as colored inline Runs (controls:MetaInlines) so the line
+    // wraps and keeps per-token colour instead of one muted, truncated string.
+    [AvaloniaFact]
+    public void MetaSegments_RenderAsColoredInlineRuns()
+    {
+        var clip = new Clipthrough.Models.ClipEntry
+        {
+            Id = 8,
+            ContentType = Clipthrough.Models.ContentType.Text,
+            Content = "hello",
+            Hash = "h",
+            CopyCount = 3,
+            LastCopiedAt = DateTimeOffset.UtcNow,
+        };
+        var item = new Clipthrough.ViewModels.ClipItemViewModel(clip);
+
+        // type + age + copy-count => 3 colored tokens.
+        Assert.Equal(3, item.MetaSegments.Count);
+        Assert.Equal(item.DisplayContentType, item.MetaSegments[0].Text);
+
+        var textBlock = new Avalonia.Controls.TextBlock();
+        Clipthrough.Controls.MetaInlines.SetSegments(textBlock, item.MetaSegments);
+
+        // 3 segment runs + 2 separator runs = 5 inlines.
+        Assert.NotNull(textBlock.Inlines);
+        Assert.Equal(5, textBlock.Inlines!.Count);
+    }
+
     [AvaloniaFact]
     public void Dispose_PersistsCurrentFilterStateImmediately()
     {

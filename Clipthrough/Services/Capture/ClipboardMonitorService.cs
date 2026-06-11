@@ -191,6 +191,14 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                 }
 
                 var (captureRequest, deferredContent) = captureResult.Value;
+                if (!_isStarted || _isDisposed)
+                {
+                    // The monitor was stopped (e.g. a database maintenance op began)
+                    // while we were reading the clipboard. Skip the write so we don't
+                    // persist into a database that's being swapped/rekeyed out from
+                    // under us — that write would be lost or hit a half-swapped file.
+                    return;
+                }
                 var capturedClip = await Task.Run(() => _clipStoreService.CaptureFastAsync(captureRequest));
                 if (capturedClip is not null)
                 {
@@ -218,6 +226,15 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
         {
             Trace.TraceWarning($"Clipboard snapshot skipped because the platform data object could not be enumerated (HRESULT 0x{ex.HResult:X8}): {ex.Message}");
             _notificationService.PublishWarning(AppText.ClipCaptureFailedTitle, AppText.FormatClipCaptureFailedComSnapshot(ex.HResult));
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown in progress — not an error.
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceError($"Clipboard capture failed unexpectedly: {ex}");
+            _notificationService.PublishError(AppText.ClipCaptureFailedTitle, ex.Message);
         }
         finally
         {
@@ -410,7 +427,11 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
             await Task.Run(() => _clipStoreService.ApplyMaintenanceAsync());
             Trace.TraceInformation($"Clipboard background enrichment completed in {enrichmentStopwatch.ElapsedMilliseconds} ms for clip {capturedClip.Id}.");
         }
-        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or COMException)
+        catch (OperationCanceledException)
+        {
+            // Expected during shutdown — suppress.
+        }
+        catch (Exception ex)
         {
             Trace.TraceWarning($"Clipboard background enrichment failed for clip {capturedClip.Id}: {ex}");
         }

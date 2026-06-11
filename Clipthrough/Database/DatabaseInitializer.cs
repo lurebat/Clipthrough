@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -129,7 +129,7 @@ public sealed class DatabaseInitializer
     /// no-ops on a current database but still pay several SQLite round trips
     /// each, which adds up to ~800ms on a cold OS file cache).
     /// </summary>
-    private const int CurrentSchemaVersion = 3;
+    private const int CurrentSchemaVersion = 4;
 
     private readonly SqliteConnectionFactory _connectionFactory;
     private readonly ISensitivityService _sensitivityService;
@@ -488,6 +488,11 @@ public sealed class DatabaseInitializer
         if (!existingColumns.Contains("embedding_status"))
         {
             await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN embedding_status TEXT;", cancellationToken);
+        }
+
+        if (!existingColumns.Contains("embedding_attempts"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN embedding_attempts INTEGER NOT NULL DEFAULT 0;", cancellationToken);
         }
 
         await ExecuteNonQueryAsync(connection, """

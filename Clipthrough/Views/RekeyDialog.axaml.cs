@@ -70,7 +70,11 @@ public partial class RekeyDialog : Window
 
         try
         {
-            await _storageOptionsService.RekeyAsync(current, newPwd, remember);
+            // Offload to a background thread: RekeyAsync does synchronous file I/O
+            // (checkpoint, copy, and swap of the whole DB) that would otherwise
+            // freeze the UI on a large database. The clipboard monitor Start/Stop it
+            // triggers marshal themselves back to the UI thread, so this is safe.
+            await Task.Run(() => _storageOptionsService.RekeyAsync(current, newPwd, remember));
             Close(true);
         }
         catch (Exception ex)

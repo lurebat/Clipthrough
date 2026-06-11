@@ -19,6 +19,9 @@ namespace Clipthrough.Services;
 public sealed class ClipAngelImportService : IClipAngelImportService
 {
     private const string ClipAngelPassword = "Magic67234784";
+    // Cap import file and single-blob sizes to prevent OOM on hostile/malformed inputs.
+    private const long MaxImportFileSizeBytes = 512L * 1024 * 1024; // 512 MB
+    private const long MaxImportBlobSizeBytes = AppSettings.MaxMaxClipSizeBytes; // 32 MB
 
     private readonly IClipStoreService _clipStore;
 
@@ -38,6 +41,15 @@ public sealed class ClipAngelImportService : IClipAngelImportService
         try
         {
             await using var conn = new SqliteConnection($"Data Source={temp};Mode=ReadOnly");
+            conn.StateChange += (_, e) =>
+            {
+                if (e.CurrentState == System.Data.ConnectionState.Open)
+                {
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText = "PRAGMA busy_timeout = 5000;";
+                    cmd.ExecuteNonQuery();
+                }
+            };
             await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             int total;
@@ -98,6 +110,15 @@ public sealed class ClipAngelImportService : IClipAngelImportService
         try
         {
             await using var conn = new SqliteConnection($"Data Source={temp};Mode=ReadOnly");
+            conn.StateChange += (_, e) =>
+            {
+                if (e.CurrentState == System.Data.ConnectionState.Open)
+                {
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText = "PRAGMA busy_timeout = 5000;";
+                    cmd.ExecuteNonQuery();
+                }
+            };
             await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             int total;
@@ -108,10 +129,12 @@ public sealed class ClipAngelImportService : IClipAngelImportService
             }
 
             await using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
+            cmd.CommandText = $"""
                 SELECT
                     Type, Text, Title, Application, Window, Created,
-                    Binary, RichText, HtmlText, Url, Favorite, AppPath
+                    CASE WHEN typeof(Binary) = 'blob' AND LENGTH(Binary) > {MaxImportBlobSizeBytes}
+                         THEN NULL ELSE Binary END,
+                    RichText, HtmlText, Url, Favorite, AppPath
                 FROM Clips
                 ORDER BY Created ASC;
                 """;
@@ -307,26 +330,27 @@ public sealed class ClipAngelImportService : IClipAngelImportService
         if (!File.Exists(src))
             throw new FileNotFoundException("ClipAngel database not found.", src);
 
-        // Read the whole file into memory. Typical size ~30-100 MB, acceptable.
-        byte[] data;
-        await using (var fs = File.OpenRead(src))
-        {
-            data = new byte[fs.Length];
-            int read = 0;
-            while (read < data.Length)
-            {
-                int n = await fs.ReadAsync(data.AsMemory(read, data.Length - read), cancellationToken).ConfigureAwait(false);
-                if (n == 0) break;
-                read += n;
-            }
-        }
-
-        if (data.Length < 1024)
+        var fileInfo = new FileInfo(src);
+        if (fileInfo.Length > MaxImportFileSizeBytes)
+            throw new InvalidDataException($"ClipAngel database too large to import ({fileInfo.Length / (1024 * 1024)} MB; limit is {MaxImportFileSizeBytes / (1024 * 1024)} MB).");
+        if (fileInfo.Length < 1024)
             throw new InvalidDataException("File too small to be a ClipAngel database.");
 
-        // Decrypt page 1 at 1024 B to read the real page size out of the header.
+        // Read just the first 1024 bytes to detect the real page size from the SQLite header.
         var probe = new byte[1024];
-        Buffer.BlockCopy(data, 0, probe, 0, 1024);
+        await using (var probeFs = File.OpenRead(src))
+        {
+            int probeRead = 0;
+            while (probeRead < 1024)
+            {
+                int n = await probeFs.ReadAsync(probe.AsMemory(probeRead, 1024 - probeRead), cancellationToken).ConfigureAwait(false);
+                if (n == 0) break;
+                probeRead += n;
+            }
+            if (probeRead < 1024)
+                throw new InvalidDataException("File too small to be a ClipAngel database.");
+        }
+
         var probePlain = Rc4DecryptPage(probe);
         if (probePlain[0] != (byte)'S' || probePlain[15] != 0)
             throw new InvalidDataException("Decryption failed: file is not a ClipAngel-encrypted SQLite database, or the password does not match.");
@@ -336,22 +360,40 @@ public sealed class ClipAngelImportService : IClipAngelImportService
         if (pageSize < 512 || pageSize > 65536 || (pageSize & (pageSize - 1)) != 0)
             throw new InvalidDataException($"Invalid SQLite page size: {pageSize}.");
 
-        int pages = data.Length / pageSize;
+        long totalBytes = fileInfo.Length;
+        int pages = (int)(totalBytes / pageSize);
         if (pages == 0)
             throw new InvalidDataException("Database has zero pages after detection.");
 
         var temp = Path.Combine(Path.GetTempPath(), $"clipthrough-clipangel-{Guid.NewGuid():N}.db");
-        await using (var outFs = File.Create(temp))
+        try
         {
+            // Stream-decrypt page-by-page: avoids a full in-memory copy of the entire database.
+            await using var srcFs = File.OpenRead(src);
+            await using var outFs = File.Create(temp);
+            var page = new byte[pageSize];
             for (int p = 0; p < pages; p++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var page = new byte[pageSize];
-                Buffer.BlockCopy(data, p * pageSize, page, 0, pageSize);
+                int pageRead = 0;
+                while (pageRead < pageSize)
+                {
+                    int n = await srcFs.ReadAsync(page.AsMemory(pageRead, pageSize - pageRead), cancellationToken).ConfigureAwait(false);
+                    if (n == 0) break;
+                    pageRead += n;
+                }
+                if (pageRead < pageSize)
+                    break; // Short/partial last page — stop here.
                 var plain = Rc4DecryptPage(page);
                 await outFs.WriteAsync(plain.AsMemory(0, pageSize), cancellationToken).ConfigureAwait(false);
             }
         }
+        catch
+        {
+            TryDelete(temp);
+            throw;
+        }
+
         return temp;
     }
 

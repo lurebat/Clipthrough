@@ -1,8 +1,12 @@
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Clipthrough.Models;
+using Clipthrough.Services;
 using Clipthrough.Services.Search;
 using Xunit;
 
@@ -69,6 +73,236 @@ public sealed class SemanticSearchServiceTests
         Assert.Empty(hits);
     }
 
+
+    // ======== U14: QueryAsync is race-free under concurrent RefreshCacheAsync ========
+
+    [Fact]
+    public async Task QueryAsync_ConcurrentRefresh_NoIndexOutOfRange()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        // Seed a mix of clip counts so RefreshCacheAsync keeps changing the snapshot size.
+        var phrases = new[] { "cat", "dog", "bird", "fish", "ant" };
+        foreach (var p in phrases)
+        {
+            await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = p,
+                ContentBytes = Encoding.UTF8.GetBytes(p),
+                IncrementExistingCopyCount = true,
+            });
+        }
+        var emb = new DeterministicEmbeddingService(dims: 8);
+        var worker = new EmbeddingWorker(scope.ClipStoreService, emb, new BackgroundJobIndicator());
+        worker.Start();
+        await WaitForBatchAsync(worker);
+        await worker.StopAsync();
+
+        var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
+        await semantic.RefreshCacheAsync();
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var exceptions = new ConcurrentBag<Exception>();
+
+        // Concurrently run RefreshCacheAsync and QueryAsync — must not throw IndexOutOfRangeException.
+        var tasks = new List<Task>();
+        for (var i = 0; i < 4; i++)
+        {
+            tasks.Add(Task.Run(async () =>
+            {
+                while (!cts.Token.IsCancellationRequested)
+                {
+                    try { await semantic.RefreshCacheAsync(cts.Token); } catch (OperationCanceledException) { }
+                    await Task.Delay(5, default);
+                }
+            }));
+        }
+        for (var i = 0; i < 4; i++)
+        {
+            tasks.Add(Task.Run(async () =>
+            {
+                while (!cts.Token.IsCancellationRequested)
+                {
+                    try { await semantic.QueryAsync("cat", topK: 3, cts.Token); }
+                    catch (OperationCanceledException) { }
+                    catch (Exception ex) { exceptions.Add(ex); }
+                    await Task.Delay(3, default);
+                }
+            }));
+        }
+
+        await Task.WhenAll(tasks);
+        Assert.Empty(exceptions);
+    }
+
+    // ======== U17: Incremental AppendEmbeddingsAsync — O(M) not O(M*N) ========
+
+    [Fact]
+    public async Task AppendEmbeddingsAsync_AppendsNewRecordsWithoutFullReload()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        var phrases = new[] { "alpha beta gamma", "delta epsilon", "zeta eta theta" };
+        var ids = new List<long>();
+        foreach (var p in phrases)
+        {
+            var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = p,
+                ContentBytes = Encoding.UTF8.GetBytes(p),
+                IncrementExistingCopyCount = true,
+            });
+            ids.Add(clip!.Id);
+        }
+
+        var emb = new DeterministicEmbeddingService(dims: 8);
+        var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
+
+        // Seed the first two clips into the cache via full refresh.
+        var firstTwoRecords = new List<ClipEmbeddingRecord>
+        {
+            new(ids[0], emb.VectorFor(phrases[0])),
+            new(ids[1], emb.VectorFor(phrases[1])),
+        };
+        // Simulate: save to DB and call RefreshCacheAsync to populate the cache.
+        await scope.ClipStoreService.SaveEmbeddingBatchAsync(firstTwoRecords, "test");
+        await semantic.RefreshCacheAsync();
+        Assert.Equal(2, semantic.CachedCount);
+
+        // Now append the third clip's record without a full reload.
+        var third = new ClipEmbeddingRecord(ids[2], emb.VectorFor(phrases[2]));
+        await semantic.AppendEmbeddingsAsync(new[] { third });
+
+        Assert.Equal(3, semantic.CachedCount);
+
+        // Query confirms the newly appended record is findable.
+        var hits = await semantic.QueryAsync(phrases[2], topK: 3);
+        Assert.NotEmpty(hits);
+        Assert.Equal(ids[2], hits[0].ClipId);
+    }
+
+    [Fact]
+    public async Task AppendEmbeddingsAsync_DuplicateId_NotAddedTwice()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "dedupe test",
+            ContentBytes = Encoding.UTF8.GetBytes("dedupe test"),
+            IncrementExistingCopyCount = true,
+        });
+        Assert.NotNull(clip);
+
+        var emb = new DeterministicEmbeddingService(dims: 4);
+        var record = new ClipEmbeddingRecord(clip!.Id, emb.VectorFor("dedupe test"));
+        await scope.ClipStoreService.SaveEmbeddingBatchAsync(new[] { record }, "test");
+
+        var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
+        await semantic.RefreshCacheAsync();
+        Assert.Equal(1, semantic.CachedCount);
+
+        // Append the same record again — should not increase count.
+        await semantic.AppendEmbeddingsAsync(new[] { record });
+        Assert.Equal(1, semantic.CachedCount);
+    }
+
+    [Fact]
+    public async Task AppendEmbeddingsAsync_EmptyCacheFallsBackToFullRefresh()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "fresh start",
+            ContentBytes = Encoding.UTF8.GetBytes("fresh start"),
+            IncrementExistingCopyCount = true,
+        });
+        Assert.NotNull(clip);
+
+        var emb = new DeterministicEmbeddingService(dims: 4);
+        var record = new ClipEmbeddingRecord(clip!.Id, emb.VectorFor("fresh start"));
+        await scope.ClipStoreService.SaveEmbeddingBatchAsync(new[] { record }, "test");
+
+        // SemanticSearchService with empty cache: AppendEmbeddingsAsync should fall back to full refresh.
+        var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
+        Assert.Equal(0, semantic.CachedCount);
+
+        await semantic.AppendEmbeddingsAsync(new[] { record });
+        Assert.Equal(1, semantic.CachedCount);
+    }
+
+    // U17 / bug #3: a clip that gets re-embedded (e.g. after OCR adds text) must
+    // have its cached vector REPLACED, not silently skipped as a duplicate id —
+    // otherwise semantic search keeps scoring against the stale vector forever.
+    [Fact]
+    public async Task AppendEmbeddingsAsync_ReembeddedClip_ReplacesStaleVector()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        var apple = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "apple",
+            ContentBytes = Encoding.UTF8.GetBytes("apple"),
+            IncrementExistingCopyCount = true,
+        });
+        var banana = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "banana",
+            ContentBytes = Encoding.UTF8.GetBytes("banana"),
+            IncrementExistingCopyCount = true,
+        });
+
+        var emb = new DeterministicEmbeddingService(dims: 8);
+        var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
+
+        await scope.ClipStoreService.SaveEmbeddingBatchAsync(new[]
+        {
+            new ClipEmbeddingRecord(apple!.Id, emb.VectorFor("apple")),
+            new ClipEmbeddingRecord(banana!.Id, emb.VectorFor("banana")),
+        }, "test");
+        await semantic.RefreshCacheAsync();
+        Assert.Equal(2, semantic.CachedCount);
+
+        // Re-embed the "apple" clip with the vector for a different concept.
+        // The id is already cached, so the old code would skip it (stale vector).
+        await semantic.AppendEmbeddingsAsync(new[]
+        {
+            new ClipEmbeddingRecord(apple.Id, emb.VectorFor("cherry")),
+        });
+
+        // Count is unchanged (update in place, not an add).
+        Assert.Equal(2, semantic.CachedCount);
+
+        // The apple clip now matches "cherry" best — proving its vector was replaced.
+        var hits = await semantic.QueryAsync("cherry", topK: 2);
+        Assert.NotEmpty(hits);
+        Assert.Equal(apple.Id, hits[0].ClipId);
+        Assert.True(hits[0].Score > 0.9f, $"expected near-1.0 cosine, got {hits[0].Score}");
+    }
+
     private static async Task<long> FindClipIdByText(TemporaryDatabaseScope scope, string text)
     {
         var result = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters { Limit = 50 });
@@ -114,5 +348,8 @@ public sealed class SemanticSearchServiceTests
             if (norm > 0) for (var i = 0; i < _dims; i++) vec[i] /= norm;
             return vec;
         }
+
+        /// <summary>Expose the same deterministic vector for test assertions without async overhead.</summary>
+        public float[] VectorFor(string text) => Vector(text);
     }
 }

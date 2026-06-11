@@ -44,15 +44,15 @@
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label"
                                        Text="{Binding SettingsThemeModeLabel}" />
-                            <ComboBox ItemsSource="{Binding ThemeModeOptions}"
-                                      SelectedItem="{Binding SettingsThemeMode}" />
+                            <ComboBox ItemsSource="{Binding Settings.ThemeModeOptions}"
+                                      SelectedItem="{Binding Settings.ThemeMode}" />
                         </StackPanel>
                         <CheckBox Content="{Binding SettingsCloseToTrayLabel}"
-                                  IsChecked="{Binding SettingsCloseToTray}" />
+                                  IsChecked="{Binding Settings.CloseToTray}" />
                         <CheckBox Content="{Binding SettingsMinimizeToTrayLabel}"
-                                  IsChecked="{Binding SettingsMinimizeToTray}" />
+                                  IsChecked="{Binding Settings.MinimizeToTray}" />
                         <CheckBox Content="{Binding SettingsStartWithWindowsLabel}"
-                                  IsChecked="{Binding SettingsStartWithWindows}" />
+                                  IsChecked="{Binding Settings.StartWithWindows}" />
                     </StackPanel>
                 </Expander>
 
@@ -264,7 +264,7 @@
                                        Text="{Binding SettingsDatabasePathLabel}" />
                             <Grid ColumnDefinitions="*,Auto"
                                   ColumnSpacing="8">
-                                <TextBox Text="{Binding SettingsDatabasePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBox Text="{Binding Settings.DatabasePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                 <Button Grid.Column="1"
                                         Classes="secondary compact"
                                         Command="{Binding BrowseDatabasePathCommand}"
@@ -313,12 +313,12 @@
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <Button Classes="secondary"
                                             HorizontalAlignment="Left"
-                                            Command="{Binding RunIntegrityCheckCommand}"
+                                            Command="{Binding Maintenance.RunIntegrityCheckCommand}"
                                             IsEnabled="{Binding StorageDatabaseExists}"
                                             Content="Run integrity check" />
                                     <TextBlock VerticalAlignment="Center"
                                                Classes="body-muted"
-                                               Text="{Binding IntegrityCheckStatus}" />
+                                               Text="{Binding Maintenance.IntegrityCheckStatus}" />
                                 </StackPanel>
                             </StackPanel>
                         </Border>
@@ -331,19 +331,19 @@
                                            TextWrapping="Wrap" />
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <Button Classes="secondary"
-                                            Command="{Binding RefreshBackupsCommand}"
+                                            Command="{Binding Maintenance.RefreshBackupsCommand}"
                                             Content="Refresh list" />
                                     <Button Classes="secondary"
-                                            Command="{Binding RestoreBackupCommand}"
+                                            Command="{Binding Maintenance.RestoreBackupCommand}"
                                             CommandParameter="{Binding $parent[Window]}"
-                                            IsEnabled="{Binding SelectedBackup, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                            IsEnabled="{Binding Maintenance.SelectedBackup, Converter={x:Static ObjectConverters.IsNotNull}}"
                                             Content="Restore selected" />
                                     <TextBlock VerticalAlignment="Center"
                                                Classes="body-muted"
-                                               Text="{Binding BackupRestoreStatus}" />
+                                               Text="{Binding Maintenance.BackupRestoreStatus}" />
                                 </StackPanel>
-                                <ListBox ItemsSource="{Binding Backups}"
-                                         SelectedItem="{Binding SelectedBackup, Mode=TwoWay}"
+                                <ListBox ItemsSource="{Binding Maintenance.Backups}"
+                                         SelectedItem="{Binding Maintenance.SelectedBackup, Mode=TwoWay}"
                                          MaxHeight="160">
                                     <ListBox.ItemTemplate>
                                         <DataTemplate x:DataType="vm:DatabaseBackupItem">
@@ -436,7 +436,7 @@
                         <TextBlock Grid.Row="2" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsClipLimitLabel}" />
                         <TextBox Grid.Row="2" Grid.Column="2"
-                                 Text="{Binding SettingsMaxClipSizeKilobytes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                 Text="{Binding Settings.MaxClipSizeKilobytes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                     </Grid>
                 </Expander>
 
@@ -516,7 +516,7 @@
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label"
                                        Text="{Binding SettingsExternalEditorPathLabel}" />
-                            <TextBox Text="{Binding SettingsExternalEditorPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBox Text="{Binding Settings.ExternalEditorPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             <TextBlock Classes="body-muted"
                                        FontSize="11"
                                        TextWrapping="Wrap"
@@ -525,7 +525,7 @@
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label"
                                        Text="{Binding SettingsExternalImageEditorPathLabel}" />
-                            <TextBox Text="{Binding SettingsExternalImageEditorPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBox Text="{Binding Settings.ExternalImageEditorPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             <TextBlock Classes="body-muted"
                                        FontSize="11"
                                        TextWrapping="Wrap"
@@ -534,7 +534,7 @@
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label"
                                        Text="{Binding SettingsExternalDiffToolPathLabel}" />
-                            <TextBox Text="{Binding SettingsExternalDiffToolPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBox Text="{Binding Settings.ExternalDiffToolPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             <TextBlock Classes="body-muted"
                                        FontSize="11"
                                        TextWrapping="Wrap"
@@ -600,60 +600,60 @@
                                    TextWrapping="Wrap"
                                    Text="Send text clips to an AI chat-completions endpoint and save the result as a new clip. Choose a provider below." />
                         <CheckBox Content="Enable AI transforms"
-                                  IsChecked="{Binding SettingsEnableAi}" />
+                                  IsChecked="{Binding Settings.EnableAi}" />
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label" Text="Provider" />
-                            <ComboBox ItemsSource="{Binding AiProviderOptions}"
-                                      SelectedItem="{Binding SettingsAiProvider, Mode=TwoWay}"
+                            <ComboBox ItemsSource="{Binding Settings.AiProviderOptions}"
+                                      SelectedItem="{Binding Settings.AiProvider, Mode=TwoWay}"
                                       MinWidth="180" />
                         </StackPanel>
 
                         <!-- OpenAI settings -->
-                        <StackPanel Spacing="10" IsVisible="{Binding IsOpenAiSettingsVisible}">
+                        <StackPanel Spacing="10" IsVisible="{Binding Settings.IsOpenAiSettingsVisible}">
                             <StackPanel Spacing="6">
                                 <TextBlock Classes="detail-label" Text="Base URL (blank = https://api.openai.com/v1)" />
                                 <TextBox PlaceholderText="https://api.openai.com/v1"
-                                         Text="{Binding SettingsAiBaseUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                         Text="{Binding Settings.AiBaseUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
                             <StackPanel Spacing="6">
                                 <TextBlock Classes="detail-label" Text="API key (blank = use OPENAI_API_KEY env var)" />
                                 <TextBox PasswordChar="*"
                                          PlaceholderText="sk-…"
-                                         Text="{Binding SettingsAiApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                         Text="{Binding Settings.AiApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
                             <StackPanel Spacing="6">
                                 <TextBlock Classes="detail-label" Text="Model (blank = gpt-4o-mini)" />
                                 <TextBox PlaceholderText="gpt-4o-mini"
-                                         Text="{Binding SettingsAiModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                         Text="{Binding Settings.AiModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
                             <StackPanel Spacing="6">
                                 <TextBlock Classes="detail-label" Text="Image model (used for image→image presets; blank = gpt-image-1)" />
                                 <TextBox PlaceholderText="gpt-image-1"
-                                         Text="{Binding SettingsAiImageModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                         Text="{Binding Settings.AiImageModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
                             <StackPanel Spacing="6">
                                 <TextBlock Classes="detail-label" Text="Reasoning effort (only used by reasoning models; blank = off)" />
-                                <ComboBox ItemsSource="{Binding AiReasoningEffortOptions}"
-                                          SelectedItem="{Binding SettingsAiReasoningEffort, Mode=TwoWay}" />
+                                <ComboBox ItemsSource="{Binding Settings.AiReasoningEffortOptions}"
+                                          SelectedItem="{Binding Settings.AiReasoningEffort, Mode=TwoWay}" />
                             </StackPanel>
                         </StackPanel>
 
                         <!-- Copilot settings -->
-                        <StackPanel Spacing="10" IsVisible="{Binding IsCopilotSettingsVisible}">
+                        <StackPanel Spacing="10" IsVisible="{Binding Settings.IsCopilotSettingsVisible}">
                             <TextBlock Classes="body-muted" TextWrapping="Wrap"
                                        Text="Sign in with your GitHub account to use Copilot as the AI provider. Requires an active GitHub Copilot subscription." />
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <Button Classes="primary compact"
                                         Content="Sign in with GitHub"
-                                        Command="{Binding CopilotSignInCommand}"
-                                        IsVisible="{Binding !IsCopilotSignedIn}" />
+                                        Command="{Binding Copilot.CopilotSignInCommand}"
+                                        IsVisible="{Binding !Copilot.IsCopilotSignedIn}" />
                                 <Button Classes="secondary compact"
                                         Content="Sign out"
-                                        Command="{Binding CopilotSignOutCommand}"
-                                        IsVisible="{Binding IsCopilotSignedIn}" />
+                                        Command="{Binding Copilot.CopilotSignOutCommand}"
+                                        IsVisible="{Binding Copilot.IsCopilotSignedIn}" />
                             </StackPanel>
-                            <TextBlock Classes="body-muted" Text="{Binding CopilotSignInStatus}"
-                                       IsVisible="{Binding CopilotSignInStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                            <TextBlock Classes="body-muted" Text="{Binding Copilot.CopilotSignInStatus}"
+                                       IsVisible="{Binding Copilot.CopilotSignInStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                                        TextWrapping="Wrap" />
                             <!--
                                 When a device-flow code is active, surface it
@@ -663,11 +663,11 @@
                                 offer a one-click "Copy code" alongside.
                             -->
                             <StackPanel Spacing="6"
-                                        IsVisible="{Binding HasCopilotUserCode}">
+                                        IsVisible="{Binding Copilot.HasCopilotUserCode}">
                                 <TextBlock Classes="detail-label"
                                            Text="Your GitHub device code (copied to clipboard)" />
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <TextBox Text="{Binding CopilotUserCode, Mode=OneWay}"
+                                    <TextBox Text="{Binding Copilot.CopilotUserCode, Mode=OneWay}"
                                              IsReadOnly="True"
                                              FontFamily="Consolas, Menlo, monospace"
                                              FontSize="20"
@@ -677,13 +677,13 @@
                                              ToolTip.Tip="Select to copy manually, or use the Copy code button." />
                                     <Button Classes="secondary compact"
                                             Content="Copy code"
-                                            Command="{Binding CopyCopilotUserCodeCommand}" />
+                                            Command="{Binding Copilot.CopyCopilotUserCodeCommand}" />
                                 </StackPanel>
                             </StackPanel>
                             <StackPanel Spacing="6">
                                 <TextBlock Classes="detail-label" Text="Model (blank = gpt-4o)" />
                                 <TextBox PlaceholderText="gpt-4o"
-                                         Text="{Binding SettingsAiModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                         Text="{Binding Settings.AiModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
                         </StackPanel>
                     </StackPanel>
@@ -725,11 +725,11 @@
                         <TextBlock Classes="body-muted" TextWrapping="Wrap"
                                    Text="OCR uses the built-in Windows.Media.Ocr engine. Install extra language packs from Windows Settings → Time &amp; Language → Language → Add a language (with the optional OCR feature) to recognize more scripts, then list their BCP-47 tags below (e.g. 'en+he')." />
                         <CheckBox Content="Automatically run OCR on new image clips in the background"
-                                  IsChecked="{Binding SettingsAutoOcrImageClips, Mode=TwoWay}" />
+                                  IsChecked="{Binding Settings.AutoOcrImageClips, Mode=TwoWay}" />
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label" Text="Languages (BCP-47 tags, separated by + , or space; blank = user profile)" />
                             <TextBox PlaceholderText="en+he"
-                                     Text="{Binding SettingsOcrLanguages, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                     Text="{Binding Settings.OcrLanguages, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </StackPanel>
                     </StackPanel>
                 </Expander>
@@ -745,22 +745,22 @@
                         <TextBlock Classes="body-muted" TextWrapping="Wrap"
                                    Text="Exposes an authenticated HTTP API bound to 127.0.0.1 so local tools and AI agents can list, capture, delete, and transform clips. Requires a bearer token." />
                         <CheckBox Content="Enable local HTTP API"
-                                  IsChecked="{Binding SettingsEnableRemoteApi, Mode=TwoWay}" />
+                                  IsChecked="{Binding Settings.EnableRemoteApi, Mode=TwoWay}" />
                         <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
                             <StackPanel Grid.Column="0" Spacing="6">
                                 <TextBlock Classes="detail-label" Text="Port (1–65535)" />
                                 <NumericUpDown Minimum="1" Maximum="65535" Increment="1" Width="140"
-                                               Value="{Binding SettingsRemoteApiPort, Mode=TwoWay}" />
+                                               Value="{Binding Settings.RemoteApiPort, Mode=TwoWay}" />
                             </StackPanel>
                             <StackPanel Grid.Column="1" Spacing="6">
                                 <TextBlock Classes="detail-label" Text="Bind address" />
                                 <TextBox PlaceholderText="127.0.0.1 (loopback only). Use 0.0.0.0 to expose on LAN."
-                                         Text="{Binding SettingsRemoteApiBindAddress, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                         Text="{Binding Settings.RemoteApiBindAddress, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
                         </Grid>
                         <TextBlock Classes="body-muted"
                                    FontSize="11"
-                                   IsVisible="{Binding RemoteApiBindAddressIsNonLoopback}"
+                                   IsVisible="{Binding Settings.RemoteApiBindAddressIsNonLoopback}"
                                    TextWrapping="Wrap"
                                    Text="⚠ Non-loopback bind: the API will be reachable from other machines on your network. Use a strong token." />
                         <StackPanel Spacing="6">
@@ -768,12 +768,12 @@
                             <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="6">
                                 <TextBox Grid.Column="0"
                                          PasswordChar="•"
-                                         RevealPassword="{Binding IsRemoteApiTokenRevealed}"
+                                         RevealPassword="{Binding Settings.IsRemoteApiTokenRevealed}"
                                          PlaceholderText="Paste or generate a token"
                                          AutomationProperties.Name="Remote API bearer token"
-                                         Text="{Binding SettingsRemoteApiToken, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                         Text="{Binding Settings.RemoteApiToken, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                 <ToggleButton Grid.Column="1" Classes="secondary compact"
-                                              IsChecked="{Binding IsRemoteApiTokenRevealed, Mode=TwoWay}"
+                                              IsChecked="{Binding Settings.IsRemoteApiTokenRevealed, Mode=TwoWay}"
                                               AutomationProperties.Name="Reveal bearer token"
                                               ToolTip.Tip="Reveal / hide token"
                                               Content="👁" />
@@ -792,7 +792,7 @@
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <TextBlock Classes="detail-label" VerticalAlignment="Center" Text="Docs:" />
                             <TextBox IsReadOnly="True" MinWidth="260"
-                                     Text="{Binding RemoteApiDocsUrl, Mode=OneWay}"
+                                     Text="{Binding Settings.RemoteApiDocsUrl, Mode=OneWay}"
                                      AutomationProperties.Name="Swagger UI URL" />
                             <Button Classes="secondary compact" Content="Copy"
                                     Command="{Binding CopyRemoteApiDocsUrlCommand}" />
@@ -802,7 +802,7 @@
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <TextBlock Classes="detail-label" VerticalAlignment="Center" Text="Schema:" />
                             <TextBox IsReadOnly="True" MinWidth="260"
-                                     Text="{Binding RemoteApiSchemaUrl, Mode=OneWay}"
+                                     Text="{Binding Settings.RemoteApiSchemaUrl, Mode=OneWay}"
                                      AutomationProperties.Name="OpenAPI schema URL" />
                             <Button Classes="secondary compact" Content="Copy"
                                     Command="{Binding CopyRemoteApiSchemaUrlCommand}" />
@@ -823,21 +823,21 @@
                         <TextBlock Classes="body-muted" TextWrapping="Wrap"
                                    Text="Clipthrough uses Velopack for auto-updates. When enabled, the app checks the feed URL on launch and downloads any newer build in the background. Updates are NEVER applied automatically while you're using Clipthrough — you'll be notified and can choose to restart now or install the next time you close the app. Only effective when installed via a Velopack package." />
                         <CheckBox Content="Check for updates on launch and download in the background"
-                                  IsChecked="{Binding SettingsEnableAutoUpdate}" />
+                                  IsChecked="{Binding Settings.EnableAutoUpdate}" />
                         <CheckBox Content="Apply downloaded updates automatically on startup (legacy behavior — restarts the app silently)"
-                                  IsChecked="{Binding SettingsAutoApplyUpdatesOnStartup}" />
+                                  IsChecked="{Binding Settings.AutoApplyUpdatesOnStartup}" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Button Classes="secondary compact"
                                     Content="Check for updates now"
-                                    Command="{Binding CheckForUpdatesNowCommand}" />
+                                    Command="{Binding Update.CheckForUpdatesNowCommand}" />
                             <Button Classes="secondary compact"
                                     Content="Restart and install downloaded update"
-                                    Command="{Binding RestartAndInstallUpdateCommand}" />
+                                    Command="{Binding Update.RestartAndInstallUpdateCommand}" />
                         </StackPanel>
                         <StackPanel Spacing="6">
                             <TextBlock Classes="detail-label" Text="Update feed URL (CLIPTHROUGH_UPDATE_FEED overrides this; blank uses the default GitHub Releases feed)" />
                             <TextBox PlaceholderText="https://github.com/owner/repo/releases/latest/download"
-                                     Text="{Binding SettingsUpdateFeedUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                     Text="{Binding Settings.UpdateFeedUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         </StackPanel>
                     </StackPanel>
                 </Expander>

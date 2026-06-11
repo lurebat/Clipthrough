@@ -67,10 +67,10 @@
             <MenuItem Header="Help">
                 <MenuItem Header="_User guide" Command="{Binding OpenHelpCommand}" />
                 <MenuItem Header="{x:Static loc:AppText.CheckForUpdateMenuHeader}"
-                          Command="{Binding CheckForUpdateCommand}" />
+                          Command="{Binding Update.CheckForUpdateCommand}" />
                 <Separator />
-                <MenuItem Header="Open _logs folder" Command="{Binding OpenLogsFolderCommand}" />
-                <MenuItem Header="Open _database folder" Command="{Binding OpenDatabaseFolderCommand}" />
+                <MenuItem Header="Open _logs folder" Command="{Binding Maintenance.OpenLogsFolderCommand}" />
+                <MenuItem Header="Open _database folder" Command="{Binding Maintenance.OpenDatabaseFolderCommand}" />
                 <Separator />
                 <MenuItem Header="_About" Command="{Binding OpenAboutCommand}" />
             </MenuItem>
@@ -496,74 +496,10 @@
                                                            Text="{Binding SingleLinePreview}"
                                                            TextTrimming="CharacterEllipsis"
                                                            IsVisible="{Binding ShowTextPreview}" />
-                                                <WrapPanel Orientation="Horizontal"
-                                                           ItemSpacing="4"
-                                                           LineSpacing="2">
-                                                    <Border Classes="meta-chip"
-                                                            Padding="6,1"
-                                                            Background="{Binding TypeChipBackground}"
-                                                            BorderBrush="{Binding TypeChipBorderBrush}"
-                                                            VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding DisplayContentType}"
-                                                                   Foreground="{Binding TypeChipForeground}"
-                                                                   FontSize="10"
-                                                                   FontWeight="SemiBold" />
-                                                    </Border>
-                                                    <Border Classes="meta-chip"
-                                                            Padding="6,1"
-                                                            Background="{Binding AgeChipBackground}"
-                                                            BorderBrush="{Binding AgeChipBorderBrush}"
-                                                            VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding CapturedAtCompact}"
-                                                                   Foreground="{Binding AgeChipForeground}"
-                                                                   FontSize="10"
-                                                                   FontWeight="SemiBold" />
-                                                    </Border>
-                                                    <Border Classes="meta-chip"
-                                                            Padding="6,1"
-                                                            IsVisible="{Binding ShowWindowTitleChipInRow}"
-                                                            VerticalAlignment="Center"
-                                                            ToolTip.Tip="{Binding SourceWindowTitle}">
-                                                        <TextBlock Text="{Binding SourceWindowTitle}"
-                                                                   FontSize="10"
-                                                                   MaxWidth="200"
-                                                                   TextTrimming="CharacterEllipsis" />
-                                                    </Border>
-                                                    <Border Classes="meta-chip"
-                                                            Padding="6,1"
-                                                            Background="{Binding PastedChipBackground}"
-                                                            BorderBrush="{Binding PastedChipBorderBrush}"
-                                                            IsVisible="{Binding HasBeenPasted}"
-                                                            VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding PastedMarker}"
-                                                                   Foreground="{Binding PastedChipForeground}"
-                                                                   FontSize="10"
-                                                                   FontWeight="SemiBold" />
-                                                    </Border>
-                                                    <TextBlock Classes="clip-row-date"
-                                                               Text="{Binding CopyCountCompact}"
-                                                               IsVisible="{Binding ShowCopyCountBadge}"
-                                                               VerticalAlignment="Center"
-                                                               FontSize="10" />
-                                                    <TextBlock Text="{Binding FavoriteMarker}"
-                                                               Foreground="{Binding StateAccentBrush}"
-                                                               IsVisible="{Binding IsFavorite}"
-                                                               VerticalAlignment="Center"
-                                                               FontSize="10" />
-                                                    <TextBlock Text="{Binding PinMarker}"
-                                                               IsVisible="{Binding IsPinned}"
-                                                               VerticalAlignment="Center"
-                                                               FontSize="10"
-                                                               ToolTip.Tip="Pinned" />
-                                                    <Border Classes="badge-chip"
-                                                            IsVisible="{Binding IsImported}"
-                                                            ToolTip.Tip="Imported via drag-and-drop"
-                                                            VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding ImportedBadgeLabel}"
-                                                                   FontSize="10"
-                                                                   FontWeight="SemiBold" />
-                                                    </Border>
-                                                </WrapPanel>
+                                                <TextBlock Classes="clip-row-meta"
+                                                           TextWrapping="Wrap"
+                                                           AutomationProperties.Name="{Binding MetaLine}"
+                                                           controls:MetaInlines.Segments="{Binding MetaSegments}" />
                                             </StackPanel>
                                         </Grid>
                                     </Border>
@@ -1375,7 +1311,7 @@
                                         <Grid ColumnDefinitions="*,Auto"
                                               ColumnSpacing="8">
                                             <TextBox x:Name="WelcomeDatabasePathTextBox"
-                                                     Text="{Binding SettingsDatabasePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                                     Text="{Binding Settings.DatabasePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                             <Button x:Name="WelcomeDatabasePathBrowseButton"
                                                     Grid.Column="1"
                                                     Classes="secondary compact"
@@ -1444,7 +1380,7 @@
                                                    Text="{Binding SettingsClipLimitLabel}" />
                                         <TextBox Grid.Row="1"
                                                  Grid.Column="2"
-                                                 Text="{Binding SettingsMaxClipSizeKilobytes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                                 Text="{Binding Settings.MaxClipSizeKilobytes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                     </Grid>
                                 </StackPanel>
                             </Border>
@@ -1455,11 +1391,11 @@
                                     <TextBlock Classes="panel-caption"
                                                Text="{Binding SettingsBehaviorTitle}" />
                                     <CheckBox Content="{Binding SettingsCloseToTrayLabel}"
-                                              IsChecked="{Binding SettingsCloseToTray}" />
+                                              IsChecked="{Binding Settings.CloseToTray}" />
                                     <CheckBox Content="{Binding SettingsMinimizeToTrayLabel}"
-                                              IsChecked="{Binding SettingsMinimizeToTray}" />
+                                              IsChecked="{Binding Settings.MinimizeToTray}" />
                                     <CheckBox Content="{Binding SettingsStartWithWindowsLabel}"
-                                              IsChecked="{Binding SettingsStartWithWindows}" />
+                                              IsChecked="{Binding Settings.StartWithWindows}" />
                                 </StackPanel>
                             </Border>
                         </StackPanel>
@@ -1612,11 +1548,11 @@
                       ColumnDefinitions="Auto,Auto,*,Auto"
                       ColumnSpacing="12">
                     <Button Classes="secondary"
-                            Command="{Binding OpenLogsFolderCommand}"
+                            Command="{Binding Maintenance.OpenLogsFolderCommand}"
                             Content="Open logs folder" />
                     <Button Grid.Column="1"
                             Classes="secondary"
-                            Command="{Binding OpenDatabaseFolderCommand}"
+                            Command="{Binding Maintenance.OpenDatabaseFolderCommand}"
                             Content="Open database folder" />
                     <Button Grid.Column="3"
                             Classes="primary"

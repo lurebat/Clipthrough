@@ -1,7 +1,7 @@
-using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Clipthrough.Models;
 
 namespace Clipthrough.Services.Search;
 
@@ -20,6 +20,13 @@ public interface ISemanticSearchService
 
     /// <summary>Reload the embedding cache from storage. Safe to call frequently.</summary>
     Task RefreshCacheAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Incrementally append newly-persisted embedding records to the in-memory cache without a full reload.
+    /// Skips records whose clip id is already in the cache or whose vector dimension does not match.
+    /// If the cache is empty or has no established dimension, falls back to a full <see cref="RefreshCacheAsync"/>.
+    /// </summary>
+    Task AppendEmbeddingsAsync(IReadOnlyList<ClipEmbeddingRecord> records, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Rank cached clips by semantic similarity to <paramref name="text"/>.

@@ -59,15 +59,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly ISearchHistoryService _searchHistoryService;
     private readonly IAiTransformService _aiTransformService;
     private readonly IScriptingService _scriptingService;
-    private readonly IUpdateService _updateService;
     private readonly IOcrService _ocrService;
     private readonly IBackgroundOcrQueue _backgroundOcrQueue;
     private readonly IBackgroundJobIndicator _jobIndicator;
     private readonly Clipthrough.Services.Search.ISemanticSearchService? _semanticSearchService;
     private readonly Clipthrough.Services.Search.IEmbeddingWorker? _embeddingWorker;
-    private readonly ICopilotAuthService? _copilotAuthService;
     private readonly DatabaseInitializer _databaseInitializer;
-    private readonly IDatabaseBackupService _databaseBackupService;
     private readonly CompositeDisposable _subscriptions = new();
     private readonly Dictionary<long, (ClipEntry Clip, CancellationTokenSource Cts)> _pendingDeletes = new();
     private readonly object _refreshQueueLock = new();
@@ -111,7 +108,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isLoadingDatabase;
     private string _startupErrorTitle = string.Empty;
     private string _startupErrorMessage = string.Empty;
-    private string _integrityCheckStatus = string.Empty;
     private bool _areBackgroundServicesStarted;
     private bool _hasQueuedRefresh;
     // Tracks whether the main window is currently visible. When false, optimistic
@@ -156,14 +152,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _settingsEnableToggleCaseSensitiveHotkey = AppSettings.Default.EnableToggleCaseSensitiveHotkey;
     private string _settingsToggleWindowHotkey = AppSettings.Default.ToggleWindowHotkey;
     private bool _settingsEnableToggleWindowHotkey = AppSettings.Default.EnableToggleWindowHotkey;
-    private string _settingsMaxClipSizeKilobytes = (AppSettings.Default.MaxClipSizeBytes / 1024d).ToString("0.##", CultureInfo.InvariantCulture);
-    private string _settingsDatabasePath = StorageOptions.Default.DatabasePath;
     private string _settingsDatabasePassword = StorageOptions.Default.DatabasePassword;
     private string _settingsDatabasePasswordConfirm = StorageOptions.Default.DatabasePassword;
-    private bool _settingsCloseToTray = AppSettings.Default.CloseToTray;
-    private bool _settingsMinimizeToTray = AppSettings.Default.MinimizeToTray;
-    private bool _settingsStartWithWindows = AppSettings.Default.StartWithWindows;
-    private ThemeMode _settingsThemeMode = AppSettings.Default.ThemeMode;
     private bool _settingsEnableNormalClipLifetime = AppSettings.Default.EnableNormalClipLifetime;
     private string _settingsNormalClipLifetimeDays = AppSettings.Default.NormalClipLifetimeDays.ToString(CultureInfo.InvariantCulture);
     private bool _settingsEnableSensitiveClipLifetime = AppSettings.Default.EnableSensitiveClipLifetime;
@@ -198,24 +188,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _settingsEnablePasteAndFavoriteHotkey = AppSettings.Default.EnablePasteAndFavoriteHotkey;
     private string _settingsPasteAsPlainTextHotkey = AppSettings.Default.PasteAsPlainTextHotkey;
     private bool _settingsEnablePasteAsPlainTextHotkey = AppSettings.Default.EnablePasteAsPlainTextHotkey;
-    private string _settingsExternalEditorPath = AppSettings.Default.ExternalEditorPath;
-    private string _settingsExternalImageEditorPath = AppSettings.Default.ExternalImageEditorPath;
-    private string _settingsExternalDiffToolPath = AppSettings.Default.ExternalDiffToolPath;
-    private bool _settingsEnableAi = AppSettings.Default.EnableAi;
-    private string _settingsAiBaseUrl = AppSettings.Default.AiBaseUrl;
-    private string _settingsAiApiKey = AppSettings.Default.AiApiKey;
-    private string _settingsAiModel = AppSettings.Default.AiModel;
-    private string _settingsAiReasoningEffort = AppSettings.Default.AiReasoningEffort;
-    private bool _settingsEnableAutoUpdate = AppSettings.Default.EnableAutoUpdate;
-    private bool _settingsAutoApplyUpdatesOnStartup = AppSettings.Default.AutoApplyUpdatesOnStartup;
-    private string _settingsUpdateFeedUrl = AppSettings.Default.UpdateFeedUrl;
-    private string _settingsOcrLanguages = AppSettings.Default.OcrLanguages;
-    private bool _settingsAutoOcrImageClips = AppSettings.Default.AutoOcrImageClips;
-    private bool _settingsEnableRemoteApi = AppSettings.Default.EnableRemoteApi;
-    private int _settingsRemoteApiPort = AppSettings.Default.RemoteApiPort;
-    private string _settingsRemoteApiToken = AppSettings.Default.RemoteApiToken;
-
-    private string _settingsRemoteApiBindAddress = AppSettings.Default.RemoteApiBindAddress;
     private string _editedClipText = string.Empty;
     private string _editedClipBaseline = string.Empty;
     private int _editedClipSelectionStart;
@@ -239,20 +211,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _searchHistoryService = searchHistoryService;
         _aiTransformService = aiTransformService;
         _scriptingService = scriptingService;
-        _updateService = updateService ?? new UpdateService(settingsService);
         _ocrService = ocrService;
         _backgroundOcrQueue = backgroundOcrQueue;
         _jobIndicator = jobIndicator;
         _jobIndicator.Changed += OnJobIndicatorChanged;
         _semanticSearchService = semanticSearchService;
         _embeddingWorker = embeddingWorker;
-        _copilotAuthService = copilotAuthService;
-        if (_copilotAuthService is not null)
-        {
-            _copilotAuthService.SignedInChanged += OnCopilotSignedInChanged;
-        }
+        Copilot = new CopilotViewModel(copilotAuthService, _systemInteractionService, _clipboardMonitorService, () => this.RaisePropertyChanged(nameof(IsAiMenuVisible)));
+        Settings = new SettingsViewModel();
         _databaseInitializer = databaseInitializer;
-        _databaseBackupService = databaseBackupService ?? new DatabaseBackupService(storageOptionsService);
         SessionLogs = new SessionLogsViewModel(sessionLogService);
         ContentTypeOptions =
         [
@@ -301,12 +268,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         JumpToTopCommand = ReactiveCommand.Create(() => { if (Clips.Count > 0) SelectedClip = Clips[0]; });
         OpenHelpCommand = ReactiveCommand.Create(OpenHelp);
         OpenAboutCommand = ReactiveCommand.Create(OpenAbout);
-        CheckForUpdateCommand = ReactiveCommand.CreateFromTask(CheckForUpdateAsync);
-        OpenLogsFolderCommand = ReactiveCommand.CreateFromTask(OpenLogsFolderAsync);
-        OpenDatabaseFolderCommand = ReactiveCommand.CreateFromTask(OpenDatabaseFolderAsync);
-        RunIntegrityCheckCommand = ReactiveCommand.CreateFromTask(RunIntegrityCheckAsync);
-        RefreshBackupsCommand = ReactiveCommand.Create(RefreshBackups);
-        RestoreBackupCommand = ReactiveCommand.CreateFromTask<Window?>(RestoreBackupAsync);
+        Maintenance = new DatabaseMaintenanceViewModel(databaseBackupService ?? new DatabaseBackupService(storageOptionsService, null, null, null), _storageOptionsService, _systemInteractionService, _notificationService, _clipboardMonitorService, _backgroundOcrQueue, _embeddingWorker, ReportError);
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
         SaveSettingsCommand = ReactiveCommand.CreateFromTask(SaveSettingsAsync);
         BrowseDatabasePathCommand = ReactiveCommand.CreateFromTask<Window?>(BrowseDatabasePathAsync);
@@ -314,9 +276,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         UnlockDatabaseCommand = ReactiveCommand.CreateFromTask(UnlockDatabaseAsync);
         ExitApplicationCommand = ReactiveCommand.Create(ExitApplication);
         OpenAiPromptCommand = ReactiveCommand.Create(OpenAiPrompt);
-        CopilotSignInCommand = ReactiveCommand.CreateFromTask(CopilotSignInAsync);
-        CopilotSignOutCommand = ReactiveCommand.Create(CopilotSignOut);
-        CopyCopilotUserCodeCommand = ReactiveCommand.CreateFromTask(CopyCopilotUserCodeAsync);
         SubmitAiPromptCommand = ReactiveCommand.CreateFromTask(SubmitAiPromptAsync);
         CancelAiPromptCommand = ReactiveCommand.Create(CancelAiPrompt);
         ApplyAiPresetCommand = ReactiveCommand.CreateFromTask<AiPreset>(ApplyAiPresetAsync);
@@ -352,32 +311,31 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RerunAllEmbeddingsCommand = ReactiveCommand.CreateFromTask(RerunAllEmbeddingsAsync);
         RefreshSemanticCoverageCommand = ReactiveCommand.CreateFromTask(RefreshSemanticCoverageAsync);
         GenerateRemoteApiTokenCommand = ReactiveCommand.Create(() =>
-            SettingsRemoteApiToken = System.Guid.NewGuid().ToString("N"));
+            Settings.RemoteApiToken = System.Guid.NewGuid().ToString("N"));
         CopyRemoteApiTokenCommand = ReactiveCommand.CreateFromTask(async () =>
         {
-            if (!string.IsNullOrWhiteSpace(SettingsRemoteApiToken))
+            if (!string.IsNullOrWhiteSpace(Settings.RemoteApiToken))
             {
-                await _systemInteractionService.CopyTextAsync(SettingsRemoteApiToken);
+                await _systemInteractionService.CopyTextAsync(Settings.RemoteApiToken);
                 StatusText = "Remote API token copied";
             }
         });
         CopyRemoteApiDocsUrlCommand = ReactiveCommand.CreateFromTask(async () =>
         {
-            await _systemInteractionService.CopyTextAsync(RemoteApiDocsUrl);
+            await _systemInteractionService.CopyTextAsync(Settings.RemoteApiDocsUrl);
             StatusText = "Swagger URL copied";
         });
         CopyRemoteApiSchemaUrlCommand = ReactiveCommand.CreateFromTask(async () =>
         {
-            await _systemInteractionService.CopyTextAsync(RemoteApiSchemaUrl);
+            await _systemInteractionService.CopyTextAsync(Settings.RemoteApiSchemaUrl);
             StatusText = "OpenAPI schema URL copied";
         });
         OpenRemoteApiDocsUrlCommand = ReactiveCommand.CreateFromTask(async () =>
-            await _systemInteractionService.OpenUrlAsync(RemoteApiDocsUrl));
+            await _systemInteractionService.OpenUrlAsync(Settings.RemoteApiDocsUrl));
         OpenRemoteApiSchemaUrlCommand = ReactiveCommand.CreateFromTask(async () =>
-            await _systemInteractionService.OpenUrlAsync(RemoteApiSchemaUrl));
+            await _systemInteractionService.OpenUrlAsync(Settings.RemoteApiSchemaUrl));
 
-        CheckForUpdatesNowCommand = ReactiveCommand.CreateFromTask(CheckForUpdatesNowAsync);
-        RestartAndInstallUpdateCommand = ReactiveCommand.Create(RestartAndInstallUpdate);
+        Update = new UpdateViewModel(updateService ?? new UpdateService(settingsService), _jobIndicator, _notificationService, status => StatusText = status);
 
         _settingsService.SettingsChanged += OnSettingsChanged;
         SyncUserScripts(_settingsService.Current);
@@ -474,7 +432,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         _subscriptions.Add(
             _backgroundOcrQueue.OcrCompleted
-                .SelectMany(id =>
+                .Throttle(TimeSpan.FromMilliseconds(250), RxSchedulers.MainThreadScheduler)
+                .SelectMany(_ =>
                 {
                     if (!_isMainWindowVisible)
                     {
@@ -527,7 +486,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .Merge(DeleteCheckedClipsCommand.ThrownExceptions)
                 .Merge(CopyEditedClipCommand.ThrownExceptions)
                 .Merge(ApplyTextTransformationCommand.ThrownExceptions)
-                .Merge(CheckForUpdateCommand.ThrownExceptions)
+                .Merge(Update.CheckForUpdateCommand.ThrownExceptions)
                 .Merge(SaveSettingsCommand.ThrownExceptions)
                 .Merge(BrowseDatabasePathCommand.ThrownExceptions)
                 .Merge(UnlockDatabaseCommand.ThrownExceptions)
@@ -613,18 +572,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> OpenRemoteApiDocsUrlCommand { get; }
     public ReactiveCommand<Unit, Unit> OpenRemoteApiSchemaUrlCommand { get; }
 
-    /// <summary>
-    /// User-initiated update check. Surfaces "checking…", success, "no update",
-    /// or error in <see cref="StatusText"/>; if an update is found and
-    /// downloaded, publishes the same notification the background check uses.
-    /// </summary>
-    public ReactiveCommand<Unit, Unit> CheckForUpdatesNowCommand { get; }
-
-    /// <summary>
-    /// User-initiated "restart now to install the downloaded update". No-op
-    /// when nothing is pending.
-    /// </summary>
-    public ReactiveCommand<Unit, Unit> RestartAndInstallUpdateCommand { get; }
+    public UpdateViewModel Update { get; }
 
     public ObservableCollection<UserScript> UserScripts { get; } = new();
 
@@ -638,33 +586,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ReactiveCommand<Unit, Unit> OpenAboutCommand { get; }
 
-    public ReactiveCommand<Unit, Unit> CheckForUpdateCommand { get; }
 
-    public ReactiveCommand<Unit, Unit> OpenLogsFolderCommand { get; }
-
-    public ReactiveCommand<Unit, Unit> OpenDatabaseFolderCommand { get; }
-
-    public ReactiveCommand<Unit, Unit> RunIntegrityCheckCommand { get; }
-
-    public ReactiveCommand<Unit, Unit> RefreshBackupsCommand { get; }
-
-    public ReactiveCommand<Window?, Unit> RestoreBackupCommand { get; }
-
-    public ObservableCollection<DatabaseBackupItem> Backups { get; } = new();
-
-    private DatabaseBackupItem? _selectedBackup;
-    public DatabaseBackupItem? SelectedBackup
-    {
-        get => _selectedBackup;
-        set => this.RaiseAndSetIfChanged(ref _selectedBackup, value);
-    }
-
-    private string _backupRestoreStatus = string.Empty;
-    public string BackupRestoreStatus
-    {
-        get => _backupRestoreStatus;
-        private set => this.RaiseAndSetIfChanged(ref _backupRestoreStatus, value);
-    }
+    public DatabaseMaintenanceViewModel Maintenance { get; }
 
     public ReactiveCommand<Unit, Unit> CloseSettingsCommand { get; }
 
@@ -680,11 +603,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ReactiveCommand<Unit, Unit> OpenAiPromptCommand { get; }
 
-    public ReactiveCommand<Unit, Unit> CopilotSignInCommand { get; }
-
-    public ReactiveCommand<Unit, Unit> CopilotSignOutCommand { get; }
-
-    public ReactiveCommand<Unit, Unit> CopyCopilotUserCodeCommand { get; }
 
     public ReactiveCommand<Unit, Unit> SubmitAiPromptCommand { get; }
 
@@ -1075,6 +993,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 _checkedSelectionAnchorId = value.Id;
             }
             UpdateSelectedClipPresentation();
+            _ = EnsureSelectedClipHydratedAsync();
             RaiseSelectionStateProperties();
             // Selection drives which AI entries / user scripts are eligible
             // (text vs. image). Without this the visible-entries collection
@@ -1159,11 +1078,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool HasStartupError => !string.IsNullOrEmpty(_startupErrorMessage);
 
-    public string IntegrityCheckStatus
-    {
-        get => _integrityCheckStatus;
-        private set => this.RaiseAndSetIfChanged(ref _integrityCheckStatus, value);
-    }
 
     public bool HasRunningJobs
     {
@@ -2052,210 +1966,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string AiPromptApplyLabel => _aiPromptKind == AiPresetKind.ImageToImage ? "Generate" : "Apply";
 
-    public bool SettingsEnableAi
-    {
-        get => _settingsEnableAi;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableAi, value);
-    }
+    public SettingsViewModel Settings { get; }
 
-    public string SettingsAiBaseUrl
-    {
-        get => _settingsAiBaseUrl;
-        set => this.RaiseAndSetIfChanged(ref _settingsAiBaseUrl, value);
-    }
+    public CopilotViewModel Copilot { get; }
 
-    public string SettingsAiApiKey
-    {
-        get => _settingsAiApiKey;
-        set => this.RaiseAndSetIfChanged(ref _settingsAiApiKey, value);
-    }
 
-    public string SettingsAiModel
-    {
-        get => _settingsAiModel;
-        set => this.RaiseAndSetIfChanged(ref _settingsAiModel, value);
-    }
-
-    private string _settingsAiImageModel = AppSettings.Default.AiImageModel;
-
-    public string SettingsAiImageModel
-    {
-        get => _settingsAiImageModel;
-        set => this.RaiseAndSetIfChanged(ref _settingsAiImageModel, value);
-    }
-
-    public string SettingsAiReasoningEffort
-    {
-        get => _settingsAiReasoningEffort;
-        set => this.RaiseAndSetIfChanged(ref _settingsAiReasoningEffort, value);
-    }
-
-    public System.Collections.Generic.IReadOnlyList<string> AiReasoningEffortOptions { get; } = new[] { "", "none", "minimal", "low", "medium", "high" };
-
-    private Models.AiProvider _settingsAiProvider = AppSettings.Default.AiProvider;
-
-    public Models.AiProvider SettingsAiProvider
-    {
-        get => _settingsAiProvider;
-        set
-        {
-            this.RaiseAndSetIfChanged(ref _settingsAiProvider, value);
-            this.RaisePropertyChanged(nameof(IsOpenAiSettingsVisible));
-            this.RaisePropertyChanged(nameof(IsCopilotSettingsVisible));
-        }
-    }
-
-    public Models.AiProvider[] AiProviderOptions { get; } = Enum.GetValues<Models.AiProvider>();
-
-    public bool IsOpenAiSettingsVisible => SettingsAiProvider == Models.AiProvider.OpenAi;
-    public bool IsCopilotSettingsVisible => SettingsAiProvider == Models.AiProvider.Copilot;
-
-    private string _copilotSignInStatus = string.Empty;
-
-    public string CopilotSignInStatus
-    {
-        get => _copilotSignInStatus;
-        private set => this.RaiseAndSetIfChanged(ref _copilotSignInStatus, value);
-    }
-
-    private string _copilotUserCode = string.Empty;
-
-    /// <summary>
-    /// The short device-flow user code (e.g. ABCD-1234) the user must paste
-    /// into github.com/login/device. Empty when no sign-in is in progress.
-    /// Bound to a selectable, copyable surface in Settings.
-    /// </summary>
-    public string CopilotUserCode
-    {
-        get => _copilotUserCode;
-        private set
-        {
-            this.RaiseAndSetIfChanged(ref _copilotUserCode, value);
-            this.RaisePropertyChanged(nameof(HasCopilotUserCode));
-        }
-    }
-
-    public bool HasCopilotUserCode => !string.IsNullOrWhiteSpace(_copilotUserCode);
-
-    private string _copilotVerificationUri = string.Empty;
-
-    public string CopilotVerificationUri
-    {
-        get => _copilotVerificationUri;
-        private set => this.RaiseAndSetIfChanged(ref _copilotVerificationUri, value);
-    }
-
-    private bool _isCopilotSigningIn;
-
-    public bool IsCopilotSigningIn
-    {
-        get => _isCopilotSigningIn;
-        private set => this.RaiseAndSetIfChanged(ref _isCopilotSigningIn, value);
-    }
-
-    public bool IsCopilotSignedIn => _copilotAuthService?.IsSignedIn == true;
-
-    public bool SettingsEnableAutoUpdate
-    {
-        get => _settingsEnableAutoUpdate;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableAutoUpdate, value);
-    }
-
-    public bool SettingsAutoApplyUpdatesOnStartup
-    {
-        get => _settingsAutoApplyUpdatesOnStartup;
-        set => this.RaiseAndSetIfChanged(ref _settingsAutoApplyUpdatesOnStartup, value);
-    }
-
-    public string SettingsUpdateFeedUrl
-    {
-        get => _settingsUpdateFeedUrl;
-        set => this.RaiseAndSetIfChanged(ref _settingsUpdateFeedUrl, value);
-    }
-
-    public string SettingsOcrLanguages
-    {
-        get => _settingsOcrLanguages;
-        set => this.RaiseAndSetIfChanged(ref _settingsOcrLanguages, value);
-    }
-
-    public bool SettingsAutoOcrImageClips
-    {
-        get => _settingsAutoOcrImageClips;
-        set => this.RaiseAndSetIfChanged(ref _settingsAutoOcrImageClips, value);
-    }
-
-    public bool SettingsEnableRemoteApi
-    {
-        get => _settingsEnableRemoteApi;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableRemoteApi, value);
-    }
-
-    public int SettingsRemoteApiPort
-    {
-        get => _settingsRemoteApiPort;
-        set
-        {
-            this.RaiseAndSetIfChanged(ref _settingsRemoteApiPort, value);
-            this.RaisePropertyChanged(nameof(RemoteApiDocsUrl));
-            this.RaisePropertyChanged(nameof(RemoteApiSchemaUrl));
-        }
-    }
-
-    public string SettingsRemoteApiToken
-    {
-        get => _settingsRemoteApiToken;
-        set => this.RaiseAndSetIfChanged(ref _settingsRemoteApiToken, value);
-    }
-
-    private bool _isRemoteApiTokenRevealed;
-    public bool IsRemoteApiTokenRevealed
-    {
-        get => _isRemoteApiTokenRevealed;
-        set => this.RaiseAndSetIfChanged(ref _isRemoteApiTokenRevealed, value);
-    }
-
-    public string SettingsRemoteApiBindAddress
-    {
-        get => _settingsRemoteApiBindAddress;
-        set
-        {
-            this.RaiseAndSetIfChanged(ref _settingsRemoteApiBindAddress, value);
-            this.RaisePropertyChanged(nameof(RemoteApiBindAddressIsNonLoopback));
-            this.RaisePropertyChanged(nameof(RemoteApiDocsUrl));
-            this.RaisePropertyChanged(nameof(RemoteApiSchemaUrl));
-        }
-    }
-
-    public bool RemoteApiBindAddressIsNonLoopback
-    {
-        get
-        {
-            var v = (_settingsRemoteApiBindAddress ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(v)) return false;
-            return !(v.Equals("127.0.0.1", StringComparison.Ordinal)
-                || v.Equals("localhost", StringComparison.OrdinalIgnoreCase)
-                || v.Equals("loopback", StringComparison.OrdinalIgnoreCase)
-                || v.Equals("::1", StringComparison.Ordinal));
-        }
-    }
-
-    private string RemoteApiUrlHost
-    {
-        get
-        {
-            var v = (_settingsRemoteApiBindAddress ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(v)) return "127.0.0.1";
-            if (v.Equals("0.0.0.0", StringComparison.Ordinal) || v.Equals("loopback", StringComparison.OrdinalIgnoreCase))
-                return "127.0.0.1";
-            if (v.Equals("::", StringComparison.Ordinal)) return "[::1]";
-            if (v.Contains(':') && !v.StartsWith("[", StringComparison.Ordinal)) return $"[{v}]";
-            return v;
-        }
-    }
-
-    public string RemoteApiDocsUrl => $"http://{RemoteApiUrlHost}:{_settingsRemoteApiPort}/docs";
-    public string RemoteApiSchemaUrl => $"http://{RemoteApiUrlHost}:{_settingsRemoteApiPort}/openapi/v1.json";
 
     public string SettingsToggleRegexHotkey
     {
@@ -2732,35 +2447,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public string SettingsExternalEditorPath
-    {
-        get => _settingsExternalEditorPath;
-        set => this.RaiseAndSetIfChanged(ref _settingsExternalEditorPath, value);
-    }
-
-    public string SettingsExternalImageEditorPath
-    {
-        get => _settingsExternalImageEditorPath;
-        set => this.RaiseAndSetIfChanged(ref _settingsExternalImageEditorPath, value);
-    }
-
-    public string SettingsExternalDiffToolPath
-    {
-        get => _settingsExternalDiffToolPath;
-        set => this.RaiseAndSetIfChanged(ref _settingsExternalDiffToolPath, value);
-    }
-
-    public string SettingsMaxClipSizeKilobytes
-    {
-        get => _settingsMaxClipSizeKilobytes;
-        set => this.RaiseAndSetIfChanged(ref _settingsMaxClipSizeKilobytes, value);
-    }
-
-    public string SettingsDatabasePath
-    {
-        get => _settingsDatabasePath;
-        set => this.RaiseAndSetIfChanged(ref _settingsDatabasePath, value);
-    }
 
     public string SettingsDatabasePassword
     {
@@ -2837,31 +2523,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => this.RaiseAndSetIfChanged(ref _isDatabasePasswordVisible, value);
     }
 
-    public bool SettingsCloseToTray
-    {
-        get => _settingsCloseToTray;
-        set => this.RaiseAndSetIfChanged(ref _settingsCloseToTray, value);
-    }
 
-    public bool SettingsMinimizeToTray
-    {
-        get => _settingsMinimizeToTray;
-        set => this.RaiseAndSetIfChanged(ref _settingsMinimizeToTray, value);
-    }
-
-    public bool SettingsStartWithWindows
-    {
-        get => _settingsStartWithWindows;
-        set => this.RaiseAndSetIfChanged(ref _settingsStartWithWindows, value);
-    }
-
-    public ThemeMode SettingsThemeMode
-    {
-        get => _settingsThemeMode;
-        set => this.RaiseAndSetIfChanged(ref _settingsThemeMode, value);
-    }
-
-    public ThemeMode[] ThemeModeOptions { get; } = Enum.GetValues<ThemeMode>();
 
     public string SettingsThemeModeLabel => AppText.SettingsThemeModeLabel;
 
@@ -2943,6 +2605,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedClipFiles.Clear();
         ClearClips();
         SessionLogs.Dispose();
+        Copilot.Dispose();
         _subscriptions.Dispose();
     }
 
@@ -3068,177 +2731,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         StatusText = AppText.FormatErrorStatus(ex.Message);
     }
 
-    private async Task OpenLogsFolderAsync()
-    {
-        try
-        {
-            var folder = System.IO.Path.GetDirectoryName(Diagnostics.TraceConfiguration.LogFilePath);
-            if (!string.IsNullOrEmpty(folder) && System.IO.Directory.Exists(folder))
-            {
-                await _systemInteractionService.OpenPathAsync(folder);
-            }
-        }
-        catch (Exception ex)
-        {
-            ReportError("Open logs folder", ex);
-        }
-    }
-
-    private async Task OpenDatabaseFolderAsync()
-    {
-        try
-        {
-            var dbPath = _storageOptionsService.Current.DatabasePath;
-            var folder = System.IO.Path.GetDirectoryName(dbPath);
-            if (!string.IsNullOrEmpty(folder) && System.IO.Directory.Exists(folder))
-            {
-                await _systemInteractionService.OpenPathAsync(folder);
-            }
-        }
-        catch (Exception ex)
-        {
-            ReportError("Open database folder", ex);
-        }
-    }
-
-    private async Task RunIntegrityCheckAsync()
-    {
-        IntegrityCheckStatus = "Running…";
-        try
-        {
-            var problems = await Task.Run(() =>
-            {
-                var found = new System.Collections.Generic.List<string>();
-                var dbPath = _storageOptionsService.Current.DatabasePath;
-                var password = _storageOptionsService.Current.DatabasePassword;
-                var builder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
-                {
-                    DataSource = dbPath,
-                    Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly,
-                };
-                if (!string.IsNullOrEmpty(password))
-                {
-                    builder.Password = password;
-                }
-                using var connection = new Microsoft.Data.Sqlite.SqliteConnection(builder.ToString());
-                connection.Open();
-                using var cmd = connection.CreateCommand();
-                cmd.CommandText = "PRAGMA integrity_check;";
-                using var reader = cmd.ExecuteReader();
-                while (reader.Read())
-                {
-                    var row = reader.GetString(0);
-                    if (!string.Equals(row, "ok", StringComparison.Ordinal))
-                    {
-                        found.Add(row);
-                    }
-                }
-                return found;
-            });
-
-            if (problems.Count == 0)
-            {
-                IntegrityCheckStatus = "Integrity OK";
-            }
-            else
-            {
-                var summary = string.Join("; ", problems.Take(3));
-                if (problems.Count > 3)
-                {
-                    summary += $" (+{problems.Count - 3} more)";
-                }
-                IntegrityCheckStatus = $"Problems found: {summary}";
-                Trace.TraceError($"Integrity check found problems: {string.Join("; ", problems)}");
-            }
-        }
-        catch (Exception ex)
-        {
-            IntegrityCheckStatus = $"Check failed: {ex.Message}";
-            Trace.TraceError($"Integrity check failed: {ex}");
-        }
-    }
-
-    public void RefreshBackups()
-    {
-        try
-        {
-            Backups.Clear();
-            foreach (var info in _databaseBackupService.ListBackups())
-            {
-                Backups.Add(new DatabaseBackupItem(info));
-            }
-            BackupRestoreStatus = Backups.Count switch
-            {
-                0 => "No backups yet (one is created per day).",
-                1 => "1 backup available",
-                _ => $"{Backups.Count} backups available",
-            };
-        }
-        catch (Exception ex)
-        {
-            BackupRestoreStatus = $"Listing failed: {ex.Message}";
-            Trace.TraceError($"List backups failed: {ex}");
-        }
-    }
-
-    private async Task RestoreBackupAsync(Window? owner)
-    {
-        var target = SelectedBackup;
-        if (target is null)
-        {
-            return;
-        }
-
-        var confirmed = owner is null
-            ? true
-            : await Clipthrough.Views.ConfirmDialog.ShowAsync(
-                owner,
-                "Restore from backup?",
-                $"Replace the current database with the snapshot from {target.Timestamp.LocalDateTime:yyyy-MM-dd HH:mm}?\n\nThe current database will be renamed with a .before-restore-* suffix so the swap is reversible. The application will exit afterwards; please restart it to load the restored data.",
-                "Restore",
-                "Cancel");
-        if (!confirmed)
-        {
-            return;
-        }
-
-        try
-        {
-            BackupRestoreStatus = "Stopping background services…";
-
-            // Stop everything that holds a SqliteConnection open so the file
-            // moves below don't race against an active writer.
-            _clipboardMonitorService.Stop();
-            await _backgroundOcrQueue.StopAsync();
-            if (_embeddingWorker is not null)
-            {
-                await _embeddingWorker.StopAsync();
-            }
-
-            BackupRestoreStatus = "Restoring…";
-            await _databaseBackupService.RestoreAsync(target.Path);
-
-            BackupRestoreStatus = "Restored. The app will exit — restart to load the restored data.";
-            _notificationService.PublishInfo("Database restored", "Restart Clipthrough to load the restored snapshot.");
-
-            // Defer the shutdown so the user sees the status update first.
-            _ = Task.Delay(TimeSpan.FromMilliseconds(800)).ContinueWith(_ =>
-                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                {
-                    if (Avalonia.Application.Current?.ApplicationLifetime
-                        is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
-                    {
-                        desktop.Shutdown(0);
-                    }
-                }));
-        }
-        catch (Exception ex)
-        {
-            BackupRestoreStatus = $"Restore failed: {ex.Message}";
-            Trace.TraceError($"Restore from backup failed: {ex}");
-            _notificationService.PublishError("Restore failed", ex.Message);
-        }
-    }
 
     /// <summary>
     /// Standard error reporter used by Rx subscriptions and async catch blocks.
@@ -3427,8 +2919,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             semantic = await _semanticSearchService.QueryAsync(filters.SearchText, topK);
         }
-        catch
+        catch (Exception ex)
         {
+            Trace.TraceWarning($"Semantic search query failed; returning FTS-only result: {ex.Message}");
             return ftsResult;
         }
         if (semantic.Count == 0)
@@ -3845,6 +3338,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private async Task EditSelectedImageAsync()
     {
         var clip = GetEffectiveSelectedClip();
+        if (clip is not null) await clip.EnsureContentHydratedAsync();
         if (clip?.Clip.ContentType != ContentType.Image || clip.Clip.ContentBytes is not { Length: > 0 } imageBytes)
         {
             return;
@@ -4444,8 +3938,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 SemanticCoverageText = $"Semantic: {coverage.Embedded}/{eligible} ({pct}%){suffix}";
             }
         }
-        catch
+        catch (Exception ex)
         {
+            Trace.TraceWarning($"Semantic coverage refresh failed: {ex.Message}");
             SemanticCoverageText = string.Empty;
         }
         this.RaisePropertyChanged(nameof(IsSemanticCoverageVisible));
@@ -4490,8 +3985,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 OcrCoverageText = $"OCR: {coverage.Succeeded}/{coverage.EligibleTotal} ({pct}%){suffix}";
             }
         }
-        catch
+        catch (Exception ex)
         {
+            Trace.TraceWarning($"OCR coverage refresh failed: {ex.Message}");
             OcrCoverageText = string.Empty;
         }
 
@@ -4553,8 +4049,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             IncrementExistingCopyCount = false,
         };
 
-        await Task.Run(() => _clipStoreService.CaptureAsync(request));
-        _editedClipBaseline = _editedClipText;
+        try
+        {
+            await Task.Run(() => _clipStoreService.CaptureAsync(request));
+            _editedClipBaseline = _editedClipText;
+        }
+        catch (Exception ex)
+        {
+            ReportError("Auto-save edited clip", ex);
+        }
     }
 
     private async Task CopyClipAsync(ClipItemViewModel clip)
@@ -5131,6 +4634,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return Clips.FirstOrDefault(static clip => !clip.IsPinned) ?? Clips[0];
     }
 
+    // Image/icon bytes are omitted from list/search reads (U12). On selection, pull
+    // the selected clip's full bytes so the preview pane, edit, export, drag, and
+    // AI-image paths have them, then refresh the image-dependent presentation.
+    private async Task EnsureSelectedClipHydratedAsync()
+    {
+        var clip = SelectedClip;
+        if (clip is null)
+        {
+            return;
+        }
+        await clip.EnsureContentHydratedAsync();
+        if (ReferenceEquals(clip, SelectedClip))
+        {
+            UpdateSelectedClipPresentation();
+            this.RaisePropertyChanged(nameof(HasTransformableTarget));
+            this.RaisePropertyChanged(nameof(HasImageTransformTarget));
+        }
+    }
+
     private void UpdateSelectedClipPresentation()
     {
         var rawContent = SelectedClip?.FullContent ?? ClipDisplayFormatter.GetRawContentDisplay(null);
@@ -5510,7 +5032,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         SessionLogs.Close();
         LoadSettingsDraft(_settingsService.Current);
-        RefreshBackups();
+        Maintenance.RefreshBackups();
         IsSettingsOpen = true;
     }
 
@@ -5526,62 +5048,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         AboutRequested?.Invoke(this, EventArgs.Empty);
     }
 
-    private async Task CheckForUpdateAsync()
-    {
-        StatusText = AppText.CheckingForUpdateStatus;
-
-        try
-        {
-            var result = await _jobIndicator.TrackAsync(
-                AppText.CheckingForUpdateStatus,
-                () => _updateService.CheckForUpdatesAsync(ignoreAutoUpdateDisabled: true));
-            var message = string.IsNullOrWhiteSpace(result.Message)
-                ? AppText.UpdateCheckCompleteStatus
-                : result.Message;
-
-            StatusText = message;
-            if (result.HasUpdate && !string.IsNullOrWhiteSpace(result.Version))
-            {
-                // Mirror the background-check notification: surface explicit
-                // "Restart and install" / "Install on exit" actions instead of
-                // leaving the user with a plain info toast.
-                _notificationService.Publish(new AppNotification
-                {
-                    Title = $"Clipthrough update {result.Version} ready",
-                    Message = "Restart now to install, or it will be applied next time you close Clipthrough.",
-                    Level = AppNotificationLevel.Information,
-                    IsPersistent = true,
-                    Actions = new[]
-                    {
-                        new AppNotificationAction
-                        {
-                            Label = "Restart and install",
-                            ExecuteAsync = () =>
-                            {
-                                _updateService.ApplyDownloadedUpdateAndRestart();
-                                return Task.CompletedTask;
-                            },
-                        },
-                        new AppNotificationAction
-                        {
-                            Label = "Install on exit",
-                            ExecuteAsync = () => Task.CompletedTask,
-                        },
-                    },
-                });
-            }
-            else
-            {
-                _notificationService.PublishInfo(AppText.UpdateCheckCompleteTitle, message);
-            }
-        }
-        catch (Exception ex)
-        {
-            Trace.TraceWarning($"Update check failed: {ex}");
-            StatusText = AppText.FormatUpdateCheckFailed(ex.Message);
-            _notificationService.PublishError(AppText.UpdateCheckFailedTitle, ex.Message);
-        }
-    }
 
     public event EventHandler? HelpRequested;
 
@@ -5630,102 +5096,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         AiPromptError = string.Empty;
     }
 
-    private async Task CopilotSignInAsync()
-    {
-        if (_copilotAuthService is null)
-        {
-            CopilotSignInStatus = "Copilot auth service not available.";
-            return;
-        }
-
-        IsCopilotSigningIn = true;
-        CopilotSignInStatus = "Starting device code flow\u2026";
-        CopilotUserCode = string.Empty;
-        CopilotVerificationUri = string.Empty;
-        try
-        {
-            var deviceCode = await Task.Run(() => _copilotAuthService.StartDeviceCodeFlowAsync()).ConfigureAwait(false);
-            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () =>
-            {
-                CopilotUserCode = deviceCode.UserCode;
-                CopilotVerificationUri = deviceCode.VerificationUri;
-                CopilotSignInStatus = $"Enter code {deviceCode.UserCode} at {deviceCode.VerificationUri} (code copied to clipboard).";
-                try
-                {
-                    // Auto-copy the device code so the user can paste it into
-                    // the GitHub page immediately. The clipboard monitor will
-                    // capture this — that's fine; it's just a 9-character
-                    // public code with no security implication.
-                    _clipboardMonitorService.SuppressNext();
-                    await _systemInteractionService.CopyTextAsync(deviceCode.UserCode);
-                }
-                catch (Exception ex)
-                {
-                    Trace.TraceWarning($"Copilot sign-in: failed to auto-copy device code: {ex.Message}");
-                }
-                await _systemInteractionService.OpenUrlAsync(deviceCode.VerificationUri);
-            });
-
-            var success = await Task.Run(() => _copilotAuthService.PollForAuthorizationAsync(deviceCode)).ConfigureAwait(false);
-            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                CopilotUserCode = string.Empty;
-                CopilotVerificationUri = string.Empty;
-                if (success)
-                {
-                    CopilotSignInStatus = "Signed in to GitHub Copilot.";
-                    this.RaisePropertyChanged(nameof(IsCopilotSignedIn));
-                }
-                else
-                {
-                    CopilotSignInStatus = "Sign-in expired or denied.";
-                }
-            });
-        }
-        catch (Exception ex)
-        {
-            Trace.TraceWarning($"Copilot sign-in failed: {ex}");
-            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                CopilotUserCode = string.Empty;
-                CopilotVerificationUri = string.Empty;
-                CopilotSignInStatus = $"Sign-in failed: {ex.Message}";
-            });
-        }
-        finally
-        {
-            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => IsCopilotSigningIn = false);
-        }
-    }
-
-    private async Task CopyCopilotUserCodeAsync()
-    {
-        if (string.IsNullOrWhiteSpace(CopilotUserCode))
-        {
-            return;
-        }
-
-        try
-        {
-            _clipboardMonitorService.SuppressNext();
-            await _systemInteractionService.CopyTextAsync(CopilotUserCode);
-            CopilotSignInStatus = $"Code {CopilotUserCode} copied. Paste it at {CopilotVerificationUri}.";
-        }
-        catch (Exception ex)
-        {
-            Trace.TraceWarning($"Copy Copilot device code failed: {ex.Message}");
-            CopilotSignInStatus = $"Could not copy code: {ex.Message}";
-        }
-    }
-
-    private void CopilotSignOut()
-    {
-        _copilotAuthService?.SignOut();
-        CopilotUserCode = string.Empty;
-        CopilotVerificationUri = string.Empty;
-        CopilotSignInStatus = "Signed out.";
-        this.RaisePropertyChanged(nameof(IsCopilotSignedIn));
-    }
 
     private Task SubmitAiPromptAsync() => SubmitAiPromptAsync(transformKind: GetCustomAiTransformKind(_aiPromptKind), presetLabel: null);
 
@@ -6063,10 +5433,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var selectedPath = await PickDatabasePathAsync(window.StorageProvider, SettingsDatabasePath);
+        var selectedPath = await PickDatabasePathAsync(window.StorageProvider, Settings.DatabasePath);
         if (!string.IsNullOrWhiteSpace(selectedPath))
         {
-            SettingsDatabasePath = selectedPath;
+            Settings.DatabasePath = selectedPath;
         }
     }
 
@@ -6264,7 +5634,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        if (!TryParseMaxClipSizeBytes(SettingsMaxClipSizeKilobytes, out var maxClipSizeBytes))
+        if (!TryParseMaxClipSizeBytes(Settings.MaxClipSizeKilobytes, out var maxClipSizeBytes))
         {
             StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidClipSize);
             return;
@@ -6306,7 +5676,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             storageOptions = new StorageOptions
             {
-                DatabasePath = SettingsDatabasePath,
+                DatabasePath = Settings.DatabasePath,
                 DatabasePassword = SettingsDatabasePassword,
                 RememberPassword = SettingsRememberDatabasePassword,
             }.Normalize();
@@ -6367,25 +5737,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             PasteAndFavoriteHotkey = normalizedExtended["paste-and-favorite"],
             EnablePasteAsPlainTextHotkey = SettingsEnablePasteAsPlainTextHotkey,
             PasteAsPlainTextHotkey = normalizedExtended["paste-as-plain-text"],
-            ExternalEditorPath = SettingsExternalEditorPath.Trim(),
-            ExternalImageEditorPath = SettingsExternalImageEditorPath.Trim(),
-            ExternalDiffToolPath = SettingsExternalDiffToolPath.Trim(),
-            EnableAi = SettingsEnableAi,
-            AiProvider = SettingsAiProvider,
-            AiBaseUrl = (SettingsAiBaseUrl ?? string.Empty).Trim(),
-            AiApiKey = (SettingsAiApiKey ?? string.Empty).Trim(),
-            AiModel = (SettingsAiModel ?? string.Empty).Trim(),
-            AiImageModel = (SettingsAiImageModel ?? string.Empty).Trim(),
-            AiReasoningEffort = (SettingsAiReasoningEffort ?? string.Empty).Trim(),
-            EnableAutoUpdate = SettingsEnableAutoUpdate,
-            AutoApplyUpdatesOnStartup = SettingsAutoApplyUpdatesOnStartup,
-            UpdateFeedUrl = (SettingsUpdateFeedUrl ?? string.Empty).Trim(),
-            OcrLanguages = (SettingsOcrLanguages ?? string.Empty).Trim(),
-            AutoOcrImageClips = SettingsAutoOcrImageClips,
-            EnableRemoteApi = SettingsEnableRemoteApi,
-            RemoteApiPort = SettingsRemoteApiPort,
-            RemoteApiToken = (SettingsRemoteApiToken ?? string.Empty).Trim(),
-            RemoteApiBindAddress = (SettingsRemoteApiBindAddress ?? string.Empty).Trim(),
+            ExternalEditorPath = Settings.ExternalEditorPath.Trim(),
+            ExternalImageEditorPath = Settings.ExternalImageEditorPath.Trim(),
+            ExternalDiffToolPath = Settings.ExternalDiffToolPath.Trim(),
+            EnableAi = Settings.EnableAi,
+            AiProvider = Settings.AiProvider,
+            AiBaseUrl = (Settings.AiBaseUrl ?? string.Empty).Trim(),
+            AiApiKey = (Settings.AiApiKey ?? string.Empty).Trim(),
+            AiModel = (Settings.AiModel ?? string.Empty).Trim(),
+            AiImageModel = (Settings.AiImageModel ?? string.Empty).Trim(),
+            AiReasoningEffort = (Settings.AiReasoningEffort ?? string.Empty).Trim(),
+            EnableAutoUpdate = Settings.EnableAutoUpdate,
+            AutoApplyUpdatesOnStartup = Settings.AutoApplyUpdatesOnStartup,
+            UpdateFeedUrl = (Settings.UpdateFeedUrl ?? string.Empty).Trim(),
+            OcrLanguages = (Settings.OcrLanguages ?? string.Empty).Trim(),
+            AutoOcrImageClips = Settings.AutoOcrImageClips,
+            EnableRemoteApi = Settings.EnableRemoteApi,
+            RemoteApiPort = Settings.RemoteApiPort,
+            RemoteApiToken = (Settings.RemoteApiToken ?? string.Empty).Trim(),
+            RemoteApiBindAddress = (Settings.RemoteApiBindAddress ?? string.Empty).Trim(),
             UserScripts = SettingsUserScriptDrafts
                 .Select(s => new UserScript { Name = s.Name.Trim(), Code = s.Code })
                 .Where(s => !string.IsNullOrWhiteSpace(s.Name) && !string.IsNullOrWhiteSpace(s.Code))
@@ -6395,10 +5765,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .Where(b => !string.IsNullOrWhiteSpace(b.Gesture) && !string.IsNullOrWhiteSpace(b.Target))
                 .ToList(),
             MaxClipSizeBytes = maxClipSizeBytes,
-            CloseToTray = SettingsCloseToTray,
-            MinimizeToTray = SettingsMinimizeToTray,
-            StartWithWindows = SettingsStartWithWindows,
-            ThemeMode = SettingsThemeMode,
+            CloseToTray = Settings.CloseToTray,
+            MinimizeToTray = Settings.MinimizeToTray,
+            StartWithWindows = Settings.StartWithWindows,
+            ThemeMode = Settings.ThemeMode,
             EnableNormalClipLifetime = SettingsEnableNormalClipLifetime,
             NormalClipLifetimeDays = normalClipLifetimeDays,
             EnableSensitiveClipLifetime = SettingsEnableSensitiveClipLifetime,
@@ -6413,8 +5783,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             UseFuzzySettingsSearch = SettingsUseFuzzySearch,
         };
 
-        await _storageOptionsService.SaveAsync(storageOptions);
-        await _settingsService.SaveAsync(settings);
+        await Task.Run(async () =>
+        {
+            await _storageOptionsService.SaveAsync(storageOptions).ConfigureAwait(false);
+            await _settingsService.SaveAsync(settings).ConfigureAwait(false);
+        });
         if (!_isDatabaseReady)
         {
             IsLoadingDatabase = true;
@@ -6469,15 +5842,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsToggleCaseSensitiveHotkey = settings.ToggleCaseSensitiveHotkey;
         SettingsEnableToggleWindowHotkey = settings.EnableToggleWindowHotkey;
         SettingsToggleWindowHotkey = settings.ToggleWindowHotkey;
-        SettingsMaxClipSizeKilobytes = (settings.MaxClipSizeBytes / 1024d).ToString("0.##", CultureInfo.InvariantCulture);
-        SettingsDatabasePath = _storageOptionsService.Current.DatabasePath;
+        Settings.MaxClipSizeKilobytes = (settings.MaxClipSizeBytes / 1024d).ToString("0.##", CultureInfo.InvariantCulture);
+        Settings.DatabasePath = _storageOptionsService.Current.DatabasePath;
         SettingsDatabasePassword = _storageOptionsService.Current.DatabasePassword;
         SettingsDatabasePasswordConfirm = _storageOptionsService.Current.DatabasePassword;
         SettingsRememberDatabasePassword = _storageOptionsService.Current.RememberPassword;
-        SettingsCloseToTray = settings.CloseToTray;
-        SettingsMinimizeToTray = settings.MinimizeToTray;
-        SettingsStartWithWindows = settings.StartWithWindows;
-        SettingsThemeMode = settings.ThemeMode;
+        Settings.CloseToTray = settings.CloseToTray;
+        Settings.MinimizeToTray = settings.MinimizeToTray;
+        Settings.StartWithWindows = settings.StartWithWindows;
+        Settings.ThemeMode = settings.ThemeMode;
         SettingsEnableNormalClipLifetime = settings.EnableNormalClipLifetime;
         SettingsNormalClipLifetimeDays = settings.NormalClipLifetimeDays.ToString(CultureInfo.InvariantCulture);
         SettingsEnableSensitiveClipLifetime = settings.EnableSensitiveClipLifetime;
@@ -6512,26 +5885,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsPasteAndFavoriteHotkey = settings.PasteAndFavoriteHotkey;
         SettingsEnablePasteAsPlainTextHotkey = settings.EnablePasteAsPlainTextHotkey;
         SettingsPasteAsPlainTextHotkey = settings.PasteAsPlainTextHotkey;
-        SettingsExternalEditorPath = settings.ExternalEditorPath;
-        SettingsExternalImageEditorPath = settings.ExternalImageEditorPath;
-        SettingsExternalDiffToolPath = settings.ExternalDiffToolPath;
-        SettingsEnableAi = settings.EnableAi;
+        Settings.ExternalEditorPath = settings.ExternalEditorPath;
+        Settings.ExternalImageEditorPath = settings.ExternalImageEditorPath;
+        Settings.ExternalDiffToolPath = settings.ExternalDiffToolPath;
+        Settings.EnableAi = settings.EnableAi;
         this.RaisePropertyChanged(nameof(IsAiMenuVisible));
-        SettingsAiProvider = settings.AiProvider;
-        SettingsAiBaseUrl = settings.AiBaseUrl;
-        SettingsAiApiKey = settings.AiApiKey;
-        SettingsAiModel = settings.AiModel;
-        SettingsAiImageModel = settings.AiImageModel;
-        SettingsAiReasoningEffort = settings.AiReasoningEffort;
-        SettingsEnableAutoUpdate = settings.EnableAutoUpdate;
-        SettingsAutoApplyUpdatesOnStartup = settings.AutoApplyUpdatesOnStartup;
-        SettingsUpdateFeedUrl = settings.UpdateFeedUrl;
-        SettingsOcrLanguages = settings.OcrLanguages;
-        SettingsAutoOcrImageClips = settings.AutoOcrImageClips;
-        SettingsEnableRemoteApi = settings.EnableRemoteApi;
-        SettingsRemoteApiPort = settings.RemoteApiPort;
-        SettingsRemoteApiToken = settings.RemoteApiToken;
-        SettingsRemoteApiBindAddress = settings.RemoteApiBindAddress;
+        Settings.AiProvider = settings.AiProvider;
+        Settings.AiBaseUrl = settings.AiBaseUrl;
+        Settings.AiApiKey = settings.AiApiKey;
+        Settings.AiModel = settings.AiModel;
+        Settings.AiImageModel = settings.AiImageModel;
+        Settings.AiReasoningEffort = settings.AiReasoningEffort;
+        Settings.EnableAutoUpdate = settings.EnableAutoUpdate;
+        Settings.AutoApplyUpdatesOnStartup = settings.AutoApplyUpdatesOnStartup;
+        Settings.UpdateFeedUrl = settings.UpdateFeedUrl;
+        Settings.OcrLanguages = settings.OcrLanguages;
+        Settings.AutoOcrImageClips = settings.AutoOcrImageClips;
+        Settings.EnableRemoteApi = settings.EnableRemoteApi;
+        Settings.RemoteApiPort = settings.RemoteApiPort;
+        Settings.RemoteApiToken = settings.RemoteApiToken;
+        Settings.RemoteApiBindAddress = settings.RemoteApiBindAddress;
         SettingsUserScriptDrafts.Clear();
         foreach (var s in settings.UserScripts)
         {
@@ -6550,14 +5923,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RebuildCustomHotkeyTargetSuggestions();
     }
 
-    private void OnCopilotSignedInChanged()
-    {
-        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-        {
-            this.RaisePropertyChanged(nameof(IsCopilotSignedIn));
-            this.RaisePropertyChanged(nameof(IsAiMenuVisible));
-        });
-    }
 
     private void OnSettingsChanged(object? sender, AppSettings settings)
     {
@@ -6709,7 +6074,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             try
             {
-                await _databaseBackupService.EnsureDailyBackupAsync().ConfigureAwait(false);
+                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -6746,7 +6111,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (_embeddingWorker is not null)
         {
             _subscriptions.Add(_embeddingWorker.BatchCompleted
-                .ObserveOn(RxSchedulers.MainThreadScheduler)
+                // Coalesce coverage refreshes: a large backlog fires BatchCompleted
+                // every batch (~32 clips) and each refresh runs a full-table
+                // aggregate. Throttle so the scan runs at most ~twice a second.
+                .Throttle(TimeSpan.FromMilliseconds(500), RxSchedulers.MainThreadScheduler)
                 .Subscribe((int count) => { _ = RefreshSemanticCoverageAsync(); }));
         }
     }
@@ -6836,6 +6204,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         var clip = GetEffectiveSelectedClip();
+        if (clip is not null) await clip.EnsureContentHydratedAsync();
         if (clip is null || clip.Clip.ContentType != ContentType.Image || clip.Clip.ContentBytes is not { Length: > 0 } imageBytes)
         {
             _notificationService.PublishWarning(
@@ -6966,73 +6335,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private async Task CheckForUpdatesNowAsync()
-    {
-        if (_updateService is null)
-        {
-            StatusText = "Updates are not available in this build.";
-            return;
-        }
-
-        StatusText = "Checking for updates\u2026";
-        try
-        {
-            var result = await _updateService.CheckForUpdatesAsync().ConfigureAwait(true);
-            if (result.HasUpdate && !string.IsNullOrWhiteSpace(result.Version))
-            {
-                StatusText = $"Update {result.Version} downloaded. Restart Clipthrough to install.";
-                _notificationService.Publish(new AppNotification
-                {
-                    Title = $"Clipthrough update {result.Version} ready",
-                    Message = "Restart now to install, or it will be applied next time you close Clipthrough.",
-                    Level = AppNotificationLevel.Information,
-                    IsPersistent = true,
-                    Actions = new[]
-                    {
-                        new AppNotificationAction
-                        {
-                            Label = "Restart and install",
-                            ExecuteAsync = () =>
-                            {
-                                _updateService.ApplyDownloadedUpdateAndRestart();
-                                return Task.CompletedTask;
-                            },
-                        },
-                        new AppNotificationAction
-                        {
-                            Label = "Install on exit",
-                            ExecuteAsync = () => Task.CompletedTask,
-                        },
-                    },
-                });
-            }
-            else
-            {
-                StatusText = string.IsNullOrWhiteSpace(result.Message)
-                    ? "Clipthrough is up to date."
-                    : result.Message!;
-            }
-        }
-        catch (Exception ex)
-        {
-            Trace.TraceWarning($"Manual update check failed: {ex}");
-            StatusText = AppText.FormatErrorStatus(ex.Message);
-        }
-    }
-
-    private void RestartAndInstallUpdate()
-    {
-        if (_updateService is null)
-        {
-            StatusText = "Updates are not available in this build.";
-            return;
-        }
-
-        if (!_updateService.ApplyDownloadedUpdateAndRestart())
-        {
-            StatusText = "No downloaded update is waiting to install. Check for updates first.";
-        }
-    }
 
     private static async Task<string?> PickDatabasePathAsync(IStorageProvider storageProvider, string currentPath)
     {
@@ -7491,7 +6793,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             DeleteClipAsync,
             ExportClipAsync,
             TogglePinClipAsync,
-            ApplyTransformationToSingleClipAsync)
+            ApplyTransformationToSingleClipAsync,
+            id => Task.Run(() => _clipStoreService.GetByIdAsync(id)))
         {
             IsChecked = checkedIds?.Contains(clip.Id) == true
         };

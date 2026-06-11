@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Clipthrough.Models;
@@ -16,6 +17,17 @@ public sealed class UpdateService : IUpdateService
         "RELEASES",
         "releases.win.json",
         "assets.win.json",
+    ];
+
+    /// <summary>
+    /// Hosts from which update feeds are accepted. Must be HTTPS. Prevents feed
+    /// hijacking via the env-override or a tampered settings.json.
+    /// </summary>
+    private static readonly string[] s_allowedFeedHosts =
+    [
+        "github.com",
+        "raw.githubusercontent.com",
+        "objects.githubusercontent.com",
     ];
 
     private readonly ISettingsService _settingsService;
@@ -160,14 +172,19 @@ public sealed class UpdateService : IUpdateService
 
     public static string ResolveFeedUrl(string? configuredFeedUrl, string? environmentFeedUrl)
     {
+        // In production builds the configured feed always wins; the env-var is a
+        // development escape hatch and must not outrank a real configuration.
+#if DEBUG
         var feedUrl = string.IsNullOrWhiteSpace(environmentFeedUrl)
             ? configuredFeedUrl
             : environmentFeedUrl;
-
+#else
+        var feedUrl = string.IsNullOrWhiteSpace(configuredFeedUrl)
+            ? environmentFeedUrl
+            : configuredFeedUrl;
+#endif
         if (string.IsNullOrWhiteSpace(feedUrl))
-        {
             feedUrl = AppSettings.DefaultUpdateFeedUrl;
-        }
 
         return NormalizeFeedUrl(feedUrl);
     }
@@ -180,8 +197,29 @@ public sealed class UpdateService : IUpdateService
             var suffix = "/" + assetName;
             if (trimmed.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
             {
-                return trimmed[..^suffix.Length].TrimEnd('/');
+                trimmed = trimmed[..^suffix.Length].TrimEnd('/');
+                break;
             }
+        }
+
+        // Enforce HTTPS and an allowlisted host to prevent feed hijacking.
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        {
+            Trace.TraceWarning($"Update feed URL is not a valid absolute URI; using default. (Input: '{trimmed}')");
+            return AppSettings.DefaultUpdateFeedUrl;
+        }
+
+        if (!string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase))
+        {
+            Trace.TraceWarning($"Update feed URL must use HTTPS; using default. (Scheme: '{uri.Scheme}')");
+            return AppSettings.DefaultUpdateFeedUrl;
+        }
+
+        var host = uri.Host;
+        if (!s_allowedFeedHosts.Any(h => string.Equals(h, host, StringComparison.OrdinalIgnoreCase)))
+        {
+            Trace.TraceWarning($"Update feed URL host '{host}' is not on the allowlist; using default.");
+            return AppSettings.DefaultUpdateFeedUrl;
         }
 
         return trimmed;

@@ -443,3 +443,28 @@ internal sealed class TestOcrService : IOcrService
     public Task<OcrResult> ExtractTextAsync(byte[] imageBytes, string languages, CancellationToken cancellationToken = default)
         => Task.FromResult(new OcrResult(false, string.Empty, "stub"));
 }
+
+/// <summary>
+/// Fake protector that behaves like a real one (CanPersistSecrets = true) but uses
+/// a trivially reversible transform so tests can verify round-trip behaviour without
+/// requiring Windows DPAPI.
+/// </summary>
+internal sealed class FakeDataProtectionService : IDataProtectionService
+{
+    public bool CanPersistSecrets => true;
+    // Reverse the byte array — simple, deterministic, and invertible.
+    public byte[] Protect(byte[] data) { var copy = (byte[])data.Clone(); Array.Reverse(copy); return copy; }
+    public byte[] Unprotect(byte[] data) { var copy = (byte[])data.Clone(); Array.Reverse(copy); return copy; }
+}
+
+/// <summary>
+/// Fake protector whose Unprotect always throws, simulating a corrupt blob or
+/// user-profile change. Used to verify the "drop key on unprotect failure" path.
+/// </summary>
+internal sealed class FailingUnprotectDataProtectionService : IDataProtectionService
+{
+    public bool CanPersistSecrets => true;
+    public byte[] Protect(byte[] data) => (byte[])data.Clone();
+    public byte[] Unprotect(byte[] data) =>
+        throw new System.Security.Cryptography.CryptographicException("Simulated unprotect failure");
+}

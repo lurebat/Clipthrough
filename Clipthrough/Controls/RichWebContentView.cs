@@ -3,6 +3,8 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
@@ -30,6 +32,11 @@ public sealed class RichWebContentView : UserControl
     private readonly TextBlock _emptyState;
     private readonly TextBlock _fallbackContent;
     private string? _loadedDocument;
+    // Incremented on every RenderContent call; async RTF conversions check this to
+    // discard stale results when content changes before conversion finishes.
+    private int _renderGeneration;
+    // Maximum RTF size to attempt rendering; larger payloads fall back to plain text.
+    private const int MaxRtfRenderSizeChars = 512 * 1024;
     private bool _suppressRenderFromWebMessage;
 
     public RichWebContentView()
@@ -102,14 +109,82 @@ public sealed class RichWebContentView : UserControl
 
     private bool CanEditHtml => !IsReadOnly && ContentFormat == ClipContentFormat.Html;
 
-    private void RenderContent(string? content)
+    private async void RenderContent(string? content)
     {
         if (_suppressRenderFromWebMessage)
-        {
             return;
+
+        var gen = Interlocked.Increment(ref _renderGeneration);
+
+        string document;
+        if (ContentFormat == ClipContentFormat.Rtf && !string.IsNullOrWhiteSpace(content))
+        {
+            // RTF-to-HTML conversion can hang on malformed/huge input; run it off the UI
+            // thread with a size cap and a hard timeout, falling back to plain text.
+            if (content.Length > MaxRtfRenderSizeChars)
+            {
+                Trace.TraceWarning($"RTF content too large to render ({content.Length:N0} chars); falling back to plain text.");
+                document = BuildPlainTextDocument(content);
+            }
+            else
+            {
+                try
+                {
+                    var captured = content;
+                    // RtfPipe exposes no cancellation hook, so run it on a dedicated
+                    // background thread instead of a pool thread: if it hangs on
+                    // pathological input the abandoned (background) thread won't
+                    // starve the shared thread pool the rest of the app relies on.
+                    var html = await ConvertRtfOnDedicatedThreadAsync(captured)
+                        .WaitAsync(TimeSpan.FromSeconds(3));
+                    document = WrapFragmentDocument(html, editable: false);
+                }
+                catch (TimeoutException)
+                {
+                    Trace.TraceWarning("RTF-to-HTML conversion timed out; falling back to plain text.");
+                    document = BuildPlainTextDocument(content);
+                }
+                catch (Exception ex)
+                {
+                    Trace.TraceWarning($"RTF-to-HTML conversion failed: {ex.Message}");
+                    document = BuildPlainTextDocument(content);
+                }
+            }
+
+            // Discard result if content has changed since we started.
+            if (Volatile.Read(ref _renderGeneration) != gen)
+                return;
+        }
+        else
+        {
+            document = BuildDocument(content);
         }
 
-        var document = BuildDocument(content);
+        ApplyDocument(document, content);
+    }
+
+    // Converts RTF→HTML on a dedicated background thread. RtfPipe is synchronous
+    // and uncancellable, so when the caller's WaitAsync timeout elapses the work
+    // is abandoned; using a background thread (not the shared pool) means a hung
+    // conversion can't exhaust the pool that DB writes and captures depend on.
+    private static Task<string> ConvertRtfOnDedicatedThreadAsync(string rtf)
+    {
+        var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try { tcs.TrySetResult(RtfToHtmlConverter.Convert(rtf)); }
+            catch (Exception ex) { tcs.TrySetException(ex); }
+        })
+        {
+            IsBackground = true,
+            Name = "rtf-to-html",
+        };
+        thread.Start();
+        return tcs.Task;
+    }
+
+    private void ApplyDocument(string document, string? content)
+    {
         if (string.IsNullOrWhiteSpace(document))
         {
             _loadedDocument = null;
@@ -136,13 +211,17 @@ public sealed class RichWebContentView : UserControl
         _webView.IsVisible = true;
 
         if (string.Equals(_loadedDocument, document, StringComparison.Ordinal))
-        {
             return;
-        }
 
         _loadedDocument = document;
         _webView.NavigateToString(document);
     }
+
+    private string BuildPlainTextDocument(string content)
+        => WrapFragmentDocument(
+            System.Net.WebUtility.HtmlEncode(ClipDisplayFormatter.NormalizePreviewText(content))
+                .Replace(Environment.NewLine, "<br>", StringComparison.Ordinal),
+            editable: false);
 
     private async void OnNavigationCompleted(object? sender, WebViewNavigationCompletedEventArgs e)
     {

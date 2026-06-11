@@ -51,7 +51,10 @@ public sealed class CopilotAuthService : ICopilotAuthService, IDisposable
         _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
         _dataProtection = dataProtection;
-        if (dataProtection is not null)
+        // Only set up token persistence when the protector can actually secure
+        // on-disk data. On non-Windows platforms with the no-op fallback we keep
+        // the token in-memory only — never write cleartext to disk.
+        if (dataProtection is not null && dataProtection.CanPersistSecrets)
         {
             _tokenPath = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
