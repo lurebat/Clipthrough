@@ -17,6 +17,13 @@ public interface IClipStoreService
 
     Task<ClipEntry?> ApplySensitivityAsync(long clipId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Classifies every clip whose deferred sensitivity scan never completed
+    /// (crash, SQLITE_BUSY, faulted enrichment task). Returns how many were
+    /// classified. Run at startup so content cannot stay unflagged forever.
+    /// </summary>
+    Task<int> ApplyPendingSensitivityAsync(CancellationToken cancellationToken = default);
+
     /// <summary>Insert multiple clips in a single transaction for bulk import scenarios.</summary>
     Task<BulkCaptureResult> CaptureBatchAsync(IReadOnlyList<ClipCaptureRequest> requests, CancellationToken cancellationToken = default);
 

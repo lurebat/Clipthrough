@@ -5910,6 +5910,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _clipboardMonitorService.Start();
         _backgroundOcrQueue.Start();
         _ = Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync());
+        _ = RecoverPendingSensitivityAsync();
         if (_embeddingWorker is not null && _settingsService.Current.EnableSemanticSearch)
         {
             _embeddingWorker.Start();
@@ -5932,6 +5933,27 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 // aggregate. Throttle so the scan runs at most ~twice a second.
                 .Throttle(TimeSpan.FromMilliseconds(500), RxSchedulers.MainThreadScheduler)
                 .Subscribe((int count) => { _ = RefreshSemanticCoverageAsync(); }));
+        }
+    }
+
+    /// <summary>
+    /// Classifies clips whose deferred sensitivity scan never completed, so a
+    /// crash or a failed enrichment task can't leave content unflagged forever.
+    /// Refreshes the list when anything was actually reclassified.
+    /// </summary>
+    private async Task RecoverPendingSensitivityAsync()
+    {
+        try
+        {
+            var classified = await Task.Run(() => _clipStoreService.ApplyPendingSensitivityAsync());
+            if (classified > 0)
+            {
+                await RefreshAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            ReportError("Deferred sensitivity recovery", ex);
         }
     }
 

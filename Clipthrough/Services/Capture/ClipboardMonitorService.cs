@@ -433,7 +433,11 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
         }
         catch (Exception ex)
         {
-            Trace.TraceWarning($"Clipboard background enrichment failed for clip {capturedClip.Id}: {ex}");
+            // The deferred scan is what makes the clip's content safe to show
+            // and to index. Losing it silently is a security-relevant failure,
+            // not noise — surface it. sensitivity_scanned_at stays null, so
+            // ApplyPendingSensitivityAsync retries this clip on next startup.
+            Trace.TraceError($"Clipboard background enrichment failed for clip {capturedClip.Id}; sensitivity classification is deferred to the next startup: {ex}");
         }
     }
 

@@ -10,6 +10,162 @@ namespace Clipthrough.Tests.Integration;
 
 public sealed class ClipStoreServiceTests
 {
+    /// <summary>
+    /// Synthetic, obviously-fake credential text. It is not a real secret; it
+    /// exists only because it matches the built-in "Passwords" rule
+    /// ((?i)(password|passwd|pwd)['":\s=]+\S{6,}), which is what these tests
+    /// need in order to observe a classification actually happening.
+    /// </summary>
+    private const string SyntheticSecretText = "password = NOT-A-REAL-CREDENTIAL";
+
+    /// <summary>
+    /// Regression test for C2: CaptureFastAsync writes content to disk and to
+    /// the FTS index before classifying it, relying on a follow-up
+    /// ApplySensitivityAsync from the clipboard monitor. If that follow-up never
+    /// ran (crash, SQLITE_BUSY, faulted enrichment task) nothing distinguished
+    /// the clip from one that had been scanned and found clean, so a secret
+    /// stayed unflagged forever. Startup recovery must find and classify it.
+    /// </summary>
+    [Fact]
+    public async Task ApplyPendingSensitivityAsync_ClassifiesClipsWhoseDeferredScanNeverRan()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        // Guard: the fixture is only meaningful if a rule really matches it.
+        await scope.SensitivityService.ReloadAsync();
+        Assert.NotEmpty(scope.SensitivityService.Scan(SyntheticSecretText));
+
+        // Fast capture defers classification - this simulates the app dying
+        // before EnrichCapturedClipAsync got to run.
+        var clip = await scope.ClipStoreService.CaptureFastAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = SyntheticSecretText,
+            ContentBytes = Encoding.UTF8.GetBytes(SyntheticSecretText),
+        });
+
+        Assert.NotNull(clip);
+        Assert.False(clip!.IsSensitive);
+
+        var classified = await scope.ClipStoreService.ApplyPendingSensitivityAsync();
+        Assert.Equal(1, classified);
+
+        var recovered = await scope.ClipStoreService.GetByIdAsync(clip.Id);
+        Assert.NotNull(recovered);
+        Assert.True(recovered!.IsSensitive, "A clip whose deferred scan never ran must be classified on recovery.");
+    }
+
+    /// <summary>
+    /// Recovery must be idempotent: a clip that has already been classified is
+    /// not rescanned, so startup cost stays proportional to the actual backlog.
+    /// </summary>
+    [Fact]
+    public async Task ApplyPendingSensitivityAsync_SkipsAlreadyClassifiedClips()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        var clip = await scope.ClipStoreService.CaptureFastAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = SyntheticSecretText,
+            ContentBytes = Encoding.UTF8.GetBytes(SyntheticSecretText),
+        });
+        Assert.NotNull(clip);
+
+        Assert.Equal(1, await scope.ClipStoreService.ApplyPendingSensitivityAsync());
+        Assert.Equal(0, await scope.ClipStoreService.ApplyPendingSensitivityAsync());
+    }
+
+    /// <summary>
+    /// A clip captured through the full CaptureAsync path is classified inline,
+    /// so recovery has nothing to do for it.
+    /// </summary>
+    [Fact]
+    public async Task ApplyPendingSensitivityAsync_IgnoresClipsScannedAtCapture()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = SyntheticSecretText,
+            ContentBytes = Encoding.UTF8.GetBytes(SyntheticSecretText),
+        });
+
+        Assert.NotNull(clip);
+        Assert.True(clip!.IsSensitive);
+        Assert.Equal(0, await scope.ClipStoreService.ApplyPendingSensitivityAsync());
+    }
+
+    /// <summary>
+    /// Regression test for C2: an unclassified clip has is_sensitive = 0 just
+    /// like a clean one, so the embedding worker used to accept it as a
+    /// candidate. Unclassified secrets could therefore reach the vector cache
+    /// before anything decided they were secrets.
+    /// </summary>
+    [Fact]
+    public async Task ClaimPendingEmbeddingsAsync_SkipsClipsAwaitingClassification()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        await scope.ClipStoreService.CaptureFastAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = SyntheticSecretText,
+            ContentBytes = Encoding.UTF8.GetBytes(SyntheticSecretText),
+        });
+
+        var beforeClassification = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10);
+        Assert.Empty(beforeClassification);
+
+        // After classification the clip is still excluded, now for the right
+        // reason: it is sensitive.
+        await scope.ClipStoreService.ApplyPendingSensitivityAsync();
+        var afterClassification = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10);
+        Assert.Empty(afterClassification);
+    }
+
+    /// <summary>
+    /// The classification gate must not permanently block ordinary clips from
+    /// being embedded - once the deferred scan completes and finds nothing, the
+    /// clip becomes a normal embedding candidate.
+    /// </summary>
+    [Fact]
+    public async Task ClaimPendingEmbeddingsAsync_AcceptsCleanClipsOnceClassified()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        var clip = await scope.ClipStoreService.CaptureFastAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "an entirely ordinary sentence",
+            ContentBytes = Encoding.UTF8.GetBytes("an entirely ordinary sentence"),
+        });
+        Assert.NotNull(clip);
+
+        Assert.Empty(await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10));
+
+        await scope.ClipStoreService.ApplyPendingSensitivityAsync();
+
+        var claimed = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10);
+        Assert.Single(claimed);
+        Assert.Equal(clip!.Id, claimed[0].ClipId);
+    }
     [Fact]
     public async Task CaptureAsync_PersistsRichContentMetadata()
     {

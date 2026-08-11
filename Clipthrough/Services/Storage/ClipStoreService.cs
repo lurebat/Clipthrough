@@ -233,6 +233,61 @@ public sealed class ClipStoreService : IClipStoreService
         return await GetClipByIdAsync(connection, clipId, cancellationToken);
     }
 
+    /// <summary>
+    /// Classifies every clip whose deferred sensitivity scan never completed.
+    /// <para>
+    /// <see cref="CaptureFastAsync"/> writes content to disk (and to the FTS
+    /// index) before classification so the capture stays fast, relying on a
+    /// follow-up <see cref="ApplySensitivityAsync"/>. If the app crashed, the
+    /// write lost a race with SQLITE_BUSY, or the enrichment task faulted, that
+    /// follow-up never ran and the clip stayed unflagged permanently. This
+    /// recovery pass runs at startup and closes that window.
+    /// </para>
+    /// </summary>
+    /// <returns>The number of clips that were classified.</returns>
+    public async Task<int> ApplyPendingSensitivityAsync(CancellationToken cancellationToken = default)
+    {
+        List<long> pending;
+        await using (var connection = _connectionFactory.CreateConnection())
+        {
+            await connection.OpenAsync(cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT id FROM clips WHERE sensitivity_scanned_at IS NULL ORDER BY id;";
+
+            pending = [];
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                pending.Add(reader.GetInt64(0));
+            }
+        }
+
+        if (pending.Count == 0)
+        {
+            return 0;
+        }
+
+        Trace.TraceWarning($"Found {pending.Count} clip(s) whose sensitivity scan never completed; classifying now.");
+
+        var classified = 0;
+        foreach (var clipId in pending)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                await ApplySensitivityAsync(clipId, cancellationToken);
+                classified++;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Leave the marker null so the next startup retries this clip.
+                Trace.TraceError($"Deferred sensitivity scan failed for clip {clipId}: {ex.Message}");
+            }
+        }
+
+        return classified;
+    }
+
     public async Task<ClipEntry?> ApplySensitivityAsync(long clipId, CancellationToken cancellationToken = default)
     {
         await using var connection = _connectionFactory.CreateConnection();
@@ -261,6 +316,7 @@ public sealed class ClipStoreService : IClipStoreService
             update.CommandText = """
                 UPDATE clips
                 SET is_sensitive = $isSensitive,
+                    sensitivity_scanned_at = $scannedAt,
                     embedding_status = CASE
                         WHEN $isSensitive = 1 THEN 'excluded'
                         WHEN embedding_status = 'excluded' THEN NULL
@@ -270,6 +326,7 @@ public sealed class ClipStoreService : IClipStoreService
                 """;
             update.Parameters.AddWithValue("$id", clipId);
             update.Parameters.AddWithValue("$isSensitive", matches.Count > 0 ? 1 : 0);
+            update.Parameters.AddWithValue("$scannedAt", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
             await update.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -1077,10 +1134,12 @@ public sealed class ClipStoreService : IClipStoreService
                             copy_count = copy_count + 1,
                             byte_size = $byteSize,
                             image_width = COALESCE($imageWidth, image_width),
-                            image_height = COALESCE($imageHeight, image_height)
+                            image_height = COALESCE($imageHeight, image_height),
+                            sensitivity_scanned_at = COALESCE($sensitivityScannedAt, sensitivity_scanned_at)
                         WHERE id = $id;
                         """;
                     AddUpsertParameters(updateCommand, request, contentText, hash, matches.Count > 0, capturedAt, byteSize, clipId);
+                    updateCommand.Parameters.AddWithValue("$sensitivityScannedAt", scanSensitivity ? capturedAt : (object)DBNull.Value);
                     await updateCommand.ExecuteNonQueryAsync(cancellationToken);
                 }
             }
@@ -1111,7 +1170,8 @@ public sealed class ClipStoreService : IClipStoreService
                         image_height,
                         source_clip_id,
                         transform_kind,
-                        import_kind)
+                        import_kind,
+                        sensitivity_scanned_at)
                     VALUES (
                         $content,
                         $contentBytes,
@@ -1134,10 +1194,12 @@ public sealed class ClipStoreService : IClipStoreService
                         $imageHeight,
                         $sourceClipId,
                         $transformKind,
-                        $importKind);
+                        $importKind,
+                        $sensitivityScannedAt);
                     SELECT last_insert_rowid();
                     """;
                 AddUpsertParameters(insertCommand, request, contentText, hash, matches.Count > 0, capturedAt, byteSize);
+                insertCommand.Parameters.AddWithValue("$sensitivityScannedAt", scanSensitivity ? capturedAt : (object)DBNull.Value);
                 clipId = (long)(await insertCommand.ExecuteScalarAsync(cancellationToken) ?? 0L);
             }
         }
@@ -1913,6 +1975,7 @@ public sealed class ClipStoreService : IClipStoreService
 
     private const string EmbeddingEligibilityClause = """
         is_sensitive = 0
+        AND sensitivity_scanned_at IS NOT NULL
         AND (
             (content_type IN ('text','richtext','files') AND content IS NOT NULL AND TRIM(content) <> '')
             OR (content_type = 'image' AND ocr_status = 'succeeded' AND ocr_text IS NOT NULL AND TRIM(ocr_text) <> '')

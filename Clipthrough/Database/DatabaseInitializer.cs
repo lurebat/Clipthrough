@@ -43,6 +43,7 @@ public sealed class DatabaseInitializer
             ocr_status   TEXT,
             ocr_attempted_at TEXT,
             ocr_error    TEXT,
+            sensitivity_scanned_at TEXT,
             source_clip_id INTEGER,
             transform_kind TEXT,
             import_kind  TEXT
@@ -435,6 +436,24 @@ public sealed class DatabaseInitializer
         if (!existingColumns.Contains("ocr_error"))
         {
             await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN ocr_error TEXT;", cancellationToken);
+        }
+
+        if (!existingColumns.Contains("sensitivity_scanned_at"))
+        {
+            // NULL means "classification has not completed for this clip".
+            // CaptureFastAsync defers the scan, so without this marker a clip
+            // whose deferred scan never ran was indistinguishable from one that
+            // was scanned and found clean — it stayed unflagged forever.
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN sensitivity_scanned_at TEXT;", cancellationToken);
+
+            // Existing rows predate the marker. Treat them as already scanned so
+            // upgrading doesn't trigger a full-library rescan and doesn't stall
+            // embedding for the whole existing library; only captures from here
+            // on are tracked.
+            await ExecuteNonQueryAsync(
+                connection,
+                "UPDATE clips SET sensitivity_scanned_at = COALESCE(captured_at, first_copied_at) WHERE sensitivity_scanned_at IS NULL;",
+                cancellationToken);
         }
 
         await ExecuteNonQueryAsync(

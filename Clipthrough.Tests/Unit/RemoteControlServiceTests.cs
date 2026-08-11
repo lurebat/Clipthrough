@@ -323,6 +323,7 @@ public sealed class RemoteControlServiceTests : IAsyncDisposable
         public Task<ClipEntry?> UpdateDeferredContentAsync(long clipId, ClipCaptureRequest request, CancellationToken cancellationToken = default) => Task.FromResult<ClipEntry?>(null);
         public Task<ClipEntry?> UpdateSourceAppIconAsync(long clipId, byte[] iconBytes, CancellationToken cancellationToken = default) => Task.FromResult<ClipEntry?>(null);
         public Task<ClipEntry?> ApplySensitivityAsync(long clipId, CancellationToken cancellationToken = default) => Task.FromResult<ClipEntry?>(null);
+    public Task<int> ApplyPendingSensitivityAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
         public Task<BulkCaptureResult> CaptureBatchAsync(IReadOnlyList<ClipCaptureRequest> requests, CancellationToken cancellationToken = default) => Task.FromResult(new BulkCaptureResult(0, 0));
         public Task SetFavoriteAsync(long clipId, bool isFavorite, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task SetPinnedAsync(long clipId, bool isPinned, CancellationToken cancellationToken = default) => Task.CompletedTask;
