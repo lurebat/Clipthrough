@@ -33,6 +33,7 @@ public sealed class MainWindowViewModelHeadlessTests
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
         await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
 
         var firstClip = await CaptureTextClipAsync(scope.ClipStoreService, "first");
         clipboardMonitor.Emit(firstClip);
@@ -206,6 +207,7 @@ public sealed class MainWindowViewModelHeadlessTests
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
         await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
 
         var firstClip = await CaptureTextClipAsync(scope.ClipStoreService, "first");
         clipboardMonitor.Emit(firstClip);
@@ -234,6 +236,7 @@ public sealed class MainWindowViewModelHeadlessTests
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
         await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
 
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "original");
         clipboardMonitor.Emit(clip);
@@ -260,6 +263,7 @@ public sealed class MainWindowViewModelHeadlessTests
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
         await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
 
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "original");
         clipboardMonitor.Emit(clip);
@@ -283,6 +287,7 @@ public sealed class MainWindowViewModelHeadlessTests
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
         await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
 
         const string originalMarkup = "<p><span style=\"color:#ff0000\">original</span></p>";
         var clip = await CaptureRichTextClipAsync(scope.ClipStoreService, originalMarkup, ClipContentFormat.Html);
@@ -306,6 +311,7 @@ public sealed class MainWindowViewModelHeadlessTests
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
         await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
 
         const string rtf = @"{\rtf1\ansi{\colortbl ;\red255\green0\blue0;}\cf1 original}";
         var clip = await CaptureRichTextClipAsync(scope.ClipStoreService, rtf, ClipContentFormat.Rtf);
@@ -328,6 +334,7 @@ public sealed class MainWindowViewModelHeadlessTests
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
         await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
 
         const string originalMarkup = "<p><strong>original</strong></p>";
         var clip = await CaptureRichTextClipAsync(scope.ClipStoreService, originalMarkup, ClipContentFormat.Html);
@@ -359,6 +366,7 @@ public sealed class MainWindowViewModelHeadlessTests
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
         await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
 
         const string rtf = @"{\rtf1\ansi{\colortbl ;\red255\green0\blue0;}\cf1 original}";
         var clip = await CaptureRichTextClipAsync(scope.ClipStoreService, rtf, ClipContentFormat.Rtf);
@@ -464,6 +472,7 @@ public sealed class MainWindowViewModelHeadlessTests
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
         await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
 
         Assert.False(viewModel.IsWelcomeOpen);
 
@@ -739,7 +748,7 @@ public sealed class MainWindowViewModelHeadlessTests
         viewModel.WholeWordSearch = true;
         viewModel.UseFuzzyClipSearch = true;
         viewModel.UseSemanticClipSearch = false;
-        viewModel.SelectedContentTypeOption = viewModel.ContentTypeOptions[2];
+        viewModel.IsImageTypeSelected = true;
 
         viewModel.Dispose();
 
@@ -752,7 +761,10 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.True(scope.SettingsService.Current.LastWholeWordSearch);
         Assert.True(scope.SettingsService.Current.LastUseFuzzyClipSearch);
         Assert.False(scope.SettingsService.Current.LastUseSemanticClipSearch);
-        Assert.Equal(ContentType.Image, scope.SettingsService.Current.LastContentTypeFilter);
+        // The single-value LastContentTypeFilter is legacy and is deliberately
+        // nulled on save; the multi-select list is the live contract.
+        Assert.Null(scope.SettingsService.Current.LastContentTypeFilter);
+        Assert.Equal([ContentType.Image], scope.SettingsService.Current.LastContentTypeFilters);
         Assert.True(scope.SettingsService.SaveCallCount > 0);
     }
 
@@ -767,6 +779,15 @@ public sealed class MainWindowViewModelHeadlessTests
 
         await viewModel.InitializeAsync();
         await viewModel.SaveSettingsCommand.Execute().ToTask();
+
+        // Saving from the welcome screen kicks off StartDatabaseInBackgroundAsync,
+        // which opens the database on a worker thread and only then posts the
+        // welcome dismissal back to the UI thread. Pump until it lands.
+        for (var attempt = 0; attempt < 50 && viewModel.IsWelcomeOpen; attempt++)
+        {
+            await Task.Delay(50);
+            Dispatcher.UIThread.RunJobs();
+        }
 
         Assert.False(viewModel.IsWelcomeOpen);
         Assert.True(scope.SettingsService.HasSavedSettings);
@@ -807,6 +828,7 @@ public sealed class MainWindowViewModelHeadlessTests
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
         await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
 
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "favorite me");
         clipboardMonitor.Emit(clip);
@@ -859,6 +881,7 @@ public sealed class MainWindowViewModelHeadlessTests
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
         await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
 
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "favorite current");
         clipboardMonitor.Emit(clip);
@@ -1182,6 +1205,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
         await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
         var pngBytes = CreatePngBytes(0);
         var clip = await CaptureImageClipAsync(scope.ClipStoreService, pngBytes, "test image");
         clipboardMonitor.Emit(clip);
@@ -1209,6 +1233,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
         await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
         var pngBytes = CreatePngBytes(0);
         var clip = await CaptureImageClipAsync(scope.ClipStoreService, pngBytes, "test image");
         clipboardMonitor.Emit(clip);
@@ -1228,6 +1253,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
         await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "hello world");
         clipboardMonitor.Emit(clip);
         Dispatcher.UIThread.RunJobs();
