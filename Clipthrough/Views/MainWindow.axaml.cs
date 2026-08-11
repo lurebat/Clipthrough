@@ -28,6 +28,7 @@ public partial class MainWindow : Window
     private ISystemInteractionService? m_systemInteractionService;
     private bool m_focusClipOnNextActivation;
     private bool m_focusClipOnNextSelectionChange;
+    private int m_focusRequestGeneration;
     private Point? m_dragStartPoint;
     private ClipItemViewModel? m_dragCandidateClip;
     private PointerPressedEventArgs? m_dragPressedArgs;
@@ -626,6 +627,8 @@ public partial class MainWindow : Window
             return;
         }
 
+        var generation = BeginFocusRequest();
+
         // Scroll the selected item into view
         if (m_clipsListBox.SelectedItem is not null)
         {
@@ -635,7 +638,7 @@ public partial class MainWindow : Window
         // Focus the ListBoxItem for the selected clip
         Dispatcher.UIThread.Post(() =>
         {
-            if (m_clipsListBox.SelectedIndex < 0)
+            if (m_focusRequestGeneration != generation || m_clipsListBox.SelectedIndex < 0)
             {
                 return;
             }
@@ -646,6 +649,33 @@ public partial class MainWindow : Window
                 item.Focus();
             }
         }, DispatcherPriority.Input);
+    }
+
+    /// <summary>
+    /// Focus moves are scheduled, not immediate, and several of them retry at a
+    /// lower priority to beat the menu bar's auto-focus on window activation.
+    /// Stamping every request means a retry can tell that focus has since been
+    /// claimed deliberately somewhere else and step aside instead of yanking it
+    /// back after the user has already moved on.
+    /// </summary>
+    private int BeginFocusRequest() => ++m_focusRequestGeneration;
+
+    /// <summary>
+    /// True when nothing in this window holds keyboard focus, or when it is held
+    /// by the top menu -- the only two states a deferred search-box focus retry
+    /// is allowed to override.
+    /// </summary>
+    private bool IsFocusReclaimable()
+    {
+        var focused = TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement();
+        return focused switch
+        {
+            null => true,
+            Avalonia.Visual visual => visual.GetSelfAndVisualAncestors()
+                .OfType<Menu>()
+                .Any(menu => menu.Name == "TopMenu"),
+            _ => false,
+        };
     }
 
     private bool TryRedirectToSearchBox(string text, object? source)
@@ -672,6 +702,7 @@ public partial class MainWindow : Window
             }
         }
 
+        BeginFocusRequest();
         searchBox.Focus();
         if (DataContext is MainWindowViewModel vm)
         {
@@ -1685,19 +1716,33 @@ public partial class MainWindow : Window
         // Avalonia + Win32 will sometimes hand focus to the menu bar when the
         // window is activated. Schedule the focus call at three priorities so
         // we win regardless of when the menu's auto-focus runs.
-        void TryFocus()
+        var generation = BeginFocusRequest();
+
+        void TryFocus(bool isRetry)
         {
-            if (!searchBox.IsKeyboardFocusWithin)
+            // A newer focus request supersedes this one entirely.
+            if (m_focusRequestGeneration != generation || searchBox.IsKeyboardFocusWithin)
             {
-                searchBox.Focus();
+                return;
             }
+
+            // The first attempt is the caller's explicit intent and always wins.
+            // The retries exist only to beat the menu bar, so they must stand
+            // down once focus has landed on a real control -- a clip, a button,
+            // the sort box -- rather than dragging it back a frame later.
+            if (isRetry && !IsFocusReclaimable())
+            {
+                return;
+            }
+
+            searchBox.Focus();
         }
 
         Dispatcher.UIThread.Post(() =>
         {
-            TryFocus();
-            Dispatcher.UIThread.Post(TryFocus, DispatcherPriority.Input);
-            Dispatcher.UIThread.Post(TryFocus, DispatcherPriority.Background);
+            TryFocus(isRetry: false);
+            Dispatcher.UIThread.Post(() => TryFocus(isRetry: true), DispatcherPriority.Input);
+            Dispatcher.UIThread.Post(() => TryFocus(isRetry: true), DispatcherPriority.Background);
         }, DispatcherPriority.Input);
     }
 
@@ -1741,6 +1786,12 @@ public partial class MainWindow : Window
     }
 
     private TextBox? GetSearchBox() => this.FindControl<TextBox>("SearchTextBox");
+
+    /// <summary>
+    /// Test seam for the deferred clip-list focus path, which is otherwise only
+    /// reachable through key handling.
+    /// </summary>
+    internal void FocusSelectedClipForTests() => FocusSelectedClipInList();
 
     /// <summary>
     /// True when the key event is a plain printable keystroke (letters,

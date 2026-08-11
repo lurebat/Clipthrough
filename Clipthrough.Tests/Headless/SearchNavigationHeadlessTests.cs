@@ -119,6 +119,31 @@ public sealed class SearchNavigationHeadlessTests
         Assert.True(harness.SearchBox.IsKeyboardFocusWithin);
     }
 
+    /// <summary>
+    /// Focusing the search box schedules retries at lower priorities to beat the
+    /// menu bar's auto-focus on window activation. Those retries used to fire
+    /// unconditionally, so a focus move issued after them -- the clip list taking
+    /// focus, say -- was undone a frame later and the caret jumped back to the
+    /// search box. The most recent request must win.
+    /// </summary>
+    [AvaloniaFact]
+    public void ASearchBoxFocusRetry_DoesNotOverrideALaterMoveToTheClipList()
+    {
+        using var harness = MainWindowTestHarness.Create();
+        harness.SeedClips(3);
+        harness.ViewModel.SelectedClip = harness.ViewModel.Clips[0];
+        Dispatcher.UIThread.RunJobs();
+
+        harness.Window.FocusSearchBox();
+        harness.Window.FocusSelectedClipForTests();
+
+        // Drains the queued focus jobs, including the low-priority retries.
+        Dispatcher.UIThread.RunJobs();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.False(harness.SearchBox.IsKeyboardFocusWithin);
+        Assert.True(harness.ClipList.IsKeyboardFocusWithin);
+    }
     [AvaloniaFact]
     public void ShiftTab_FromClipList_ReturnsFocusToSearchBox()
     {
