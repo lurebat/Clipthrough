@@ -92,7 +92,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _statusText = AppText.LoadingStatus;
     private bool _hasRunningJobs;
     private string _runningJobsLabel = string.Empty;
-    private int _currentOffset;
     private int _matchingClipCount;
     private int _totalClipCount;
     private int _sensitiveClipCount;
@@ -2794,6 +2793,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Ids of clips that a pending delete hides from the loaded window while
+    /// the query still returns them. They occupy a slot in the result set, so
+    /// paging has to count them — but only while they are genuinely part of the
+    /// current result: a filter change or a committed delete drops them.
+    /// </summary>
+    private readonly HashSet<long> _hiddenPendingDeletes = [];
+
+    /// <summary>
+    /// Rows already consumed from the current result set: everything on screen
+    /// plus rows hidden by a pending delete. Deriving this instead of
+    /// maintaining a counter keeps paging correct across optimistic inserts,
+    /// deletes, and undo, none of which used to adjust it.
+    /// </summary>
+    private int LoadedResultCount => Clips.Count + _hiddenPendingDeletes.Count;
+
     private async Task LoadMoreAsync()
     {
         if (!_isDatabaseReady || !HasMoreResults)
@@ -2804,16 +2819,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         IsBusy = true;
         try
         {
-            var request = new RefreshRequest(BuildFilters(_currentOffset), UseSemanticClipSearch);
+            var request = new RefreshRequest(BuildFilters(LoadedResultCount), UseSemanticClipSearch);
             var result = await SearchClipsAsync(request.Filters, request.UseSemanticClipSearch).ConfigureAwait(false);
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
-                foreach (var item in result.Items.Select(clip => CreateClipItemViewModel(clip)))
+                foreach (var clip in result.Items)
                 {
-                    Clips.Add(item);
+                    // Same reason as in ApplyRefreshResult: the query still
+                    // returns clips awaiting a delete commit, and showing them
+                    // again would resurrect a row the user already deleted.
+                    if (_pendingDeletes.ContainsKey(clip.Id))
+                    {
+                        _hiddenPendingDeletes.Add(clip.Id);
+                        continue;
+                    }
+
+                    Clips.Add(CreateClipItemViewModel(clip));
                 }
 
-                _currentOffset += result.Items.Count;
                 HasMoreResults = Clips.Count < result.TotalMatchingCount;
                 this.RaisePropertyChanged(nameof(HasNoClips));
                 RaiseBulkSelectionProperties();
@@ -3943,6 +3966,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             entries.Add((vm.Id, vm.Clip));
             DetachClip(vm);
             Clips.Remove(vm);
+            // The row leaves the list but the query still returns it until the
+            // delete commits, so it keeps occupying a slot for paging.
+            _hiddenPendingDeletes.Add(vm.Id);
             vm.Dispose();
         }
 
@@ -4004,6 +4030,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (_pendingDeletes.Remove(id))
             {
+                _hiddenPendingDeletes.Remove(id);
                 anyRestored = true;
             }
         }
@@ -4025,6 +4052,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (_pendingDeletes.Remove(id, out _))
             {
                 await RunClipMutationAsync(() => _clipStoreService.DeleteAsync(id));
+                // The row is gone from the result set now, so it no longer
+                // occupies a paging slot.
+                _hiddenPendingDeletes.Remove(id);
             }
         }
     }
@@ -4042,6 +4072,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         _pendingDeletes.Clear();
+        _hiddenPendingDeletes.Clear();
     }
 
     private ClipSearchFilters BuildFilters(int offset) => new()
@@ -4145,14 +4176,44 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _suppressEditAutoSave = true;
         try
         {
-            var stats = ApplyRefreshResultIncremental(result.Items, checkedIds);
+            // A clip deleted optimistically is still in the database until its
+            // undo window expires, so the query keeps returning it. Applying it
+            // would resurrect a row the user already saw disappear, and that
+            // ghost then shifts every later page by one — the next LoadMore
+            // silently skipped a clip. Recording which ones the current result
+            // actually contains keeps the paging offset exact when the filter
+            // changes and stops matching them.
+            IReadOnlyList<ClipEntry> items;
+            if (_pendingDeletes.Count == 0)
+            {
+                items = result.Items;
+                _hiddenPendingDeletes.Clear();
+            }
+            else
+            {
+                var visible = new List<ClipEntry>(result.Items.Count);
+                _hiddenPendingDeletes.Clear();
+                foreach (var clip in result.Items)
+                {
+                    if (_pendingDeletes.ContainsKey(clip.Id))
+                    {
+                        _hiddenPendingDeletes.Add(clip.Id);
+                        continue;
+                    }
+
+                    visible.Add(clip);
+                }
+
+                items = visible;
+            }
+
+            var stats = ApplyRefreshResultIncremental(items, checkedIds);
             if (sw is not null)
             {
                 Trace.TraceInformation(
                     $"[refresh-timing] apply-diff added={stats.Added} removed={stats.Removed} replaced={stats.Replaced} moved={stats.Moved} fullRebuild={stats.FullRebuild} forceNewest={forceSelectNewest} (before={initialCount}, after={Clips.Count}) @ {sw.ElapsedMilliseconds}ms");
             }
 
-            _currentOffset = result.Items.Count;
             HasMoreResults = Clips.Count < result.TotalMatchingCount;
             this.RaisePropertyChanged(nameof(HasNoClips));
             SelectedClip = previousSelectionId is null
@@ -4413,8 +4474,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var checkedIds = wasChecked ? new HashSet<long> { clip.Id } : null;
         var item = CreateClipItemViewModel(clip, checkedIds);
         Clips.Insert(targetIndex, item);
-        _currentOffset = Clips.Count;
-        HasMoreResults = HasMoreResults || Clips.Count > _currentOffset;
         this.RaisePropertyChanged(nameof(HasNoClips));
         RaiseBulkSelectionProperties();
         UpdateClipDisplayIndices();
