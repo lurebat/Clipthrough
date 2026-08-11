@@ -686,12 +686,14 @@ public sealed class ClipStoreService : IClipStoreService
 
         if (settings.EnableSensitiveClipLifetime)
         {
-            purgedClipCount += await DeleteOlderThanAsync(connection, transaction, isSensitive: true, now.AddMinutes(-settings.SensitiveClipLifetimeMinutes), cancellationToken);
+            // Deliberately not preserving pinned/favorite clips: an expiring secret
+            // outranks the user's intent to keep it around.
+            purgedClipCount += await DeleteOlderThanAsync(connection, transaction, isSensitive: true, now.AddMinutes(-settings.SensitiveClipLifetimeMinutes), preserveUserKeptClips: false, cancellationToken);
         }
 
         if (settings.EnableNormalClipLifetime)
         {
-            purgedClipCount += await DeleteOlderThanAsync(connection, transaction, isSensitive: false, now.AddDays(-settings.NormalClipLifetimeDays), cancellationToken);
+            purgedClipCount += await DeleteOlderThanAsync(connection, transaction, isSensitive: false, now.AddDays(-settings.NormalClipLifetimeDays), preserveUserKeptClips: true, cancellationToken);
         }
 
         if (settings.EnableMaxEntryCount)
@@ -1688,18 +1690,27 @@ public sealed class ClipStoreService : IClipStoreService
         return scalar is DBNull or null ? null : Convert.ToString(scalar, CultureInfo.InvariantCulture);
     }
 
-    private static async Task<int> DeleteOlderThanAsync(SqliteConnection connection, SqliteTransaction transaction, bool isSensitive, DateTimeOffset cutoff, CancellationToken cancellationToken)
+    /// <summary>
+    /// Pinning or favoriting a clip is an explicit "keep this" from the user, so
+    /// capacity- and age-based pruning must skip it. The sensitive-clip timer
+    /// deliberately does not apply this: expiring a secret outranks convenience.
+    /// </summary>
+    private const string UserKeptClipPredicate = "(is_favorite = 1 OR pinned_at IS NOT NULL)";
+
+    private static async Task<int> DeleteOlderThanAsync(SqliteConnection connection, SqliteTransaction transaction, bool isSensitive, DateTimeOffset cutoff, bool preserveUserKeptClips, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = """
+        command.CommandText = $"""
             DELETE FROM clips
             WHERE is_sensitive = $isSensitive
-              AND COALESCE(last_copied_at, captured_at) < $cutoff;
+              AND COALESCE(last_copied_at, captured_at) < $cutoff
+              AND ($keepUserKept = 0 OR NOT {UserKeptClipPredicate});
             SELECT changes();
             """;
         command.Parameters.AddWithValue("$isSensitive", isSensitive ? 1 : 0);
         command.Parameters.AddWithValue("$cutoff", cutoff.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$keepUserKept", preserveUserKeptClips ? 1 : 0);
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
     }
 
@@ -1712,11 +1723,12 @@ public sealed class ClipStoreService : IClipStoreService
 
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = """
+        command.CommandText = $"""
             DELETE FROM clips
             WHERE id IN (
                 SELECT id
                 FROM clips
+                WHERE NOT {UserKeptClipPredicate}
                 ORDER BY COALESCE(last_copied_at, captured_at) ASC, id ASC
                 LIMIT $limit
             );
@@ -1732,9 +1744,10 @@ public sealed class ClipStoreService : IClipStoreService
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = """
+            command.CommandText = $"""
                 SELECT id, byte_size
                 FROM clips
+                WHERE NOT {UserKeptClipPredicate}
                 ORDER BY COALESCE(last_copied_at, captured_at) ASC, id ASC;
                 """;
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
