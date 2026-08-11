@@ -69,7 +69,16 @@ public sealed class DatabaseInitializer
             VALUES ('delete', old.id, old.content, old.source_app, old.source_window_title, old.source_url, old.ocr_text);
         END;
 
-        CREATE TRIGGER IF NOT EXISTS clips_au AFTER UPDATE ON clips BEGIN
+        -- Dropped unconditionally so the UPDATE OF column list below stays authoritative:
+        -- CREATE TRIGGER IF NOT EXISTS would silently keep an older unscoped trigger on
+        -- databases created before this scope existed.
+        DROP TRIGGER IF EXISTS clips_au;
+
+        -- Scoped to the five columns clips_fts actually indexes. An unscoped AFTER UPDATE
+        -- re-tokenises the entire clip (content can be megabytes) on every metadata-only
+        -- write — paste counters, OCR status, embedding status, pinning — which is the
+        -- overwhelming majority of updates.
+        CREATE TRIGGER clips_au AFTER UPDATE OF content, source_app, source_window_title, source_url, ocr_text ON clips BEGIN
             INSERT INTO clips_fts(clips_fts, rowid, content, source_app, source_window_title, source_url, ocr_text)
             VALUES ('delete', old.id, old.content, old.source_app, old.source_window_title, old.source_url, old.ocr_text);
             INSERT INTO clips_fts(rowid, content, source_app, source_window_title, source_url, ocr_text)
