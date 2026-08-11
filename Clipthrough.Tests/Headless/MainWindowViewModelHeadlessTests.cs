@@ -996,12 +996,118 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.Equal(3, scope.NotificationService.LastNotification.Actions.Count);
     }
 
+    /// <summary>
+    /// Regression test for S1: a drag-and-drop import used to call
+    /// CaptureFastAsync and stop there. CaptureFastAsync deliberately skips the
+    /// sensitivity scan for speed — the clipboard monitor finishes the job in
+    /// EnrichCapturedClipAsync, but a drop has no monitor behind it. A dropped
+    /// credential therefore stayed classified as ordinary content: rendered in
+    /// plaintext, exempt from the sensitive-clip lifetime, and returned by
+    /// ordinary searches.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task ImportDroppedData_ClassifiesSensitiveContent()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+
+        // Payload matches the sensitivity rule seeded below.
+        var dragDrop = new StubDragDropService(
+        [
+            new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = "SECRET-4711",
+                ContentBytes = System.Text.Encoding.UTF8.GetBytes("SECRET-4711"),
+            },
+        ]);
+
+        using var viewModel = CreateViewModel(
+            scope, clipboardMonitor, systemInteraction, sessionLogService, dragDropService: dragDrop);
+
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        // Seed a rule that certainly matches the dropped payload, after VM
+        // initialization so nothing overwrites it.
+        await scope.SensitivityService.SaveRulesAsync(
+        [
+            new SensitivityRule
+            {
+                Name = "test-secret",
+                Pattern = "SECRET-[0-9]+",
+                Severity = "critical",
+                IsEnabled = true,
+                IsBuiltIn = false,
+            },
+        ]);
+        await scope.SensitivityService.ReloadAsync();
+
+        var imported = await viewModel.ImportDroppedDataAsync(new Avalonia.Input.DataTransfer(), null);
+        Assert.Equal(1, imported);
+
+        var stored = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        var clip = Assert.Single(stored.Items);
+        Assert.True(clip.IsSensitive, "A dropped credential must be classified exactly like a copied one.");
+        Assert.NotEmpty(clip.SensitivityMatches);
+    }
+
+    /// <summary>
+    /// Regression test for S1: dropped images used to skip the OCR enqueue the
+    /// clipboard-capture stream performs, so their text was unsearchable until
+    /// an unrelated backlog run happened to pick them up.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task ImportDroppedData_EnqueuesImageClipsForOcr()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        var ocrQueue = new NoOpBackgroundOcrQueue();
+
+        scope.SettingsService.SetCurrent(scope.SettingsService.Current with { AutoOcrImageClips = true });
+
+        var pngBytes = CreatePngBytes(0);
+        var dragDrop = new StubDragDropService(
+        [
+            new ClipCaptureRequest
+            {
+                ContentType = ContentType.Image,
+                ContentFormat = ClipContentFormat.Bitmap,
+                ContentText = "image",
+                ContentBytes = pngBytes,
+            },
+        ]);
+
+        using var viewModel = CreateViewModel(
+            scope, clipboardMonitor, systemInteraction, sessionLogService,
+            backgroundOcrQueue: ocrQueue, dragDropService: dragDrop,
+            ocrService: new TestOcrService(isAvailable: true));
+
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var imported = await viewModel.ImportDroppedDataAsync(new Avalonia.Input.DataTransfer(), null);
+        Assert.Equal(1, imported);
+
+        Assert.Single(ocrQueue.Enqueued);
+    }
+
     private static MainWindowViewModel CreateViewModel(
         TemporaryDatabaseScope scope,
         TestClipboardMonitorService clipboardMonitor,
         TestSystemInteractionService systemInteraction,
         TestSessionLogService sessionLogService,
-        TestImageEditorService? imageEditorService = null)
+        TestImageEditorService? imageEditorService = null,
+        Clipthrough.Services.IBackgroundOcrQueue? backgroundOcrQueue = null,
+        Clipthrough.Services.IDragDropService? dragDropService = null,
+        Clipthrough.Services.IOcrService? ocrService = null)
     {
         return new MainWindowViewModel(
             scope.ClipStoreService,
@@ -1018,20 +1124,40 @@ public sealed class MainWindowViewModelHeadlessTests
             scope.SearchHistoryService,
             new TestAiTransformService(),
             new Clipthrough.Services.ScriptingService(),
-            new TestOcrService(),
-            new NoOpBackgroundOcrQueue(),
+            ocrService ?? new TestOcrService(),
+            backgroundOcrQueue ?? new NoOpBackgroundOcrQueue(),
             new Clipthrough.Services.BackgroundJobIndicator(),
-            scope.DatabaseInitializer);
+            scope.DatabaseInitializer,
+            dragDropService: dragDropService);
     }
 
     private sealed class NoOpBackgroundOcrQueue : Clipthrough.Services.IBackgroundOcrQueue
     {
+        private readonly List<long> _enqueued = [];
+
+        public IReadOnlyList<long> Enqueued => _enqueued;
+
         public IObservable<long> OcrCompleted { get; } = System.Reactive.Linq.Observable.Empty<long>();
         public IObservable<System.Reactive.Unit> QueueChanged { get; } = System.Reactive.Linq.Observable.Empty<System.Reactive.Unit>();
         public void Start() { }
         public Task StopAsync() => Task.CompletedTask;
-        public void Enqueue(long clipId) { }
+        public void Enqueue(long clipId) => _enqueued.Add(clipId);
         public Task EnqueueBacklogAsync(System.Threading.CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Returns a fixed set of capture requests for any drop, so drag-import tests
+    /// don't have to build a real platform data transfer.
+    /// </summary>
+    private sealed class StubDragDropService(IReadOnlyList<ClipCaptureRequest> requests) : Clipthrough.Services.IDragDropService
+    {
+        public Task<Avalonia.Input.IDataTransfer> BuildDragPayloadAsync(
+            IReadOnlyList<ClipEntry> clips,
+            Avalonia.Platform.Storage.IStorageProvider storageProvider) => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<ClipCaptureRequest>> TryBuildCaptureRequestsAsync(
+            Avalonia.Input.IDataTransfer drop,
+            ClipboardSourceApplicationInfo? sourceInfo) => Task.FromResult(requests);
     }
 
     private sealed class SlowSearchClipStore : IClipStoreService

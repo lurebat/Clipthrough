@@ -386,15 +386,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         _subscriptions.Add(
             _clipboardMonitorService.CapturedClips
-                .Subscribe(clip =>
-                {
-                    if (clip.ContentType == ContentType.Image
-                        && _ocrService.IsAvailable
-                        && _settingsService.Current.AutoOcrImageClips)
-                    {
-                        _backgroundOcrQueue.Enqueue(clip.Id);
-                    }
-                }));
+                .Subscribe(clip => TryEnqueueOcr(clip)));
 
         _subscriptions.Add(
             _backgroundOcrQueue.OcrCompleted
@@ -6982,7 +6974,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return 0;
         }
 
-        var imported = 0;
+        var imported = new List<ClipEntry>();
         foreach (var request in requests)
         {
             try
@@ -6994,7 +6986,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 }
 
                 ApplyCapturedClipOptimistically(clip);
-                imported++;
+                TryEnqueueOcr(clip);
+                imported.Add(clip);
             }
             catch (Exception ex)
             {
@@ -7002,12 +6995,82 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
         }
 
-        if (imported > 0)
+        if (imported.Count > 0)
         {
-            _notificationService.PublishInfo(AppText.ClipDragImportTitle, AppText.FormatClipDragImportSummary(imported));
+            // CaptureFastAsync deliberately skips the sensitivity scan so the
+            // write stays fast. The clipboard monitor finishes the job in
+            // EnrichCapturedClipAsync; a drop has no monitor behind it, so
+            // without this a dropped password would never be classified as
+            // sensitive — it would render in plaintext, escape the sensitive
+            // clip lifetime, and stay in ordinary search results.
+            await EnrichImportedClipsAsync(imported);
+
+            _notificationService.PublishInfo(AppText.ClipDragImportTitle, AppText.FormatClipDragImportSummary(imported.Count));
         }
 
-        return imported;
+        return imported.Count;
+    }
+
+    /// <summary>
+    /// Applies the post-capture enrichment the clipboard monitor performs for
+    /// captured clips — sensitivity classification and retention maintenance —
+    /// to clips that entered the library by drag-and-drop instead.
+    /// </summary>
+    private async Task EnrichImportedClipsAsync(IReadOnlyList<ClipEntry> clips)
+    {
+        var reclassified = false;
+        foreach (var clip in clips)
+        {
+            try
+            {
+                ClipEntry? updated = null;
+                // Sensitivity is part of ClipsAreMateriallyEqual, so this has to
+                // be a tracked mutation or an in-flight refresh snapshot can
+                // revert the row back to "not sensitive".
+                await RunClipMutationAsync(async () =>
+                    updated = await _clipStoreService.ApplySensitivityAsync(clip.Id));
+
+                if (updated is not null && updated.IsSensitive != clip.IsSensitive)
+                {
+                    reclassified = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                ReportError("Drag-import sensitivity", ex);
+            }
+        }
+
+        try
+        {
+            await RunClipMutationAsync(() => _clipStoreService.ApplyMaintenanceAsync());
+        }
+        catch (Exception ex)
+        {
+            ReportError("Drag-import maintenance", ex);
+        }
+
+        if (reclassified)
+        {
+            // The optimistic row still shows the clip as ordinary content;
+            // re-read so the sensitive presentation (masking, badge) applies.
+            await RefreshAsync();
+        }
+    }
+
+    /// <summary>
+    /// Queues a newly captured image clip for background OCR when the feature is
+    /// available and enabled. Shared by the clipboard-capture stream and the
+    /// drag-import path so both behave identically.
+    /// </summary>
+    private void TryEnqueueOcr(ClipEntry clip)
+    {
+        if (clip.ContentType == ContentType.Image
+            && _ocrService.IsAvailable
+            && _settingsService.Current.AutoOcrImageClips)
+        {
+            _backgroundOcrQueue.Enqueue(clip.Id);
+        }
     }
 
     private readonly record struct HotkeyDraft(string Name, bool IsEnabled, string HotkeyText);

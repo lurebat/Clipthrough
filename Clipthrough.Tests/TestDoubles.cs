@@ -439,7 +439,12 @@ internal sealed class TestCopilotAuthService : ICopilotAuthService
 
 internal sealed class TestOcrService : IOcrService
 {
-    public bool IsAvailable => false;
+    public TestOcrService(bool isAvailable = false)
+    {
+        IsAvailable = isAvailable;
+    }
+
+    public bool IsAvailable { get; }
     public Task<OcrResult> ExtractTextAsync(byte[] imageBytes, string languages, CancellationToken cancellationToken = default)
         => Task.FromResult(new OcrResult(false, string.Empty, "stub"));
 }
