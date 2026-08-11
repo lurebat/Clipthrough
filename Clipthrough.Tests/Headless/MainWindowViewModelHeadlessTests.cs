@@ -226,6 +226,83 @@ public sealed class MainWindowViewModelHeadlessTests
     }
 
     [AvaloniaFact]
+    public async Task FavoriteCheckedClips_SurvivesRefreshSnapshotTakenBeforeTheWrite()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        var gatedStore = new GatedSearchClipStore(scope.ClipStoreService);
+        using var viewModel = new MainWindowViewModel(
+            gatedStore,
+            clipboardMonitor,
+            new TestClipSampleDataService(),
+            scope.SettingsService,
+            systemInteraction,
+            scope.StorageOptionsService,
+            scope.SensitivityService,
+            scope.NotificationService,
+            sessionLogService,
+            scope.ClipExportService,
+            new TestImageEditorService(),
+            scope.SearchHistoryService,
+            new TestAiTransformService(),
+            new Clipthrough.Services.ScriptingService(),
+            new TestOcrService(),
+            new NoOpBackgroundOcrQueue(),
+            new Clipthrough.Services.BackgroundJobIndicator(),
+            scope.DatabaseInitializer);
+
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var firstClip = await CaptureTextClipAsync(scope.ClipStoreService, "first");
+        clipboardMonitor.Emit(firstClip);
+        var secondClip = await CaptureTextClipAsync(scope.ClipStoreService, "second");
+        clipboardMonitor.Emit(secondClip);
+
+        for (var attempt = 0; attempt < 20 && viewModel.Clips.Count < 2; attempt++)
+        {
+            await Task.Delay(50);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        // Let the throttled capture refreshes drain so the gate below parks the
+        // refresh this test actually cares about.
+        await Task.Delay(400);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(2, viewModel.Clips.Count);
+
+        await viewModel.SelectAllClipsCommand.Execute().ToTask();
+        Assert.Equal(2, viewModel.CheckedClipCount);
+
+        // Park a refresh right after it has read the pre-write database state.
+        gatedStore.ArmGate();
+        var refresh = viewModel.RefreshCommand.Execute().ToTask();
+        for (var attempt = 0; attempt < 100 && !gatedStore.IsParked; attempt++)
+        {
+            await Task.Delay(20);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.True(gatedStore.IsParked, "the gated search never reached its park point");
+
+        // Favourite both clips while that now-stale snapshot is still in flight.
+        await viewModel.FavoriteCheckedClipsCommand.Execute().ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        gatedStore.ReleaseGate();
+        await refresh;
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(2, viewModel.Clips.Count);
+        Assert.All(
+            viewModel.Clips,
+            clip => Assert.True(clip.IsFavorite, $"clip {clip.Id} was rolled back to not-favorite by a stale refresh"));
+    }
+
+    [AvaloniaFact]
     public async Task CopyEditedClip_CopiesModifiedText()
     {
         using var scope = new TemporaryDatabaseScope();
@@ -1049,6 +1126,81 @@ public sealed class MainWindowViewModelHeadlessTests
         public Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default) => Task.FromResult(new EmbeddingCoverage(0, 0, 0, 0, 0));
         public Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task PrewarmAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Wraps a real store and can park a single <see cref="SearchAsync"/> call
+    /// after it has read the database but before the caller applies the result.
+    /// That is the exact window in which a clip write turns a refresh snapshot
+    /// stale.
+    /// </summary>
+    private sealed class GatedSearchClipStore(IClipStoreService inner) : IClipStoreService
+    {
+        private TaskCompletionSource? _armed;
+        private TaskCompletionSource? _parked;
+        private volatile bool _isParked;
+
+        public bool IsParked => _isParked;
+
+        public void ArmGate() => Volatile.Write(ref _armed, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+
+        public void ReleaseGate() => Volatile.Read(ref _parked)?.TrySetResult();
+
+        public async Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default)
+        {
+            var result = await inner.SearchAsync(filters, cancellationToken);
+
+            var gate = Interlocked.Exchange(ref _armed, null);
+            if (gate is not null)
+            {
+                Volatile.Write(ref _parked, gate);
+                _isParked = true;
+                try
+                {
+                    // Never hang the suite if the test forgets to release.
+                    await gate.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+                }
+                finally
+                {
+                    _isParked = false;
+                    Volatile.Write(ref _parked, null);
+                }
+            }
+
+            return result;
+        }
+
+        public Task<BulkCaptureResult> CaptureBatchAsync(IReadOnlyList<ClipCaptureRequest> requests, CancellationToken cancellationToken = default) => inner.CaptureBatchAsync(requests, cancellationToken);
+        public Task<ClipEntry?> CaptureAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default) => inner.CaptureAsync(request, cancellationToken);
+        public Task<ClipEntry?> CaptureFastAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default) => inner.CaptureFastAsync(request, cancellationToken);
+        public Task<ClipEntry?> UpdateDeferredContentAsync(long clipId, ClipCaptureRequest request, CancellationToken cancellationToken = default) => inner.UpdateDeferredContentAsync(clipId, request, cancellationToken);
+        public Task<ClipEntry?> UpdateSourceAppIconAsync(long clipId, byte[] iconBytes, CancellationToken cancellationToken = default) => inner.UpdateSourceAppIconAsync(clipId, iconBytes, cancellationToken);
+        public Task<ClipEntry?> ApplySensitivityAsync(long clipId, CancellationToken cancellationToken = default) => inner.ApplySensitivityAsync(clipId, cancellationToken);
+        public Task SetFavoriteAsync(long clipId, bool isFavorite, CancellationToken cancellationToken = default) => inner.SetFavoriteAsync(clipId, isFavorite, cancellationToken);
+        public Task SetPinnedAsync(long clipId, bool isPinned, CancellationToken cancellationToken = default) => inner.SetPinnedAsync(clipId, isPinned, cancellationToken);
+        public Task DeleteAsync(long clipId, CancellationToken cancellationToken = default) => inner.DeleteAsync(clipId, cancellationToken);
+        public Task ClearSensitivityAsync(long clipId, CancellationToken cancellationToken = default) => inner.ClearSensitivityAsync(clipId, cancellationToken);
+        public Task SetSensitiveAsync(long clipId, bool isSensitive, CancellationToken cancellationToken = default) => inner.SetSensitiveAsync(clipId, isSensitive, cancellationToken);
+        public Task MarkPastedAsync(long clipId, CancellationToken cancellationToken = default) => inner.MarkPastedAsync(clipId, cancellationToken);
+        public Task<bool> TryClaimForOcrAsync(long clipId, CancellationToken cancellationToken = default) => inner.TryClaimForOcrAsync(clipId, cancellationToken);
+        public Task<bool> SetOcrResultAsync(long clipId, string ocrText, CancellationToken cancellationToken = default) => inner.SetOcrResultAsync(clipId, ocrText, cancellationToken);
+        public Task<bool> SetOcrFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => inner.SetOcrFailureAsync(clipId, error, cancellationToken);
+        public Task<IReadOnlyList<long>> GetPendingOcrClipIdsAsync(CancellationToken cancellationToken = default) => inner.GetPendingOcrClipIdsAsync(cancellationToken);
+        public Task<bool> MarkOcrForRerunAsync(long clipId, CancellationToken cancellationToken = default) => inner.MarkOcrForRerunAsync(clipId, cancellationToken);
+        public Task<IReadOnlyList<long>> MarkAllSucceededForRerunAsync(CancellationToken cancellationToken = default) => inner.MarkAllSucceededForRerunAsync(cancellationToken);
+        public Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default) => inner.GetOcrCoverageAsync(cancellationToken);
+        public Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default) => inner.ApplyMaintenanceAsync(cancellationToken);
+        public Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default) => inner.RebuildSensitivityMatchesAsync(cancellationToken);
+        public Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default) => inner.GetClipAtOffsetAsync(offset, cancellationToken);
+        public Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default) => inner.GetByIdAsync(clipId, cancellationToken);
+        public Task<IReadOnlyList<ClipEntry>> GetByIdsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default) => inner.GetByIdsAsync(clipIds, cancellationToken);
+        public Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default) => inner.ClaimPendingEmbeddingsAsync(batchSize, cancellationToken);
+        public Task SaveEmbeddingBatchAsync(IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion, CancellationToken cancellationToken = default) => inner.SaveEmbeddingBatchAsync(records, modelVersion, cancellationToken);
+        public Task<bool> SetEmbeddingFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => inner.SetEmbeddingFailureAsync(clipId, error, cancellationToken);
+        public Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default) => inner.MarkAllEmbeddingsForRerunAsync(cancellationToken);
+        public Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default) => inner.GetEmbeddingCoverageAsync(cancellationToken);
+        public Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default) => inner.LoadAllEmbeddingsAsync(cancellationToken);
+        public Task PrewarmAsync(CancellationToken cancellationToken = default) => inner.PrewarmAsync(cancellationToken);
     }
 
     private static async Task PrepareInitializedScopeAsync(TemporaryDatabaseScope scope)

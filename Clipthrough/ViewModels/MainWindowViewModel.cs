@@ -142,6 +142,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _settingsRememberDatabasePassword;
     private Task _queuedRefreshTask = Task.CompletedTask;
     private long? _queuedRefreshPreferredSelectionId;
+    private int _pendingClipMutations;
+    private long _clipMutationVersion;
     private string _settingsDatabasePassword = StorageOptions.Default.DatabasePassword;
     private string _settingsDatabasePasswordConfirm = StorageOptions.Default.DatabasePassword;
     private bool _settingsEnableNormalClipLifetime = AppSettings.Default.EnableNormalClipLifetime;
@@ -2539,6 +2541,31 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// Runs a clip-state write against the store and records that it happened.
+    ///
+    /// A refresh reads its snapshot on a background thread and applies it later
+    /// on the UI thread. Without this bookkeeping a snapshot taken before the
+    /// write can be applied after it, and because
+    /// <see cref="ClipsAreMateriallyEqual"/> compares favorite/pinned/pasted
+    /// flags the diff sees a "change" and replaces the row with the pre-write
+    /// entry — silently rolling the UI back. <see cref="PerformRefreshAsync"/>
+    /// uses the counters below to detect and re-read such snapshots.
+    /// </summary>
+    private async Task RunClipMutationAsync(Func<Task> write)
+    {
+        Interlocked.Increment(ref _pendingClipMutations);
+        try
+        {
+            await Task.Run(write);
+        }
+        finally
+        {
+            Interlocked.Increment(ref _clipMutationVersion);
+            Interlocked.Decrement(ref _pendingClipMutations);
+        }
+    }
+
     private async Task PerformRefreshAsync(long? preferredSelectionId)
     {
         if (!_isDatabaseReady)
@@ -2550,10 +2577,44 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => IsBusy = true);
         try
         {
-            var request = await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => new RefreshRequest(BuildFilters(offset: 0), UseSemanticClipSearch));
-            if (sw is not null) Trace.TraceInformation($"[refresh-timing] built-request @ {sw.ElapsedMilliseconds}ms search='{request.Filters.SearchText}' semantic={request.UseSemanticClipSearch}");
-            var result = await SearchClipsAsync(request.Filters, request.UseSemanticClipSearch).ConfigureAwait(false);
-            if (sw is not null) Trace.TraceInformation($"[refresh-timing] db-search-complete @ {sw.ElapsedMilliseconds}ms items={result.Items.Count} total={result.TotalMatchingCount}");
+            // A clip write that lands while the search is in flight makes the
+            // result stale: applying it would revert the row we just changed.
+            // Re-read instead. Bounded so a continuous write stream can't
+            // starve the refresh — on the last attempt we apply what we have
+            // and leave a follow-up refresh queued.
+            const int maxAttempts = 4;
+            ClipSearchResult result;
+            RefreshRequest request;
+            var attempt = 0;
+            while (true)
+            {
+                attempt++;
+                var pendingBefore = Volatile.Read(ref _pendingClipMutations);
+                var versionBefore = Interlocked.Read(ref _clipMutationVersion);
+
+                request = await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => new RefreshRequest(BuildFilters(offset: 0), UseSemanticClipSearch));
+                if (sw is not null) Trace.TraceInformation($"[refresh-timing] built-request @ {sw.ElapsedMilliseconds}ms search='{request.Filters.SearchText}' semantic={request.UseSemanticClipSearch}");
+                result = await SearchClipsAsync(request.Filters, request.UseSemanticClipSearch).ConfigureAwait(false);
+                if (sw is not null) Trace.TraceInformation($"[refresh-timing] db-search-complete @ {sw.ElapsedMilliseconds}ms items={result.Items.Count} total={result.TotalMatchingCount}");
+
+                var isStale = pendingBefore > 0
+                    || Volatile.Read(ref _pendingClipMutations) > 0
+                    || Interlocked.Read(ref _clipMutationVersion) != versionBefore;
+                if (!isStale)
+                {
+                    break;
+                }
+
+                if (attempt >= maxAttempts)
+                {
+                    lock (_refreshQueueLock)
+                    {
+                        _hasQueuedRefresh = true;
+                    }
+
+                    break;
+                }
+            }
 
             // Apply the refresh result regardless of visibility. With
             // optimistic captures running continuously, ApplyRefreshResult's
@@ -2899,7 +2960,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         try
         {
-            await Task.Run(() => _clipStoreService.MarkPastedAsync(clipId));
+            await RunClipMutationAsync(() => _clipStoreService.MarkPastedAsync(clipId));
         }
         catch (Exception ex)
         {
@@ -3180,8 +3241,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var nextIsFavorite = targetClips.Any(static clip => !clip.IsFavorite);
         foreach (var clip in targetClips)
         {
-            await Task.Run(() => _clipStoreService.SetFavoriteAsync(clip.Id, nextIsFavorite));
-            clip.SetFavoriteState(nextIsFavorite);
+            await RunClipMutationAsync(() => _clipStoreService.SetFavoriteAsync(clip.Id, nextIsFavorite));
+            ApplyToLiveClip(clip.Id, live => live.SetFavoriteState(nextIsFavorite));
         }
 
         if (ShowFavoritesOnly && !nextIsFavorite)
@@ -3208,8 +3269,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var nextIsPinned = targetClips.Any(static clip => !clip.IsPinned);
         foreach (var clip in targetClips)
         {
-            await Task.Run(() => _clipStoreService.SetPinnedAsync(clip.Id, nextIsPinned));
-            clip.SetPinnedState(nextIsPinned);
+            await RunClipMutationAsync(() => _clipStoreService.SetPinnedAsync(clip.Id, nextIsPinned));
+            ApplyToLiveClip(clip.Id, live => live.SetPinnedState(nextIsPinned));
         }
 
         await RefreshAsync(SelectedClip?.Id ?? targetClips[0].Id);
@@ -3227,16 +3288,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         var nextIsPinned = !clip.IsPinned;
-        await Task.Run(() => _clipStoreService.SetPinnedAsync(clip.Id, nextIsPinned));
-        clip.SetPinnedState(nextIsPinned);
+        await RunClipMutationAsync(() => _clipStoreService.SetPinnedAsync(clip.Id, nextIsPinned));
+        ApplyToLiveClip(clip.Id, live => live.SetPinnedState(nextIsPinned));
         await RefreshAsync(clip.Id);
     }
 
     private async Task TogglePinClipAsync(ClipItemViewModel clip)
     {
         var nextIsPinned = !clip.IsPinned;
-        await Task.Run(() => _clipStoreService.SetPinnedAsync(clip.Id, nextIsPinned));
-        clip.SetPinnedState(nextIsPinned);
+        await RunClipMutationAsync(() => _clipStoreService.SetPinnedAsync(clip.Id, nextIsPinned));
+        ApplyToLiveClip(clip.Id, live => live.SetPinnedState(nextIsPinned));
         await RefreshAsync(clip.Id);
     }
 
@@ -3852,10 +3913,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private async Task ToggleFavoriteStateAsync(ClipItemViewModel clip)
     {
         var nextIsFavorite = !clip.IsFavorite;
-        await Task.Run(() => _clipStoreService.SetFavoriteAsync(clip.Id, nextIsFavorite));
-        clip.SetFavoriteState(nextIsFavorite);
+        await RunClipMutationAsync(() => _clipStoreService.SetFavoriteAsync(clip.Id, nextIsFavorite));
+        ApplyToLiveClip(clip.Id, live => live.SetFavoriteState(nextIsFavorite));
 
-        if (ReferenceEquals(SelectedClip, clip))
+        if (SelectedClip?.Id == clip.Id)
         {
             RaiseSelectionStateProperties();
         }
@@ -3971,7 +4032,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (_pendingDeletes.Remove(id, out _))
             {
-                await Task.Run(() => _clipStoreService.DeleteAsync(id));
+                await RunClipMutationAsync(() => _clipStoreService.DeleteAsync(id));
             }
         }
     }
@@ -6669,6 +6730,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 : [];
     }
 
+    /// <summary>
+    /// Applies an in-memory state change to the clip with <paramref name="clipId"/>
+    /// as it exists in <see cref="Clips"/> at this moment.
+    ///
+    /// Commands that write to the database await once per clip, and a throttled
+    /// background refresh can rebuild the collection in between. Any
+    /// ClipItemViewModel captured before such an await is then orphaned, and
+    /// mutating it leaves the freshly-created replacement showing the old value
+    /// until something else triggers a refresh. Always re-resolve by id.
+    /// </summary>
+    private void ApplyToLiveClip(long clipId, Action<ClipItemViewModel> apply)
+    {
+        var index = IndexOfClip(clipId);
+        if (index >= 0)
+        {
+            apply(Clips[index]);
+        }
+    }
+
     private string BuildSelectedClipExpirationText()
     {
         if (SelectedClip is null)
@@ -6720,7 +6800,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     Label = AppText.DeleteButtonLabel,
                     ExecuteAsync = async () =>
                     {
-                        await Task.Run(() => _clipStoreService.DeleteAsync(clip.Id));
+                        await RunClipMutationAsync(() => _clipStoreService.DeleteAsync(clip.Id));
                         await RefreshAsync();
                     }
                 },
@@ -6729,7 +6809,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     Label = AppText.UnmarkSensitiveButtonLabel,
                     ExecuteAsync = async () =>
                     {
-                        await Task.Run(() => _clipStoreService.ClearSensitivityAsync(clip.Id));
+                        await RunClipMutationAsync(() => _clipStoreService.ClearSensitivityAsync(clip.Id));
                         await RefreshAsync(clip.Id);
                     }
                 }
