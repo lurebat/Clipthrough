@@ -89,6 +89,36 @@ public sealed class SearchNavigationHeadlessTests
         Assert.True(harness.SearchBox.IsKeyboardFocusWithin);
     }
 
+    /// <summary>
+    /// A selection that is no longer in the list (the clip was deleted, or the
+    /// filter changed under it) leaves <c>IndexOf</c> at -1. Up used to compute
+    /// index -2, fall through every branch and still mark the key handled, so
+    /// the user was stranded in the list with no way back to the search box.
+    /// </summary>
+    [AvaloniaFact]
+    public void Up_WithASelectionThatIsNoLongerInTheList_ReturnsFocusToTheSearchBox()
+    {
+        using var harness = MainWindowTestHarness.Create();
+        harness.SeedClips(3);
+        harness.FocusClipList();
+
+        var orphan = harness.ViewModel.Clips[1];
+        harness.ViewModel.Clips.Remove(orphan);
+        Dispatcher.UIThread.RunJobs();
+
+        // Assigned after the removal: removing a selected item makes the list
+        // pick a neighbour, which would hide the dead end under test.
+        harness.ViewModel.SelectedClip = orphan;
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(-1, harness.ViewModel.Clips.IndexOf(harness.ViewModel.SelectedClip!));
+
+        harness.Window.KeyPress(Key.Up, RawInputModifiers.None, PhysicalKey.ArrowUp, null);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(harness.SearchBox.IsKeyboardFocusWithin);
+    }
+
     [AvaloniaFact]
     public void ShiftTab_FromClipList_ReturnsFocusToSearchBox()
     {

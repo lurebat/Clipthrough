@@ -508,19 +508,16 @@ public partial class MainWindow : Window
 
         if (e.Key == Key.Up)
         {
-            if (currentIndex == 0)
+            // Index 0 -- and any selection that is no longer part of the list --
+            // returns focus to the search box rather than swallowing the key.
+            if (currentIndex <= 0)
             {
-                // Up from first clip: return focus to search box
                 FocusSearchBox();
                 return true;
             }
 
-            var prevIndex = currentIndex - 1;
-            if (prevIndex >= 0)
-            {
-                viewModel.SelectedClip = viewModel.Clips[prevIndex];
-                FocusSelectedClipInList();
-            }
+            viewModel.SelectedClip = viewModel.Clips[currentIndex - 1];
+            FocusSelectedClipInList();
             return true;
         }
 
