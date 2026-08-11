@@ -45,6 +45,7 @@ public partial class MainWindow : Window
         Closed += OnClosed;
         DataContextChanged += OnDataContextChanged;
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
+        AddHandler(TextInputEvent, OnTextInput, RoutingStrategies.Tunnel);
     }
 
     private void OnOpened(object? sender, EventArgs e)
@@ -278,11 +279,30 @@ public partial class MainWindow : Window
         if (viewModel.TryHandleShortcut(e))
         {
             e.Handled = true;
+        }
+
+        // Type-to-filter is deliberately NOT handled here. Marking a printable
+        // KeyDown handled suppresses the platform's TextInput event, which is the
+        // only source of the character the user's keyboard layout actually
+        // produced. See OnTextInput.
+    }
+
+    /// <summary>
+    /// Type-to-filter. Runs on TextInput rather than KeyDown because
+    /// <see cref="KeyEventArgs.Key"/> is a layout-independent virtual key code:
+    /// the physical A key reports <see cref="Key.A"/> on Hebrew, Russian and
+    /// Arabic layouts alike, so deriving a character from it always produced
+    /// Latin. TextInput carries the text the platform actually composed, which
+    /// also gives us dead keys, AltGr and IME composition for free.
+    /// </summary>
+    private void OnTextInput(object? sender, TextInputEventArgs e)
+    {
+        if (e.Handled || string.IsNullOrEmpty(e.Text))
+        {
             return;
         }
 
-        // Type-to-filter: redirect printable keystrokes to search box
-        if (TryRedirectToSearchBox(e))
+        if (TryRedirectToSearchBox(e.Text, e.Source))
         {
             e.Handled = true;
         }
@@ -628,7 +648,7 @@ public partial class MainWindow : Window
         }, DispatcherPriority.Input);
     }
 
-    private bool TryRedirectToSearchBox(KeyEventArgs e)
+    private bool TryRedirectToSearchBox(string text, object? source)
     {
         var searchBox = GetSearchBox();
         if (searchBox is null || searchBox.IsKeyboardFocusWithin)
@@ -637,49 +657,27 @@ public partial class MainWindow : Window
         }
 
         // Don't redirect if already in a text input
-        if (IsKeyEventFromTextInput(e))
+        if (IsFromTextInput(source))
         {
             return false;
         }
 
-        // Only redirect unmodified or shift-modified printable keys
-        var relevantModifiers = e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Alt | KeyModifiers.Meta);
-        if (relevantModifiers != KeyModifiers.None)
+        // Control characters reach TextInput for Tab, Enter, Escape, Backspace and
+        // Ctrl+letter chords. None of those are filter text.
+        foreach (var character in text)
         {
-            return false;
-        }
-
-        // Translate the key into a printable character (letters/digits only; shift handled naturally)
-        char? typed = null;
-        if (e.Key >= Key.A && e.Key <= Key.Z)
-        {
-            var letter = (char)('a' + (e.Key - Key.A));
-            typed = (e.KeyModifiers & KeyModifiers.Shift) == KeyModifiers.Shift ? char.ToUpperInvariant(letter) : letter;
-        }
-        else if (e.Key >= Key.D0 && e.Key <= Key.D9 && (e.KeyModifiers & KeyModifiers.Shift) == 0)
-        {
-            typed = (char)('0' + (e.Key - Key.D0));
-        }
-        else if (e.Key >= Key.NumPad0 && e.Key <= Key.NumPad9)
-        {
-            typed = (char)('0' + (e.Key - Key.NumPad0));
-        }
-        else if (e.Key == Key.Space)
-        {
-            typed = ' ';
-        }
-
-        if (typed is null)
-        {
-            return false;
+            if (char.IsControl(character))
+            {
+                return false;
+            }
         }
 
         searchBox.Focus();
         if (DataContext is MainWindowViewModel vm)
         {
-            var newText = (vm.SearchText ?? string.Empty) + typed.Value;
+            var newText = (vm.SearchText ?? string.Empty) + text;
             vm.SearchText = newText;
-            // Move the caret past the redirected character so that subsequent
+            // Move the caret past the redirected text so that subsequent
             // keystrokes (which land natively once focus has transferred) are
             // appended in order rather than inserted at the start.
             searchBox.CaretIndex = newText.Length;
@@ -1791,19 +1789,21 @@ public partial class MainWindow : Window
     /// check misses real keystrokes typed into the editor. Walk the visual ancestry so
     /// keystrokes from inside any TextBox / TextEditor / SyntaxTextEditor are recognised.
     /// </summary>
-    private static bool IsKeyEventFromTextInput(KeyEventArgs e)
+    private static bool IsKeyEventFromTextInput(KeyEventArgs e) => IsFromTextInput(e.Source);
+
+    private static bool IsFromTextInput(object? source)
     {
-        if (e.Source is not Visual source)
+        if (source is not Visual visual)
         {
             return false;
         }
 
-        if (source is TextBox or AvaloniaEdit.TextEditor or SyntaxTextEditor)
+        if (visual is TextBox or AvaloniaEdit.TextEditor or SyntaxTextEditor)
         {
             return true;
         }
 
-        foreach (var ancestor in source.GetVisualAncestors())
+        foreach (var ancestor in visual.GetVisualAncestors())
         {
             if (ancestor is TextBox or AvaloniaEdit.TextEditor or SyntaxTextEditor)
             {
