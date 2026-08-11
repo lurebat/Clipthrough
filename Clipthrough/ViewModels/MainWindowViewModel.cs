@@ -144,6 +144,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _pendingClipMutations;
     private long _clipMutationVersion;
 
+    /// <summary>
+    /// How long a refresh waits before re-reading a snapshot it found stale.
+    /// Long enough that a bulk clip operation does not keep the search running
+    /// back to back for its whole duration, short enough to be imperceptible.
+    /// </summary>
+    private static readonly TimeSpan StaleRefreshRetryDelay = TimeSpan.FromMilliseconds(25);
+
     private string _settingsDatabasePassword = StorageOptions.Default.DatabasePassword;
     private string _settingsDatabasePasswordConfirm = StorageOptions.Default.DatabasePassword;
     private bool _settingsEnableNormalClipLifetime = AppSettings.Default.EnableNormalClipLifetime;
@@ -2577,11 +2584,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             const int maxAttempts = 4;
             ClipSearchResult result;
             RefreshRequest request;
+            long versionAtCheck;
+            var appliedWhileStale = false;
             var attempt = 0;
             while (true)
             {
                 attempt++;
-                var pendingBefore = Volatile.Read(ref _pendingClipMutations);
                 var versionBefore = Interlocked.Read(ref _clipMutationVersion);
 
                 request = await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => new RefreshRequest(BuildFilters(offset: 0), UseSemanticClipSearch));
@@ -2589,9 +2597,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 result = await SearchClipsAsync(request.Filters, request.UseSemanticClipSearch).ConfigureAwait(false);
                 if (sw is not null) Trace.TraceInformation($"[refresh-timing] db-search-complete @ {sw.ElapsedMilliseconds}ms items={result.Items.Count} total={result.TotalMatchingCount}");
 
-                var isStale = pendingBefore > 0
-                    || Volatile.Read(ref _pendingClipMutations) > 0
-                    || Interlocked.Read(ref _clipMutationVersion) != versionBefore;
+                versionAtCheck = Interlocked.Read(ref _clipMutationVersion);
+
+                // A write still in flight has not bumped the version yet, so it
+                // has to be tested separately. A write that started before this
+                // attempt and finished during it is already covered: the version
+                // is incremented before the pending count is released.
+                var isStale = versionAtCheck != versionBefore
+                    || Volatile.Read(ref _pendingClipMutations) > 0;
                 if (!isStale)
                 {
                     break;
@@ -2599,6 +2612,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
                 if (attempt >= maxAttempts)
                 {
+                    appliedWhileStale = true;
                     lock (_refreshQueueLock)
                     {
                         _hasQueuedRefresh = true;
@@ -2606,6 +2620,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
                     break;
                 }
+
+                // Yield before re-reading. A bulk operation holds the pending
+                // count above zero for its whole duration, and without this the
+                // retry loop would re-run the search back to back for as long
+                // as that lasts.
+                await Task.Delay(StaleRefreshRetryDelay).ConfigureAwait(false);
             }
 
             // Apply the refresh result regardless of visibility. With
@@ -2614,6 +2634,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // is what makes the next popup show instant.
             var applied = await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
+                // The staleness check above ran before this dispatcher hop. A
+                // write completing in between posts its own UI update, which can
+                // be ordered first; applying the older snapshot now would roll it
+                // back. Give up on this snapshot and queue a fresh one instead --
+                // unless we already decided to apply a knowingly stale result,
+                // which would otherwise loop here indefinitely.
+                if (!appliedWhileStale && Interlocked.Read(ref _clipMutationVersion) != versionAtCheck)
+                {
+                    lock (_refreshQueueLock)
+                    {
+                        _hasQueuedRefresh = true;
+                    }
+
+                    return false;
+                }
+
                 ApplyRefreshResult(result, preferredSelectionId);
                 _isClipListStale = false;
                 return true;
