@@ -5593,15 +5593,27 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             UseFuzzySettingsSearch = SettingsUseFuzzySearch,
         };
 
+        SecretPersistenceException? secretFailure = null;
         await Task.Run(async () =>
         {
             await _storageOptionsService.SaveAsync(storageOptions).ConfigureAwait(false);
-            await _settingsService.SaveAsync(settings).ConfigureAwait(false);
+            try
+            {
+                await _settingsService.SaveAsync(settings).ConfigureAwait(false);
+            }
+            catch (SecretPersistenceException ex)
+            {
+                // Everything else saved; only the credential sidecars failed.
+                // Keep going, but never report an unqualified success below.
+                secretFailure = ex;
+            }
         });
         if (!_isDatabaseReady)
         {
             IsLoadingDatabase = true;
-            StatusText = "Loading clipboard library\u2026";
+            StatusText = secretFailure is null
+                ? "Loading clipboard library\u2026"
+                : AppText.FormatSettingsSecretSaveFailed(secretFailure.SecretNameList);
             _ = StartDatabaseInBackgroundAsync();
             return;
         }
@@ -5635,7 +5647,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         IsWelcomeOpen = false;
         IsSettingsOpen = false;
-        StatusText = AppText.SettingsSavedStatus;
+        StatusText = secretFailure is null
+            ? AppText.SettingsSavedStatus
+            : AppText.FormatSettingsSecretSaveFailed(secretFailure.SecretNameList);
         UpdateSelectedClipPresentation();
         RaiseSelectionStateProperties();
     }

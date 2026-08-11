@@ -227,4 +227,78 @@ public sealed class SettingsServiceSecretsTests : IDisposable
         Assert.False(File.Exists(_aiKeyPath), "AI key sidecar should be removed when secret is empty");
         Assert.False(File.Exists(_remoteTokenPath), "Remote token sidecar should be removed when secret is empty");
     }
+
+    // ─── S2: a credential that could not be persisted must not report success ──
+
+    /// <summary>
+    /// Regression test for S2: when the protector cannot store a credential, the
+    /// save used to log a warning and return normally, so the settings UI reported
+    /// an unqualified "Settings saved." while the API key silently never reached
+    /// disk — the user only discovered it after a restart.
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_WhenSecretCannotBePersisted_ThrowsSecretPersistenceException()
+    {
+        var service = NewService(new FailingProtectDataProtectionService());
+        await service.InitializeAsync();
+
+        var failure = await Assert.ThrowsAsync<SecretPersistenceException>(() =>
+            service.SaveAsync(AppSettings.Default with
+            {
+                AiApiKey = "sk-secret-key",
+                EnableRemoteApi = true,
+                RemoteApiToken = "remote-tok",
+            }));
+
+        Assert.Contains("AI API key", failure.SecretNameList);
+        Assert.Contains("Remote API token", failure.SecretNameList);
+    }
+
+    /// <summary>
+    /// The failure must not cost the user their non-secret settings, nor the
+    /// in-memory credential for the current session: only the sidecar is missing.
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_WhenSecretCannotBePersisted_StillSavesEverythingElse()
+    {
+        var service = NewService(new FailingProtectDataProtectionService());
+        await service.InitializeAsync();
+
+        var settings = AppSettings.Default with
+        {
+            AiApiKey = "sk-secret-key",
+            EnableRemoteApi = true,
+        };
+
+        await Assert.ThrowsAsync<SecretPersistenceException>(() => service.SaveAsync(settings));
+
+        // Non-secret settings reached settings.json.
+        Assert.True(File.Exists(_settingsPath));
+        var json = await File.ReadAllTextAsync(_settingsPath);
+        Assert.DoesNotContain("sk-secret-key", json);
+
+        // In-memory state is still published so the key works for this session.
+        Assert.True(service.Current.EnableRemoteApi);
+        Assert.Equal("sk-secret-key", service.Current.AiApiKey);
+
+        // But nothing was written to the sidecar, which is exactly what the
+        // exception is telling the caller.
+        Assert.False(File.Exists(_aiKeyPath));
+    }
+
+    /// <summary>
+    /// A platform that intentionally cannot persist secrets (no-op protector) is a
+    /// documented configuration, not a failure — it must not raise the exception.
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_NoOpProtector_DoesNotReportSecretFailure()
+    {
+        var service = NewService(new NoOpDataProtectionService());
+        await service.InitializeAsync();
+
+        await service.SaveAsync(AppSettings.Default with { AiApiKey = "sk-secret-key" });
+
+        Assert.Equal("sk-secret-key", service.Current.AiApiKey);
+        Assert.False(File.Exists(_aiKeyPath));
+    }
 }

@@ -468,3 +468,16 @@ internal sealed class FailingUnprotectDataProtectionService : IDataProtectionSer
     public byte[] Unprotect(byte[] data) =>
         throw new System.Security.Cryptography.CryptographicException("Simulated unprotect failure");
 }
+
+/// <summary>
+/// Fake protector whose Protect always throws, simulating DPAPI being unavailable
+/// or the credential store rejecting the write. Used to verify that a secret which
+/// could not be persisted is reported instead of silently dropped.
+/// </summary>
+internal sealed class FailingProtectDataProtectionService : IDataProtectionService
+{
+    public bool CanPersistSecrets => true;
+    public byte[] Protect(byte[] data) =>
+        throw new System.Security.Cryptography.CryptographicException("Simulated protect failure");
+    public byte[] Unprotect(byte[] data) => (byte[])data.Clone();
+}

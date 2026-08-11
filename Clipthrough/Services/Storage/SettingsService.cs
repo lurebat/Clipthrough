@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -87,10 +88,23 @@ public sealed class SettingsService : ISettingsService
     {
         var normalized = settings.Normalize();
 
+        SecretPersistenceException? secretFailure = null;
+
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            await SaveToDiskAsync(normalized, cancellationToken);
+            try
+            {
+                await SaveToDiskAsync(normalized, cancellationToken);
+            }
+            catch (SecretPersistenceException ex)
+            {
+                // settings.json was still written; only the credential sidecars
+                // failed. Finish publishing the in-memory state so the secret
+                // stays usable for this session, then report the failure.
+                secretFailure = ex;
+            }
+
             await TrySaveLegacyCopyToDatabaseAsync(normalized, cancellationToken);
             _current = normalized;
             _isInitialized = true;
@@ -101,6 +115,11 @@ public sealed class SettingsService : ISettingsService
         }
 
         SettingsChanged?.Invoke(this, _current);
+
+        if (secretFailure is not null)
+        {
+            throw secretFailure;
+        }
     }
 
     private async Task<AppSettings> LoadSettingsAsync(CancellationToken cancellationToken)
@@ -157,8 +176,10 @@ public sealed class SettingsService : ISettingsService
             {
                 await SaveToDiskAsync(merged, cancellationToken);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecretPersistenceException)
             {
+                // A migration that cannot re-protect the credential is not fatal:
+                // the value is still live in memory for this session.
                 Trace.TraceWarning($"Settings secrets migration failed: {ex.Message}");
             }
         }
@@ -227,13 +248,22 @@ public sealed class SettingsService : ISettingsService
         // Persist AiApiKey and RemoteApiToken via protected sidecars rather than
         // as plaintext in settings.json. The fields are stripped from the JSON so
         // settings.json never carries readable credentials.
-        TrySaveSecret(_aiKeyPath, settings.AiApiKey);
-        TrySaveSecret(_remoteTokenPath, settings.RemoteApiToken);
+        var failedSecrets = new List<string>();
+        if (!TrySaveSecret(_aiKeyPath, settings.AiApiKey)) failedSecrets.Add("AI API key");
+        if (!TrySaveSecret(_remoteTokenPath, settings.RemoteApiToken)) failedSecrets.Add("Remote API token");
 
         // Serialize without the secret fields.
         var stripped = settings with { AiApiKey = string.Empty, RemoteApiToken = string.Empty };
         var json = JsonSerializer.Serialize(stripped, JsonOptions);
         await File.WriteAllTextAsync(_settingsPath, json, cancellationToken);
+
+        // Everything except the named credentials is now on disk. Report the
+        // credentials that are not, so the caller never shows an unqualified
+        // "saved" for a secret that will be gone after a restart.
+        if (failedSecrets.Count > 0)
+        {
+            throw new SecretPersistenceException(failedSecrets);
+        }
     }
 
     /// <summary>
@@ -242,30 +272,37 @@ public sealed class SettingsService : ISettingsService
     /// When <see cref="IDataProtectionService.CanPersistSecrets"/> is false the
     /// secret is kept in-memory only and no file is written.
     /// </summary>
-    private void TrySaveSecret(string path, string secret)
+    /// <returns>
+    /// <c>true</c> when the sidecar now reflects <paramref name="secret"/>, or when
+    /// persisting secrets is intentionally unsupported on this platform;
+    /// <c>false</c> when the write or delete failed and disk state is wrong.
+    /// </returns>
+    private bool TrySaveSecret(string path, string secret)
     {
         try
         {
             if (string.IsNullOrEmpty(secret))
             {
                 if (File.Exists(path)) File.Delete(path);
-                return;
+                return true;
             }
 
             if (!_dataProtection.CanPersistSecrets)
             {
                 // No-op protector (non-Windows): keep secret in-memory only.
-                return;
+                return true;
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             var raw = Encoding.UTF8.GetBytes(secret);
             var protectedBytes = _dataProtection.Protect(raw);
             File.WriteAllBytes(path, protectedBytes);
+            return true;
         }
         catch (Exception ex)
         {
-            Trace.TraceWarning($"Secret save failed for '{Path.GetFileName(path)}': {ex.Message}");
+            Trace.TraceError($"Secret save failed for '{Path.GetFileName(path)}': {ex.Message}");
+            return false;
         }
     }
 
