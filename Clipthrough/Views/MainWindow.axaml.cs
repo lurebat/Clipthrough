@@ -392,8 +392,10 @@ public partial class MainWindow : Window
             return true;
         }
 
-        // Don't interfere with arrow keys in multi-line text editors
-        if (IsKeyEventFromTextInput(e))
+        // Don't interfere with arrow keys in multi-line text editors. The
+        // single-line search box must fall through so Tab / Up / Down can move
+        // focus into the clip list and walk the search history.
+        if (IsKeyEventFromMultiLineEditor(e))
         {
             return false;
         }
@@ -461,8 +463,9 @@ public partial class MainWindow : Window
             return true;
         }
 
-        // Home/End: jump to first/last clip (from search box or clip list)
-        if (modifiers == KeyModifiers.None && (isSearchFocused || m_clipsListBox?.IsKeyboardFocusWithin == true))
+        // Home/End: jump to first/last clip. Only from the clip list -- inside the
+        // search box these keep their standard caret-movement meaning.
+        if (modifiers == KeyModifiers.None && m_clipsListBox?.IsKeyboardFocusWithin == true)
         {
             if (e.Key == Key.Home)
             {
