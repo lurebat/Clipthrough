@@ -143,6 +143,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private long? _queuedRefreshPreferredSelectionId;
     private int _pendingClipMutations;
     private long _clipMutationVersion;
+
     private string _settingsDatabasePassword = StorageOptions.Default.DatabasePassword;
     private string _settingsDatabasePasswordConfirm = StorageOptions.Default.DatabasePassword;
     private bool _settingsEnableNormalClipLifetime = AppSettings.Default.EnableNormalClipLifetime;
@@ -2837,7 +2838,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     Clips.Add(CreateClipItemViewModel(clip));
                 }
 
-                HasMoreResults = Clips.Count < result.TotalMatchingCount;
+                HasMoreResults = LoadedResultCount < result.TotalMatchingCount;
                 this.RaisePropertyChanged(nameof(HasNoClips));
                 RaiseBulkSelectionProperties();
                 UpdateStatus(result);
@@ -4214,7 +4215,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     $"[refresh-timing] apply-diff added={stats.Added} removed={stats.Removed} replaced={stats.Replaced} moved={stats.Moved} fullRebuild={stats.FullRebuild} forceNewest={forceSelectNewest} (before={initialCount}, after={Clips.Count}) @ {sw.ElapsedMilliseconds}ms");
             }
 
-            HasMoreResults = Clips.Count < result.TotalMatchingCount;
+            // Rows hidden because they are pending deletion are still counted by
+            // the query, so compare against everything the result set has
+            // consumed rather than against the rows actually on screen.
+            HasMoreResults = LoadedResultCount < result.TotalMatchingCount;
             this.RaisePropertyChanged(nameof(HasNoClips));
             SelectedClip = previousSelectionId is null
                 ? GetDefaultAutoSelectedClip()

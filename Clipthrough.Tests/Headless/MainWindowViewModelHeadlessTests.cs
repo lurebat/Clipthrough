@@ -1398,11 +1398,73 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.DoesNotContain(firstPage[0], loaded);
         Assert.Contains(survivor - 1, loaded);
     }
+
     /// <summary>
-    /// Paging must only count a pending delete while the row is genuinely part
-    /// of the current result set. If the user deletes a clip and then changes
-    /// the search so the deleted clip no longer matches, counting it anyway
-    /// would push the next page one row too far and skip a match.
+    /// A row hidden because it is pending deletion is still counted by the
+    /// query. Comparing the visible rows against that total made the list claim
+    /// there was another page to load, which re-fired a full search on every
+    /// scroll near the bottom for the whole undo window.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task HasMoreResults_IsFalseWhenOnlyAPendingDeleteIsMissing()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        for (var i = 1; i <= 3; i++)
+        {
+            await CaptureTextAsync(scope, $"clip {i}");
+        }
+
+        // A page large enough to hold every clip: there is genuinely nothing
+        // more to load, so any later claim to the contrary is the defect.
+        var pagedStore = new PagedSearchClipStore(scope.ClipStoreService, pageSize: 3);
+        using var viewModel = CreateViewModel(
+            scope,
+            new TestClipboardMonitorService(),
+            new TestSystemInteractionService(),
+            new TestSessionLogService(),
+            clipStore: pagedStore);
+        await viewModel.InitializeAsync();
+
+        for (var attempt = 0; attempt < 40 && viewModel.Clips.Count < 3; attempt++)
+        {
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.Equal(3, viewModel.Clips.Count);
+        Assert.False(viewModel.HasMoreResults);
+
+        // Delete inside the undo window, then refresh while the row is still in
+        // the database. Nothing further is loadable, so the flag must stay false.
+        viewModel.SelectedClip = viewModel.Clips[0];
+        var deleting = viewModel.DeleteSelectedCommand.Execute().ToTask();
+
+        await viewModel.RefreshCommand.Execute().ToTask();
+        for (var attempt = 0; attempt < 40 && viewModel.Clips.Count > 2; attempt++)
+        {
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.Equal(2, viewModel.Clips.Count);
+        Assert.False(viewModel.HasMoreResults);
+
+        await deleting;
+        Dispatcher.UIThread.RunJobs();
+    }
+    /// <summary>
+    /// The paging offset counts pending deletes so a hidden row does not shift
+    /// the next page — but only while the row is genuinely part of the current
+    /// result set. Once the user changes the search so the deleted clip no
+    /// longer matches, counting it pushes the next page one row too far and
+    /// skips a match.
+    ///
+    /// This guards the design of the offset rather than the original paging
+    /// defect: it fails against a naive `Clips.Count + _pendingDeletes.Count`,
+    /// not against the pre-fix code.
     /// </summary>
     [AvaloniaFact]
     public async Task LoadMore_AfterFilterStopsMatchingAPendingDelete_DoesNotSkipARow()
