@@ -85,3 +85,26 @@ to comparing ids, for the same orphaning reason.
 - Headless ViewModel tests that assert on `SelectedClip` after emitting a
   capture must call `viewModel.SetMainWindowVisible(true)` first;
   `ApplyCapturedClipOptimistically` deliberately skips selection while hidden.
+
+## Follow-up: the retry must not become a spin
+
+The first version of the staleness test also treated "a write was in flight
+when this attempt started" as a signal in its own right, and
+`ProcessQueuedRefreshesAsync` re-entered `PerformRefreshAsync` with no delay.
+A bulk operation writes one clip at a time and so holds `_pendingClipMutations`
+above zero for its whole duration — which meant four full searches plus a full
+list diff, repeated back to back, for as long as the bulk edit lasted.
+
+That signal is redundant. `RunClipMutationAsync` increments
+`_clipMutationVersion` **before** decrementing `_pendingClipMutations`, so a
+write that finishes during the search always moves the version, and one still
+running is caught by the pending count. Keep that ordering: reversing it opens
+a hole where a completing write is invisible to both checks. A stale retry now
+also waits `StaleRefreshRetryDelay` before re-reading.
+
+The check runs on a pool thread while the snapshot is applied after a hop to
+the UI thread, so it is re-checked once more inside that lambda — a write
+completing in the gap posts its own UI update, which can be ordered first and
+would then be rolled back by the older snapshot. The re-check is skipped when
+the loop deliberately gave up and applied a knowingly stale result, which would
+otherwise never converge.

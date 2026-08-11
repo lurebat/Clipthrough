@@ -60,7 +60,10 @@ routine warnings.
   true for content nobody has looked at yet.
 - Any new capture path must either scan inline or leave the marker `NULL` so the
   startup pass picks it up. A path that stamps the marker without scanning
-  permanently hides its clips from the retry.
+  permanently hides its clips from the retry, and a path that scans without
+  stamping (as `CaptureBatchAsync` originally did) excludes everything it writes
+  from embedding until the next launch and then makes the startup pass rescan
+  the lot one clip at a time.
 - Regression tests in `ClipStoreServiceTests` cover: fast capture leaves the
   marker unset, the startup pass sets it, a failing scan leaves it unset for the
   next attempt, an unscanned clip is not embedding-eligible, and a duplicate

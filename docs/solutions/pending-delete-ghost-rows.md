@@ -61,15 +61,26 @@ wrong inside that window.
 
 - Anything that removes rows from `Clips` outside `SoftDeleteClipsAsync` will
   desynchronise paging again. Derive the offset; never maintain it by hand.
+- `HasMoreResults` must compare `LoadedResultCount` — not `Clips.Count` — with
+  `result.TotalMatchingCount`, because the query still counts the hidden rows.
+  Comparing the visible rows makes the list claim another page exists and
+  re-runs a full search on every scroll near the bottom.
 - Any new "hidden but still returned by the query" state (a mute/snooze
   feature, say) needs the same treatment as `_hiddenPendingDeletes`, or the
   offset silently drifts.
 - Regression tests, both verified to fail on the pre-fix code:
   - `LoadMore_AfterADeleteCommits_DoesNotSkipARow`
-  - `LoadMore_AfterFilterStopsMatchingAPendingDelete_DoesNotSkipARow`
+  - `HasMoreResults_IsFalseWhenOnlyAPendingDeleteIsMissing`
 
-  Both use `PagedSearchClipStore`, a decorator that enforces a small page size
+  Plus `LoadMore_AfterFilterStopsMatchingAPendingDelete_DoesNotSkipARow`, which
+  guards the design of the offset rather than the original defect: it fails
+  against a naive `Clips.Count + _pendingDeletes.Count`, not against the
+  pre-fix code.
+
+  All use `PagedSearchClipStore`, a decorator that enforces a small page size
   over the real store so paging behaviour is exercised with only a handful of
-  clips.
+  clips. Note that a refresh collapses the loaded list back to a single page,
+  so a test that needs everything loaded after a refresh must size the page to
+  hold it.
 - Related, still open: a refresh collapses the loaded list back to a single
   page, so pages already loaded are discarded.
