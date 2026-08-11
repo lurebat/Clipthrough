@@ -166,6 +166,49 @@ public sealed class ClipStoreServiceTests
         Assert.Single(claimed);
         Assert.Equal(clip!.Id, claimed[0].ClipId);
     }
+
+    /// <summary>
+    /// CaptureBatchAsync classifies inline, so its clips must be stamped as
+    /// scanned. Leaving the marker unset excluded every bulk-imported clip from
+    /// embedding until the next launch, and then made the startup pass rescan
+    /// the whole import one clip at a time.
+    /// </summary>
+    [Fact]
+    public async Task CaptureBatchAsync_MarksImportedClipsAsClassified()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        var request = new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "an imported sentence",
+            ContentBytes = Encoding.UTF8.GetBytes("an imported sentence"),
+            IncrementExistingCopyCount = true,
+        };
+
+        var result = await scope.ClipStoreService.CaptureBatchAsync([request]);
+        Assert.Equal(1, result.Imported);
+
+        // Eligible immediately: no restart and no deferred rescan required.
+        Assert.Single(await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10));
+
+        // Re-importing the same content must not clear the marker either.
+        await scope.ClipStoreService.CaptureBatchAsync([request]);
+        Assert.Equal(0, await CountUnclassifiedAsync(scope));
+    }
+
+    private static async Task<long> CountUnclassifiedAsync(TemporaryDatabaseScope scope)
+    {
+        await using var connection = scope.ConnectionFactory.CreateConnection();
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM clips WHERE sensitivity_scanned_at IS NULL;";
+        return (long)(await command.ExecuteScalarAsync() ?? 0L);
+    }
+
     [Fact]
     public async Task CaptureAsync_PersistsRichContentMetadata()
     {

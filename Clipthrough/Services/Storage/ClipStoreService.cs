@@ -1033,6 +1033,7 @@ public sealed class ClipStoreService : IClipStoreService
                                 source_url = CASE WHEN $sourceUrl IS NULL OR TRIM($sourceUrl) = '' THEN source_url ELSE $sourceUrl END,
                                 is_favorite = CASE WHEN is_favorite = 1 OR $isFavorite = 1 THEN 1 ELSE 0 END,
                                 is_sensitive = CASE WHEN is_sensitive = 1 OR $isSensitive = 1 THEN 1 ELSE 0 END,
+                                sensitivity_scanned_at = $capturedAt,
                                 captured_at = $lastCopiedAt,
                                 first_copied_at = COALESCE(first_copied_at, captured_at, $lastCopiedAt),
                                 last_copied_at = $lastCopiedAt,
@@ -1061,13 +1062,15 @@ public sealed class ClipStoreService : IClipStoreService
                         source_app, source_app_path, source_app_icon, source_window_title, source_url,
                         hash, is_favorite, is_sensitive, captured_at, copy_count,
                         first_copied_at, last_copied_at, byte_size,
-                        image_width, image_height, source_clip_id, transform_kind, import_kind)
+                        image_width, image_height, source_clip_id, transform_kind, import_kind,
+                        sensitivity_scanned_at)
                     VALUES (
                         $content, $contentBytes, $contentType, $contentFormat,
                         $sourceApp, $sourceAppPath, $sourceAppIcon, $sourceWindowTitle, $sourceUrl,
                         $hash, $isFavorite, $isSensitive, $capturedAt, 1,
                         $capturedAt, $capturedAt, $byteSize,
-                        $imageWidth, $imageHeight, $sourceClipId, $transformKind, $importKind);
+                        $imageWidth, $imageHeight, $sourceClipId, $transformKind, $importKind,
+                        $capturedAt);
                     SELECT last_insert_rowid();
                     """;
                 AddUpsertParameters(insertCommand, request, contentText, hash, matches.Count > 0, capturedAt, byteSize);
