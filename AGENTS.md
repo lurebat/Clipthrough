@@ -58,6 +58,24 @@ dotnet test .\Clipthrough.Tests\Clipthrough.Tests.csproj --filter "FullyQualifie
 
 The headless filter is there because some Avalonia headless tests hang intermittently in CI. Run them locally if you are specifically touching view code.
 
+If Clipthrough is running it holds a lock on its own output, and any build that
+needs to copy a changed assembly into it fails with `MSB3027` / `MSB3021` on
+`ShareX.ImageEditor.dll`. (A build with nothing to copy still succeeds, so the
+failure looks intermittent.) Rather than killing an app the user may be using,
+redirect the output — note the path must be **absolute**, because a relative
+one is resolved per-project and scatters an output tree under every project in
+the build:
+
+```
+dotnet test .\Clipthrough.Tests\Clipthrough.Tests.csproj -p:BaseOutputPath=C:\full\path\to\Clipthrough.Tests\artifacts\bin\
+```
+
+`Clipthrough.Tests/artifacts/` is gitignored. Do not also override
+`BaseIntermediateOutputPath` — that invalidates the restore assets and fails
+with `NETSDK1005`. When the lock does bite, MSBuild can leave the previous
+assembly in place, so the tests silently run the old build; treat an
+unexpectedly passing run after a lock error as untrustworthy.
+
 ## Testing expectations
 
 - **Pure logic** (formatting, parsing, fuzzy matching, text transformation): unit tests in the service's test class.
