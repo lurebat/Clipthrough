@@ -1814,6 +1814,215 @@ public sealed class MainWindowViewModelHeadlessTests
         public Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default) => inner.LoadAllEmbeddingsAsync(cancellationToken);
         public Task PrewarmAsync(CancellationToken cancellationToken = default) => inner.PrewarmAsync(cancellationToken);
     }
+    /// <summary>
+    /// Regression test for B2d: captures were inserted at index 0
+    /// unconditionally. Every ORDER BY clause leads with pinned-first, so a new
+    /// (unpinned) clip was shown above the user's pinned clips until the next
+    /// refresh quietly moved it back down.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task CapturedClip_IsInsertedBelowThePinnedClips()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+
+        var pinned = await CaptureTextClipAsync(scope.ClipStoreService, "pinned clip");
+        await CaptureTextClipAsync(scope.ClipStoreService, "ordinary clip");
+        await scope.ClipStoreService.SetPinnedAsync(pinned.Id, true);
+
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+        await PumpAsync(() => viewModel.Clips.Count >= 2);
+
+        Assert.Equal(pinned.Id, viewModel.Clips[0].Id);
+
+        var fresh = await CaptureTextClipAsync(scope.ClipStoreService, "freshly captured");
+        clipboardMonitor.Emit(fresh);
+        await PumpAsync(() => viewModel.Clips.Any(clip => clip.Id == fresh.Id));
+
+        Assert.Equal(pinned.Id, viewModel.Clips[0].Id);
+        Assert.Equal(fresh.Id, viewModel.Clips[1].Id);
+    }
+
+    /// <summary>
+    /// Regression test for B2d: the optimistic insert assumed the default sort.
+    /// Under Oldest first a newly captured clip belongs at the bottom, so
+    /// putting it on top contradicted the sort the user picked. We cannot work
+    /// out the right position in memory, so the insert must be declined and an
+    /// authoritative refresh requested instead.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task CapturedClip_UnderANonDefaultSort_IsNotPlacedOnTop()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+
+        var oldest = await CaptureTextClipAsync(scope.ClipStoreService, "oldest clip");
+        await CaptureTextClipAsync(scope.ClipStoreService, "middle clip");
+
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        viewModel.SelectedSortOption = viewModel.SortOptions.Single(option => option.Value == ClipSortOption.OldestFirst);
+        await PumpAsync(() => viewModel.Clips.Count >= 2 && viewModel.Clips[0].Id == oldest.Id);
+
+        var fresh = await CaptureTextClipAsync(scope.ClipStoreService, "freshly captured");
+        clipboardMonitor.Emit(fresh);
+        await PumpAsync(() => viewModel.Clips.Any(clip => clip.Id == fresh.Id));
+
+        Assert.Equal(oldest.Id, viewModel.Clips[0].Id);
+        Assert.Equal(fresh.Id, viewModel.Clips[^1].Id);
+    }
+
+    /// <summary>
+    /// Regression test for B2d: the optimistic insert ignored the active
+    /// filters, so a capture appeared in a list it does not belong to - here a
+    /// list filtered to favourites only - and then vanished on the next
+    /// refresh.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task CapturedClip_ThatFailsTheActiveFilter_IsNotShown()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+
+        var favorite = await CaptureTextClipAsync(scope.ClipStoreService, "favourite clip");
+        await CaptureTextClipAsync(scope.ClipStoreService, "ordinary clip");
+        await scope.ClipStoreService.SetFavoriteAsync(favorite.Id, true);
+
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        viewModel.ShowFavoritesOnly = true;
+        await PumpAsync(() => viewModel.Clips.Count == 1 && viewModel.Clips[0].Id == favorite.Id);
+
+        Assert.Equal(favorite.Id, Assert.Single(viewModel.Clips).Id);
+
+        // Record every clip ever added to the list. Asserting on the final
+        // contents would not detect the bug: the old code inserted the clip and
+        // a later refresh removed it again, so only the flash in between is
+        // observable, and racing it would make this test timing-dependent.
+        var everAdded = new HashSet<long>();
+        void OnClipsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+        {
+            foreach (var item in e.NewItems?.OfType<ClipItemViewModel>() ?? Enumerable.Empty<ClipItemViewModel>())
+            {
+                everAdded.Add(item.Id);
+            }
+        }
+
+        viewModel.Clips.CollectionChanged += OnClipsChanged;
+        try
+        {
+            var fresh = await CaptureTextClipAsync(scope.ClipStoreService, "freshly captured, not a favourite");
+            clipboardMonitor.Emit(fresh);
+
+            // Long enough for the optimistic insert and for the deferred
+            // refresh that replaces it to have run.
+            await PumpAsync(() => false, maxAttempts: 12);
+
+            Assert.DoesNotContain(fresh.Id, everAdded);
+            Assert.DoesNotContain(viewModel.Clips, clip => clip.Id == fresh.Id);
+            Assert.Equal(favorite.Id, Assert.Single(viewModel.Clips).Id);
+        }
+        finally
+        {
+            viewModel.Clips.CollectionChanged -= OnClipsChanged;
+        }
+    }
+
+    /// <summary>
+    /// Pinned clips order by when they were pinned, not by recency, so
+    /// re-copying a pinned clip must not move it to the top of the pinned run.
+    /// The optimistic path cannot work out the right position among the pinned
+    /// clips, so it declines and lets a refresh decide.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RecapturingAPinnedClip_DoesNotReorderThePinnedClips()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+
+        var pinnedFirst = await CaptureTextClipAsync(scope.ClipStoreService, "pinned earlier");
+        var pinnedSecond = await CaptureTextClipAsync(scope.ClipStoreService, "pinned later");
+
+        // pinnedSecond is pinned last, so it sorts above pinnedFirst.
+        await scope.ClipStoreService.SetPinnedAsync(pinnedFirst.Id, true);
+        await Task.Delay(15);
+        await scope.ClipStoreService.SetPinnedAsync(pinnedSecond.Id, true);
+
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+        await PumpAsync(() => viewModel.Clips.Count >= 2);
+
+        Assert.Equal(pinnedSecond.Id, viewModel.Clips[0].Id);
+        Assert.Equal(pinnedFirst.Id, viewModel.Clips[1].Id);
+
+        // Snapshot the order after every mutation. Checking only the final
+        // order would not detect the bug: an optimistic reorder is repaired by
+        // the next refresh, so the pinned clips visibly swap and swap back.
+        var snapshots = new List<string>();
+        void OnClipsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+            => snapshots.Add(string.Join(",", viewModel.Clips.Select(clip => clip.Id)));
+
+        viewModel.Clips.CollectionChanged += OnClipsChanged;
+        try
+        {
+            // Re-copying the older-pinned clip bumps its recency but not its
+            // pin time, so the order must not change.
+            var recaptured = (await scope.ClipStoreService.GetByIdAsync(pinnedFirst.Id))!;
+            clipboardMonitor.Emit(recaptured);
+            await PumpAsync(() => false, maxAttempts: 12);
+
+            var expected = $"{pinnedSecond.Id},{pinnedFirst.Id}";
+            Assert.All(snapshots, snapshot => Assert.Equal(expected, snapshot));
+            Assert.Equal(pinnedSecond.Id, viewModel.Clips[0].Id);
+            Assert.Equal(pinnedFirst.Id, viewModel.Clips[1].Id);
+        }
+        finally
+        {
+            viewModel.Clips.CollectionChanged -= OnClipsChanged;
+        }
+    }
+
+    /// <summary>
+    /// Runs the dispatcher until <paramref name="isSatisfied"/> holds or the
+    /// attempts run out. Returning without satisfying the condition is not an
+    /// error here: callers assert the real expectation afterwards, and some
+    /// callers deliberately wait for a fixed period instead.
+    /// </summary>
+    private static async Task PumpAsync(Func<bool> isSatisfied, int maxAttempts = 20)
+    {
+        for (var attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            Dispatcher.UIThread.RunJobs();
+            if (isSatisfied())
+            {
+                return;
+            }
+
+            await Task.Delay(50);
+        }
+
+        Dispatcher.UIThread.RunJobs();
+    }
+
     private static async Task PrepareInitializedScopeAsync(TemporaryDatabaseScope scope)
     {
         scope.SettingsService.SetHasSavedSettings(true);

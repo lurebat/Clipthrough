@@ -9,6 +9,7 @@ using System.Linq;
 using System.Reactive;
 using System.Reactive.Disposables;
 using System.Reactive.Linq;
+using System.Reactive.Subjects;
 using System.Reflection;
 using System.Text;
 using System.Threading;
@@ -117,6 +118,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // while the window is hidden, or when a refresh result was discarded because
     // the window became hidden mid-apply. On the next show we trigger one refresh.
     private bool _isClipListStale;
+    // Raised when an optimistic list update was declined because the clip's
+    // correct position could not be determined in memory (a non-default sort, an
+    // active search, or filters the clip does not match). Throttled so a burst
+    // of captures costs one refresh rather than one each.
+    private readonly Subject<Unit> _deferredRefreshRequests = new();
     // When the popup is reopened, mirror the typical clipboard-manager UX of
     // always highlighting the newest captured clip rather than preserving the
     // previous selection. Set by SetMainWindowVisible(true) and consumed by
@@ -330,6 +336,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _clipboardMonitorService.CapturedClips
                 .ObserveOn(RxSchedulers.MainThreadScheduler)
                 .Subscribe(ApplyCapturedClipOptimistically, ex => ReportError("Captured-clip subscription", ex)));
+
+        _subscriptions.Add(
+            _deferredRefreshRequests
+                .Throttle(TimeSpan.FromMilliseconds(300), RxSchedulers.MainThreadScheduler)
+                .SelectMany(_ => Observable.FromAsync(() => RefreshAsync()).Select(static _ => Unit.Default))
+                .Subscribe(static _ => { }, ex => ReportError("Deferred refresh", ex)));
 
         _subscriptions.Add(
             _clipboardMonitorService.UpdatedClips
@@ -2271,6 +2283,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SessionLogs.Dispose();
         Copilot.Dispose();
         _subscriptions.Dispose();
+        _deferredRefreshRequests.Dispose();
     }
 
     private void OnJobIndicatorChanged(object? sender, EventArgs e)
@@ -4416,14 +4429,104 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Places a newly captured clip in the list without waiting for a database
+    /// round trip - but only when we can prove where it goes. Every other case
+    /// asks for an authoritative refresh instead, because a clip shown in the
+    /// wrong place is worse than one that arrives a fraction of a second later:
+    /// it silently contradicts the sort the user chose, and the contradiction
+    /// disappears on the next refresh, so it looks like a glitch rather than a
+    /// bug.
+    /// </summary>
     private void ApplyCapturedClipOptimistically(ClipEntry clip)
     {
+        if (!TryGetOptimisticInsertIndex(clip, out var targetIndex))
+        {
+            RequestDeferredRefresh();
+            return;
+        }
+
         // Keep the Clips collection current even while the popup is hidden so
         // the next show is instant. We do skip the per-insert SelectedClip
         // assignment in the hidden case: SetMainWindowVisible re-selects the
         // newest clip on show, so paying for the SelectedClip property storm
         // on every capture would be wasted work.
-        UpsertClipItem(clip, targetIndex: 0, select: _isMainWindowVisible);
+        UpsertClipItem(clip, targetIndex, select: _isMainWindowVisible);
+    }
+
+    /// <summary>
+    /// Works out where <paramref name="clip"/> belongs in the list as it is
+    /// currently displayed, returning false when that cannot be determined
+    /// without querying the database.
+    ///
+    /// Only the default sort can be satisfied in memory. Every other sort keys
+    /// on a value we cannot compare against rows that were never loaded - under
+    /// OldestFirst, for instance, a new clip belongs below every row in the
+    /// library, so no position in the loaded page is correct. Mirroring the SQL
+    /// comparer in C# would not fix that, and would add a third copy of the
+    /// ordering rules that SQLite's BINARY collation does not even agree with.
+    /// </summary>
+    private bool TryGetOptimisticInsertIndex(ClipEntry clip, out int index)
+    {
+        index = 0;
+
+        if (SelectedSortOption.Value != ClipSortOption.MostRecent)
+        {
+            return false;
+        }
+
+        // With a search active, membership depends on FTS/regex/fuzzy matching
+        // and, for BestMatching, on a relevance score - none of which can be
+        // evaluated here. (Semantic fusion also no-ops on empty search text,
+        // so this covers it too.)
+        if (!string.IsNullOrWhiteSpace(SearchText))
+        {
+            return false;
+        }
+
+        if (!ClipStructuralFilter.Matches(BuildFilters(offset: 0), clip))
+        {
+            return false;
+        }
+
+        // Every ORDER BY clause leads with pinned-first, so an unpinned clip
+        // belongs below the pinned run rather than at the very top. Inserting
+        // at 0 unconditionally is what used to push new clips above the user's
+        // pinned ones until the next refresh moved them back down.
+        //
+        // A pinned clip is declined outright. Pinned clips order by pinned_at,
+        // not by recency, so re-copying one must not move it: its position
+        // depends on when it was pinned relative to the others, which is not
+        // something this method should try to reason about.
+        if (clip.IsPinned)
+        {
+            return false;
+        }
+
+        while (index < Clips.Count && Clips[index].IsPinned)
+        {
+            index++;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Asks for an authoritative refresh when an optimistic update was declined.
+    /// While hidden we only set the stale flag, which the next show consumes -
+    /// refreshing a window nobody is looking at costs UI-thread time that makes
+    /// the next popup slower to open.
+    /// </summary>
+    private void RequestDeferredRefresh()
+    {
+        if (_isMainWindowVisible)
+        {
+            _deferredRefreshRequests.OnNext(Unit.Default);
+        }
+        else
+        {
+            _isClipListStale = true;
+        }
     }
 
     private void ApplyUpdatedClipOptimistically(ClipEntry clip)
