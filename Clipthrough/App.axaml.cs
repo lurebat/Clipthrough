@@ -391,8 +391,21 @@ public partial class App : Application
 
     private void OnSettingsChanged(object? sender, AppSettings e)
     {
+        // The event argument is deliberately ignored. RaiseSettingsChanged
+        // invokes synchronously when the save happened on the UI thread but
+        // posts otherwise, and this app does both - filter state is saved from
+        // a pool thread while a command-driven save resumes on the UI thread -
+        // so an older posted save can be delivered after a newer synchronous
+        // one. Everything below applies to the app as a whole, where newest
+        // wins, so read what is actually current rather than whichever snapshot
+        // this callback happens to be carrying.
+        if (_settingsService?.Current is not { } current)
+        {
+            return;
+        }
+
         var previous = _lastAppliedSettings;
-        _lastAppliedSettings = e;
+        _lastAppliedSettings = current;
 
         // Filter toggles reach here on a 500 ms debounce, and re-registering
         // hotkeys is not free of consequences: UpdateGlobalHotKeyRegistration
@@ -402,19 +415,19 @@ public partial class App : Application
         // kill a working global hotkey. Skip the work when nothing but view
         // state moved; a null previous means this is the first event, which
         // always applies.
-        if (previous is null || !AppSettings.OnlyViewStateChanged(previous, e))
+        if (previous is null || !AppSettings.OnlyViewStateChanged(previous, current))
         {
             UpdateGlobalHotKeyRegistration();
         }
 
-        if (previous is null || previous.StartWithWindows != e.StartWithWindows)
+        if (previous is null || previous.StartWithWindows != current.StartWithWindows)
         {
-            _systemInteractionService?.SyncStartWithWindows(e.StartWithWindows);
+            _systemInteractionService?.SyncStartWithWindows(current.StartWithWindows);
         }
 
-        if (previous is null || previous.ThemeMode != e.ThemeMode)
+        if (previous is null || previous.ThemeMode != current.ThemeMode)
         {
-            ApplyThemeMode(e.ThemeMode);
+            ApplyThemeMode(current.ThemeMode);
         }
     }
 
