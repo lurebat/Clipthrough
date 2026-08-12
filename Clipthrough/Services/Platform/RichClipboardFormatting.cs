@@ -10,7 +10,7 @@ namespace Clipthrough.Services.Platform;
 /// by both <see cref="SystemInteractionService"/> (clipboard writes) and the
 /// drag-and-drop service (drag-out payloads).
 /// </summary>
-internal static class RichClipboardFormatting
+internal static partial class RichClipboardFormatting
 {
     private const string StartFragmentMarker = "<!--StartFragment-->";
     private const string EndFragmentMarker = "<!--EndFragment-->";
@@ -27,10 +27,28 @@ internal static class RichClipboardFormatting
 
     /// <summary>
     /// Best-effort detection of an HTML fragment vs. plain text.
+    ///
+    /// An opening tag on its own is not enough. "Template&lt;int&gt; t;" and
+    /// "if (a &lt; b && b &gt; c)" both contain something shaped like a tag, and
+    /// treating them as HTML injects them raw into the CF_HTML document, where
+    /// Word and Outlook silently drop the "tag" and the text with it.
+    ///
+    /// Require a construct that plain text does not accidentally produce: a
+    /// closing tag, a self-closing tag, or a known void element. This stays true
+    /// for real markup that uses unknown element names - custom elements still
+    /// close - so tightening it does not start escaping genuine HTML.
     /// </summary>
     public static bool LooksLikeHtml(string content)
         => !string.IsNullOrWhiteSpace(content)
-           && Regex.IsMatch(content, @"<\s*([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+           && (ClosingOrSelfClosingTagRegex().IsMatch(content)
+               || VoidElementRegex().IsMatch(content)
+               || content.Contains("<!DOCTYPE html", StringComparison.OrdinalIgnoreCase));
+
+    [GeneratedRegex(@"</\s*[a-zA-Z][a-zA-Z0-9-]*\s*>|<\s*[a-zA-Z][a-zA-Z0-9-]*\b[^>]*/\s*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ClosingOrSelfClosingTagRegex();
+
+    [GeneratedRegex(@"<\s*(br|hr|img|input|meta|link|area|base|col|embed|param|source|track|wbr)\b[^>]*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex VoidElementRegex();
 
     /// <summary>
     /// Wraps an HTML fragment in the CF_HTML envelope expected by Word,
@@ -47,7 +65,13 @@ internal static class RichClipboardFormatting
 
         if (!LooksLikeHtml(fragment))
         {
-            fragment = System.Net.WebUtility.HtmlEncode(fragment).Replace(Environment.NewLine, "<br>", StringComparison.Ordinal);
+            // Every line-ending form, not just this platform's. The transform
+            // service normalises to "\n", so on Windows a plain-text fragment
+            // would keep no <br> at all and paste into Word as a single line.
+            fragment = System.Net.WebUtility.HtmlEncode(fragment)
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace("\r", "\n", StringComparison.Ordinal)
+                .Replace("\n", "<br>", StringComparison.Ordinal);
         }
 
         var document = $"<html><body>{StartFragmentMarker}{fragment}{EndFragmentMarker}</body></html>";

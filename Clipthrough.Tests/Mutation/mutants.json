@@ -662,5 +662,37 @@
     "filter": "BoxTableToHtml_EscapesProseForHtmlButThePlainTextFlavourStaysLiteral",
     "find": "            return NormalizePreviewText(WebUtility.HtmlDecode(withoutTags));",
     "replace": "            return NormalizePreviewText(withoutTags);"
+  },
+  {
+    "id": "cfhtml-treats-any-tag-shape-as-markup",
+    "why": "Restores the opening-tag-only heuristic, so 'Template<int> t;' is classified as HTML and injected raw into the CF_HTML document. Word and Outlook drop the unknown tag and the text with it.",
+    "file": "Clipthrough/Services/Platform/RichClipboardFormatting.cs",
+    "filter": "LooksLikeHtml_IsFalseForCodeThatMerelyContainsAngleBrackets",
+    "find": "           && (ClosingOrSelfClosingTagRegex().IsMatch(content)\n               || VoidElementRegex().IsMatch(content)\n               || content.Contains(\"<!DOCTYPE html\", StringComparison.OrdinalIgnoreCase));",
+    "replace": "           && Regex.IsMatch(content, @\"<\\s*([a-zA-Z][a-zA-Z0-9]*)\\b[^>]*>\", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);"
+  },
+  {
+    "id": "cfhtml-stops-recognising-void-elements",
+    "why": "The over-correction: without the void-element arm, genuine markup whose only tag is a <br> or <img> is escaped and pastes as visible angle brackets instead of rendering.",
+    "file": "Clipthrough/Services/Platform/RichClipboardFormatting.cs",
+    "filter": "LooksLikeHtml_IsTrueForRealMarkup",
+    "find": "               || VoidElementRegex().IsMatch(content)\n",
+    "replace": ""
+  },
+  {
+    "id": "cfhtml-converts-only-the-platform-newline",
+    "why": "Reverts the line-break conversion to Environment.NewLine only. The transform service normalises to a bare newline, so on Windows a plain-text fragment keeps no <br> at all and pastes into Word as one run-on line.",
+    "file": "Clipthrough/Services/Platform/RichClipboardFormatting.cs",
+    "filter": "BuildCfHtml_ConvertsEveryLineEndingFormToABreak",
+    "find": "            fragment = System.Net.WebUtility.HtmlEncode(fragment)\n                .Replace(\"\\r\\n\", \"\\n\", StringComparison.Ordinal)\n                .Replace(\"\\r\", \"\\n\", StringComparison.Ordinal)\n                .Replace(\"\\n\", \"<br>\", StringComparison.Ordinal);",
+    "replace": "            fragment = System.Net.WebUtility.HtmlEncode(fragment).Replace(Environment.NewLine, \"<br>\", StringComparison.Ordinal);"
+  },
+  {
+    "id": "cfhtml-fragment-offsets-drift",
+    "why": "Miscounts the CF_HTML fragment end. The header offsets are byte positions into the document; if they do not address the real fragment bytes, Word pastes a truncated fragment or nothing at all.",
+    "file": "Clipthrough/Services/Platform/RichClipboardFormatting.cs",
+    "filter": "BuildCfHtml_HeaderOffsetsAddressTheRealFragmentBytes",
+    "find": "        var endFragment = startFragment + Encoding.UTF8.GetByteCount(StartFragmentMarker) + Encoding.UTF8.GetByteCount(fragment);",
+    "replace": "        var endFragment = startFragment + Encoding.UTF8.GetByteCount(StartFragmentMarker) + fragment.Length;"
   }
 ]
