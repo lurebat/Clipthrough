@@ -40,6 +40,7 @@ public sealed class SyntaxTextEditor : UserControl
     private readonly RegistryOptions _lightRegistry = new(ThemeName.LightPlus);
     private bool _isSyncingText;
     private bool _grammarUpdateScheduled;
+    private bool _isAttached;
     // When the control is hidden (one of the three stacked editors in the
     // clip preview), there's no point paying for a full TextDocument
     // replacement on every keystroke — the user can't see it. Stash the
@@ -117,7 +118,28 @@ public sealed class SyntaxTextEditor : UserControl
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        _isAttached = true;
         ApplyTheme();
+    }
+
+    /// <summary>
+    /// A TextMate installation owns a <c>TMModel</c>, and a <c>TMModel</c> owns a
+    /// running tokenizer thread. A running thread is a GC root, so an
+    /// installation that is never disposed pins this control, its editor and its
+    /// document for the life of the process — one leaked thread and one leaked
+    /// document per editor that was ever shown, and the main window alone hosts
+    /// two of these.
+    ///
+    /// Nothing else covers it: <see cref="ApplyTheme"/> disposes the previous
+    /// installation, but it only runs on attach or on a theme change, and
+    /// neither happens to a window that is simply closed.
+    /// </summary>
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        _isAttached = false;
+        _textMateInstall?.Dispose();
+        _textMateInstall = null;
+        base.OnDetachedFromVisualTree(e);
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
@@ -245,6 +267,15 @@ public sealed class SyntaxTextEditor : UserControl
 
     private void ApplyTheme()
     {
+        // A theme change can reach a control that is off the visual tree, and
+        // installing TextMate there would resurrect the tokenizer thread that
+        // OnDetachedFromVisualTree just stopped. Re-attaching calls back into
+        // here, so nothing is lost by skipping it.
+        if (!_isAttached)
+        {
+            return;
+        }
+
         var isDark = ActualThemeVariant != ThemeVariant.Light;
 
         _editor.Background = isDark

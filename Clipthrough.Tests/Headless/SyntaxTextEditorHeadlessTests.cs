@@ -1,3 +1,5 @@
+using System;
+using System.Reflection;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
@@ -5,6 +7,7 @@ using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using AvaloniaEdit.Editing;
+using AvaloniaEdit.TextMate;
 using Clipthrough.Controls;
 using Xunit;
 
@@ -152,6 +155,71 @@ public sealed class SyntaxTextEditorHeadlessTests
         Assert.True(reachedEditor, "Tab never reached the content editor, so this test proves nothing.");
         Assert.True(returnedToSearch, "Focus never left the content editor - Tab is trapped there again.");
     }
+
+    /// <summary>
+    /// A TextMate installation owns a TMModel, which owns a running tokenizer
+    /// thread — a GC root that pins the control, its editor and its document.
+    /// The control used to install one on attach and never dispose it, so every
+    /// window that showed an editor leaked a thread for the life of the process.
+    /// </summary>
+    [AvaloniaFact]
+    public void ClosingTheWindowDisposesTheTextMateInstallation()
+    {
+        SyntaxTextEditor editor;
+        TextMate.Installation installation;
+
+        using (var fixture = EditorFixture.Create())
+        {
+            editor = fixture.Editor;
+            installation = GetInstallation(editor)!;
+            Assert.NotNull(installation);
+        }
+
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Null(GetInstallation(editor));
+
+        // Nulling the field is not the contract - stopping the tokenizer is.
+        // Only a genuinely disposed installation throws here.
+        Assert.Throws<ObjectDisposedException>(() => installation.SetGrammar(null));
+    }
+
+    /// <summary>
+    /// Two paths can install TextMate after teardown: a theme change routed
+    /// through <c>ApplyTheme</c>, and a queued grammar update. Either one would
+    /// restart the tokenizer thread on a control nothing can detach a second
+    /// time, turning the leak back on permanently.
+    /// </summary>
+    [AvaloniaFact]
+    public void NothingReinstallsTextMateAfterDetach()
+    {
+        SyntaxTextEditor editor;
+
+        using (var fixture = EditorFixture.Create())
+        {
+            editor = fixture.Editor;
+            Assert.NotNull(GetInstallation(editor));
+        }
+
+        Dispatcher.UIThread.RunJobs();
+        Assert.Null(GetInstallation(editor));
+
+        // Path 1: a theme change reaching a detached control.
+        typeof(SyntaxTextEditor)
+            .GetMethod("ApplyTheme", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(editor, null);
+        Assert.Null(GetInstallation(editor));
+
+        // Path 2: a grammar update posted before detach, or a hint set after it.
+        editor.SyntaxHint = ".json";
+        Dispatcher.UIThread.RunJobs();
+        Assert.Null(GetInstallation(editor));
+    }
+
+    private static TextMate.Installation? GetInstallation(SyntaxTextEditor editor)
+        => (TextMate.Installation?)typeof(SyntaxTextEditor)
+            .GetField("_textMateInstall", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(editor);
     private sealed class EditorFixture : System.IDisposable
     {
         private EditorFixture(Window window, Button before, SyntaxTextEditor editor, Button after)

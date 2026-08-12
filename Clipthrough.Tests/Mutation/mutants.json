@@ -790,5 +790,37 @@
     "filter": "Dispose_PersistsCurrentFilterStateImmediately",
     "find": "        if (SaveDelay > TimeSpan.Zero)\n        {\n            await Task.Delay(SaveDelay, cancellationToken);\n        }",
     "replace": "        await Task.CompletedTask;"
+  },
+  {
+    "id": "k19-detach-does-not-dispose-textmate",
+    "why": "Drops the installation reference on detach without disposing it. The tokenizer thread keeps running and keeps rooting the control - the original leak, now invisible because the field reads null.",
+    "file": "Clipthrough/Controls/SyntaxTextEditor.cs",
+    "filter": "SyntaxTextEditorHeadlessTests",
+    "find": "        _isAttached = false;\n        _textMateInstall?.Dispose();\n        _textMateInstall = null;",
+    "replace": "        _isAttached = false;\n        _textMateInstall = null;"
+  },
+  {
+    "id": "k19-no-detach-cleanup-at-all",
+    "why": "Removes the teardown hook entirely, restoring the state the control shipped in: an installation created on attach and never released.",
+    "file": "Clipthrough/Controls/SyntaxTextEditor.cs",
+    "filter": "SyntaxTextEditorHeadlessTests",
+    "find": "        _isAttached = false;\n        _textMateInstall?.Dispose();\n        _textMateInstall = null;\n        base.OnDetachedFromVisualTree(e);",
+    "replace": "        base.OnDetachedFromVisualTree(e);"
+  },
+  {
+    "id": "k19-theme-change-reinstalls-after-detach",
+    "why": "Lets ApplyTheme run on a detached control, so a theme change arriving after teardown installs TextMate again and restarts the tokenizer on a control that will never be detached a second time.",
+    "file": "Clipthrough/Controls/SyntaxTextEditor.cs",
+    "filter": "SyntaxTextEditorHeadlessTests",
+    "find": "        if (!_isAttached)\n        {\n            return;\n        }\n\n        var isDark = ActualThemeVariant != ThemeVariant.Light;",
+    "replace": "        var isDark = ActualThemeVariant != ThemeVariant.Light;"
+  },
+  {
+    "id": "k19-grammar-update-reinstalls-after-detach",
+    "why": "Removes the null guard that stops a queued grammar update from installing TextMate on a torn-down control, which would resurrect the tokenizer thread from the dispatcher queue.",
+    "file": "Clipthrough/Controls/SyntaxTextEditor.cs",
+    "filter": "SyntaxTextEditorHeadlessTests",
+    "find": "        if (_textMateInstall is null) return;\n\n        var isDark = ActualThemeVariant != ThemeVariant.Light;\n        var registry = isDark ? _darkRegistry : _lightRegistry;\n\n        _textMateInstall.Dispose();",
+    "replace": "        var isDark = ActualThemeVariant != ThemeVariant.Light;\n        var registry = isDark ? _darkRegistry : _lightRegistry;\n\n        _textMateInstall?.Dispose();"
   }
 ]
