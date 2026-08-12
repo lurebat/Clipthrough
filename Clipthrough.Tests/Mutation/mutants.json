@@ -350,5 +350,37 @@
     "filter": "SearchAsync_WholeWord",
     "find": "        return [.. tokens.Select(token => new Regex($@\"\\b{Regex.Escape(token)}\\b\", options))];",
     "replace": "        return [new Regex(string.Join(\"|\", tokens.Select(t => $@\"\\b{Regex.Escape(t)}\\b\")), options)];"
+  },
+  {
+    "id": "semantic-fusion-applied-to-paged-reads",
+    "why": "Restores fusing the globally-ranked semantic top-K into every paged read. Load more is then handed the same semantic hits it already showed and appends them again, so a clip gets two view models whose selection and checkbox state diverge.",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "filter": "LoadMore_WithSemanticFusion_AddsNoDuplicatesAndSkipsNoQueryRows",
+    "find": "        if (filters.Offset > 0)\n        {\n            return FusedSearchResult.FromQuery(ftsResult);\n        }\n",
+    "replace": ""
+  },
+  {
+    "id": "load-more-counts-semantic-additions-in-the-offset",
+    "why": "Restores paging on the on-screen row count. Semantic additions are not part of the query's offset space, so counting them advances the offset past query rows that were never shown - those clips match the search and appear on no page at all.",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "filter": "LoadMore_WithSemanticFusion_AddsNoDuplicatesAndSkipsNoQueryRows",
+    "find": "            var request = new RefreshRequest(BuildFilters(FtsRowsConsumed), UseSemanticClipSearch);",
+    "replace": "            var request = new RefreshRequest(BuildFilters(LoadedResultCount), UseSemanticClipSearch);"
+  },
+  {
+    "id": "fused-clip-never-rejoins-the-offset-space",
+    "why": "Stops clearing the semantic-addition mark when the query itself returns the clip on a later page. The offset then stays one row short for good, so every further Load more re-reads a row already on screen, discards it as a duplicate, and the list never grows again.",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "filter": "LoadMore_WhenAFusedClipIsAlsoAQueryMatch_KeepsMakingProgress",
+    "find": "                    _semanticOnlyIds.Remove(clip.Id);\n",
+    "replace": ""
+  },
+  {
+    "id": "fusion-trims-query-rows-to-make-room",
+    "why": "Restores trimming the fused page back to the page size. The lowest-ranked query rows are dropped to make room for semantic additions, and the next page resumes past them - so clips that matched the search are shown on no page.",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "filter": "Refresh_WithSemanticFusion_KeepsEveryQueryRowOfThePage",
+    "find": "            .ThenByDescending(t => t.Score)\n            .Select(t => t.Clip)\n            .ToList();",
+    "replace": "            .ThenByDescending(t => t.Score)\n            .Take(filters.Limit)\n            .Select(t => t.Clip)\n            .ToList();"
   }
 ]

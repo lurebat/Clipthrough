@@ -1090,6 +1090,207 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.Single(ocrQueue.Enqueued);
     }
 
+    /// <summary>
+    /// Semantic fusion contributes clips the SQL query did not return, ranked
+    /// globally from rank 0. Handing that same global top-K to every paged read
+    /// meant "Load more" re-added the same clips it had already shown, giving a
+    /// clip two view models that no longer shared selection or checkbox state.
+    /// The offset was also advanced past them, so genuine query matches were
+    /// skipped and never appeared at all.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task LoadMore_WithSemanticFusion_AddsNoDuplicatesAndSkipsNoQueryRows()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        // Five clips the text query matches, plus one it does not.
+        for (var i = 1; i <= 5; i++)
+        {
+            await CaptureTextAsync(scope, $"alpha {i}");
+        }
+
+        await CaptureTextAsync(scope, "unrelated wording");
+        var semanticOnly = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters { SearchText = "unrelated" });
+        var semanticOnlyId = Assert.Single(semanticOnly.Items).Id;
+
+        var pagedStore = new PagedSearchClipStore(scope.ClipStoreService, pageSize: 2);
+        var semantic = new StubSemanticSearchService(semanticOnlyId);
+        using var viewModel = CreateViewModel(
+            scope,
+            new TestClipboardMonitorService(),
+            new TestSystemInteractionService(),
+            new TestSessionLogService(),
+            clipStore: pagedStore,
+            semanticSearchService: semantic);
+        await viewModel.InitializeAsync();
+
+        viewModel.UseSemanticClipSearch = true;
+        viewModel.SearchText = "alpha";
+
+        // Two query rows plus the semantic addition.
+        for (var attempt = 0; attempt < 200 && viewModel.Clips.Count != 3; attempt++)
+        {
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.Equal(3, viewModel.Clips.Count);
+        Assert.Contains(semanticOnlyId, viewModel.Clips.Select(clip => clip.Id));
+
+        var queriesBeforePaging = semantic.QueryCount;
+        Assert.True(queriesBeforePaging > 0, "the first page should have consulted semantic ranking");
+
+        pagedStore.RequestedOffsets.Clear();
+        await viewModel.LoadMoreCommand.Execute().ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        // Semantic ranking is global and starts at rank 0, so it says nothing
+        // about an offset window. A paged read must not consult it at all -
+        // doing so both costs a full vector scan per page and hands the page the
+        // same hits it already showed.
+        Assert.Equal(queriesBeforePaging, semantic.QueryCount);
+
+        // The next page resumes after the two rows the query returned, not after
+        // the three rows on screen - offset 3 would skip a matching clip.
+        Assert.Equal([2], pagedStore.RequestedOffsets);
+
+        var loaded = viewModel.Clips.Select(clip => clip.Id).ToArray();
+        Assert.Equal(loaded.Length, loaded.Distinct().Count());
+        Assert.Single(loaded, id => id == semanticOnlyId);
+
+        // Every "alpha" clip read so far is present: four query rows over two
+        // pages, plus the semantic addition.
+        Assert.Equal(5, loaded.Length);
+    }
+
+    /// <summary>
+    /// A clip surfaced early by semantic fusion can also be a genuine query
+    /// match that a later page reaches. Once the query returns it, it occupies a
+    /// slot in the offset space: continuing to treat it as an addition holds the
+    /// offset one row short forever, so every further "Load more" re-reads the
+    /// same row, discards it as a duplicate, and adds nothing.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task LoadMore_WhenAFusedClipIsAlsoAQueryMatch_KeepsMakingProgress()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        for (var i = 1; i <= 6; i++)
+        {
+            await CaptureTextAsync(scope, $"alpha {i}");
+        }
+
+        // The oldest clip: a real query match that lands on the last page, and
+        // also the one the semantic ranking pulls to the front.
+        var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters { SearchText = "alpha" });
+        Assert.Equal(6, all.Items.Count);
+        var oldestId = all.Items[^1].Id;
+
+        var pagedStore = new PagedSearchClipStore(scope.ClipStoreService, pageSize: 2);
+        using var viewModel = CreateViewModel(
+            scope,
+            new TestClipboardMonitorService(),
+            new TestSystemInteractionService(),
+            new TestSessionLogService(),
+            clipStore: pagedStore,
+            semanticSearchService: new StubSemanticSearchService(oldestId));
+        await viewModel.InitializeAsync();
+
+        viewModel.UseSemanticClipSearch = true;
+        viewModel.SearchText = "alpha";
+
+        for (var attempt = 0; attempt < 200 && viewModel.Clips.Count != 3; attempt++)
+        {
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.Equal(3, viewModel.Clips.Count);
+        Assert.Contains(oldestId, viewModel.Clips.Select(clip => clip.Id));
+
+        // Page until the list stops growing, then check it really is finished
+        // rather than stuck re-reading a row it already has.
+        var offsets = new List<int>();
+        for (var page = 0; page < 6 && viewModel.HasMoreResults; page++)
+        {
+            var before = viewModel.Clips.Count;
+            pagedStore.RequestedOffsets.Clear();
+            await viewModel.LoadMoreCommand.Execute().ToTask();
+            Dispatcher.UIThread.RunJobs();
+            offsets.AddRange(pagedStore.RequestedOffsets);
+            if (viewModel.Clips.Count == before)
+            {
+                break;
+            }
+        }
+
+        var loaded = viewModel.Clips.Select(clip => clip.Id).ToArray();
+        Assert.Equal(loaded.Length, loaded.Distinct().Count());
+        Assert.Equal(6, loaded.Length);
+        Assert.False(viewModel.HasMoreResults);
+
+        // Each page has to move forward; a repeated offset is the stall.
+        Assert.Equal(offsets.Count, offsets.Distinct().Count());
+    }
+
+    /// <summary>
+    /// Fusion used to trim the merged list back to the page size, which dropped
+    /// the lowest-ranked query rows to make room for the semantic additions. The
+    /// next page then resumed past those rows, so clips that matched the search
+    /// were never shown on any page. Semantic fusion adds recall; it must not
+    /// cost any.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task Refresh_WithSemanticFusion_KeepsEveryQueryRowOfThePage()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        // A full page of matches (the view model asks for 200) plus one clip the
+        // text query does not match.
+        var seedRequests = Enumerable.Range(1, 200)
+            .Select(i => new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = $"alpha {i}",
+                ContentBytes = Encoding.UTF8.GetBytes($"alpha {i}"),
+            })
+            .ToList();
+        Assert.Equal(200, (await scope.ClipStoreService.CaptureBatchAsync(seedRequests)).Imported);
+
+        await CaptureTextAsync(scope, "unrelated wording");
+        var semanticOnly = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters { SearchText = "unrelated" });
+        var semanticOnlyId = Assert.Single(semanticOnly.Items).Id;
+
+        using var viewModel = CreateViewModel(
+            scope,
+            new TestClipboardMonitorService(),
+            new TestSystemInteractionService(),
+            new TestSessionLogService(),
+            semanticSearchService: new StubSemanticSearchService(semanticOnlyId));
+        await viewModel.InitializeAsync();
+
+        viewModel.UseSemanticClipSearch = true;
+        viewModel.SearchText = "alpha";
+
+        for (var attempt = 0; attempt < 200 && viewModel.Clips.Count != 201; attempt++)
+        {
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        // All 200 query rows survive alongside the semantic addition.
+        Assert.Equal(201, viewModel.Clips.Count);
+        Assert.Contains(semanticOnlyId, viewModel.Clips.Select(clip => clip.Id));
+        Assert.Equal(200, viewModel.Clips.Count(clip => clip.Id != semanticOnlyId));
+    }
+
     private static MainWindowViewModel CreateViewModel(
         TemporaryDatabaseScope scope,
         TestClipboardMonitorService clipboardMonitor,
@@ -1099,7 +1300,8 @@ public sealed class MainWindowViewModelHeadlessTests
         Clipthrough.Services.IBackgroundOcrQueue? backgroundOcrQueue = null,
         Clipthrough.Services.IDragDropService? dragDropService = null,
         Clipthrough.Services.IOcrService? ocrService = null,
-        IClipStoreService? clipStore = null)
+        IClipStoreService? clipStore = null,
+        Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null)
     {
         return new MainWindowViewModel(
             clipStore ?? scope.ClipStoreService,
@@ -1119,7 +1321,38 @@ public sealed class MainWindowViewModelHeadlessTests
             backgroundOcrQueue ?? new NoOpBackgroundOcrQueue(),
             new Clipthrough.Services.BackgroundJobIndicator(),
             scope.DatabaseInitializer,
+            semanticSearchService: semanticSearchService,
             dragDropService: dragDropService);
+    }
+
+    /// <summary>
+    /// Returns a caller-supplied ranking for every query, so a test can decide
+    /// exactly which clips semantic fusion contributes.
+    /// </summary>
+    private sealed class StubSemanticSearchService(params long[] clipIds) : Clipthrough.Services.Search.ISemanticSearchService
+    {
+        private int _queryCount;
+
+        public bool IsReady => true;
+
+        public int CachedCount => clipIds.Length;
+
+        /// <summary>Queries run so far. Incremented from the background search thread.</summary>
+        public int QueryCount => Volatile.Read(ref _queryCount);
+
+        public Task RefreshCacheAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task AppendEmbeddingsAsync(IReadOnlyList<ClipEmbeddingRecord> records, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<IReadOnlyList<(long ClipId, float Score)>> QueryAsync(string text, int topK, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _queryCount);
+            IReadOnlyList<(long, float)> hits = clipIds
+                .Take(topK)
+                .Select((id, index) => (id, 1.0f - (index * 0.01f)))
+                .ToList();
+            return Task.FromResult(hits);
+        }
     }
 
     private sealed class NoOpBackgroundOcrQueue : Clipthrough.Services.IBackgroundOcrQueue

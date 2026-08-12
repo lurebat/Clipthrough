@@ -2503,7 +2503,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // starve the refresh — on the last attempt we apply what we have
             // and leave a follow-up refresh queued.
             const int maxAttempts = 4;
-            ClipSearchResult result;
+            FusedSearchResult fused;
             RefreshRequest request;
             long versionAtCheck;
             var appliedWhileStale = false;
@@ -2522,14 +2522,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     // new search would inherit the old depth and never shrink.
                     var probe = BuildFilters(offset: 0);
                     var limit = SameResultSet(_lastRefreshFilters, probe, _lastRefreshUsedSemantic, UseSemanticClipSearch)
-                        ? Math.Max(PageSize, LoadedResultCount)
+                        ? Math.Max(PageSize, FtsRowsConsumed)
                         : PageSize;
 
                     return new RefreshRequest(BuildFilters(offset: 0, limit: limit), UseSemanticClipSearch);
                 });
                 if (sw is not null) Trace.TraceInformation($"[refresh-timing] built-request @ {sw.ElapsedMilliseconds}ms search='{request.Filters.SearchText}' semantic={request.UseSemanticClipSearch}");
-                result = await SearchClipsAsync(request.Filters, request.UseSemanticClipSearch).ConfigureAwait(false);
-                if (sw is not null) Trace.TraceInformation($"[refresh-timing] db-search-complete @ {sw.ElapsedMilliseconds}ms items={result.Items.Count} total={result.TotalMatchingCount}");
+                fused = await SearchClipsAsync(request.Filters, request.UseSemanticClipSearch).ConfigureAwait(false);
+                if (sw is not null) Trace.TraceInformation($"[refresh-timing] db-search-complete @ {sw.ElapsedMilliseconds}ms items={fused.Result.Items.Count} total={fused.Result.TotalMatchingCount}");
 
                 versionAtCheck = Interlocked.Read(ref _clipMutationVersion);
 
@@ -2584,7 +2584,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     return false;
                 }
 
-                ApplyRefreshResult(result, preferredSelectionId);
+                ApplyRefreshResult(fused, preferredSelectionId);
                 _isClipListStale = false;
 
                 // Record the query only once its rows are actually on screen.
@@ -2662,35 +2662,56 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private Task<ClipSearchResult> SearchClipsAsync(ClipSearchFilters filters, bool useSemanticClipSearch)
+    /// <summary>
+    /// A search result plus the ids in it that the SQL query did not return —
+    /// clips added by semantic fusion. They sit outside the query's offset
+    /// space, so paging has to know not to count them.
+    /// </summary>
+    private readonly record struct FusedSearchResult(ClipSearchResult Result, IReadOnlySet<long> SemanticOnlyIds)
+    {
+        public static FusedSearchResult FromQuery(ClipSearchResult result) => new(result, EmptyIds);
+
+        private static readonly HashSet<long> EmptyIds = [];
+    }
+
+    private Task<FusedSearchResult> SearchClipsAsync(ClipSearchFilters filters, bool useSemanticClipSearch)
         => Task.Run(async () =>
         {
             var result = await _clipStoreService.SearchAsync(filters).ConfigureAwait(false);
             return await ApplySemanticFusionAsync(filters, result, useSemanticClipSearch).ConfigureAwait(false);
         });
 
-    private async Task<ClipSearchResult> ApplySemanticFusionAsync(ClipSearchFilters filters, ClipSearchResult ftsResult, bool useSemanticClipSearch)
+    private async Task<FusedSearchResult> ApplySemanticFusionAsync(ClipSearchFilters filters, ClipSearchResult ftsResult, bool useSemanticClipSearch)
     {
         if (_semanticSearchService is null)
         {
-            return ftsResult;
+            return FusedSearchResult.FromQuery(ftsResult);
         }
         if (!useSemanticClipSearch)
         {
-            return ftsResult;
+            return FusedSearchResult.FromQuery(ftsResult);
         }
         if (string.IsNullOrWhiteSpace(filters.SearchText))
         {
-            return ftsResult;
+            return FusedSearchResult.FromQuery(ftsResult);
         }
         // Exact-mode gating: regex/wildcard/whole-word are precise operators; semantic would only dilute.
         if (filters.UseRegex || filters.UseWildcard || filters.WholeWord)
         {
-            return ftsResult;
+            return FusedSearchResult.FromQuery(ftsResult);
+        }
+        // The semantic query is ranked globally from rank 0 and knows nothing
+        // about the offset window, so fusing it into a paged read is meaningless:
+        // every page gets handed the same global top-K, and the paging code then
+        // appends the same clips again. Fusion belongs to the read that starts at
+        // the top, which is the only read the refresh path ever issues.
+        if (filters.Offset > 0)
+        {
+            return FusedSearchResult.FromQuery(ftsResult);
         }
         if (!_semanticSearchService.IsReady)
         {
-            return ftsResult;
+            return FusedSearchResult.FromQuery(ftsResult);
         }
 
         // The candidate pool exists to find semantic hits the FTS query missed;
@@ -2705,11 +2726,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         catch (Exception ex)
         {
             Trace.TraceWarning($"Semantic search query failed; returning FTS-only result: {ex.Message}");
-            return ftsResult;
+            return FusedSearchResult.FromQuery(ftsResult);
         }
         if (semantic.Count == 0)
         {
-            return ftsResult;
+            return FusedSearchResult.FromQuery(ftsResult);
         }
 
         var ftsIds = new HashSet<long>(ftsResult.Items.Select(c => c.Id));
@@ -2728,6 +2749,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         // Respect non-text filters on semantic-only additions (FTS results already honor them).
         var extraFiltered = extraClips.Where(c => MatchesNonTextFilters(c, filters)).ToList();
+        if (extraFiltered.Count == 0)
+        {
+            return FusedSearchResult.FromQuery(ftsResult);
+        }
 
         var allClips = new Dictionary<long, ClipEntry>();
         foreach (var c in ftsResult.Items) allClips[c.Id] = c;
@@ -2739,6 +2764,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         for (var i = 0; i < semantic.Count; i++) semRank[semantic[i].ClipId] = i;
 
         const double rrfK = 60.0;
+        // Every FTS row of this page is kept. Trimming the fused list back to the
+        // page size used to drop the lowest-ranked FTS rows to make room for the
+        // semantic additions, and the next page then resumed past them — so the
+        // dropped clips matched the search and were never shown at all. Semantic
+        // fusion adds recall; it must not cost any.
         var fused = allClips.Values
             .Select(c =>
             {
@@ -2751,19 +2781,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             .OrderByDescending(t => t.Clip.PinnedAt.HasValue)
             .ThenByDescending(t => t.Clip.PinnedAt ?? DateTimeOffset.MinValue)
             .ThenByDescending(t => t.Score)
-            .Take(filters.Limit)
             .Select(t => t.Clip)
             .ToList();
 
-        return new ClipSearchResult
+        var fusedResult = new ClipSearchResult
         {
             Items = fused,
-            TotalMatchingCount = Math.Max(ftsResult.TotalMatchingCount, fused.Count + (extraFiltered.Count - Math.Min(extraFiltered.Count, Math.Max(0, fused.Count - ftsResult.Items.Count)))),
+            // The additions are matches the query did not have, and all of them
+            // are on screen, so the total grows by exactly that many.
+            TotalMatchingCount = ftsResult.TotalMatchingCount + extraFiltered.Count,
             TotalClipCount = ftsResult.TotalClipCount,
             SensitiveClipCount = ftsResult.SensitiveClipCount,
             TotalStoredBytes = ftsResult.TotalStoredBytes,
             LastCapturedAt = ftsResult.LastCapturedAt,
         };
+
+        return new FusedSearchResult(fusedResult, extraFiltered.Select(c => c.Id).ToHashSet());
     }
 
     private static bool MatchesNonTextFilters(ClipEntry clip, ClipSearchFilters filters)
@@ -2790,6 +2823,49 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// deletes, and undo, none of which used to adjust it.
     /// </summary>
     private int LoadedResultCount => Clips.Count + _hiddenPendingDeletes.Count;
+
+    /// <summary>
+    /// Ids on screen that semantic fusion added rather than the SQL query. They
+    /// are outside the query's offset space, so <see cref="FtsRowsConsumed"/>
+    /// discounts them.
+    /// </summary>
+    private readonly HashSet<long> _semanticOnlyIds = [];
+
+    /// <summary>
+    /// Rows consumed from the SQL query's own result set — the offset the next
+    /// page has to resume from. Counting semantic additions here would advance
+    /// the offset past query rows that were never shown.
+    /// </summary>
+    private int FtsRowsConsumed
+    {
+        get
+        {
+            if (_semanticOnlyIds.Count == 0)
+            {
+                return LoadedResultCount;
+            }
+
+            var semanticOnlyConsumed = 0;
+            foreach (var clip in Clips)
+            {
+                if (_semanticOnlyIds.Contains(clip.Id))
+                {
+                    semanticOnlyConsumed++;
+                }
+            }
+
+            foreach (var id in _hiddenPendingDeletes)
+            {
+                if (_semanticOnlyIds.Contains(id))
+                {
+                    semanticOnlyConsumed++;
+                }
+            }
+
+            return LoadedResultCount - semanticOnlyConsumed;
+        }
+    }
+
     private async Task LoadMoreAsync()
     {
         if (!_isDatabaseReady || !HasMoreResults)
@@ -2800,12 +2876,27 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         IsBusy = true;
         try
         {
-            var request = new RefreshRequest(BuildFilters(LoadedResultCount), UseSemanticClipSearch);
-            var result = await SearchClipsAsync(request.Filters, request.UseSemanticClipSearch).ConfigureAwait(false);
+            var request = new RefreshRequest(BuildFilters(FtsRowsConsumed), UseSemanticClipSearch);
+            var fused = await SearchClipsAsync(request.Filters, request.UseSemanticClipSearch).ConfigureAwait(false);
+            var result = fused.Result;
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
+                // The list is append-only here, so anything already on screen must
+                // be skipped: a second view model for a clip id shows the same clip
+                // twice and leaves selection and checkbox state split across two
+                // rows that no longer track each other.
+                var onScreen = Clips.Select(static c => c.Id).ToHashSet();
                 foreach (var clip in result.Items)
                 {
+                    // The query returned this id, so it occupies a slot in the
+                    // offset space whether or not it is already on screen. A clip
+                    // that semantic fusion surfaced early and the query then
+                    // reached on a later page has to stop counting as an addition,
+                    // or the offset stays permanently short of the rows actually
+                    // read and every further page re-reads - and skips - the same
+                    // row without ever growing the list.
+                    _semanticOnlyIds.Remove(clip.Id);
+
                     // Same reason as in ApplyRefreshResult: the query still
                     // returns clips awaiting a delete commit, and showing them
                     // again would resurrect a row the user already deleted.
@@ -2815,10 +2906,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         continue;
                     }
 
+                    if (!onScreen.Add(clip.Id))
+                    {
+                        continue;
+                    }
+
                     Clips.Add(CreateClipItemViewModel(clip));
                 }
 
-                HasMoreResults = LoadedResultCount < result.TotalMatchingCount;
+                // This page came from the query alone, so compare against the
+                // query's own totals rather than the on-screen count.
+                HasMoreResults = FtsRowsConsumed < result.TotalMatchingCount;
                 this.RaisePropertyChanged(nameof(HasNoClips));
                 RaiseBulkSelectionProperties();
                 UpdateStatus(result);
@@ -4146,8 +4244,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return -1;
     }
 
-    private void ApplyRefreshResult(ClipSearchResult result, long? preferredSelectionId = null)
+    private void ApplyRefreshResult(FusedSearchResult fused, long? preferredSelectionId = null)
     {
+        var result = fused.Result;
         var sw = CommandLineOptions.LogPopupTimings ? Stopwatch.StartNew() : null;
         var forceSelectNewest = _selectNewestOnNextRefresh;
         _selectNewestOnNextRefresh = false;
@@ -4190,6 +4289,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 }
 
                 items = visible;
+            }
+
+            // This read replaced the whole list, so the semantic additions it
+            // carried are the only ones on screen. Recording them here keeps the
+            // next page's offset counting query rows only.
+            _semanticOnlyIds.Clear();
+            foreach (var id in fused.SemanticOnlyIds)
+            {
+                _semanticOnlyIds.Add(id);
             }
 
             var stats = ApplyRefreshResultIncremental(items, checkedIds);
