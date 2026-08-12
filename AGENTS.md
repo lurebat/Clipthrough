@@ -43,8 +43,8 @@ shortcuts, and pluggable source attribution.
 - **Auto-copy after transform**: `ApplyTransformToTargetsAsync` and `ApplyTransformationToSingleClipAsync` invoke `CopyTransformResultToClipboardAsync` whenever exactly one target was transformed (single clip or selection slice). HTML-output transforms write CF_HTML via `CopyRichContentAsync`; everything else uses `CopyTextAsync`. Always call `_clipboardMonitorService.SuppressNext()` first so the capture doesn't double-create the clip. Multi-clip transforms intentionally do NOT auto-copy.
 - **Custom hotkey bindings** (`Models/CustomHotkeyBinding.cs`, `App.axaml.cs#ExecuteCustomHotkey`): `Target` string uses `kind:value` with kinds `builtin`, `script`, `ai`, or `prompt`. The `prompt` kind sends `value` directly to `IAiTransformService.TransformAsync` as the system prompt — useful for one-off prompts without saving a preset.
 - **Image AI transforms**: image clips can use AI presets/prompts in both image-to-text and image-to-image modes. Keep prompt UX and command routing aligned with the selected clip type.
-- **User scripting** (`IScriptingService` / `ScriptingService`): Roslyn `CSharpScript` wrapper. Scripts get a `Input` global (string) and return any value, coerced to string. Default scripts come from `ScriptingService.GetDefaultScripts()` and are appended to `AppSettings.UserScripts` by the `LoadDefaultScripts` command.
-- **Remote API** (`IRemoteControlService` / `RemoteControlService`): optional local HTTP API with bearer-token auth, Swagger/OpenAPI at `/docs` and `/openapi/v1.json`, and endpoint reference in `.github/copilot-cli-skills/clipthrough-remote-api.md`. Keep the skill file in sync with the actual API contract when endpoints or DTOs change.
+- **User scripting** (`IScriptingService` / `ScriptingService`): Roslyn `CSharpScript` wrapper. Scripts get a `Input` global (string) and return any value, coerced to string. The service's only public entry point is `EvaluateAsync`; scripts run under a hard timeout (`DefaultScriptTimeout`) with a restricted reference set. Scripts live in `AppSettings.UserScripts`, which starts empty — there is no default-script seeding.
+- **Remote API** (`IRemoteControlService` / `RemoteControlService`): optional local HTTP API with bearer-token auth, Swagger/OpenAPI at `/docs` and `/openapi/v1.json` (both authenticated — `/health` is the only public route), and endpoint reference in `.github/copilot-cli-skills/clipthrough-remote-api.md`. The API is read + capture only; `POST /clips/{id}/transform` was removed as an RCE surface and must not be reintroduced. Keep the skill file in sync with the actual API contract when endpoints or DTOs change.
 - **Session logs** (`ISessionLogService` / `SessionLogService`): user-facing session logs are fed from `Trace`. Preserve real app warnings/errors, but avoid surfacing known benign framework noise that would drown out actionable entries.
 
 ## Validation
@@ -95,7 +95,7 @@ unexpectedly passing run after a lock error as untrustworthy.
 
 - **Windows** is the primary target. Linux and macOS should build but are not feature-complete. Platform-specific code lives in `Services/Platform/SystemInteractionService.cs` under `[SupportedOSPlatform("windows")]` guards.
 - **Async void** is allowed only for event handlers. Prefer `async Task` everywhere else.
-- **P/Invoke**: struct layouts must match Win32 exactly. Prefer `System.Runtime.InteropServices.LibraryImport` on .NET 10 where possible.
+- **P/Invoke**: struct layouts must match Win32 exactly. Prefer `System.Runtime.InteropServices.LibraryImport` on .NET 10 where possible — note this is aspirational, not descriptive: the codebase is currently 48 `DllImport` and 0 `LibraryImport`, so follow the surrounding style when editing an existing interop block rather than converting it piecemeal.
 
 ## How to add a feature (template)
 
