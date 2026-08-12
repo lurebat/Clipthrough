@@ -42,6 +42,12 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
     // worker stops hammering the DB while the ONNX model file is absent.
     private volatile bool _modelMissing;
 
+    // Set whenever clips may be stranded in the 'processing' embedding state: at
+    // every start, and again if releasing an unattempted batch fails. The loop
+    // clears it only once the sweep actually succeeds, so a transient SQLite busy
+    // can't strand those clips for the rest of the run.
+    private volatile bool _claimsResetPending = true;
+
     public EmbeddingWorker(IClipStoreService clipStore, IEmbeddingService embeddingService, IBackgroundJobIndicator jobIndicator)
     {
         _clipStore = clipStore;
@@ -59,6 +65,7 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
         if (_disposed) return;
         if (_started) return;
         _started = true;
+        _claimsResetPending = true;
         _cts = new CancellationTokenSource();
         _loop = Task.Run(() => RunAsync(_cts.Token));
     }
@@ -98,6 +105,33 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
     {
         while (!cancellationToken.IsCancellationRequested)
         {
+            // Nothing this worker claimed is in flight at the top of an iteration,
+            // so any row still marked 'processing' was stranded — by a stop, by a
+            // crash, or by a release that failed. ClaimPendingEmbeddingsAsync never
+            // re-selects 'processing', so without this sweep those clips would never
+            // be embedded again while still counting as pending, leaving a coverage
+            // figure that can never reach 100%. Retried until it succeeds rather
+            // than attempted once, so a transient SQLite busy doesn't reinstate
+            // exactly the bug this is here to prevent. The retry can't hot-loop:
+            // an iteration that finds no work idles first.
+            if (_claimsResetPending)
+            {
+                try
+                {
+                    var reset = await _clipStore.ResetStalledEmbeddingClaimsAsync(cancellationToken).ConfigureAwait(false);
+                    _claimsResetPending = false;
+                    if (reset > 0)
+                    {
+                        Trace.TraceInformation($"Reset {reset} stalled embedding claim(s) back to pending.");
+                    }
+                }
+                catch (OperationCanceledException) { return; }
+                catch (Exception ex)
+                {
+                    Trace.TraceError($"Resetting stalled embedding claims failed (will retry): {ex}");
+                }
+            }
+
             // Guard: if the ONNX model is missing, idle until poked/stopped, then
             // clear the flag and retry. The model may have been placed during the
             // idle window (or a Poke woke us); if it is still absent ProcessOnceAsync
@@ -132,6 +166,13 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
             }
 
             if (processed > 0) continue;
+
+            // A model-missing pass already returns 0. Falling into the idle below
+            // would wait 30s here and another 30s in the model-missing branch at the
+            // top of the next iteration — and, worse, would swallow the Poke that
+            // says "the model is in place now", delaying the retry by a further
+            // idle period. Let the model-missing branch own that wait.
+            if (_modelMissing) continue;
 
             try
             {
@@ -174,7 +215,27 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
             // ONNX model file absent — stop spinning; wait for a Poke/restart.
             Trace.TraceError($"Embedding model file not found — worker will idle until restarted: {ex}");
             _modelMissing = true;
-            // Don't mark the candidates as 'failed'; they'll be retried after the model is placed.
+
+            // Don't mark the candidates as 'failed'; they'll be retried after the
+            // model is placed. That only works if the claim is released: the batch
+            // is currently 'processing', which the claim query never re-selects, so
+            // leaving it would strand exactly the clips we promised to retry — and
+            // each idle cycle would strand another batch.
+            try
+            {
+                await _clipStore.ReleaseEmbeddingClaimsAsync(
+                    candidates.Select(c => c.ClipId).ToArray(),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception releaseEx)
+            {
+                // Leave the sweep armed so the next loop iteration retries; otherwise
+                // this batch stays stranded for the rest of the run.
+                _claimsResetPending = true;
+                Trace.TraceError($"Releasing the unattempted embedding batch failed: {releaseEx}");
+            }
+
             return 0;
         }
         catch (Exception ex)

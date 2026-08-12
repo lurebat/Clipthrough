@@ -893,6 +893,83 @@ public sealed class ClipStoreServiceTests
     }
 
     [Fact]
+    public async Task ResetStalledEmbeddingClaims_ReturnsProcessingRowsToPendingAndLeavesOtherStatesAlone()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        for (var i = 0; i < 3; i++)
+        {
+            await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = $"stalled {i}",
+                ContentBytes = Encoding.UTF8.GetBytes($"stalled {i}"),
+                SourceApp = "Editor",
+            });
+        }
+
+        var claimed = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10);
+        Assert.Equal(3, claimed.Count);
+
+        // One of them completes normally; the other two are the interrupted batch.
+        var vec = new float[8];
+        for (var k = 0; k < vec.Length; k++) vec[k] = 0.35355339f;
+        await scope.ClipStoreService.SaveEmbeddingBatchAsync([new ClipEmbeddingRecord(claimed[0].ClipId, vec)], "test-model-v1");
+
+        // Nothing is claimable while the two are stuck in 'processing'.
+        Assert.Empty(await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10));
+
+        Assert.Equal(2, await scope.ClipStoreService.ResetStalledEmbeddingClaimsAsync());
+
+        var reclaimed = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10);
+        Assert.Equal(2, reclaimed.Count);
+        Assert.DoesNotContain(claimed[0].ClipId, reclaimed.Select(c => c.ClipId));
+
+        // The already-embedded clip was not knocked back to pending.
+        var coverage = await scope.ClipStoreService.GetEmbeddingCoverageAsync();
+        Assert.Equal(1, coverage.Embedded);
+
+        // A sweep with nothing stalled is a no-op.
+        await scope.ClipStoreService.ResetStalledEmbeddingClaimsAsync();
+        Assert.Equal(0, await scope.ClipStoreService.ResetStalledEmbeddingClaimsAsync());
+    }
+
+    [Fact]
+    public async Task ReleaseEmbeddingClaims_ReturnsOnlyTheNamedProcessingClips()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        for (var i = 0; i < 3; i++)
+        {
+            await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = $"release {i}",
+                ContentBytes = Encoding.UTF8.GetBytes($"release {i}"),
+                SourceApp = "Editor",
+            });
+        }
+
+        var claimed = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10);
+        Assert.Equal(3, claimed.Count);
+
+        await scope.ClipStoreService.ReleaseEmbeddingClaimsAsync([claimed[0].ClipId, claimed[2].ClipId]);
+
+        var reclaimed = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10);
+        var expected = new[] { claimed[0].ClipId, claimed[2].ClipId }.OrderBy(id => id).ToArray();
+        Assert.Equal(expected, reclaimed.Select(c => c.ClipId).OrderBy(id => id).ToArray());
+
+        // An empty release is a no-op rather than a malformed "IN ()" query.
+        await scope.ClipStoreService.ReleaseEmbeddingClaimsAsync([]);
+    }
+
+    [Fact]
     public async Task Embeddings_SaveBatch_SkipsDeletedClaimedClip()
     {
         using var scope = new TemporaryDatabaseScope();

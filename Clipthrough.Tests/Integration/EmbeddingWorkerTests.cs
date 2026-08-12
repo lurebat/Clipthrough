@@ -164,16 +164,148 @@ public sealed class EmbeddingWorkerTests
         Assert.Equal(0, store.SetFailureCallCount);
     }
 
+    [Fact]
+    public async Task Worker_MissingOnnxModel_LeavesTheBatchClaimableSoItEmbedsOnceTheModelArrives()
+    {
+        // Claiming marks the batch 'processing', which ClaimPendingEmbeddingsAsync never
+        // re-selects. If the model-missing path doesn't release the claim, the clips it
+        // promised to "retry after the model is placed" can never be embedded again.
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        for (var i = 0; i < 3; i++)
+        {
+            await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = $"model arrives later {i}",
+                ContentBytes = Encoding.UTF8.GetBytes($"model arrives later {i}"),
+                SourceApp = "Test",
+            });
+        }
+
+        var embedding = new ModelArrivesLateEmbeddingService(dims: 8);
+        var worker = new EmbeddingWorker(scope.ClipStoreService, embedding, new BackgroundJobIndicator());
+
+        var embedded = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var sub = worker.BatchCompleted.Subscribe(n => embedded.TrySetResult(n));
+
+        worker.Start();
+        worker.Poke();
+
+        // First pass: the model file is "absent".
+        await embedding.ModelMissingReported.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // The model is now in place; wake the idling worker for a second pass.
+        embedding.PlaceModel();
+        worker.Poke();
+
+        var done = await Task.WhenAny(embedded.Task, Task.Delay(TimeSpan.FromSeconds(10)));
+        await worker.StopAsync();
+        Assert.Same(embedded.Task, done);
+
+        var coverage = await scope.ClipStoreService.GetEmbeddingCoverageAsync();
+        Assert.Equal(3, coverage.Embedded);
+        Assert.Equal(0, coverage.Pending);
+    }
+
+    [Fact]
+    public async Task Worker_Start_SweepsClaimsStrandedByAPreviousRun()
+    {
+        // A batch claimed by a run that was stopped (or crashed) mid-flight stays
+        // 'processing' forever, because the claim query only selects null/pending/
+        // rerun/failed. Starting the worker must sweep those back to pending.
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        for (var i = 0; i < 3; i++)
+        {
+            await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = $"stranded {i}",
+                ContentBytes = Encoding.UTF8.GetBytes($"stranded {i}"),
+                SourceApp = "Test",
+            });
+        }
+
+        // Simulate the interrupted run: claim, then never save or fail the batch.
+        var stranded = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10);
+        Assert.Equal(3, stranded.Count);
+        Assert.Empty(await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10));
+
+        var worker = new EmbeddingWorker(scope.ClipStoreService, new FakeEmbeddingService(dims: 8), new BackgroundJobIndicator());
+        var embedded = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var sub = worker.BatchCompleted.Subscribe(n => embedded.TrySetResult(n));
+
+        worker.Start();
+        worker.Poke();
+
+        var done = await Task.WhenAny(embedded.Task, Task.Delay(TimeSpan.FromSeconds(10)));
+        await worker.StopAsync();
+        Assert.Same(embedded.Task, done);
+
+        var coverage = await scope.ClipStoreService.GetEmbeddingCoverageAsync();
+        Assert.Equal(3, coverage.Embedded);
+        Assert.Equal(0, coverage.Pending);
+    }
+
+    [Fact]
+    public async Task Worker_StalledClaimSweepFailure_IsRetriedInsteadOfStrandingTheRun()
+    {
+        // A transient SQLite busy on the sweep must not reinstate the very bug the
+        // sweep exists to prevent: it has to be retried on a later iteration.
+        var store = new InferenceFailureClipStore { FailResetCalls = 1 };
+        var worker = new EmbeddingWorker(store, new FakeEmbeddingService(dims: 4), new BackgroundJobIndicator());
+
+        worker.Start();
+        worker.Poke();
+
+        await store.ResetSucceeded.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await worker.StopAsync();
+
+        Assert.True(store.ResetCallCount >= 2, $"Expected the sweep to be retried after failing; saw {store.ResetCallCount} call(s).");
+    }
+
+    [Fact]
+    public async Task Worker_MissingOnnxModel_ReleasesTheClaimItRefusedToFail()
+    {
+        var store = new InferenceFailureClipStore();
+        var worker = new EmbeddingWorker(store, new FileNotFoundEmbeddingService(), new BackgroundJobIndicator());
+
+        worker.Start();
+        worker.Poke();
+
+        await store.ClaimReleased.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await worker.StopAsync();
+
+        Assert.Equal(0, store.SetFailureCallCount);
+        Assert.Equal([42L], store.ReleasedIds);
+    }
+
     private sealed class InferenceFailureClipStore : IClipStoreService
     {
         private int _claimCallCount;
         private int _setFailureCallCount;
+        private int _resetCallCount;
         private bool _claimed;
 
         public int ClaimCallCount => Volatile.Read(ref _claimCallCount);
         public int SetFailureCallCount => Volatile.Read(ref _setFailureCallCount);
+        public int ResetCallCount => Volatile.Read(ref _resetCallCount);
+
+        /// <summary>Number of leading <see cref="ResetStalledEmbeddingClaimsAsync"/> calls that throw.</summary>
+        public int FailResetCalls { get; init; }
+
+        public List<long> ReleasedIds { get; } = [];
         public TaskCompletionSource InferenceFailureFlagged { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ClaimAttempted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ClaimReleased { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ResetSucceeded { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default)
         {
@@ -189,6 +321,21 @@ public sealed class EmbeddingWorkerTests
             Interlocked.Increment(ref _setFailureCallCount);
             InferenceFailureFlagged.TrySetResult();
             return Task.FromResult(true);
+        }
+
+        public Task<int> ResetStalledEmbeddingClaimsAsync(CancellationToken cancellationToken = default)
+        {
+            var call = Interlocked.Increment(ref _resetCallCount);
+            if (call <= FailResetCalls) throw new InvalidOperationException("database is locked");
+            ResetSucceeded.TrySetResult();
+            return Task.FromResult(0);
+        }
+
+        public Task ReleaseEmbeddingClaimsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default)
+        {
+            lock (ReleasedIds) ReleasedIds.AddRange(clipIds);
+            ClaimReleased.TrySetResult();
+            return Task.CompletedTask;
         }
 
         public Task SaveEmbeddingBatchAsync(IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion, CancellationToken cancellationToken = default) => Task.CompletedTask;
@@ -242,6 +389,49 @@ public sealed class EmbeddingWorkerTests
         public Task<float[]> EmbedAsync(string text, CancellationToken cancellationToken = default) => throw new System.IO.FileNotFoundException("model.onnx not found");
         public Task<IReadOnlyList<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken cancellationToken = default)
             => throw new System.IO.FileNotFoundException("model.onnx not found");
+    }
+
+    /// <summary>
+    /// Fails like an absent ONNX model until <see cref="PlaceModel"/> is called, then
+    /// embeds normally — the "user dropped the model in later" scenario the worker's
+    /// model-missing path explicitly promises to support.
+    /// </summary>
+    private sealed class ModelArrivesLateEmbeddingService : IEmbeddingService
+    {
+        private readonly int _dims;
+        private volatile bool _present;
+
+        public ModelArrivesLateEmbeddingService(int dims) => _dims = dims;
+
+        public TaskCompletionSource ModelMissingReported { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void PlaceModel() => _present = true;
+
+        public int Dimensions => _dims;
+        public bool IsReady => true;
+
+        public Task<float[]> EmbedAsync(string text, CancellationToken cancellationToken = default)
+            => EmbedBatchAsync([text], cancellationToken).ContinueWith(t => t.Result[0], cancellationToken, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+
+        public Task<IReadOnlyList<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken cancellationToken = default)
+        {
+            if (!_present)
+            {
+                ModelMissingReported.TrySetResult();
+                throw new System.IO.FileNotFoundException("model.onnx not found");
+            }
+
+            var result = new float[texts.Count][];
+            var unit = (float)(1.0 / Math.Sqrt(_dims));
+            for (var i = 0; i < texts.Count; i++)
+            {
+                var vec = new float[_dims];
+                for (var k = 0; k < _dims; k++) vec[k] = unit;
+                result[i] = vec;
+            }
+
+            return Task.FromResult<IReadOnlyList<float[]>>(result);
+        }
     }
 
     private sealed class FakeEmbeddingService : IEmbeddingService
@@ -314,6 +504,8 @@ public sealed class EmbeddingWorkerTests
         }
 
         public Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<int> ResetStalledEmbeddingClaimsAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
+        public Task ReleaseEmbeddingClaimsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task PrewarmAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;

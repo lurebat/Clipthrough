@@ -1591,6 +1591,8 @@ public sealed class MainWindowViewModelHeadlessTests
         public Task<bool> SetEmbeddingFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default) => Task.FromResult(new EmbeddingCoverage(0, 0, 0, 0, 0));
+        public Task<int> ResetStalledEmbeddingClaimsAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
+        public Task ReleaseEmbeddingClaimsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task PrewarmAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
@@ -1669,6 +1671,8 @@ public sealed class MainWindowViewModelHeadlessTests
         public Task<bool> SetEmbeddingFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => inner.SetEmbeddingFailureAsync(clipId, error, cancellationToken);
         public Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default) => inner.MarkAllEmbeddingsForRerunAsync(cancellationToken);
         public Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default) => inner.GetEmbeddingCoverageAsync(cancellationToken);
+        public Task<int> ResetStalledEmbeddingClaimsAsync(CancellationToken cancellationToken = default) => inner.ResetStalledEmbeddingClaimsAsync(cancellationToken);
+        public Task ReleaseEmbeddingClaimsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default) => inner.ReleaseEmbeddingClaimsAsync(clipIds, cancellationToken);
         public Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default) => inner.LoadAllEmbeddingsAsync(cancellationToken);
         public Task PrewarmAsync(CancellationToken cancellationToken = default) => inner.PrewarmAsync(cancellationToken);
     }
@@ -2094,6 +2098,8 @@ public sealed class MainWindowViewModelHeadlessTests
         public Task<bool> SetEmbeddingFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => inner.SetEmbeddingFailureAsync(clipId, error, cancellationToken);
         public Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default) => inner.MarkAllEmbeddingsForRerunAsync(cancellationToken);
         public Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default) => inner.GetEmbeddingCoverageAsync(cancellationToken);
+        public Task<int> ResetStalledEmbeddingClaimsAsync(CancellationToken cancellationToken = default) => inner.ResetStalledEmbeddingClaimsAsync(cancellationToken);
+        public Task ReleaseEmbeddingClaimsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default) => inner.ReleaseEmbeddingClaimsAsync(clipIds, cancellationToken);
         public Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default) => inner.LoadAllEmbeddingsAsync(cancellationToken);
         public Task PrewarmAsync(CancellationToken cancellationToken = default) => inner.PrewarmAsync(cancellationToken);
     }
@@ -2149,6 +2155,8 @@ public sealed class MainWindowViewModelHeadlessTests
         public Task<bool> SetEmbeddingFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => inner.SetEmbeddingFailureAsync(clipId, error, cancellationToken);
         public Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default) => inner.MarkAllEmbeddingsForRerunAsync(cancellationToken);
         public Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default) => inner.GetEmbeddingCoverageAsync(cancellationToken);
+        public Task<int> ResetStalledEmbeddingClaimsAsync(CancellationToken cancellationToken = default) => inner.ResetStalledEmbeddingClaimsAsync(cancellationToken);
+        public Task ReleaseEmbeddingClaimsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default) => inner.ReleaseEmbeddingClaimsAsync(clipIds, cancellationToken);
         public Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default) => inner.LoadAllEmbeddingsAsync(cancellationToken);
         public Task PrewarmAsync(CancellationToken cancellationToken = default) => inner.PrewarmAsync(cancellationToken);
     }
@@ -2234,6 +2242,8 @@ public sealed class MainWindowViewModelHeadlessTests
         public Task<bool> SetEmbeddingFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => inner.SetEmbeddingFailureAsync(clipId, error, cancellationToken);
         public Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default) => inner.MarkAllEmbeddingsForRerunAsync(cancellationToken);
         public Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default) => inner.GetEmbeddingCoverageAsync(cancellationToken);
+        public Task<int> ResetStalledEmbeddingClaimsAsync(CancellationToken cancellationToken = default) => inner.ResetStalledEmbeddingClaimsAsync(cancellationToken);
+        public Task ReleaseEmbeddingClaimsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default) => inner.ReleaseEmbeddingClaimsAsync(clipIds, cancellationToken);
         public Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default) => inner.LoadAllEmbeddingsAsync(cancellationToken);
         public Task PrewarmAsync(CancellationToken cancellationToken = default) => inner.PrewarmAsync(cancellationToken);
     }

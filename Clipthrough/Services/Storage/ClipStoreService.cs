@@ -2138,6 +2138,40 @@ public sealed class ClipStoreService : IClipStoreService
         return results;
     }
 
+    /// <inheritdoc />
+    public async Task<int> ResetStalledEmbeddingClaimsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE clips SET embedding_status = 'pending' WHERE embedding_status = 'processing';";
+        return await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task ReleaseEmbeddingClaimsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(clipIds);
+        if (clipIds.Count == 0) return;
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        var paramNames = new List<string>(clipIds.Count);
+        for (var i = 0; i < clipIds.Count; i++)
+        {
+            var p = "$id" + i;
+            paramNames.Add(p);
+            command.Parameters.AddWithValue(p, clipIds[i]);
+        }
+
+        command.CommandText =
+            $"UPDATE clips SET embedding_status = 'pending' WHERE embedding_status = 'processing' AND id IN ({string.Join(",", paramNames)});";
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     public async Task SaveEmbeddingBatchAsync(IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(records);

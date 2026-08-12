@@ -446,5 +446,53 @@
     "filter": "StopAsync_ThenRestart_ReprocessesTheClipTheStopLeftQueued",
     "find": "        _inflight.Clear();\n        _queueChanged.OnNext(Unit.Default);",
     "replace": "        _queueChanged.OnNext(Unit.Default);"
+  },
+  {
+    "id": "embedding-no-stalled-claim-sweep",
+    "why": "Removes the start-of-loop sweep that returns stranded 'processing' rows to pending. A batch left behind by a stop or a crash is never re-selected by ClaimPendingEmbeddingsAsync, so those clips can never be embedded again while still counting as pending.",
+    "file": "Clipthrough/Services/Search/EmbeddingWorker.cs",
+    "filter": "Worker_Start_SweepsClaimsStrandedByAPreviousRun",
+    "find": "                    var reset = await _clipStore.ResetStalledEmbeddingClaimsAsync(cancellationToken).ConfigureAwait(false);\n                    _claimsResetPending = false;",
+    "replace": "                    var reset = 0;\n                    _claimsResetPending = false;"
+  },
+  {
+    "id": "embedding-sweep-not-retried-after-failure",
+    "why": "Clears the retry flag before the sweep instead of after it succeeds. A transient SQLite busy on the first attempt then strands those clips for the whole run - exactly the bug the sweep exists to prevent.",
+    "file": "Clipthrough/Services/Search/EmbeddingWorker.cs",
+    "filter": "Worker_StalledClaimSweepFailure_IsRetriedInsteadOfStrandingTheRun",
+    "find": "            if (_claimsResetPending)\n            {\n                try\n                {",
+    "replace": "            if (_claimsResetPending)\n            {\n                _claimsResetPending = false;\n                try\n                {"
+  },
+  {
+    "id": "embedding-model-missing-keeps-claim",
+    "why": "Drops the claim release from the model-missing path. The batch stays 'processing', which the claim query never re-selects, so the clips the comment promises to retry once the model is placed are stranded permanently.",
+    "file": "Clipthrough/Services/Search/EmbeddingWorker.cs",
+    "filter": "Worker_MissingOnnxModel_ReleasesTheClaimItRefusedToFail",
+    "find": "                await _clipStore.ReleaseEmbeddingClaimsAsync(\n                    candidates.Select(c => c.ClipId).ToArray(),\n                    cancellationToken).ConfigureAwait(false);",
+    "replace": "                await Task.CompletedTask.ConfigureAwait(false);"
+  },
+  {
+    "id": "embedding-model-missing-double-idle",
+    "why": "Restores the fall-through into the bottom idle after a model-missing pass. The worker then waits two full idle periods before retrying, and the Poke that signals the model has been placed is swallowed by the wrong wait.",
+    "file": "Clipthrough/Services/Search/EmbeddingWorker.cs",
+    "filter": "Worker_MissingOnnxModel_LeavesTheBatchClaimableSoItEmbedsOnceTheModelArrives",
+    "find": "            if (_modelMissing) continue;",
+    "replace": ""
+  },
+  {
+    "id": "embedding-release-ignores-id-filter",
+    "why": "Makes ReleaseEmbeddingClaimsAsync release every processing row rather than only the named ones, so a batch another worker is actively embedding would be handed back out for duplicate work.",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "filter": "ReleaseEmbeddingClaims_ReturnsOnlyTheNamedProcessingClips",
+    "find": "            $\"UPDATE clips SET embedding_status = 'pending' WHERE embedding_status = 'processing' AND id IN ({string.Join(\",\", paramNames)});\";",
+    "replace": "            $\"UPDATE clips SET embedding_status = 'pending' WHERE embedding_status = 'processing' AND (id IN ({string.Join(\",\", paramNames)}) OR 1=1);\";"
+  },
+  {
+    "id": "embedding-sweep-hits-embedded-rows",
+    "why": "Widens the stalled sweep to reset successfully embedded clips too, which would silently re-embed the entire library on every worker start.",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "filter": "ResetStalledEmbeddingClaims_ReturnsProcessingRowsToPendingAndLeavesOtherStatesAlone",
+    "find": "        command.CommandText = \"UPDATE clips SET embedding_status = 'pending' WHERE embedding_status = 'processing';\";",
+    "replace": "        command.CommandText = \"UPDATE clips SET embedding_status = 'pending' WHERE embedding_status IS NOT NULL;\";"
   }
 ]

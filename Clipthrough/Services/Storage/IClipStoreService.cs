@@ -80,6 +80,24 @@ public interface IClipStoreService
 
     Task<System.Collections.Generic.IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Returns every clip left in the <c>processing</c> embedding state to
+    /// <c>pending</c> and reports how many were reset. Claiming a batch marks it
+    /// <c>processing</c>, and <see cref="ClaimPendingEmbeddingsAsync"/> never
+    /// re-selects that state, so a batch interrupted by a worker stop or a crash
+    /// would never be embedded again while still counting as pending in the
+    /// coverage readout. Called when the worker loop starts, at which point
+    /// nothing is in flight.
+    /// </summary>
+    Task<int> ResetStalledEmbeddingClaimsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the given claimed clips to <c>pending</c> without counting a failed
+    /// attempt, for when a batch could not be attempted at all (for example the
+    /// ONNX model file is absent) and must stay eligible for a later retry.
+    /// </summary>
+    Task ReleaseEmbeddingClaimsAsync(System.Collections.Generic.IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default);
+
     Task SaveEmbeddingBatchAsync(System.Collections.Generic.IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion, CancellationToken cancellationToken = default);
 
     Task<bool> SetEmbeddingFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default);

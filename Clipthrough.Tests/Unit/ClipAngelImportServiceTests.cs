@@ -146,6 +146,8 @@ public sealed class ClipAngelImportServiceTests
         public Task<bool> SetEmbeddingFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<int> ResetStalledEmbeddingClaimsAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task ReleaseEmbeddingClaimsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task PrewarmAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }
