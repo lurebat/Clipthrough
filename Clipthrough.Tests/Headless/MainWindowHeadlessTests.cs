@@ -415,7 +415,11 @@ public sealed class MainWindowHeadlessTests
 
         Assert.NotNull(clip);
 
-        var window = new MainWindow
+        // The window must be handed the service it is expected to drive: the
+        // parameterless ctor chains to this(null), and ExecutePasteSelectedAndHide
+        // calls it null-conditionally, so both the foreground restore and the
+        // paste keystroke would silently no-op.
+        var window = new MainWindow(systemInteraction)
         {
             DataContext = viewModel,
         };
@@ -426,12 +430,37 @@ public sealed class MainWindowHeadlessTests
         viewModel.SelectedClip = new ClipItemViewModel(clip!);
 
         InvokePasteSelectedAndHide(window, viewModel);
-        await Task.Delay(200);
-        Dispatcher.UIThread.RunJobs();
+
+        // ExecutePasteSelectedAndHide is async void and delays 150ms before
+        // simulating the keystroke - and that delay only starts once the copy
+        // has completed. A fixed wait here races it, so poll instead.
+        await WaitForUiAsync(() => systemInteraction.SimulatedPasteCount == 1);
 
         Assert.False(window.IsVisible);
         Assert.Equal("paste me", systemInteraction.LastCopiedText);
         Assert.Equal(1, systemInteraction.SimulatedPasteCount);
+    }
+
+    /// <summary>
+    /// Pumps the Avalonia dispatcher until <paramref name="condition"/> holds or
+    /// the timeout expires. Returns either way so the caller's assertion is what
+    /// reports the failure.
+    /// </summary>
+    private static async Task WaitForUiAsync(Func<bool> condition, int timeoutMs = 5_000)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < deadline)
+        {
+            Dispatcher.UIThread.RunJobs();
+            if (condition())
+            {
+                return;
+            }
+
+            await Task.Delay(20);
+        }
+
+        Dispatcher.UIThread.RunJobs();
     }
 
     private static SettingsWindow? GetOwnedSettingsWindow(MainWindow window)
