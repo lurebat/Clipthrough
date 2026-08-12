@@ -78,5 +78,37 @@
     "find": "_compiledRules = CompileStoredRules(rules);",
     "replace": "_compiledRules = CompileRules(rules);",
     "filter": "SensitivityServiceTests"
+  },
+  {
+    "id": "embedding-embeds-sensitive-clips",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "PRIVACY. Drops the is_sensitive gate, so passwords and tokens get sent to the embedding model and cached as vectors.",
+    "find": "is_sensitive = 0\n        AND sensitivity_scanned_at IS NOT NULL",
+    "replace": "sensitivity_scanned_at IS NOT NULL",
+    "filter": "FullyQualifiedName!~HeadlessTests"
+  },
+  {
+    "id": "retention-lifetime-deletes-user-kept",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "DATA LOSS. Age-based retention stops exempting pinned and favorited clips.",
+    "find": "AND ($keepUserKept = 0 OR NOT {UserKeptClipPredicate});",
+    "replace": "AND ($keepUserKept = 0 OR 1 = 1);",
+    "filter": "ClipRetentionTests"
+  },
+  {
+    "id": "retention-countcap-deletes-user-kept",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "DATA LOSS. The entry-count cap stops exempting pinned and favorited clips.",
+    "find": "WHERE NOT {UserKeptClipPredicate}\n                ORDER BY COALESCE(last_copied_at, captured_at) ASC, id ASC\n                LIMIT $limit",
+    "replace": "WHERE 1 = 1\n                ORDER BY COALESCE(last_copied_at, captured_at) ASC, id ASC\n                LIMIT $limit",
+    "filter": "ClipRetentionTests"
+  },
+  {
+    "id": "retention-sizecap-deletes-user-kept",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "DATA LOSS. The library size cap stops exempting pinned and favorited clips.",
+    "find": "WHERE NOT {UserKeptClipPredicate}\n                ORDER BY COALESCE(last_copied_at, captured_at) ASC, id ASC;",
+    "replace": "WHERE 1 = 1\n                ORDER BY COALESCE(last_copied_at, captured_at) ASC, id ASC;",
+    "filter": "ClipRetentionTests"
   }
 ]

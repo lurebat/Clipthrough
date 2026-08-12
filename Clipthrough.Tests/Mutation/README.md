@@ -80,3 +80,27 @@ that support lands.
 Note also that coverage does not substitute for this. `coverlet.collector` is
 already referenced, and all three vacuous tests had full coverage of the code
 they failed to defend. Coverage measures execution, not discrimination.
+
+## What the first audit found
+
+Seven mutants representing plausible regressions were run against the whole
+non-headless suite, to answer "does *any* existing test catch this?".
+
+| Mutant | Outcome |
+| --- | --- |
+| Retention age cutoff inverted (control) | killed by 56 tests |
+| Embedding drops the `is_sensitive` gate | killed by 1 |
+| Embedding drops the sensitivity-scan gate | killed by 2 |
+| Age retention deletes pinned/favorited clips | killed by 1 |
+| Entry-count cap deletes pinned/favorited clips | killed by 1 |
+| Library-size cap deletes pinned/favorited clips | killed by 1 |
+| Sensitivity rules ignore the `IsEnabled` flag | **survived all 278** |
+
+So the existing suite is largely sound, and the surviving gap was a service with
+no direct tests at all rather than a weak assertion in an existing one. Writing
+those tests then surfaced two real defects in the same file — an uncompilable
+pattern being persisted before it was ever compiled, and unbounded regex
+backtracking on the capture path.
+
+The lesson worth repeating: mutants are cheapest to aim at code that has *no*
+test file, not at code whose tests merely look thin.
