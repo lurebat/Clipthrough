@@ -313,11 +313,11 @@
   },
   {
     "id": "schema-version-not-bumped-for-the-new-migration",
-    "why": "The migration helpers are skipped when the stored version already matches, so new migration work is dead code unless the constant is bumped. Existing databases would silently never gain byte_size.",
+    "why": "The migration helpers are skipped when the stored version already matches, so new migration work is dead code unless the constant is bumped. Simulating a forgotten bump - the gate one version short - must break the test that stamps a database at the previous version. Anchored on the gate rather than on the literal version so it survives the next bump.",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "filter": "DatabaseInitializerMigrationTests",
-    "find": "    private const int CurrentSchemaVersion = 5;",
-    "replace": "    private const int CurrentSchemaVersion = 4;"
+    "find": "        if (storedVersion < CurrentSchemaVersion)",
+    "replace": "        if (storedVersion < CurrentSchemaVersion - 1)"
   },
   {
     "id": "sort-indexes-only-created-during-migration",

@@ -107,6 +107,12 @@ public sealed class DatabaseInitializerMigrationTests
     {
         using var scope = new TemporaryDatabaseScope();
         await CreateLegacyDatabase(scope, "seed");
+
+        // Without this the test goes vacuous the day CreateLegacyDatabase starts
+        // seeding byte_size: the assertion below would then hold whether or not
+        // the migrations ran at all.
+        Assert.DoesNotContain("byte_size", ClipColumns(scope));
+
         await StampSchemaVersion(scope, PreviousSchemaVersion);
 
         await scope.DatabaseInitializer.InitializeAsync();
@@ -136,10 +142,23 @@ public sealed class DatabaseInitializerMigrationTests
     }
 
     /// <summary>
-    /// The version the byte_size migration was added in. A database stamped
-    /// here predates that work and must still be migrated.
+    /// One version behind whatever the app currently declares.
+    ///
+    /// This was a hardcoded 4, written when the current version was 5. The
+    /// constant later went to 6 and nobody updated the copy, so the test kept
+    /// passing while quietly no longer testing the thing it names: stamping 4
+    /// against a current of 6 clears the gate with a version to spare, which is
+    /// exactly the margin a forgotten bump eats. Read the real constant instead
+    /// so this cannot drift again.
     /// </summary>
-    private const int PreviousSchemaVersion = 4;
+    private static int PreviousSchemaVersion => CurrentSchemaVersion - 1;
+
+    private static int CurrentSchemaVersion =>
+        (int)(typeof(Clipthrough.Database.DatabaseInitializer)
+            .GetField("CurrentSchemaVersion", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+            ?.GetRawConstantValue()
+            ?? throw new System.InvalidOperationException(
+                "DatabaseInitializer.CurrentSchemaVersion is gone or is no longer a const - this test can no longer track it."));
 
     private static async Task StampSchemaVersion(TemporaryDatabaseScope scope, int version)
     {
