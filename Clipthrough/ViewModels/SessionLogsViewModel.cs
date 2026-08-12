@@ -34,6 +34,7 @@ public sealed class SessionLogsViewModel : ViewModelBase, IDisposable
 
         OpenCommand = ReactiveCommand.Create(Open);
         CloseCommand = ReactiveCommand.Create(Close);
+        _subscriptions.Add(ObserveCommandErrors());
 
         _subscriptions.Add(
             this.WhenAnyValue(x => x.SearchText, x => x.SelectedLogLevelOption)

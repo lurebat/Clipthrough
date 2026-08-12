@@ -423,29 +423,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Observable.Interval(TimeSpan.FromSeconds(10), RxSchedulers.MainThreadScheduler)
                 .Subscribe(_ => RefreshLastCaptureSummary()));
 
-        _subscriptions.Add(
-            RefreshCommand.ThrownExceptions
-                .Merge(LoadMoreCommand.ThrownExceptions)
-                .Merge(ToggleFavoriteCommand.ThrownExceptions)
-                .Merge(TogglePinCommand.ThrownExceptions)
-                .Merge(CopySelectedCommand.ThrownExceptions)
-                .Merge(PasteSelectedCommand.ThrownExceptions)
-                .Merge(ExportSelectedCommand.ThrownExceptions)
-                .Merge(OpenInEditorCommand.ThrownExceptions)
-                .Merge(CompareClipsCommand.ThrownExceptions)
-                .Merge(EditSelectedImageCommand.ThrownExceptions)
-                .Merge(DeleteSelectedCommand.ThrownExceptions)
-                .Merge(FavoriteCheckedClipsCommand.ThrownExceptions)
-                .Merge(PinCheckedClipsCommand.ThrownExceptions)
-                .Merge(DeleteCheckedClipsCommand.ThrownExceptions)
-                .Merge(CopyEditedClipCommand.ThrownExceptions)
-                .Merge(ApplyTextTransformationCommand.ThrownExceptions)
-                .Merge(Update.CheckForUpdateCommand.ThrownExceptions)
-                .Merge(SaveSettingsCommand.ThrownExceptions)
-                .Merge(BrowseDatabasePathCommand.ThrownExceptions)
-                .Merge(UnlockDatabaseCommand.ThrownExceptions)
-                .ObserveOn(RxSchedulers.MainThreadScheduler)
-                .Subscribe(ex => ReportError("Command", ex)));
+        _subscriptions.Add(ViewModelBase.UseCommandErrorSink((context, ex) => ReportError(context, ex)));
+        _subscriptions.Add(ObserveCommandErrors());
     }
 
     public ObservableCollection<ClipItemViewModel> Clips { get; } = [];

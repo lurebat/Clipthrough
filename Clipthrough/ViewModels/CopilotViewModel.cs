@@ -20,6 +20,7 @@ public sealed class CopilotViewModel : ViewModelBase, IDisposable
     private readonly ISystemInteractionService _systemInteractionService;
     private readonly IClipboardMonitorService _clipboardMonitorService;
     private readonly Action _onAiMenuVisibilityChanged;
+    private readonly IDisposable _commandErrors;
 
     public CopilotViewModel(
         ICopilotAuthService? copilotAuthService,
@@ -40,6 +41,7 @@ public sealed class CopilotViewModel : ViewModelBase, IDisposable
         CopilotSignInCommand = ReactiveCommand.CreateFromTask(CopilotSignInAsync);
         CopilotSignOutCommand = ReactiveCommand.Create(CopilotSignOut);
         CopyCopilotUserCodeCommand = ReactiveCommand.CreateFromTask(CopyCopilotUserCodeAsync);
+        _commandErrors = ObserveCommandErrors();
     }
 
     public ReactiveCommand<Unit, Unit> CopilotSignInCommand { get; }
@@ -194,5 +196,7 @@ public sealed class CopilotViewModel : ViewModelBase, IDisposable
         {
             _copilotAuthService.SignedInChanged -= OnCopilotSignedInChanged;
         }
+
+        _commandErrors.Dispose();
     }
 }

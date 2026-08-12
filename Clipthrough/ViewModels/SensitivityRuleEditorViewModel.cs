@@ -18,6 +18,7 @@ public sealed class SensitivityRuleEditorViewModel : ViewModelBase
     {
         RemoveCommand = ReactiveCommand.Create(() => removeHandler?.Invoke(this));
         ToggleExpandedCommand = ReactiveCommand.Create(() => { IsExpanded = !IsExpanded; });
+        ObserveCommandErrors();
     }
 
     public ReactiveCommand<Unit, Unit> RemoveCommand { get; }

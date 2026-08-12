@@ -23,6 +23,7 @@ public sealed class ClipFileItemViewModel : ViewModelBase
         CopyPathCommand = ReactiveCommand.CreateFromTask(CopyPathAsync);
         OpenCommand = ReactiveCommand.CreateFromTask(OpenAsync);
         OpenContainingFolderCommand = ReactiveCommand.CreateFromTask(OpenContainingFolderAsync);
+        ObserveCommandErrors();
     }
 
     public string FilePath { get; }

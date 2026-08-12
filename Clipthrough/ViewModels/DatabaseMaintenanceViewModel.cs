@@ -52,6 +52,7 @@ public sealed class DatabaseMaintenanceViewModel : ViewModelBase
         RunIntegrityCheckCommand = ReactiveCommand.CreateFromTask(RunIntegrityCheckAsync);
         RefreshBackupsCommand = ReactiveCommand.Create(RefreshBackups);
         RestoreBackupCommand = ReactiveCommand.CreateFromTask<Window?>(RestoreBackupAsync);
+        ObserveCommandErrors();
     }
 
     public ReactiveCommand<Unit, Unit> OpenLogsFolderCommand { get; }

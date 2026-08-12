@@ -16,6 +16,7 @@ public sealed class AppNotificationActionViewModel : ViewModelBase
             await action.ExecuteAsync();
             afterExecute?.Invoke();
         });
+        ObserveCommandErrors();
     }
 
     public string Label { get; }

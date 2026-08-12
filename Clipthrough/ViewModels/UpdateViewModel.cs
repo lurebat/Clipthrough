@@ -37,6 +37,7 @@ public sealed class UpdateViewModel : ViewModelBase
         CheckForUpdateCommand = ReactiveCommand.CreateFromTask(CheckForUpdateAsync);
         CheckForUpdatesNowCommand = ReactiveCommand.CreateFromTask(CheckForUpdatesNowAsync);
         RestartAndInstallUpdateCommand = ReactiveCommand.Create(RestartAndInstallUpdate);
+        ObserveCommandErrors();
     }
 
     public ReactiveCommand<Unit, Unit> CheckForUpdateCommand { get; }

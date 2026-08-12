@@ -86,6 +86,7 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     private bool _previewThumbnailLoaded;
     private bool _isDisposed;
     private readonly Func<long, Task<ClipEntry?>>? _contentHydrator;
+    private readonly IDisposable _commandErrors;
     private bool _contentHydrationStarted;
 
     public ClipItemViewModel(
@@ -153,6 +154,7 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
                     await applyTransformHandler(this, t);
                 }
             });
+        _commandErrors = ObserveCommandErrors();
     }
 
     public ClipEntry Clip { get; private set; }
@@ -659,6 +661,7 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     public void Dispose()
     {
         _isDisposed = true;
+        _commandErrors.Dispose();
         _previewThumbnailImage?.Dispose();
         _sourceAppIconImage?.Dispose();
     }

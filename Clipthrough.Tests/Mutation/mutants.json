@@ -150,5 +150,37 @@
     "find": "        var snapshot = _current;\n        Dispatcher.UIThread.Post(() => SettingsChanged?.Invoke(this, snapshot));",
     "replace": "        Dispatcher.UIThread.Post(() => SettingsChanged?.Invoke(this, _current));",
     "filter": "SettingsThreadingHeadlessTests"
+  },
+  {
+    "id": "viewmodel-command-errors-unwired",
+    "file": "Clipthrough/ViewModels/UpdateViewModel.cs",
+    "why": "A view model that exposes ReactiveCommands but never calls ObserveCommandErrors leaves every failure in it silent. The IL-scan coverage test must catch that, or it is decoration.",
+    "find": "        RestartAndInstallUpdateCommand = ReactiveCommand.Create(RestartAndInstallUpdate);\n        ObserveCommandErrors();",
+    "replace": "        RestartAndInstallUpdateCommand = ReactiveCommand.Create(RestartAndInstallUpdate);",
+    "filter": "ViewModelCommandCoverageTests"
+  },
+  {
+    "id": "command-discovery-matches-nothing",
+    "file": "Clipthrough/ViewModels/ViewModelBase.cs",
+    "why": "If the reflection filter stops matching commands, ObserveCommandErrors silently subscribes to nothing and the coverage test passes vacuously for every view model.",
+    "find": "                && typeof(IReactiveCommand).IsAssignableFrom(p.PropertyType))",
+    "replace": "                && typeof(IReactiveCommand).IsAssignableFrom(p.PropertyType)\n                && false)",
+    "filter": "ViewModelCommandCoverageTests"
+  },
+  {
+    "id": "command-error-sink-ignored",
+    "file": "Clipthrough/ViewModels/ViewModelBase.cs",
+    "why": "Reporting must reach the installed sink; dropping to the Trace fallback while a sink exists leaves the user with no status message.",
+    "find": "            failures.Add(command.ThrownExceptions.Do(ex => Report(context, ex)));",
+    "replace": "            failures.Add(command.ThrownExceptions);",
+    "filter": "ViewModelCommandCoverageTests"
+  },
+  {
+    "id": "command-discovery-matches-nested-viewmodels",
+    "file": "Clipthrough/ViewModels/ViewModelBase.cs",
+    "why": "ReactiveObject also implements IHandleObservableErrors, so the looser filter matches every nested view-model property and double-reports their command failures.",
+    "find": "                && typeof(IReactiveCommand).IsAssignableFrom(p.PropertyType))",
+    "replace": "                && typeof(IHandleObservableErrors).IsAssignableFrom(p.PropertyType))",
+    "filter": "ViewModelCommandCoverageTests"
   }
 ]
