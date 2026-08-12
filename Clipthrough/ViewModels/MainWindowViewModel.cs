@@ -108,6 +108,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _startupErrorTitle = string.Empty;
     private string _startupErrorMessage = string.Empty;
     private bool _areBackgroundServicesStarted;
+
+    // Serialises embedding-worker start/stop transitions driven by the
+    // EnableSemanticSearch setting; see ApplySemanticSearchWorkerState.
+    private Task _semanticWorkerTransition = Task.CompletedTask;
+
+    /// <summary>
+    /// Test seam: completes once every pending embedding-worker start/stop
+    /// transition queued by a settings change has run.
+    /// </summary>
+    internal Task SemanticWorkerTransition => _semanticWorkerTransition;
+
     private bool _hasQueuedRefresh;
     // Tracks whether the main window is currently visible. When false, optimistic
     // clip-list mutations and the throttled background refresh are skipped to
@@ -5529,6 +5540,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ClipAngelImportTotal = 0;
 
         // Pause background workers to avoid write contention during bulk import.
+        var ocrWasRunning = _backgroundOcrQueue.IsRunning;
+        var embeddingWasRunning = _embeddingWorker?.IsRunning ?? false;
         await _backgroundOcrQueue.StopAsync();
         if (_embeddingWorker is not null)
             await _embeddingWorker.StopAsync();
@@ -5555,9 +5568,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         finally
         {
-            // Resume background workers.
-            _backgroundOcrQueue.Start();
-            _embeddingWorker?.Start();
+            // Resume only the workers that were running before the import.
+            if (ocrWasRunning)
+            {
+                _backgroundOcrQueue.Start();
+            }
+
+            if (embeddingWasRunning)
+            {
+                _embeddingWorker?.Start();
+            }
 
             IsBusy = false;
             IsImportingClipAngel = false;
@@ -5990,6 +6010,53 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(SemanticFilterTooltip));
         this.RaisePropertyChanged(nameof(IsSemanticSearchEnabled));
         this.RaisePropertyChanged(nameof(IsAiMenuVisible));
+        ApplySemanticSearchWorkerState(settings.EnableSemanticSearch);
+    }
+
+    /// <summary>
+    /// Keeps the embedding worker's lifetime in step with the semantic-search
+    /// setting. Without this, toggling the setting only takes effect on the next
+    /// launch: turning it on leaves clips unembedded (so semantic search silently
+    /// returns nothing) and turning it off leaves the worker burning CPU.
+    /// </summary>
+    private void ApplySemanticSearchWorkerState(bool enabled)
+    {
+        if (_embeddingWorker is null || !_areBackgroundServicesStarted)
+        {
+            return;
+        }
+
+        var worker = _embeddingWorker;
+
+        // Serialise transitions off the UI thread: StopAsync waits for the current
+        // batch to drain, and a rapid off/on toggle must not race that stop against
+        // a start, which would leave the worker in the state the user did not ask for.
+        _semanticWorkerTransition = _semanticWorkerTransition.ContinueWith(
+            async _ =>
+            {
+                try
+                {
+                    if (enabled)
+                    {
+                        if (!worker.IsRunning)
+                        {
+                            worker.Start();
+                            worker.Poke();
+                        }
+                    }
+                    else if (worker.IsRunning)
+                    {
+                        await worker.StopAsync().ConfigureAwait(false);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Trace.TraceWarning($"Applying the semantic-search worker state failed: {ex.Message}");
+                }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.None,
+            TaskScheduler.Default).Unwrap();
     }
 
     private void RebuildCustomHotkeyTargetSuggestions()
@@ -6108,7 +6175,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         });
     }
 
-    private void StartBackgroundServices()
+    /// <summary>
+    /// Starts the clipboard monitor, the OCR queue, the embedding worker (when
+    /// semantic search is enabled) and the maintenance loop. Called once the
+    /// database is open — never before, since the workers write to it.
+    /// Internal so tests can drive the same path the startup sequence uses.
+    /// </summary>
+    internal void StartBackgroundServices()
     {
         if (_areBackgroundServicesStarted)
         {

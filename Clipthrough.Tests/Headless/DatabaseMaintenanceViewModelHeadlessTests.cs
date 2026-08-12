@@ -62,25 +62,27 @@ public sealed class DatabaseMaintenanceViewModelHeadlessTests
     {
         public int StartCount;
         public int StopCount;
+        public bool IsRunning { get; private set; } = true;
 
         public IObservable<ClipEntry> CapturedClips => Observable.Empty<ClipEntry>();
         public IObservable<ClipEntry> UpdatedClips => Observable.Empty<ClipEntry>();
         public IObservable<bool> CaptureBusy => Observable.Empty<bool>();
 
-        public void Start() => StartCount++;
-        public void Stop() => StopCount++;
+        public void Start() { StartCount++; IsRunning = true; }
+        public void Stop() { StopCount++; IsRunning = false; }
         public void SuppressNext() { }
     }
 
     private sealed class RecordingOcrQueue : IBackgroundOcrQueue
     {
         public int StartCount;
+        public bool IsRunning { get; private set; } = true;
 
         public IObservable<long> OcrCompleted => Observable.Empty<long>();
         public IObservable<System.Reactive.Unit> QueueChanged => Observable.Empty<System.Reactive.Unit>();
 
-        public void Start() => StartCount++;
-        public Task StopAsync() => Task.CompletedTask;
+        public void Start() { StartCount++; IsRunning = true; }
+        public Task StopAsync() { IsRunning = false; return Task.CompletedTask; }
         public void Enqueue(long clipId) { }
         public Task EnqueueBacklogAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
@@ -88,13 +90,14 @@ public sealed class DatabaseMaintenanceViewModelHeadlessTests
     private sealed class RecordingEmbeddingWorker : IEmbeddingWorker
     {
         public int StartCount;
+        public bool IsRunning { get; private set; } = true;
 
         public IObservable<int> BatchCompleted => Observable.Empty<int>();
         public IObservable<IReadOnlyList<ClipEmbeddingRecord>> BatchRecordsCompleted =>
             Observable.Empty<IReadOnlyList<ClipEmbeddingRecord>>();
 
-        public void Start() => StartCount++;
-        public Task StopAsync() => Task.CompletedTask;
+        public void Start() { StartCount++; IsRunning = true; }
+        public Task StopAsync() { IsRunning = false; return Task.CompletedTask; }
         public void Poke() { }
         public Task<EmbeddingCoverage> GetCoverageAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<EmbeddingCoverage>(default!);

@@ -123,12 +123,16 @@ internal sealed class TestClipboardMonitorService : IClipboardMonitorService
 
     public IObservable<bool> CaptureBusy => _captureBusy.AsObservable();
 
+    public bool IsRunning { get; private set; }
+
     public void Start()
     {
+        IsRunning = true;
     }
 
     public void Stop()
     {
+        IsRunning = false;
     }
 
     public void SuppressNext()

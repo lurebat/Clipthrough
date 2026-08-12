@@ -52,6 +52,8 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
 
     public IObservable<IReadOnlyList<ClipEmbeddingRecord>> BatchRecordsCompleted => _batchRecordsCompleted.AsObservable();
 
+    public bool IsRunning => _started;
+
     public void Start()
     {
         if (_disposed) return;

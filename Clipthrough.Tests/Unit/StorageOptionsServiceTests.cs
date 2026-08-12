@@ -872,16 +872,17 @@ public sealed class StorageOptionsServicePhase2Tests : IDisposable
         private readonly Action _onStart;
 
         public CurrentRecordingMonitor(Action onStart) => _onStart = onStart;
-
         public IObservable<ClipEntry> CapturedClips => System.Reactive.Linq.Observable.Empty<ClipEntry>();
 
         public IObservable<ClipEntry> UpdatedClips => System.Reactive.Linq.Observable.Empty<ClipEntry>();
 
         public IObservable<bool> CaptureBusy => System.Reactive.Linq.Observable.Empty<bool>();
 
-        public void Start() => _onStart();
+        public bool IsRunning { get; private set; } = true;
 
-        public void Stop() { }
+        public void Start() { IsRunning = true; _onStart(); }
+
+        public void Stop() { IsRunning = false; }
 
         public void SuppressNext() { }
     }

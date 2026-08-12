@@ -17,6 +17,13 @@ public interface IClipboardMonitorService
     /// </summary>
     IObservable<bool> CaptureBusy { get; }
 
+    /// <summary>
+    /// True between <see cref="Start"/> and <see cref="Stop"/>. Lets callers that
+    /// quiesce the monitor for a whole-database operation restore the state they
+    /// found rather than unconditionally starting it.
+    /// </summary>
+    bool IsRunning { get; }
+
     void Start();
 
     void Stop();

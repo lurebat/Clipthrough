@@ -1291,6 +1291,72 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.Equal(200, viewModel.Clips.Count(clip => clip.Id != semanticOnlyId));
     }
 
+    // K3: the EnableSemanticSearch setting was read exactly once, in
+    // StartBackgroundServices. Toggling it in Settings changed nothing until the
+    // next launch — turning it on left every clip unembedded (so semantic search
+    // silently returned nothing) and turning it off left the worker burning CPU.
+    [AvaloniaFact]
+    public async Task SemanticSearchSetting_TogglingIt_StartsAndStopsTheEmbeddingWorker()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(AppSettings.Default with { EnableSemanticSearch = false });
+
+        var worker = new RecordingEmbeddingWorker();
+        using var viewModel = CreateViewModel(
+            scope,
+            new TestClipboardMonitorService(),
+            new TestSystemInteractionService(),
+            new TestSessionLogService(),
+            embeddingWorker: worker);
+        await viewModel.InitializeAsync();
+
+        viewModel.StartBackgroundServices();
+        Assert.False(worker.IsRunning);
+        Assert.Equal(0, worker.StartCount);
+
+        scope.SettingsService.SetCurrent(scope.SettingsService.Current with { EnableSemanticSearch = true });
+        await viewModel.SemanticWorkerTransition;
+        Assert.True(worker.IsRunning);
+        Assert.Equal(1, worker.StartCount);
+
+        scope.SettingsService.SetCurrent(scope.SettingsService.Current with { EnableSemanticSearch = false });
+        await viewModel.SemanticWorkerTransition;
+        Assert.False(worker.IsRunning);
+        Assert.Equal(1, worker.StopCount);
+    }
+
+    // A rapid off -> on toggle must not let the pending stop overwrite the start:
+    // transitions are chained, so the final worker state always matches the final
+    // setting value rather than whichever call happened to finish last.
+    [AvaloniaFact]
+    public async Task SemanticSearchSetting_ToggledOffThenOnQuickly_LeavesTheWorkerRunning()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(AppSettings.Default with { EnableSemanticSearch = true });
+
+        var worker = new RecordingEmbeddingWorker();
+        using var viewModel = CreateViewModel(
+            scope,
+            new TestClipboardMonitorService(),
+            new TestSystemInteractionService(),
+            new TestSessionLogService(),
+            embeddingWorker: worker);
+        await viewModel.InitializeAsync();
+
+        viewModel.StartBackgroundServices();
+        Assert.True(worker.IsRunning);
+
+        scope.SettingsService.SetCurrent(scope.SettingsService.Current with { EnableSemanticSearch = false });
+        scope.SettingsService.SetCurrent(scope.SettingsService.Current with { EnableSemanticSearch = true });
+        await viewModel.SemanticWorkerTransition;
+
+        Assert.True(worker.IsRunning);
+        Assert.Equal(1, worker.StopCount);
+        Assert.Equal(2, worker.StartCount);
+    }
+
     private static MainWindowViewModel CreateViewModel(
         TemporaryDatabaseScope scope,
         TestClipboardMonitorService clipboardMonitor,
@@ -1301,7 +1367,8 @@ public sealed class MainWindowViewModelHeadlessTests
         Clipthrough.Services.IDragDropService? dragDropService = null,
         Clipthrough.Services.IOcrService? ocrService = null,
         IClipStoreService? clipStore = null,
-        Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null)
+        Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null,
+        Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null)
     {
         return new MainWindowViewModel(
             clipStore ?? scope.ClipStoreService,
@@ -1322,7 +1389,53 @@ public sealed class MainWindowViewModelHeadlessTests
             new Clipthrough.Services.BackgroundJobIndicator(),
             scope.DatabaseInitializer,
             semanticSearchService: semanticSearchService,
+            embeddingWorker: embeddingWorker,
             dragDropService: dragDropService);
+    }
+
+    /// <summary>
+    /// Records start/stop calls and tracks the running state the way the real
+    /// worker does, so lifecycle wiring can be asserted.
+    /// </summary>
+    private sealed class RecordingEmbeddingWorker : Clipthrough.Services.Search.IEmbeddingWorker
+    {
+        private int _startCount;
+        private int _stopCount;
+        private int _pokeCount;
+        private int _isRunning;
+
+        public int StartCount => Volatile.Read(ref _startCount);
+
+        public int StopCount => Volatile.Read(ref _stopCount);
+
+        public int PokeCount => Volatile.Read(ref _pokeCount);
+
+        public bool IsRunning => Volatile.Read(ref _isRunning) != 0;
+
+        public IObservable<int> BatchCompleted { get; } = System.Reactive.Linq.Observable.Empty<int>();
+
+        public IObservable<IReadOnlyList<ClipEmbeddingRecord>> BatchRecordsCompleted { get; } =
+            System.Reactive.Linq.Observable.Empty<IReadOnlyList<ClipEmbeddingRecord>>();
+
+        public void Start()
+        {
+            Interlocked.Increment(ref _startCount);
+            Volatile.Write(ref _isRunning, 1);
+        }
+
+        public Task StopAsync()
+        {
+            Interlocked.Increment(ref _stopCount);
+            Volatile.Write(ref _isRunning, 0);
+            return Task.CompletedTask;
+        }
+
+        public void Poke() => Interlocked.Increment(ref _pokeCount);
+
+        public Task<EmbeddingCoverage> GetCoverageAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new EmbeddingCoverage(0, 0, 0, 0, 0));
+
+        public Task RerunAllAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     /// <summary>
@@ -1363,8 +1476,9 @@ public sealed class MainWindowViewModelHeadlessTests
 
         public IObservable<long> OcrCompleted { get; } = System.Reactive.Linq.Observable.Empty<long>();
         public IObservable<System.Reactive.Unit> QueueChanged { get; } = System.Reactive.Linq.Observable.Empty<System.Reactive.Unit>();
-        public void Start() { }
-        public Task StopAsync() => Task.CompletedTask;
+        public bool IsRunning { get; private set; }
+        public void Start() { IsRunning = true; }
+        public Task StopAsync() { IsRunning = false; return Task.CompletedTask; }
         public void Enqueue(long clipId) => _enqueued.Add(clipId);
         public Task EnqueueBacklogAsync(System.Threading.CancellationToken cancellationToken = default) => Task.CompletedTask;
     }

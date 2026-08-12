@@ -221,12 +221,19 @@ public sealed class DatabaseMaintenanceViewModel : ViewModelBase
             return;
         }
 
+        var monitorWasRunning = false;
+        var ocrWasRunning = false;
+        var embeddingWasRunning = false;
+
         try
         {
             BackupRestoreStatus = "Stopping background services…";
 
             // Stop everything that holds a SqliteConnection open so the file
             // moves below don't race against an active writer.
+            monitorWasRunning = _clipboardMonitorService.IsRunning;
+            ocrWasRunning = _backgroundOcrQueue.IsRunning;
+            embeddingWasRunning = _embeddingWorker?.IsRunning ?? false;
             _clipboardMonitorService.Stop();
             await _backgroundOcrQueue.StopAsync();
             if (_embeddingWorker is not null)
@@ -254,11 +261,22 @@ public sealed class DatabaseMaintenanceViewModel : ViewModelBase
         catch (Exception ex)
         {
             // The restore failed before the app could exit; restart the workers we
-            // stopped above so the session keeps capturing clips instead of going
-            // silently dead until the next launch.
-            _clipboardMonitorService.Start();
-            _backgroundOcrQueue.Start();
-            _embeddingWorker?.Start();
+            // stopped above (and only those) so the session keeps capturing clips
+            // instead of going silently dead until the next launch.
+            if (monitorWasRunning)
+            {
+                _clipboardMonitorService.Start();
+            }
+
+            if (ocrWasRunning)
+            {
+                _backgroundOcrQueue.Start();
+            }
+
+            if (embeddingWasRunning)
+            {
+                _embeddingWorker?.Start();
+            }
 
             BackupRestoreStatus = $"Restore failed: {ex.Message}";
             System.Diagnostics.Trace.TraceError($"Restore from backup failed: {ex}");

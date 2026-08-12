@@ -71,6 +71,8 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
 
     public void SuppressNext() => Interlocked.Increment(ref _suppressCount);
 
+    public bool IsRunning => _isStarted;
+
     public void Start()
     {
         if (_isDisposed || _isStarted || !OperatingSystem.IsWindows())

@@ -21,6 +21,13 @@ public interface IEmbeddingWorker
     /// </summary>
     IObservable<IReadOnlyList<ClipEmbeddingRecord>> BatchRecordsCompleted { get; }
 
+    /// <summary>
+    /// True between <see cref="Start"/> and <see cref="StopAsync"/>. Lets callers that
+    /// quiesce the worker for a whole-database operation restore the state they found
+    /// rather than unconditionally starting it.
+    /// </summary>
+    bool IsRunning { get; }
+
     /// <summary>Start the worker loop. No-op if already started.</summary>
     void Start();
 

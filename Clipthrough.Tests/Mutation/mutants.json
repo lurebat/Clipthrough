@@ -382,5 +382,37 @@
     "filter": "Refresh_WithSemanticFusion_KeepsEveryQueryRowOfThePage",
     "find": "            .ThenByDescending(t => t.Score)\n            .Select(t => t.Clip)\n            .ToList();",
     "replace": "            .ThenByDescending(t => t.Score)\n            .Take(filters.Limit)\n            .Select(t => t.Clip)\n            .ToList();"
+  },
+  {
+    "id": "settings-change-ignores-semantic-toggle",
+    "why": "Removes the call that syncs the embedding worker with the EnableSemanticSearch setting. Toggling semantic search then does nothing until the next launch: on leaves clips unembedded, off leaves the worker running.",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "filter": "SemanticSearchSetting_TogglingIt_StartsAndStopsTheEmbeddingWorker",
+    "find": "        this.RaisePropertyChanged(nameof(IsAiMenuVisible));\n        ApplySemanticSearchWorkerState(settings.EnableSemanticSearch);",
+    "replace": "        this.RaisePropertyChanged(nameof(IsAiMenuVisible));"
+  },
+  {
+    "id": "semantic-toggle-off-does-not-stop-worker",
+    "why": "Drops the disable branch, so turning semantic search off leaves the embedding worker running and consuming CPU and the SQLite write lock.",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "filter": "SemanticSearchSetting_TogglingIt_StartsAndStopsTheEmbeddingWorker",
+    "find": "                    else if (worker.IsRunning)\n                    {\n                        await worker.StopAsync().ConfigureAwait(false);\n                    }",
+    "replace": "                    else if (worker.IsRunning && false)\n                    {\n                        await worker.StopAsync().ConfigureAwait(false);\n                    }"
+  },
+  {
+    "id": "semantic-toggle-transitions-not-serialised",
+    "why": "Runs each start/stop transition independently instead of chaining it onto the previous one. A rapid off->on toggle can then let the pending stop land after the start, leaving the worker off while semantic search is enabled.",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "filter": "SemanticSearchSetting_ToggledOffThenOnQuickly_LeavesTheWorkerRunning",
+    "find": "        _semanticWorkerTransition = _semanticWorkerTransition.ContinueWith(",
+    "replace": "        _semanticWorkerTransition = Task.Delay(20).ContinueWith("
+  },
+  {
+    "id": "maintenance-scope-restarts-every-worker",
+    "why": "Restores the unconditional restart in DatabaseMaintenanceScope.DisposeAsync. A worker the user had deliberately turned off (capture paused, semantic search disabled) comes back to life after any whole-database operation.",
+    "file": "Clipthrough/Services/Storage/DatabaseMaintenanceScope.cs",
+    "filter": "DisposeAsync_RestartsOnlyTheWorkersThatWereRunningOnEntry",
+    "find": "        if (_ocrQueueWasRunning)\n        {\n            _ocrQueue?.Start();\n        }",
+    "replace": "        {\n            _ocrQueue?.Start();\n        }"
   }
 ]

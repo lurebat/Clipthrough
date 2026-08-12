@@ -7,7 +7,11 @@ namespace Clipthrough.Services;
 /// <summary>
 /// Quiesces all background workers and clears the SQLite connection pool
 /// before a whole-database operation (rekey, path move, backup, restore),
-/// then restores everything on disposal — even when the operation body throws.
+/// then restores them on disposal — even when the operation body throws.
+///
+/// Only workers that were running on entry are restarted. A worker the user
+/// deliberately turned off (capture paused, semantic search disabled) must not
+/// come back to life just because a maintenance operation ran.
 ///
 /// Usage:
 /// <code>
@@ -23,6 +27,9 @@ public sealed class DatabaseMaintenanceScope : System.IAsyncDisposable
     private readonly IClipboardMonitorService? _monitor;
     private readonly IBackgroundOcrQueue? _ocrQueue;
     private readonly IEmbeddingWorker? _embeddingWorker;
+    private readonly bool _monitorWasRunning;
+    private readonly bool _ocrQueueWasRunning;
+    private readonly bool _embeddingWorkerWasRunning;
 
     private DatabaseMaintenanceScope(
         IClipboardMonitorService? monitor,
@@ -32,6 +39,13 @@ public sealed class DatabaseMaintenanceScope : System.IAsyncDisposable
         _monitor = monitor;
         _ocrQueue = ocrQueue;
         _embeddingWorker = embeddingWorker;
+
+        // Snapshot before anything is stopped: disposal restores this state rather
+        // than starting everything, so a worker that was deliberately off (capture
+        // paused, semantic search disabled, the model file missing) stays off.
+        _monitorWasRunning = monitor?.IsRunning ?? false;
+        _ocrQueueWasRunning = ocrQueue?.IsRunning ?? false;
+        _embeddingWorkerWasRunning = embeddingWorker?.IsRunning ?? false;
     }
 
     /// <summary>
@@ -82,7 +96,7 @@ public sealed class DatabaseMaintenanceScope : System.IAsyncDisposable
 
     /// <summary>
     /// Clears the connection pool a second time (in case the body opened new
-    /// connections), then restarts each worker.
+    /// connections), then restarts each worker that was running on entry.
     /// </summary>
     public System.Threading.Tasks.ValueTask DisposeAsync()
     {
@@ -90,9 +104,20 @@ public sealed class DatabaseMaintenanceScope : System.IAsyncDisposable
         // linger and reopen the now-replaced/moved database file.
         SqliteConnection.ClearAllPools();
 
-        _monitor?.Start();
-        _ocrQueue?.Start();
-        _embeddingWorker?.Start();
+        if (_monitorWasRunning)
+        {
+            _monitor?.Start();
+        }
+
+        if (_ocrQueueWasRunning)
+        {
+            _ocrQueue?.Start();
+        }
+
+        if (_embeddingWorkerWasRunning)
+        {
+            _embeddingWorker?.Start();
+        }
 
         return System.Threading.Tasks.ValueTask.CompletedTask;
     }

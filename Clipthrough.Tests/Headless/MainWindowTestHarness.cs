@@ -145,8 +145,9 @@ internal sealed class MainWindowTestHarness : IDisposable
     {
         public IObservable<long> OcrCompleted { get; } = System.Reactive.Linq.Observable.Empty<long>();
         public IObservable<System.Reactive.Unit> QueueChanged { get; } = System.Reactive.Linq.Observable.Empty<System.Reactive.Unit>();
-        public void Start() { }
-        public Task StopAsync() => Task.CompletedTask;
+        public bool IsRunning { get; private set; }
+        public void Start() { IsRunning = true; }
+        public Task StopAsync() { IsRunning = false; return Task.CompletedTask; }
         public void Enqueue(long clipId) { }
         public Task EnqueueBacklogAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }

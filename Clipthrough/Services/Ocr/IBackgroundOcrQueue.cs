@@ -11,6 +11,13 @@ public interface IBackgroundOcrQueue
 
     IObservable<Unit> QueueChanged { get; }
 
+    /// <summary>
+    /// True between <see cref="Start"/> and <see cref="StopAsync"/>. Lets callers that
+    /// quiesce the queue for a whole-database operation restore the state they found
+    /// rather than unconditionally starting it.
+    /// </summary>
+    bool IsRunning { get; }
+
     void Start();
 
     Task StopAsync();

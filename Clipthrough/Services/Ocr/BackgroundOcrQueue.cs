@@ -40,6 +40,8 @@ public sealed class BackgroundOcrQueue : IBackgroundOcrQueue, IDisposable
 
     public IObservable<Unit> QueueChanged => _queueChanged.AsObservable();
 
+    public bool IsRunning => _started;
+
     public void Start()
     {
         if (_disposed) return;
