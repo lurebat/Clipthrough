@@ -61,6 +61,14 @@ previous implementation, or a plausible drift such as one of two coupled
 constants changing alone. Then confirm it is `KILLED`. If it survives, the test
 is the thing that needs fixing.
 
+A survivor occasionally means the *mutant* is wrong rather than the test. The
+harness verifies the anchor matched exactly once, so a survivor did break the
+code — but the break can be neutralised by something unrelated. One rollback
+mutant here survived because on Windows the file it deleted was still locked, so
+the deletion threw inside the very `catch` the mutant was meant to expose and the
+observable result was unchanged. That mutant modelled a state production cannot
+reach; it was replaced with one that can, not answered by weakening the test.
+
 Point `filter` at the test that actually asserts the property. During this
 harness's first run, `alphabetical-sort-index-dropped` survived because it named
 a test that deliberately excludes Alphabetical; the fix was a missing assertion
@@ -69,12 +77,23 @@ a test that deliberately excludes Alphabetical; the fix was a missing assertion
 ## Safety
 
 Sources are backed up as raw bytes and restored in a `finally`, so a file with a
-BOM or unusual line endings comes back byte-identical. If the run is killed
-mid-mutation, `Clipthrough.Tests/artifacts/mutation-pending.json` survives and
-the next run restores from it before doing anything else — production code can
-never be left broken on disk.
+BOM or unusual line endings comes back byte-identical.
 
-After any run, `git diff -- Clipthrough/` should be empty.
+If the run is killed mid-mutation the `finally` never executes, so the mutated
+source **stays on disk**. `Clipthrough.Tests/artifacts/mutation-pending.json`
+survives and the next run restores from it before doing anything else, printing
+`WARNING: Found interrupted mutation run`. Recovery is automatic but it is not
+instant: between killing a run and starting the next one the working tree
+contains deliberately broken code. Do not commit in that window — run
+`git diff -- Clipthrough/` first, and if it is not empty, start a mutation run
+(any `-Id` will do) to trigger the restore.
+
+Every mutant is checked against a baseline run of its own filter first. A
+`INCONCLUSIVE: N test(s) already failing before mutating` means the unmutated
+tree is broken — nothing about the mutant is being measured. Fix the failing
+test before reading anything into the result.
+
+After any completed run, `git diff -- Clipthrough/` should be empty.
 
 ## Why not Stryker.NET
 
