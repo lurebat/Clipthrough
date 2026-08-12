@@ -918,5 +918,37 @@
     "filter": "SqliteConcurrencyTests",
     "find": "    public SqliteConnection CreateReadOnlyConnection() => Create(SqliteOpenMode.ReadOnly);",
     "replace": "    public SqliteConnection CreateReadOnlyConnection() => Create(SqliteOpenMode.ReadWriteCreate);"
+  },
+  {
+    "id": "unlock-blames-the-password-for-everything",
+    "why": "The original bug: every SqliteException was reported as a wrong password, so a moved or deleted database sent the user off to retype a password that was already correct.",
+    "file": "Clipthrough/Database/SqliteErrors.cs",
+    "filter": "SqliteErrorsTests",
+    "find": "        return exception.SqliteErrorCode == NotADatabase;",
+    "replace": "        return true;"
+  },
+  {
+    "id": "unlock-never-blames-the-password",
+    "why": "The opposite failure: a genuinely wrong password must still say so, rather than sending the user to look for a missing file.",
+    "file": "Clipthrough/Database/SqliteErrors.cs",
+    "filter": "SqliteErrorsTests",
+    "find": "        return exception.SqliteErrorCode == NotADatabase;",
+    "replace": "        return false;"
+  },
+  {
+    "id": "unlock-classifies-on-the-wrong-error-code",
+    "why": "Measured against SQLitePCLRaw.bundle_e_sqlcipher: a bad key is 26 (SQLITE_NOTADB) and a missing file is 14 (SQLITE_CANTOPEN). Swapping them inverts both messages.",
+    "file": "Clipthrough/Database/SqliteErrors.cs",
+    "filter": "SqliteErrorsTests",
+    "find": "    private const int NotADatabase = 26;",
+    "replace": "    private const int NotADatabase = 14;"
+  },
+  {
+    "id": "unlock-shows-the-password-message-for-unreadable-databases",
+    "why": "The classifier can be right while the message wiring is not; this proves the unreadable branch actually reaches a different string.",
+    "file": "Clipthrough/Database/SqliteErrors.cs",
+    "filter": "SqliteErrorsTests",
+    "find": "            : AppText.UnlockDatabaseUnreadable;",
+    "replace": "            : AppText.UnlockIncorrectPassword;"
   }
 ]

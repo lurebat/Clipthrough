@@ -6476,9 +6476,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             command.CommandText = "SELECT count(*) FROM sqlite_master;";
             await command.ExecuteScalarAsync();
         }
-        catch (Microsoft.Data.Sqlite.SqliteException)
+        catch (Microsoft.Data.Sqlite.SqliteException ex)
         {
-            PasswordPromptError = "Incorrect password. Please try again.";
+            // Not every failure here is a bad password: a moved or deleted
+            // file, a disk error or a lock held past the busy timeout all land
+            // in this catch too, and reporting those as "incorrect password"
+            // sends the user off to retype a password that was right.
+            PasswordPromptError = Database.SqliteErrors.DescribeUnlockFailure(ex);
             return;
         }
 
