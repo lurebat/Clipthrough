@@ -120,7 +120,34 @@ public sealed class SettingsServiceSecretsTests : IDisposable
             "A remote API token sidecar from an older version must not survive load");
     }
 
+    /// <summary>
+    /// Upgrade path: settings.json files written by older versions still carry
+    /// the removed remote-API and user-scripting keys. Deserialization must skip
+    /// them rather than throw, otherwise upgrading silently resets every setting.
+    /// </summary>
+    [Fact]
+    public async Task InitializeAsync_IgnoresKeysFromRemovedFeatures()
+    {
+        await File.WriteAllTextAsync(_settingsPath, """
+            {
+              "toggleWindowHotkey": "Ctrl+Shift+Y",
+              "maxClipSizeBytes": 4096,
+              "remoteApiEnabled": true,
+              "remoteApiPort": 9876,
+              "remoteApiToken": "stale-token",
+              "userScripts": [ { "name": "Legacy", "code": "Input.Trim()" } ]
+            }
+            """);
+
+        var service = NewService(new FakeDataProtectionService());
+        await service.InitializeAsync();
+
+        Assert.Equal("Ctrl+Shift+Y", service.Current.ToggleWindowHotkey);
+        Assert.Equal(4096, service.Current.MaxClipSizeBytes);
+    }
+
     // ─── NoOp protector: in-memory only ──────────────────────────────────────
+
 
     [Fact]
     public async Task SaveAsync_NoOpProtector_DoesNotWriteSidecarFiles()
