@@ -1418,6 +1418,14 @@ public sealed class ClipStoreServiceTests
             new string('a', 65),
             shared + "\u00e9",
             shared + "Z",
+
+            // A BINARY/NOCASE inversion: under BINARY "Beta" precedes "apple"
+            // (uppercase sorts first), under NOCASE it does not. If anyone
+            // gives content a different collation, the prefix term and the
+            // tie-break term would stop agreeing, and this pair is what
+            // notices.
+            "Beta",
+            "apple",
         };
 
         foreach (var text in texts)
@@ -1472,15 +1480,13 @@ public sealed class ClipStoreServiceTests
     /// assertion than a stopwatch.
     /// </summary>
     [Theory]
-    [InlineData(ClipSortOption.MostRecent, "idx_clips_default_order", false)]
-    [InlineData(ClipSortOption.OldestFirst, "idx_clips_oldest_order", false)]
-    [InlineData(ClipSortOption.MostPasted, "idx_clips_paste_order", false)]
-    [InlineData(ClipSortOption.LargestFirst, "idx_clips_size_order", false)]
-    // Alphabetical orders from a bounded prefix, so SQLite still sorts within
-    // each group of clips sharing those first 64 characters. That residual sort
-    // is over ties only, not the library.
-    [InlineData(ClipSortOption.Alphabetical, "idx_clips_alpha_order", true)]
-    public async Task EverySort_IsServedFromItsOwnIndex(ClipSortOption sortOption, string expectedIndex, bool allowsTieBreakSort)
+    [InlineData(ClipSortOption.MostRecent, "idx_clips_default_order")]
+    [InlineData(ClipSortOption.OldestFirst, "idx_clips_oldest_order")]
+    [InlineData(ClipSortOption.MostPasted, "idx_clips_paste_order")]
+    [InlineData(ClipSortOption.LargestFirst, "idx_clips_size_order")]
+    // Alphabetical is deliberately absent: its plan cannot defend it. See
+    // Alphabetical_OrdersByTheExpressionItsIndexStores.
+    public async Task EverySort_IsServedFromItsOwnIndex(ClipSortOption sortOption, string expectedIndex)
     {
         using var scope = new TemporaryDatabaseScope();
         await scope.DatabaseInitializer.InitializeAsync();
@@ -1501,9 +1507,44 @@ public sealed class ClipStoreServiceTests
 
         var text = string.Join(" | ", plan);
         Assert.Contains(expectedIndex, text, StringComparison.Ordinal);
-        if (!allowsTieBreakSort)
+        Assert.DoesNotContain("TEMP B-TREE", text, StringComparison.Ordinal);
+    }
+    /// <summary>
+    /// Alphabetical is the one sort whose query plan proves nothing. With
+    /// idx_clips_alpha_order present, the old whole-content clause and the
+    /// prefix clause produce a byte-identical plan string - the index supplies
+    /// the two pinned columns either way, and only the volume the sorter has to
+    /// swallow differs. A full revert of the clause therefore passes both the
+    /// plan test and the equivalence test (whose oracle IS the old clause), so
+    /// neither can defend the optimisation. Pin the clause to the index
+    /// definition structurally instead: the ORDER BY must sort by exactly the
+    /// expression the index stores, or the index cannot serve it.
+    /// </summary>
+    [Fact]
+    public async Task Alphabetical_OrdersByTheExpressionItsIndexStores()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        string? indexSql;
+        await using (var connection = scope.ConnectionFactory.CreateConnection())
         {
-            Assert.DoesNotContain("TEMP B-TREE", text, StringComparison.Ordinal);
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_clips_alpha_order';";
+            indexSql = await command.ExecuteScalarAsync() as string;
         }
+
+        Assert.False(string.IsNullOrEmpty(indexSql), "idx_clips_alpha_order is missing.");
+
+        static string Normalise(string sql) => sql
+            .Replace(" ", string.Empty, StringComparison.Ordinal)
+            .Replace("c.", string.Empty, StringComparison.Ordinal);
+
+        var indexed = System.Text.RegularExpressions.Regex.Match(Normalise(indexSql!), @"substr\([^)]*\)");
+        Assert.True(indexed.Success, $"No substr expression in the index: {indexSql}");
+
+        var clause = Normalise(ClipStoreService.BuildOrderClause(ClipSortOption.Alphabetical));
+        Assert.Contains(indexed.Value, clause, StringComparison.Ordinal);
     }
 }

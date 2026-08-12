@@ -1441,7 +1441,16 @@ public sealed class ClipStoreService : IClipStoreService
         // prefixes differ, the first differing character is inside the prefix,
         // so the prefix comparison already agrees with the full one; when they
         // match, c.content breaks the tie exactly as before.
-        ClipSortOption.Alphabetical => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, substr(c.content, 1, 64) ASC, c.content ASC, c.id ASC",
+        //
+        // COLLATE BINARY on the tie-break is load-bearing. substr() is a
+        // function, so its result is always BINARY and does not inherit the
+        // column's collation, whereas a bare c.content does. Giving content a
+        // different collation - NOCASE for a case-insensitive sort, say - would
+        // leave the two halves of this clause disagreeing about what "less
+        // than" means, producing an order that is neither. Naming BINARY keeps
+        // them consistent, and the equivalence test fails if the intent ever
+        // changes without the index changing with it.
+        ClipSortOption.Alphabetical => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, substr(c.content, 1, 64) ASC, c.content COLLATE BINARY ASC, c.id ASC",
         ClipSortOption.LargestFirst => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, c.byte_size DESC, c.id DESC",
         ClipSortOption.BestMatching => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, COALESCE(c.last_copied_at, c.captured_at) DESC, c.id DESC",
         _ => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, COALESCE(c.last_copied_at, c.captured_at) DESC, c.id DESC",
