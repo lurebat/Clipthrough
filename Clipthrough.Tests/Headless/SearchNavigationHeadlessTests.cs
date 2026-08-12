@@ -1,7 +1,12 @@
+using System.Linq;
+using Avalonia.Automation;
+using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Xunit;
 
 namespace Clipthrough.Tests.Headless;
@@ -22,8 +27,14 @@ namespace Clipthrough.Tests.Headless;
 /// </summary>
 public sealed class SearchNavigationHeadlessTests
 {
+    /// <summary>
+    /// Tab follows visual order rather than jumping to the clip list. It used to
+    /// skip straight from the search box to the list, which left the filter
+    /// toggles sitting visually between them reachable only by mouse. Down is
+    /// still the one-key path into the list, so nothing got slower.
+    /// </summary>
     [AvaloniaFact]
-    public void Tab_FromSearchBox_MovesFocusToClipList()
+    public void Tab_FromSearchBox_MovesToTheFilterControlsNotStraightToTheList()
     {
         using var harness = MainWindowTestHarness.Create();
         harness.SeedClips(3);
@@ -33,7 +44,60 @@ public sealed class SearchNavigationHeadlessTests
         Dispatcher.UIThread.RunJobs();
 
         Assert.False(harness.SearchBox.IsKeyboardFocusWithin);
-        Assert.NotNull(harness.ViewModel.SelectedClip);
+        Assert.False(harness.ClipList.IsKeyboardFocusWithin);
+
+        var focused = TopLevel.GetTopLevel(harness.Window)!.FocusManager!.GetFocusedElement();
+        Assert.IsType<ToggleButton>(focused);
+    }
+
+    /// <summary>
+    /// The clip list must stay reachable by Tab alone now that the shortcut into
+    /// it is gone, and the ring has to come back round rather than dead-ending.
+    /// Both were real regressions waiting to happen when the jump was removed.
+    /// </summary>
+    [AvaloniaFact]
+    public void TabRing_ReachesTheClipListAndWrapsBackToTheSearchBox()
+    {
+        using var harness = MainWindowTestHarness.Create();
+        harness.SeedClips(3);
+        harness.FocusSearchBox();
+
+        var reachedClipList = false;
+        var wrappedToSearch = false;
+
+        for (var i = 0; i < 60; i++)
+        {
+            harness.Window.KeyPress(Key.Tab, RawInputModifiers.None, PhysicalKey.Tab, "\t");
+            Dispatcher.UIThread.RunJobs();
+
+            if (harness.ClipList.IsKeyboardFocusWithin)
+            {
+                reachedClipList = true;
+            }
+            else if (reachedClipList && harness.SearchBox.IsKeyboardFocusWithin)
+            {
+                wrappedToSearch = true;
+                break;
+            }
+        }
+
+        Assert.True(reachedClipList, "Tab never reaches the clip list, so it is mouse-only.");
+        Assert.True(wrappedToSearch, "The tab ring does not wrap back to the search box.");
+    }
+
+    /// <summary>
+    /// The splitter is a tab stop, so a screen reader has to be able to say what
+    /// landing on it means; unnamed it is announced only as "custom".
+    /// </summary>
+    [AvaloniaFact]
+    public void GridSplitter_HasAnAccessibleName()
+    {
+        using var harness = MainWindowTestHarness.Create();
+        harness.SeedClips(1);
+
+        var splitter = harness.Window.GetVisualDescendants().OfType<GridSplitter>().Single();
+
+        Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetName(splitter)));
     }
 
     [AvaloniaFact]
@@ -144,8 +208,14 @@ public sealed class SearchNavigationHeadlessTests
         Assert.False(harness.SearchBox.IsKeyboardFocusWithin);
         Assert.True(harness.ClipList.IsKeyboardFocusWithin);
     }
+    /// <summary>
+    /// Shift+Tab is plain reverse traversal now that the jump back to the search
+    /// box is gone. It must still leave the list - the editor's Tab trap fix
+    /// depends on reverse traversal working - but it lands on whatever precedes
+    /// the list visually, not on the search box.
+    /// </summary>
     [AvaloniaFact]
-    public void ShiftTab_FromClipList_ReturnsFocusToSearchBox()
+    public void ShiftTab_FromClipList_MovesBackwardsInVisualOrder()
     {
         using var harness = MainWindowTestHarness.Create();
         harness.SeedClips(3);
@@ -154,7 +224,8 @@ public sealed class SearchNavigationHeadlessTests
         harness.Window.KeyPress(Key.Tab, RawInputModifiers.Shift, PhysicalKey.Tab, "\t");
         Dispatcher.UIThread.RunJobs();
 
-        Assert.True(harness.SearchBox.IsKeyboardFocusWithin);
+        Assert.False(harness.ClipList.IsKeyboardFocusWithin);
+        Assert.NotNull(TopLevel.GetTopLevel(harness.Window)!.FocusManager!.GetFocusedElement());
     }
 
     [AvaloniaTheory]

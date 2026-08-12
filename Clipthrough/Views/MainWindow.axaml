@@ -560,6 +560,7 @@
 
             <GridSplitter Grid.Column="1"
                           ResizeDirection="Columns"
+                          AutomationProperties.Name="{x:Static loc:AppText.SplitterAccessibleName}"
                           Width="6" />
 
             <Border Grid.Column="2"

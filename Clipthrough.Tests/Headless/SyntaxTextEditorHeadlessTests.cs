@@ -110,6 +110,13 @@ public sealed class SyntaxTextEditorHeadlessTests
         using var harness = MainWindowTestHarness.Create();
         harness.SeedClips(3);
         Dispatcher.UIThread.RunJobs();
+
+        // The editor only joins the tab ring once a clip is actually selected.
+        // Tab used to select one as a side effect of jumping into the list; it
+        // no longer does, so select one explicitly rather than relying on that.
+        harness.ViewModel.SelectedClip = harness.ViewModel.Clips[0];
+        Dispatcher.UIThread.RunJobs();
+
         harness.FocusSearchBox();
         Dispatcher.UIThread.RunJobs();
 
@@ -117,8 +124,8 @@ public sealed class SyntaxTextEditorHeadlessTests
         var reachedEditor = false;
         var returnedToSearch = false;
 
-        // Long enough to lap the ring even if stops are added later.
-        for (var i = 0; i < 40; i++)
+        // Long enough to lap the ring twice even if stops are added later.
+        for (var i = 0; i < 80; i++)
         {
             harness.Window.KeyPress(Key.Tab, RawInputModifiers.None, PhysicalKey.Tab, "\t");
             Dispatcher.UIThread.RunJobs();

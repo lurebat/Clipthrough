@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using Clipthrough.Models;
@@ -13,6 +13,7 @@ public static class AppText
         [nameof(SearchWatermark)] = "Filter clips",
         [nameof(ClipboardHistoryCaption)] = "Clipboard history",
         [nameof(ClipsPanelTitle)] = "Clips",
+        [nameof(SplitterAccessibleName)] = "Resize clip list and preview panes",
         [nameof(FavoritesFilterLabel)] = "Favorites",
         [nameof(SensitiveFilterLabel)] = "Sensitive",
         [nameof(RegexFilterLabel)] = "Regex",
@@ -301,6 +302,12 @@ public static class AppText
     public static string SearchWatermark => Text(nameof(SearchWatermark));
     public static string ClipboardHistoryCaption => Text(nameof(ClipboardHistoryCaption));
     public static string ClipsPanelTitle => Text(nameof(ClipsPanelTitle));
+
+    /// <summary>
+    /// The splitter is a tab stop, so a screen reader has to be able to say what
+    /// stopping on it means. Without a name it is announced only as "custom".
+    /// </summary>
+    public static string SplitterAccessibleName => Text(nameof(SplitterAccessibleName));
     public static string FavoritesFilterLabel => Text(nameof(FavoritesFilterLabel));
     public static string SensitiveFilterLabel => Text(nameof(SensitiveFilterLabel));
     public static string RegexFilterLabel => Text(nameof(RegexFilterLabel));

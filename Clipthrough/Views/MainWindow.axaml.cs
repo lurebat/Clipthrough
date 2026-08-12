@@ -430,23 +430,12 @@ public partial class MainWindow : Window
             return true;
         }
 
-        // Tab from search box: move focus to clip list
-        if (e.Key == Key.Tab && modifiers == KeyModifiers.None && isSearchFocused && viewModel.Clips.Count > 0)
-        {
-            if (viewModel.SelectedClip is null)
-            {
-                viewModel.SelectedClip = viewModel.GetDefaultAutoSelectedClip();
-            }
-            FocusSelectedClipInList();
-            return true;
-        }
-
-        // Shift+Tab from clip list: return focus to search box
-        if (e.Key == Key.Tab && modifiers == KeyModifiers.Shift && m_clipsListBox?.IsKeyboardFocusWithin == true)
-        {
-            FocusSearchBox();
-            return true;
-        }
+        // Plain Tab and Shift+Tab are deliberately not intercepted. They used to
+        // jump straight between the search box and the clip list, which skipped
+        // the filter toggles sitting visually between them and left those
+        // controls reachable only by mouse. Tab now walks the window in visual
+        // order like any other app; Down from the search box (below) is still
+        // the one-key path into the list.
 
         if (viewModel.Clips.Count == 0)
         {
