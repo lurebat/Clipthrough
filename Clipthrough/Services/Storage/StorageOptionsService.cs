@@ -158,6 +158,24 @@ public sealed class StorageOptionsService : IStorageOptionsService
             // already be the new path, or they recreate an empty DB at the deleted
             // old path and every later clip is lost. Null for non-move saves.
             await using var scope = await ApplyStorageChangesAsync(previous, normalized, cancellationToken);
+
+            // A non-null scope means the database file has moved and the source
+            // is already deleted, so the file system is the source of truth and
+            // Current has to agree with it before anything else can fail. If
+            // persisting threw while Current still named the old path, the scope
+            // would restart the workers there, they would find nothing and
+            // create an empty database, and every later clip would go into it
+            // while the real history sat orphaned at the new path. Persisting
+            // still throws, so the caller learns the config on disk is stale.
+            //
+            // Saves that did not move anything keep the original ordering: there
+            // is nothing on disk to agree with, so a failed write should leave
+            // the in-memory state untouched rather than diverging from it.
+            if (scope is not null)
+            {
+                Current = normalized;
+            }
+
             await SaveToDiskAsync(normalized, cancellationToken);
             Current = normalized;
         }

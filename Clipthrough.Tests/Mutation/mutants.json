@@ -326,5 +326,21 @@
     "filter": "DatabaseInitializerMigrationTests",
     "find": "            indexCommand.CommandText = SortOrderIndexes;",
     "replace": "            indexCommand.CommandText = storedVersion < CurrentSchemaVersion ? SortOrderIndexes : \"SELECT 1;\";"
+  },
+  {
+    "id": "config-write-precedes-the-current-flip",
+    "why": "Restores writing storage.json before flipping Current. A path move has already deleted the source by then, so a failed write leaves Current naming a path with no database - the workers restart there, create an empty one, and the real history is orphaned.",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "filter": "StorageOptionsServicePhase2Tests",
+    "find": "            if (scope is not null)\n            {\n                Current = normalized;\n            }\n\n            await SaveToDiskAsync(normalized, cancellationToken);",
+    "replace": "            await SaveToDiskAsync(normalized, cancellationToken);"
+  },
+  {
+    "id": "current-flipped-early-for-every-save",
+    "why": "Flips Current before persisting even when nothing moved. A config-only write that fails then leaves the running session using settings that were never saved, silently diverging from what the next launch will read.",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "filter": "StorageOptionsServicePhase2Tests",
+    "find": "            if (scope is not null)\n            {\n                Current = normalized;\n            }",
+    "replace": "            Current = normalized;"
   }
 ]

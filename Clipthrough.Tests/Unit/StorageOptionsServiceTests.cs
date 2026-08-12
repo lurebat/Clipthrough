@@ -478,6 +478,57 @@ public sealed class StorageOptionsServicePhase2Tests : IDisposable
     }
 
     /// <summary>
+    /// Persisting storage.json is the last step of a path move, and it happens
+    /// after the source database has already been deleted. If it fails, Current
+    /// must still point at where the database actually is. It used to be left
+    /// on the old path, so the maintenance scope restarted the workers there,
+    /// they found nothing and created an empty database, and every clip from
+    /// then on went into it while the real history sat orphaned at the new
+    /// path.
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_MoveSucceedsButConfigWriteFails_LeavesCurrentOnTheMovedDatabase()
+    {
+        await CreateEncryptedDb("pass");
+        var service = NewService(rememberPassword: true, password: "pass");
+        var newPath = Path.Combine(_tempRoot, "moved", "clipthrough.db");
+
+        // Make the config file unwritable by putting a directory in its place.
+        File.Delete(_configPath);
+        Directory.CreateDirectory(_configPath);
+
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+            service.SaveAsync(service.Current with { DatabasePath = newPath }));
+
+        Assert.False(File.Exists(_dbPath), "The move should have removed the source.");
+        Assert.True(File.Exists(newPath), "The move should have completed.");
+        Assert.Equal(newPath, service.Current.DatabasePath);
+    }
+
+    /// <summary>
+    /// The converse of the move case: a save that moved nothing has no
+    /// already-committed file-system change to agree with, so a failed write
+    /// must leave the in-memory state exactly as it was rather than diverging
+    /// from what is on disk.
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_NoMoveAndConfigWriteFails_LeavesCurrentUnchanged()
+    {
+        await CreateEncryptedDb("pass");
+        var service = NewService(rememberPassword: true, password: "pass");
+        var before = service.Current;
+
+        File.Delete(_configPath);
+        Directory.CreateDirectory(_configPath);
+
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+            service.SaveAsync(service.Current with { RememberPassword = false }));
+
+        Assert.Equal(before.RememberPassword, service.Current.RememberPassword);
+        Assert.Equal(before.DatabasePath, service.Current.DatabasePath);
+    }
+
+    /// <summary>
     /// The same hazard on the database path move, which deletes the source as
     /// soon as the copy is renamed into place.
     /// </summary>
