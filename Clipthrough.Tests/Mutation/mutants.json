@@ -11,24 +11,24 @@
     "id": "alphabetical-reverts-to-whole-content",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "The whole point of the prefix clause. A revert costs the index and re-sorts the library, but produces a byte-identical query plan - only a structural assertion catches it.",
-    "find": "substr(c.content, 1, 64) ASC, c.content COLLATE BINARY ASC",
-    "replace": "c.content ASC",
+    "find": "substr(c.content, 1, 64) COLLATE NOCASE ASC, c.content COLLATE NOCASE ASC",
+    "replace": "c.content COLLATE NOCASE ASC",
     "filter": "Alphabetical_OrdersByTheExpressionItsIndexStores"
   },
   {
     "id": "alphabetical-prefix-length-drifts",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "The clause prefix and the index expression must agree. Changing one and not the other silently drops back to a full sort.",
-    "find": "substr(c.content, 1, 64) ASC",
-    "replace": "substr(c.content, 1, 32) ASC",
+    "find": "substr(c.content, 1, 64) COLLATE NOCASE ASC",
+    "replace": "substr(c.content, 1, 32) COLLATE NOCASE ASC",
     "filter": "Alphabetical_OrdersByTheExpressionItsIndexStores"
   },
   {
-    "id": "content-column-becomes-nocase",
-    "file": "Clipthrough/Database/DatabaseInitializer.cs",
-    "why": "substr() returns a BINARY result and does not inherit the column collation, but bare c.content does. A NOCASE column leaves the two halves of the ORDER BY disagreeing.",
-    "find": "        content      TEXT,",
-    "replace": "        content      TEXT COLLATE NOCASE,",
+    "id": "alphabetical-terms-disagree-on-collation",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "substr() returns a BINARY result and does not inherit the column collation, so both terms must name NOCASE explicitly. If the tie-break drifts back to BINARY the two halves of the ORDER BY disagree about what 'less than' means and the result is neither order.",
+    "find": "substr(c.content, 1, 64) COLLATE NOCASE ASC, c.content COLLATE NOCASE ASC",
+    "replace": "substr(c.content, 1, 64) COLLATE NOCASE ASC, c.content COLLATE BINARY ASC",
     "filter": "Alphabetical_OrdersIdenticallyToOrderingByWholeContent"
   },
   {
@@ -43,7 +43,7 @@
     "id": "alphabetical-sort-index-dropped",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "Same, for the expression index. Partial index coverage measured worse than none at all.",
-    "find": "        CREATE INDEX IF NOT EXISTS idx_clips_alpha_order ON clips(\n            (pinned_at IS NULL),\n            pinned_at DESC,\n            substr(content, 1, 64) ASC,\n            id ASC\n        );",
+    "find": "        CREATE INDEX IF NOT EXISTS idx_clips_alpha_order_ci ON clips(\n            (pinned_at IS NULL),\n            pinned_at DESC,\n            substr(content, 1, 64) COLLATE NOCASE ASC,\n            id ASC\n        );",
     "replace": "",
     "filter": "Alphabetical_IsServedFromItsOwnIndex"
   },
@@ -558,5 +558,21 @@
     "filter": "Migration_BackfillsManualSensitivityForClipsUpgradedFromAnOlderSchema",
     "find": "                WHERE is_sensitive = 1\n                  AND NOT EXISTS (SELECT 1 FROM clip_sensitivity_matches m WHERE m.clip_id = clips.id);",
     "replace": "                WHERE is_sensitive = 1;"
+  },
+  {
+    "id": "alphabetical-sorts-case-sensitively",
+    "why": "Reverts Alphabetical to SQLite's default BINARY collation, where every uppercase codepoint precedes every lowercase one. 'apple' sorts after 'Zebra' and any capitalised clip is banished to the front - not what a user means by alphabetical.",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "filter": "Alphabetical_IgnoresCaseSoCapitalisedClipsAreNotBanishedToTheFront",
+    "find": "substr(c.content, 1, 64) COLLATE NOCASE ASC, c.content COLLATE NOCASE ASC",
+    "replace": "substr(c.content, 1, 64) ASC, c.content COLLATE BINARY ASC"
+  },
+  {
+    "id": "alphabetical-index-loses-its-collation",
+    "why": "Drops COLLATE NOCASE from the index while the clause keeps it. An index is only usable by an ORDER BY that compares with the same collation, so the sort silently stops being served and falls back to sorting the whole library.",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "filter": "Alphabetical_OrdersByTheExpressionItsIndexStores",
+    "find": "            substr(content, 1, 64) COLLATE NOCASE ASC,\n            id ASC\n        );",
+    "replace": "            substr(content, 1, 64) ASC,\n            id ASC\n        );"
   }
 ]

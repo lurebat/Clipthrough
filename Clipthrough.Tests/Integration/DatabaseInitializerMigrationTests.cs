@@ -69,7 +69,7 @@ public sealed class DatabaseInitializerMigrationTests
                      "idx_clips_oldest_order",
                      "idx_clips_paste_order",
                      "idx_clips_size_order",
-                     "idx_clips_alpha_order",
+                     "idx_clips_alpha_order_ci",
                  })
         {
             Assert.Equal(
@@ -125,14 +125,14 @@ public sealed class DatabaseInitializerMigrationTests
         using var scope = new TemporaryDatabaseScope();
         await scope.DatabaseInitializer.InitializeAsync();
 
-        Execute(scope, "DROP INDEX idx_clips_alpha_order;");
-        Assert.Null(ScalarString(scope, "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_clips_alpha_order';"));
+        Execute(scope, "DROP INDEX idx_clips_alpha_order_ci;");
+        Assert.Null(ScalarString(scope, "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_clips_alpha_order_ci';"));
 
         await scope.DatabaseInitializer.InitializeAsync();
 
         Assert.Equal(
-            "idx_clips_alpha_order",
-            ScalarString(scope, "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_clips_alpha_order';"));
+            "idx_clips_alpha_order_ci",
+            ScalarString(scope, "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_clips_alpha_order_ci';"));
     }
 
     /// <summary>

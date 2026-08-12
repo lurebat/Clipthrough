@@ -1782,11 +1782,10 @@ public sealed class ClipStoreServiceTests
             shared + "\u00e9",
             shared + "Z",
 
-            // A BINARY/NOCASE inversion: under BINARY "Beta" precedes "apple"
-            // (uppercase sorts first), under NOCASE it does not. If anyone
-            // gives content a different collation, the prefix term and the
-            // tie-break term would stop agreeing, and this pair is what
-            // notices.
+            // "Beta" and "apple" invert between BINARY and NOCASE. The oracle
+            // here compares whole content under NOCASE, so this pair fails the
+            // moment the prefix term and the tie-break term stop agreeing on a
+            // collation - which is exactly when the index stops serving them.
             "Beta",
             "apple",
         };
@@ -1820,7 +1819,7 @@ public sealed class ClipStoreServiceTests
             command.CommandText = """
                 SELECT c.id
                 FROM clips c
-                ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, c.content ASC, c.id ASC;
+                ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, c.content COLLATE NOCASE ASC, c.id ASC;
                 """;
             await using var reader = await command.ExecuteReaderAsync();
             while (await reader.ReadAsync())
@@ -1879,7 +1878,42 @@ public sealed class ClipStoreServiceTests
 
         var text = await ExplainOrderPlanAsync(scope, ClipSortOption.Alphabetical);
 
-        Assert.Contains("idx_clips_alpha_order", text, StringComparison.Ordinal);
+        Assert.Contains("idx_clips_alpha_order_ci", text, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// "Alphabetical" has to mean what a reader of a dictionary means by it.
+    /// Under SQLite's default BINARY collation it did not: uppercase codepoints
+    /// all precede lowercase ones, so every capitalised clip was banished ahead
+    /// of every lowercase one and "apple" sorted after "Zebra". The equivalence
+    /// test above cannot catch this - its oracle is the same clause - so assert
+    /// the user-visible order directly.
+    /// </summary>
+    [Fact]
+    public async Task Alphabetical_IgnoresCaseSoCapitalisedClipsAreNotBanishedToTheFront()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        foreach (var text in new[] { "Zebra", "apple", "Banana", "cherry" })
+        {
+            await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = text,
+                ContentBytes = Encoding.UTF8.GetBytes(text),
+            });
+        }
+
+        var result = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters
+        {
+            SortOption = ClipSortOption.Alphabetical,
+        });
+
+        Assert.Equal(
+            new[] { "apple", "Banana", "cherry", "Zebra" },
+            result.Items.Select(item => item.Content).ToArray());
     }
 
     private static async Task<string> ExplainOrderPlanAsync(TemporaryDatabaseScope scope, ClipSortOption sortOption)
@@ -1919,18 +1953,22 @@ public sealed class ClipStoreServiceTests
         {
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
-            command.CommandText = "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_clips_alpha_order';";
+            command.CommandText = "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_clips_alpha_order_ci';";
             indexSql = await command.ExecuteScalarAsync() as string;
         }
 
-        Assert.False(string.IsNullOrEmpty(indexSql), "idx_clips_alpha_order is missing.");
+        Assert.False(string.IsNullOrEmpty(indexSql), "idx_clips_alpha_order_ci is missing.");
 
         static string Normalise(string sql) => sql
             .Replace(" ", string.Empty, StringComparison.Ordinal)
             .Replace("c.", string.Empty, StringComparison.Ordinal);
 
-        var indexed = System.Text.RegularExpressions.Regex.Match(Normalise(indexSql!), @"substr\([^)]*\)");
+        // The collation is part of the expression for this purpose: an index is
+        // only usable by an ORDER BY that compares with the same one, so a
+        // clause that dropped COLLATE NOCASE would silently stop being served.
+        var indexed = System.Text.RegularExpressions.Regex.Match(Normalise(indexSql!), @"substr\([^)]*\)(COLLATE\w+)?");
         Assert.True(indexed.Success, $"No substr expression in the index: {indexSql}");
+        Assert.Contains("COLLATE", indexed.Value, StringComparison.Ordinal);
 
         var clause = Normalise(ClipStoreService.BuildOrderClause(ClipSortOption.Alphabetical));
         Assert.Contains(indexed.Value, clause, StringComparison.Ordinal);

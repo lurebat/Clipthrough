@@ -147,6 +147,10 @@ public sealed class DatabaseInitializer
         -- three scalar indexes -> 0.2ms with all four, at 20k clips).
         DROP INDEX IF EXISTS idx_clips_paste_count;
         DROP INDEX IF EXISTS idx_clips_byte_size;
+        -- Superseded by the case-insensitive index below. A redefinition cannot
+        -- reuse the name: CREATE INDEX IF NOT EXISTS would see the old one and
+        -- silently keep it, leaving the clause unservable.
+        DROP INDEX IF EXISTS idx_clips_alpha_order;
 
         CREATE INDEX IF NOT EXISTS idx_clips_default_order ON clips(
             (pinned_at IS NULL),
@@ -177,10 +181,16 @@ public sealed class DatabaseInitializer
         -- costs +2.6% and orders just as well, because BuildOrderClause's
         -- Alphabetical arm leads with this same expression and falls back to
         -- the full content only to break prefix ties.
-        CREATE INDEX IF NOT EXISTS idx_clips_alpha_order ON clips(
+        --
+        -- NOCASE because users read "Alphabetical" as a dictionary order, and
+        -- BINARY puts every capitalised word ahead of every lowercase one
+        -- ("Zebra" before "apple"). The collation has to be spelled here as
+        -- well as in the clause: an index is only usable by an ORDER BY that
+        -- compares with the same collation.
+        CREATE INDEX IF NOT EXISTS idx_clips_alpha_order_ci ON clips(
             (pinned_at IS NULL),
             pinned_at DESC,
-            substr(content, 1, 64) ASC,
+            substr(content, 1, 64) COLLATE NOCASE ASC,
             id ASC
         );
         """;
