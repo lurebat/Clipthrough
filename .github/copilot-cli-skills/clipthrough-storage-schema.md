@@ -64,13 +64,31 @@ All `IClipStoreService` calls from ViewModel command handlers must be wrapped in
 - `idx_clips_content_type`.
 - `idx_clips_is_favorite` — partial, `WHERE is_favorite = 1`.
 - `idx_clips_is_sensitive` — partial, `WHERE is_sensitive = 1`.
-- `idx_clips_default_order` — expression index on `(pinned_at IS NULL, pinned_at DESC, COALESCE(last_copied_at, captured_at) DESC, id DESC)`. **This is the primary list-view ordering**; keep queries aligned with it.
-- `idx_clips_paste_count` — `(paste_count DESC, id DESC)` for MostUsed sort.
-- `idx_clips_byte_size` — `(byte_size DESC, id DESC)` for size sort.
 - `idx_clips_pinned_at` — partial, pinned-only.
 - `idx_clips_ocr_status` — partial, non-null only.
 - `idx_clips_source_clip_id` — partial, non-null only.
 - `idx_clips_embedding_status` — partial, non-null only.
+
+#### Sort-order indexes
+
+**Maintain these as a complete set.** There is one per
+`ClipSortOption` arm of `BuildOrderClause`, and every one of them starts with
+the same `(pinned_at IS NULL), pinned_at DESC` prefix, because every ORDER BY
+does. An index without that prefix can never satisfy a list query, which is why
+the old `idx_clips_paste_count` and `idx_clips_byte_size` are now dropped by the
+schema DDL rather than kept.
+
+Do not add a sort without adding its index. Partial coverage is *worse than
+none*: SQLite still picks some other pinned-prefixed index to satisfy the
+prefix, then fetches each row by rowid in an order uncorrelated with the table.
+Measured at 20k clips, Alphabetical went 118 ms (no new indexes) -> 206 ms
+(three of the four) -> 0.2 ms (all four).
+
+- `idx_clips_default_order` — `(pinned_at IS NULL, pinned_at DESC, COALESCE(last_copied_at, captured_at) DESC, id DESC)`. **The primary list-view ordering**; serves `MostRecent` and `BestMatching`.
+- `idx_clips_oldest_order` — same, ASC. Serves `OldestFirst`.
+- `idx_clips_paste_order` — `(..., paste_count DESC, id DESC)`. Serves `MostPasted`.
+- `idx_clips_size_order` — `(..., byte_size DESC, id DESC)`. Serves `LargestFirst`.
+- `idx_clips_alpha_order` — `(..., substr(content, 1, 64) ASC, id ASC)`. Serves `Alphabetical`, whose ORDER BY leads with the same `substr` expression and then falls back to full `content` to break prefix ties. That is order-equivalent to ordering by `content` alone, because when two prefixes differ the first differing character is inside the prefix. Indexing full `content` instead would copy the whole text corpus into the index (+71% database on a 2 KB-average fixture); the prefix costs 2.6%.
 
 ### `clips_fts` (FTS5)
 
