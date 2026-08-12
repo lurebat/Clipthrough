@@ -1,13 +1,16 @@
 # Clipthrough Remote API skill
 
-When the user wants to inspect, capture, delete, or transform Clipthrough clips programmatically and Clipthrough is already running with the Remote API enabled, use this HTTP interface instead of trying to automate the UI.
+When the user wants to inspect, capture, or delete Clipthrough clips programmatically and Clipthrough is already running with the Remote API enabled, use this HTTP interface instead of trying to automate the UI.
 
 ## When to use it
 
 - Read clipboard history from a local tool or agent.
 - Capture a new **text** clip without touching the desktop UI.
-- Apply a built-in transform, C# script, or AI prompt to an existing clip.
 - Delete a clip by id.
+
+The API is **read + capture only**. It deliberately exposes no way to run
+scripts, invoke AI prompts, or otherwise transform a clip — see the note at
+the end of *Endpoints*. Use the desktop UI for transforms.
 
 Do **not** assume the API can yet create image/file/rich-text clips directly. `POST /clips` is text-only today.
 
@@ -15,7 +18,7 @@ Do **not** assume the API can yet create image/file/rich-text clips directly. `P
 
 - Default base URL: `http://127.0.0.1:53117`
 - The bind address and port are configurable in **Settings -> Remote API**
-- Swagger/OpenAPI:
+- Swagger/OpenAPI (**both require the bearer token**):
   - `GET /docs` -> Swagger UI
   - `GET /openapi/v1.json` -> OpenAPI JSON
 - Health probe:
@@ -23,8 +26,9 @@ Do **not** assume the API can yet create image/file/rich-text clips directly. `P
 
 ## Authentication
 
-- `GET /health`, `GET /docs`, and `GET /openapi/v1.json` are public.
-- Every other endpoint requires:
+- `GET /health` is the **only** unauthenticated endpoint.
+- Every other endpoint — including `GET /docs` and `GET /openapi/v1.json`,
+  which expose the API surface — requires:
 
 ```http
 Authorization: Bearer <TOKEN>
@@ -86,76 +90,16 @@ Delete a clip by id.
 
 - Returns `204 No Content`
 
-### `POST /clips/{id}/transform`
+### `POST /clips/{id}/transform` — **removed, do not use**
 
-Transform an existing clip and capture the transformed output as a **new plain-text clip**.
+This endpoint no longer exists and returns **404**. It was removed
+deliberately: the `kind=script` and `kind=ai` branches were remote
+code-execution surfaces, and `kind=builtin` was dropped with them so the
+remote API exposes only read + capture
+(`RemoteControlService.cs:238`).
 
-Request body depends on `kind`:
-
-1. Built-in transform
-
-```json
-{
-  "kind": "builtin",
-  "name": "UpperCase"
-}
-```
-
-Supported built-in names currently match the `TextTransformation` enum:
-
-- `None`
-- `UpperCase`
-- `LowerCase`
-- `TitleCase`
-- `SentenceCase`
-- `UpperCamelCase`
-- `LowerCamelCase`
-- `FromCamelCase`
-- `TrimWhitespace`
-- `CollapseWhitespace`
-- `TabsToSpaces`
-- `SpacesToTabs`
-- `NormalizeEol`
-- `LinesToJsonArray`
-- `JoinWithDelimiter`
-- `SortLines`
-- `ReverseLines`
-- `RemoveEmptyLines`
-- `RemoveDuplicateLines`
-
-2. Script transform
-
-```json
-{
-  "kind": "script",
-  "code": "Input.ToUpperInvariant()"
-}
-```
-
-Notes:
-
-- uses Clipthrough's Roslyn-based scripting engine
-- `Input` is in scope as the source string
-
-3. AI transform
-
-```json
-{
-  "kind": "ai",
-  "prompt": "Summarize this clip in one sentence."
-}
-```
-
-Notes:
-
-- requires AI settings to be configured in Clipthrough
-
-Behavior notes:
-
-- if `id` is missing, returns `404`
-- if `kind` is missing, returns `400 { "error": "kind required" }`
-- transform exceptions return a generic problem response with the exception message
-- unknown built-in names currently fall back to `TextTransformation.None`, which means the source text is copied through unchanged
+Do not reintroduce it, and do not tell the user to call it. Apply transforms
+through the desktop UI instead — see `clipthrough-transforms.md`.
 
 ## Clip DTO
 
@@ -207,8 +151,7 @@ curl -H "Authorization: Bearer $TOKEN" \
   -d '{"text":"hello","sourceApp":"copilot-cli"}' \
   http://127.0.0.1:53117/clips
 
+# /docs and /openapi need the token too -- without it they return 401
 curl -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"kind":"builtin","name":"UpperCase"}' \
-  http://127.0.0.1:53117/clips/42/transform
+  http://127.0.0.1:53117/openapi/v1.json
 ```
