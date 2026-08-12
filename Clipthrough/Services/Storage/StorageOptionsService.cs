@@ -215,8 +215,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
         {
             Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
 
-            // Checkpoint the source WAL so the raw file copy is consistent.
-            TryCheckpointLegacyDatabase(oldPath, previous.DatabasePassword);
+            // Release pooled handles on the source before reading it.
             SqliteConnection.ClearAllPools();
 
             // If the destination already exists, keep a timestamped safety copy.
@@ -229,8 +228,11 @@ public sealed class StorageOptionsService : IStorageOptionsService
             }
 
             // Copy source → temp (in the destination directory for same-volume rename).
+            // Read through SQLite, not the file system: this copy becomes the
+            // database and the source is deleted immediately afterwards, so a
+            // copy missing WAL-resident commits would lose them permanently.
             var tempPath = Path.Combine(Path.GetDirectoryName(newPath)!, Path.GetFileName(newPath) + ".moving-" + Guid.NewGuid().ToString("N"));
-            File.Copy(oldPath, tempPath, overwrite: false);
+            SqliteDatabaseCopier.CopyDatabase(oldPath, previous.DatabasePassword, tempPath);
 
             try
             {
@@ -281,13 +283,13 @@ public sealed class StorageOptionsService : IStorageOptionsService
     /// Sequence:
     ///   1. Verify current password opens the DB.
     ///   2. Enter maintenance scope (stop workers, clear pool).
-    ///   3. Checkpoint source (WAL → main file).
-    ///   4. Copy DB to a temp file.
-    ///   5. Apply PRAGMA rekey to the copy.
-    ///   6. Verify the copy opens with the new password.
-    ///   7. Atomic rename: temp → live DB path (DB file is the source of truth).
-    ///   8. Update Current (key for the session + workers restarted on scope dispose).
-    ///   9. Persist storage.json with the new password.
+    ///   3. Copy the DB to a temp file through SQLite's online backup API, so
+    ///      commits still in the WAL travel with it.
+    ///   4. Apply PRAGMA rekey to the copy.
+    ///   5. Verify the copy opens with the new password.
+    ///   6. Atomic rename: temp → live DB path (DB file is the source of truth).
+    ///   7. Update Current (key for the session + workers restarted on scope dispose).
+    ///   8. Persist storage.json with the new password.
     ///
     /// If any step fails the original DB is untouched; the temp copy is cleaned up.
     /// </summary>
@@ -322,17 +324,17 @@ public sealed class StorageOptionsService : IStorageOptionsService
             // Step 2: Enter maintenance scope (stop workers, clear pool).
             await using var scope = await EnterMaintenanceScopeAsync();
 
-            // Step 3: Checkpoint so the WAL is merged into the main file and the raw copy is consistent.
-            TryCheckpointLegacyDatabase(dbPath, currentPassword);
+            // Step 3: Copy the DB to a temp file. This copy is rekeyed and then
+            // renamed over the live database, so it has to be complete: a raw
+            // file copy taken after a busy checkpoint is malformed, and here
+            // that malformed file would become the user's database.
             SqliteConnection.ClearAllPools();
-
-            // Step 4: Copy DB to a temp file.
             var tempPath = dbPath + ".rekeying-" + Guid.NewGuid().ToString("N");
-            File.Copy(dbPath, tempPath, overwrite: false);
+            SqliteDatabaseCopier.CopyDatabase(dbPath, currentPassword, tempPath);
 
             try
             {
-                // Step 5: Rekey the copy with the new password.
+                // Step 4: Rekey the copy with the new password.
                 var tempOptions = current with
                 {
                     DatabasePath = tempPath,
@@ -350,14 +352,14 @@ public sealed class StorageOptionsService : IStorageOptionsService
                 // Flush pooled connections to the temp file before verifying.
                 SqliteConnection.ClearAllPools();
 
-                // Step 6: Verify the rekeyed copy opens with the new password.
+                // Step 5: Verify the rekeyed copy opens with the new password.
                 if (!CanOpenWithPassword(tempPath, newPassword ?? string.Empty))
                 {
                     throw new InvalidOperationException(
                         "Rekey verification failed: the rekeyed copy does not open with the new password.");
                 }
 
-                // Step 7: Atomic swap — the rekeyed copy (verified in step 6 to
+                // Step 6: Atomic swap — the rekeyed copy (verified in step 5 to
                 // open with the new password) becomes the live database. Swap the
                 // file BEFORE persisting the password: the DB file is the source of
                 // truth for which key is required. A crash here leaves a freshly
@@ -375,11 +377,11 @@ public sealed class StorageOptionsService : IStorageOptionsService
                     RememberPassword = rememberNewPassword,
                 }).Normalize();
 
-                // Step 8: Update in-memory state so the running session (and the
+                // Step 7: Update in-memory state so the running session (and the
                 // workers restarted on scope dispose) use the new key.
                 Current = updated;
 
-                // Step 9: Persist the remembered password last. If this throws the
+                // Step 8: Persist the remembered password last. If this throws the
                 // DB is already rekeyed and Current is correct for this session.
                 await SaveToDiskAsync(updated, cancellationToken);
 
@@ -560,18 +562,19 @@ public sealed class StorageOptionsService : IStorageOptionsService
     /// pending WAL frames (the <c>-shm</c> file in particular is a per-process
     /// shared-memory snapshot and is never safe to copy verbatim).
     ///
-    /// The safe sequence is:
-    ///   1. Open the legacy database with its password.
-    ///   2. PRAGMA wal_checkpoint(TRUNCATE) to flush every pending frame into the
-    ///      main <c>.db</c> file, then close the connection so the OS releases
-    ///      its locks and the <c>-shm</c> file becomes stale.
-    ///   3. Copy only the <c>.db</c> file. The destination starts with a fresh
-    ///      WAL on next open.
+    /// Checkpoint-then-copy replaced that, and was still not safe:
+    /// <c>PRAGMA wal_checkpoint(TRUNCATE)</c> reports failure in its result row
+    /// instead of throwing, so a reader holding an older snapshot leaves frames
+    /// in the WAL and the copied <c>.db</c> opens as
+    /// "database disk image is malformed".
     ///
-    /// If we don't have a working password we skip the migration entirely
-    /// rather than risk a torn copy — the legacy file stays in place and the
-    /// user can re-run the migration later (once the password prompt has
-    /// completed) via <see cref="ImportLegacyDatabaseAsync"/>.
+    /// The migration now reads the legacy database through SQLite's online
+    /// backup API, which includes WAL-resident commits by construction. If it
+    /// cannot be opened — encrypted with a password we do not have yet, or
+    /// locked — we skip the migration entirely rather than risk a torn copy.
+    /// The legacy file stays in place and the user can re-run the migration
+    /// later (once the password prompt has completed) via
+    /// <see cref="ImportLegacyDatabaseAsync"/>.
     /// </summary>
     internal static void TryCopyLegacyDatabase(string legacyPath, string migratedPath, string? password)
     {
@@ -584,48 +587,14 @@ public sealed class StorageOptionsService : IStorageOptionsService
         {
             Directory.CreateDirectory(Path.GetDirectoryName(migratedPath)!);
 
-            // Best-effort checkpoint so the legacy WAL is merged into the .db
-            // file. We only attempt this when we have the password — without it
-            // SQLCipher can't decrypt the pages enough to apply them.
-            TryCheckpointLegacyDatabase(legacyPath, password);
-
-            File.Copy(legacyPath, migratedPath);
+            SqliteDatabaseCopier.CopyDatabase(legacyPath, password, migratedPath);
             Trace.TraceInformation($"Copied legacy database from '{legacyPath}' to uninstall-safe path '{migratedPath}'.");
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException)
         {
-            Trace.TraceWarning($"Legacy database migration failed: {ex.Message}");
-        }
-    }
-
-    internal static void TryCheckpointLegacyDatabase(string legacyPath, string? password)
-    {
-        try
-        {
-            var builder = new SqliteConnectionStringBuilder
-            {
-                DataSource = legacyPath,
-                Mode = SqliteOpenMode.ReadWrite,
-            };
-            if (!string.IsNullOrEmpty(password))
-            {
-                builder.Password = password;
-            }
-            using var connection = new SqliteConnection(builder.ToString());
-            connection.StateChange += ApplyBusyTimeoutOnOpen;
-            connection.Open();
-            using var command = connection.CreateCommand();
-            command.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
-            command.ExecuteNonQuery();
-        }
-        catch (Exception ex) when (ex is SqliteException or IOException)
-        {
-            // Encrypted DB without a password, locked file, or schema-level
-            // failure. We accept that any uncheckpointed WAL frames will not
-            // make it into the migrated copy — that's strictly better than
-            // producing a structurally corrupt destination, which is what the
-            // previous raw .db + -wal + -shm copy did.
-            Trace.TraceWarning($"Legacy database checkpoint failed; copying raw .db without merging WAL: {ex.Message}");
+            // Leaving the legacy database where it is keeps it readable. Writing
+            // a destination we could not read in full would not.
+            Trace.TraceWarning($"Legacy database migration failed; leaving '{legacyPath}' in place: {ex.Message}");
         }
     }
 

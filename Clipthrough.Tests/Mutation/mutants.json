@@ -246,5 +246,45 @@
     "find": "                    var stash = $\"{live}.before-restore-{stamp}\";\n                    File.Move(live, stash);\n                    stashed.Add((live, stash));",
     "replace": "                    var stash = $\"{live}.before-restore-{stamp}\";\n                    File.Delete(live);\n                    stashed.Add((live, stash));",
     "filter": "DatabaseBackupServiceTests"
+  },
+  {
+    "id": "backup-copies-the-file-instead-of-the-database",
+    "why": "Reverts the daily backup to a raw file copy. A checkpoint that cannot finish leaves committed frames in the WAL, and the copied .db then opens as 'database disk image is malformed' - an unopenable backup nobody notices until they need it.",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "filter": "DatabaseBackupServiceTests",
+    "find": "                () => SqliteDatabaseCopier.CopyDatabase(dbPath, _storageOptionsService.Current.DatabasePassword, tempPath),",
+    "replace": "                () => File.Copy(dbPath, tempPath, overwrite: true),"
+  },
+  {
+    "id": "move-copies-the-file-instead-of-the-database",
+    "why": "Reverts the database path move to a raw file copy. The source is deleted immediately after the rename, so anything the copy missed is gone.",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "filter": "StorageOptionsServicePhase2Tests",
+    "find": "            SqliteDatabaseCopier.CopyDatabase(oldPath, previous.DatabasePassword, tempPath);",
+    "replace": "            File.Copy(oldPath, tempPath, overwrite: false);"
+  },
+  {
+    "id": "database-copy-loses-the-encryption-key",
+    "why": "Writes the destination unencrypted. The copy would then be readable by anyone with the file, and unreadable by the app that expects the live key.",
+    "file": "Clipthrough/Services/Storage/SqliteDatabaseCopier.cs",
+    "filter": "DatabaseBackupServiceTests",
+    "find": "            using var destination = OpenConnection(destinationPath, password);",
+    "replace": "            using var destination = OpenConnection(destinationPath, null);"
+  },
+  {
+    "id": "database-copy-keeps-the-files-open",
+    "why": "Leaves the connections in the pool, so the copied file is still held open and the caller's move or delete fails.",
+    "file": "Clipthrough/Services/Storage/SqliteDatabaseCopier.cs",
+    "filter": "DatabaseBackupServiceTests",
+    "find": "            Pooling = false,",
+    "replace": "            Pooling = true,"
+  },
+  {
+    "id": "database-copy-reuses-an-unopenable-destination",
+    "why": "A truncated or differently-keyed leftover file at the destination cannot be opened, so failing to clear it first blocks every future copy to that path - backups stop happening and nothing says so.",
+    "file": "Clipthrough/Services/Storage/SqliteDatabaseCopier.cs",
+    "filter": "DatabaseBackupServiceTests",
+    "find": "        // and would block every future copy to this path, so clear it.\n        File.Delete(destinationPath);",
+    "replace": "        // and would block every future copy to this path, so clear it.\n        _ = destinationPath;"
   }
 ]

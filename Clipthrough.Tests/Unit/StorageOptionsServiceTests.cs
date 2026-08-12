@@ -372,6 +372,127 @@ public sealed class StorageOptionsServicePhase2Tests : IDisposable
         cmd.ExecuteScalar();
     }
 
+    /// <summary>
+    /// Leaves <paramref name="dbPath"/> in the state an unclean shutdown leaves
+    /// behind: a main .db file plus a -wal holding committed frames that were
+    /// never checkpointed into it, and no process holding either open. SQLite
+    /// replays the WAL on the next open, so the database still reads correctly -
+    /// but anything that copies only the .db file loses those commits.
+    ///
+    /// It is built by copying the two files out from under a live connection,
+    /// because a clean close checkpoints and removes the WAL.
+    /// </summary>
+    private static async Task CreateEncryptedDbWithHotWal(string dbPath, string password, string value)
+    {
+        var staging = Path.Combine(Path.GetTempPath(), "ct-hotwal-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(staging);
+        var stagedDb = Path.Combine(staging, "staged.db");
+
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = stagedDb,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Password = password,
+            Pooling = false,
+        };
+
+        await using (var conn = new SqliteConnection(builder.ToString()))
+        {
+            await conn.OpenAsync();
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "PRAGMA journal_mode = WAL; " +
+                                  "PRAGMA wal_autocheckpoint = 0; " +
+                                  "CREATE TABLE marker (v TEXT); " +
+                                  "INSERT INTO marker VALUES (@v);";
+                cmd.Parameters.AddWithValue("@v", value);
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            // Snapshot both files while the connection is still open: a clean
+            // close would fold the WAL into the main file and destroy the case.
+            Assert.True(File.Exists(stagedDb + "-wal"), "Setup failed to produce a WAL.");
+            File.Copy(stagedDb, dbPath, overwrite: true);
+            File.Copy(stagedDb + "-wal", dbPath + "-wal", overwrite: true);
+        }
+
+        try { Directory.Delete(staging, recursive: true); } catch { }
+
+        // The fixture is only meaningful if the row lives in the WAL and not in
+        // the main file, so prove that before any test relies on it.
+        var mainOnly = Path.Combine(Path.GetDirectoryName(dbPath)!, "main-only-probe.db");
+        File.Copy(dbPath, mainOnly, overwrite: true);
+        Assert.Null(TryReadMarker(mainOnly, password));
+        File.Delete(mainOnly);
+    }
+
+    /// <summary>
+    /// Reads the single marker row, or returns null when the database cannot be
+    /// opened or has no such table - which is what a torn copy looks like from
+    /// the outside.
+    /// </summary>
+    private static string? TryReadMarker(string dbPath, string password)
+    {
+        try
+        {
+            var builder = new SqliteConnectionStringBuilder
+            {
+                DataSource = dbPath,
+                Mode = SqliteOpenMode.ReadWrite,
+                Password = password,
+                Pooling = false,
+            };
+            using var conn = new SqliteConnection(builder.ToString());
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT v FROM marker LIMIT 1;";
+            return cmd.ExecuteScalar() as string;
+        }
+        catch (SqliteException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Re-encryption starting from a database left with a hot WAL by an unclean
+    /// shutdown must end with those commits still present. The rekeyed copy is
+    /// renamed over the live database and the original is deleted, so anything
+    /// dropped along the way is lost for good.
+    ///
+    /// Note this passes with a raw file copy too, because step 1's verification
+    /// probe opens and cleanly closes the database and so checkpoints the WAL
+    /// before the copy runs. That ordering is what makes the rekey path safe,
+    /// not the copy method - reading through SQLite here is defence in depth
+    /// and consistency with the move and backup paths, which are reachable.
+    /// </summary>
+    [Fact]
+    public async Task RekeyAsync_DatabaseWithAHotWal_KeepsTheCommittedRows()
+    {
+        await CreateEncryptedDbWithHotWal(_dbPath, "old-pass", "survives-rekey");
+        var service = NewService(rememberPassword: true, password: "old-pass");
+
+        await service.RekeyAsync("old-pass", "new-pass", rememberNewPassword: true);
+
+        Assert.Equal("survives-rekey", TryReadMarker(_dbPath, "new-pass"));
+    }
+
+    /// <summary>
+    /// The same hazard on the database path move, which deletes the source as
+    /// soon as the copy is renamed into place.
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_MovingADatabaseWithAHotWal_KeepsTheCommittedRows()
+    {
+        await CreateEncryptedDbWithHotWal(_dbPath, "pass", "survives-move");
+        var service = NewService(rememberPassword: true, password: "pass");
+        var newPath = Path.Combine(_tempRoot, "moved", "clipthrough.db");
+
+        await service.SaveAsync(service.Current with { DatabasePath = newPath });
+
+        Assert.Equal("survives-move", TryReadMarker(newPath, "pass"));
+    }
+
     // ─── U5: Atomic rekey ─────────────────────────────────────────────────────
 
     /// <summary>

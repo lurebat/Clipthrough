@@ -71,14 +71,13 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         {
             Directory.CreateDirectory(backupDir);
 
-            // Flush WAL into the main file first so the copy is consistent
-            // without us needing to know which .db-wal frames are committed.
-            // TRUNCATE (vs PASSIVE) ensures the WAL is fully flushed and
-            // then zeroed so the copy starts with a clean state.
-            await Task.Run(() => CheckpointSafely(dbPath, _storageOptionsService.Current.DatabasePassword), cancellationToken).ConfigureAwait(false);
-
+            // Read the snapshot through SQLite rather than checkpointing and
+            // copying the file, so commits still living in the WAL are included
+            // even while other connections are reading or writing.
             var tempPath = todayPath + ".tmp";
-            File.Copy(dbPath, tempPath, overwrite: true);
+            await Task.Run(
+                () => SqliteDatabaseCopier.CopyDatabase(dbPath, _storageOptionsService.Current.DatabasePassword, tempPath),
+                cancellationToken).ConfigureAwait(false);
             File.Move(tempPath, todayPath, overwrite: true);
             Trace.TraceInformation($"Database backup written: {todayPath}");
 
@@ -87,39 +86,6 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException)
         {
             Trace.TraceWarning($"Database backup failed: {ex.Message}");
-        }
-    }
-
-    private static void CheckpointSafely(string dbPath, string? password)
-    {
-        try
-        {
-            var builder = new SqliteConnectionStringBuilder
-            {
-                DataSource = dbPath,
-                Mode = SqliteOpenMode.ReadWrite,
-            };
-            if (!string.IsNullOrEmpty(password))
-            {
-                builder.Password = password;
-            }
-
-            using var connection = new SqliteConnection(builder.ToString());
-            connection.StateChange += ApplyBusyTimeoutOnOpen;
-            connection.Open();
-            using var cmd = connection.CreateCommand();
-            // TRUNCATE: flushes all WAL frames to the main file AND zeros the WAL
-            // so a raw file copy captures a fully-consistent snapshot. The previous
-            // PASSIVE mode only checkpointed opportunistically and left WAL frames
-            // behind if any reader held the -wal file open.
-            cmd.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
-            cmd.ExecuteNonQuery();
-        }
-        catch (Exception ex) when (ex is SqliteException or IOException)
-        {
-            // Non-fatal: copy ahead without the checkpoint. The snapshot will
-            // still be a valid (if slightly stale) SQLite file.
-            Trace.TraceWarning($"Backup checkpoint failed; copying without checkpoint: {ex.Message}");
         }
     }
 

@@ -106,6 +106,27 @@ public sealed class DatabaseBackupServiceTests : IDisposable
         SqliteConnection.ClearAllPools();
     }
 
+    private static string[] ReadAllRows(string dbPath)
+    {
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = dbPath,
+            Mode = SqliteOpenMode.ReadOnly,
+        };
+        using var conn = new SqliteConnection(builder.ToString());
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT v FROM clips ORDER BY rowid;";
+        using var reader = cmd.ExecuteReader();
+        var rows = new System.Collections.Generic.List<string>();
+        while (reader.Read())
+        {
+            rows.Add(reader.GetString(0));
+        }
+
+        return rows.ToArray();
+    }
+
     private static string? ReadSingleRow(string dbPath)
     {
         var builder = new SqliteConnectionStringBuilder
@@ -199,6 +220,133 @@ public sealed class DatabaseBackupServiceTests : IDisposable
         var backupPath = Directory.GetFiles(_backupDir, "clipthrough-*.db").Single();
         var row = ReadSingleRow(backupPath);
         Assert.Equal("wal-row", row);
+    }
+
+    /// <summary>
+    /// A concurrent reader pinning an older snapshot stops a TRUNCATE checkpoint
+    /// from finishing. It reports that by returning <c>busy = 1</c> in its result
+    /// row rather than by throwing, so the service used to copy the main .db file
+    /// anyway - producing a backup whose header disagrees with its pages, which
+    /// fails to open at all with "database disk image is malformed". Silently
+    /// writing an unopenable backup is the worst possible outcome here, because
+    /// it is only discovered on the day someone needs it.
+    /// </summary>
+    [Fact]
+    public async Task EnsureDailyBackup_ReaderPinningAnOlderSnapshot_StillWritesAReadableBackup()
+    {
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = _dbPath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+        };
+
+        await using var writer = new SqliteConnection(builder.ToString());
+        await writer.OpenAsync();
+        await using (var cmd = writer.CreateCommand())
+        {
+            cmd.CommandText = "PRAGMA journal_mode = WAL; " +
+                              "PRAGMA wal_autocheckpoint = 0; " +
+                              "CREATE TABLE clips (v TEXT); " +
+                              "INSERT INTO clips VALUES ('first');";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Open read transaction: everything committed after this point is
+        // pinned in the WAL and cannot be checkpointed into the main file.
+        await using var reader = new SqliteConnection(builder.ToString());
+        await reader.OpenAsync();
+        await using (var readerCmd = reader.CreateCommand())
+        {
+            readerCmd.CommandText = "BEGIN; SELECT count(*) FROM clips;";
+            await readerCmd.ExecuteScalarAsync();
+        }
+
+        await using (var cmd = writer.CreateCommand())
+        {
+            cmd.CommandText = "INSERT INTO clips VALUES ('committed-past-the-reader');";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var service = NewService();
+        await service.EnsureDailyBackupAsync();
+
+        var backupPath = Assert.Single(Directory.GetFiles(_backupDir, "clipthrough-*.db"));
+        Assert.Equal(new[] { "first", "committed-past-the-reader" }, ReadAllRows(backupPath));
+    }
+
+    /// <summary>
+    /// The same hazard on an encrypted database: the copy must stay decryptable
+    /// with the live password and must carry the WAL-resident commit.
+    /// </summary>
+    [Fact]
+    public async Task EnsureDailyBackup_EncryptedDatabaseWithWalResidentCommit_IsReadableWithTheLivePassword()
+    {
+        const string password = "correct horse battery staple";
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = _dbPath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Password = password,
+        };
+
+        await using var writer = new SqliteConnection(builder.ToString());
+        await writer.OpenAsync();
+        await using (var cmd = writer.CreateCommand())
+        {
+            cmd.CommandText = "PRAGMA journal_mode = WAL; " +
+                              "PRAGMA wal_autocheckpoint = 0; " +
+                              "CREATE TABLE clips (v TEXT); " +
+                              "INSERT INTO clips VALUES ('encrypted-wal-row');";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var service = NewEncryptedService(password);
+        await service.EnsureDailyBackupAsync();
+
+        var backupPath = Assert.Single(Directory.GetFiles(_backupDir, "clipthrough-*.db"));
+        Assert.Equal("encrypted-wal-row", ReadSingleRow(backupPath, password));
+    }
+
+    /// <summary>
+    /// A backup is a single self-contained file. Leaving a -wal or -shm sidecar
+    /// next to it means the file on its own is not the snapshot, and restore
+    /// copies only the file.
+    /// </summary>
+    [Fact]
+    public async Task EnsureDailyBackup_LeavesNoSidecarsBesideTheBackup()
+    {
+        await CreateDbWithRow(_dbPath, "seed");
+
+        var service = NewService();
+        await service.EnsureDailyBackupAsync();
+
+        var backupPath = Assert.Single(Directory.GetFiles(_backupDir, "clipthrough-*.db"));
+        Assert.False(File.Exists(backupPath + "-wal"), "Backup left a -wal sidecar behind.");
+        Assert.False(File.Exists(backupPath + "-shm"), "Backup left a -shm sidecar behind.");
+        Assert.Empty(Directory.GetFiles(_backupDir, "*.tmp"));
+    }
+
+    /// <summary>
+    /// A .tmp left behind by a crash mid-backup is not a usable SQLite file.
+    /// Opening it fails, so unless it is cleared first it blocks not just this
+    /// backup but every future one to the same path - the user quietly stops
+    /// having backups at all.
+    /// </summary>
+    [Fact]
+    public async Task EnsureDailyBackup_UnusableTempFromAPriorCrash_DoesNotBlockTodaysBackup()
+    {
+        await CreateDbWithRow(_dbPath, "current");
+
+        Directory.CreateDirectory(_backupDir);
+        var stamp = DateTime.UtcNow.ToString("yyyyMMdd");
+        var stalePath = Path.Combine(_backupDir, $"clipthrough-{stamp}.db.tmp");
+        await File.WriteAllBytesAsync(stalePath, new byte[] { 0x53, 0x51, 0x4C, 0x69, 0x74, 0x65, 0xFF, 0x00, 0x11 });
+
+        var service = NewService();
+        await service.EnsureDailyBackupAsync();
+
+        var backupPath = Assert.Single(Directory.GetFiles(_backupDir, "clipthrough-*.db"));
+        Assert.Equal(new[] { "current" }, ReadAllRows(backupPath));
     }
 
     /// <summary>
