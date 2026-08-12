@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Linq;
 using System.Reactive.Linq;
@@ -1417,6 +1418,7 @@ public partial class MainWindow : Window
             m_subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
             m_subscribedViewModel.HelpRequested -= OnHelpRequested;
             m_subscribedViewModel.AboutRequested -= OnAboutRequested;
+            m_subscribedViewModel.Clips.CollectionChanged -= OnClipsCollectionChanged;
             m_subscribedViewModel = null;
         }
 
@@ -1430,10 +1432,73 @@ public partial class MainWindow : Window
             m_subscribedViewModel.PropertyChanged += OnViewModelPropertyChanged;
             m_subscribedViewModel.HelpRequested += OnHelpRequested;
             m_subscribedViewModel.AboutRequested += OnAboutRequested;
+            m_subscribedViewModel.Clips.CollectionChanged += OnClipsCollectionChanged;
             UpdateSettingsWindowVisibility(viewModel.IsSettingsOpen);
             UpdateAiPromptWindowVisibility(viewModel.IsAiPromptOpen);
             PopulateTransformMenus();
         }
+    }
+
+    /// <summary>
+    /// A refresh rebuilds the view model of any row whose clip changed, and
+    /// background enrichment (OCR text, the sensitivity scan, source icons)
+    /// makes that happen seconds after a capture, while the user is arrowing
+    /// through the list. Replacing the row destroys its container, and Avalonia
+    /// then leaves <em>nothing</em> focused: the arrow keys stop working
+    /// entirely until the user clicks or tabs back in.
+    ///
+    /// Measured, a null focused element is the exact signature of that and of
+    /// nothing else here. Moving focus deliberately always lands somewhere, and
+    /// this window keeps its focused element even while another window is
+    /// active — so no separate "was the list focused" flag is needed, and
+    /// checking for null is what keeps a background refresh from stealing the
+    /// keyboard away from the search box.
+    /// </summary>
+    private void OnClipsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.Action == NotifyCollectionChangedAction.Add)
+        {
+            return;
+        }
+
+        // The check has to be deferred, not just the restore. The ListBox
+        // subscribes to this same collection after this window does, so its
+        // handler -- the one that destroys the container -- has not run yet and
+        // focus still looks fine from here. Containers are realised during
+        // layout too, so the replacement row does not exist yet either.
+        Dispatcher.UIThread.Post(
+            () =>
+            {
+                if (m_clipsListBox is null
+                    || TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is not null)
+                {
+                    return;
+                }
+
+                // Containers are created during layout, and a posted job can run
+                // before the one triggered by this collection change. Force the
+                // pass so the row exists, then focus it here rather than posting
+                // again: the restore is only correct while focus is still null,
+                // and another hop gives that window a chance to change.
+                m_clipsListBox.UpdateLayout();
+
+                // An emptied list has no row to return to; the search box is the
+                // only place the user can act from, and leaving focus nowhere
+                // would strand the keyboard just the same.
+                if (m_clipsListBox.SelectedIndex < 0)
+                {
+                    FocusSearchBox();
+                    return;
+                }
+
+                m_clipsListBox.ScrollIntoView(m_clipsListBox.SelectedIndex);
+                if (m_clipsListBox.ContainerFromIndex(m_clipsListBox.SelectedIndex) is ListBoxItem row)
+                {
+                    BeginFocusRequest();
+                    row.Focus();
+                }
+            },
+            DispatcherPriority.Loaded);
     }
 
     private void OnHelpRequested(object? sender, EventArgs e)

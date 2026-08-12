@@ -110,5 +110,29 @@
     "find": "WHERE NOT {UserKeptClipPredicate}\n                ORDER BY COALESCE(last_copied_at, captured_at) ASC, id ASC;",
     "replace": "WHERE 1 = 1\n                ORDER BY COALESCE(last_copied_at, captured_at) ASC, id ASC;",
     "filter": "ClipRetentionTests"
+  },
+  {
+    "id": "cliplist-focus-never-restored",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "KEYBOARD DEAD END. Replacing the focused row leaves nothing focused, so the arrow keys stop responding until the user clicks back in.",
+    "find": "        if (e.Action == NotifyCollectionChangedAction.Add)",
+    "replace": "        if (true || e.Action == NotifyCollectionChangedAction.Add)",
+    "filter": "ClipListFocusHeadlessTests"
+  },
+  {
+    "id": "cliplist-focus-restore-checked-too-early",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "The ListBox subscribes to the collection after this window does, so checking focus synchronously always sees the container still alive and skips the restore.",
+    "find": "        // The check has to be deferred, not just the restore. The ListBox\n        // subscribes to this same collection after this window does, so its\n        // handler -- the one that destroys the container -- has not run yet and\n        // focus still looks fine from here. Containers are realised during\n        // layout too, so the replacement row does not exist yet either.\n        Dispatcher.UIThread.Post(",
+    "replace": "        if (TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is not null) { return; }\n        Dispatcher.UIThread.Post(",
+    "filter": "ClipListFocusHeadlessTests"
+  },
+  {
+    "id": "cliplist-focus-restore-steals-focus",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "FOCUS THEFT. Without the null check a background capture pulls the keyboard out of the search box while the user is typing a filter.",
+    "find": "                if (m_clipsListBox is null\n                    || TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is not null)",
+    "replace": "                if (m_clipsListBox is null)",
+    "filter": "ClipListFocusHeadlessTests"
   }
 ]

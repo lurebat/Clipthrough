@@ -123,9 +123,22 @@ internal sealed class MainWindowTestHarness : IDisposable
 
     public void Dispose()
     {
+        // Everything is torn down before the queue is drained, because closing a
+        // window and disposing the view model both post their own jobs. Draining
+        // first leaves those queued for the runner's own RunJobs(), which
+        // Avalonia calls after xUnit has already retired the test context -- and
+        // anything touching xUnit from there fails the test in cleanup rather
+        // than in an assertion.
         try { Window.Close(); } catch { /* test teardown */ }
         ViewModel.Dispose();
         _scope.Dispose();
+
+        // Posting from inside a posted job is normal, so one pass can leave work
+        // behind; a handful of passes settles it.
+        for (var i = 0; i < 5; i++)
+        {
+            try { Dispatcher.UIThread.RunJobs(); } catch { /* test teardown */ }
+        }
     }
 
     private sealed class NoOpBackgroundOcrQueue : IBackgroundOcrQueue
