@@ -1389,4 +1389,121 @@ public sealed class ClipStoreServiceTests
         await scope.ClipStoreService.MarkPastedAsync(lastPasted.Id);
         await scope.ClipStoreService.SetPinnedAsync(pinned.Id, true);
     }
+    /// <summary>
+    /// Alphabetical now orders by a bounded content prefix first so it can be
+    /// served from an index. That rewrite is only safe if it is truly
+    /// order-equivalent to ordering by the whole content, so this pins it
+    /// against the naive clause using inputs designed to break a prefix
+    /// comparison: strings sharing more than the indexed 64 characters, one
+    /// string that is a strict prefix of another, empty content, and content
+    /// differing only past the prefix boundary.
+    /// </summary>
+    [Fact]
+    public async Task Alphabetical_OrdersIdenticallyToOrderingByWholeContent()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        var shared = new string('a', 64);
+        var texts = new[]
+        {
+            shared + "zzz",
+            shared + "aaa",
+            shared,
+            shared + "aaa" + "b",
+            "b",
+            "a",
+            string.Empty,
+            new string('a', 63) + "b",
+            new string('a', 65),
+            shared + "\u00e9",
+            shared + "Z",
+        };
+
+        foreach (var text in texts)
+        {
+            var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = text,
+                ContentBytes = Encoding.UTF8.GetBytes(text),
+            });
+
+            // Empty content may be rejected by capture; that is fine, the rest
+            // of the fixture still exercises the boundary.
+            _ = clip;
+        }
+
+        var actual = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters
+        {
+            SortOption = ClipSortOption.Alphabetical,
+        });
+
+        // The oracle is the clause this replaced, run directly against SQLite.
+        var expected = new List<long>();
+        await using (var connection = scope.ConnectionFactory.CreateConnection())
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT c.id
+                FROM clips c
+                ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, c.content ASC, c.id ASC;
+                """;
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                expected.Add(reader.GetInt64(0));
+            }
+        }
+
+        // Guard: a fixture that collapsed to one row would prove nothing.
+        Assert.True(expected.Count >= 8, $"Fixture too small: {expected.Count} clips.");
+        Assert.Equal(expected, actual.Items.Select(item => item.Id).ToList());
+    }
+
+    /// <summary>
+    /// Every sort must be servable straight from an index. A missing index does
+    /// not merely lose its own sort - SQLite picks some other pinned-prefixed
+    /// index and then fetches rows in an order uncorrelated with the table,
+    /// which measured roughly twice as slow as having no index at all. So the
+    /// index set has to stay complete, and a query plan is a far more stable
+    /// assertion than a stopwatch.
+    /// </summary>
+    [Theory]
+    [InlineData(ClipSortOption.MostRecent, "idx_clips_default_order", false)]
+    [InlineData(ClipSortOption.OldestFirst, "idx_clips_oldest_order", false)]
+    [InlineData(ClipSortOption.MostPasted, "idx_clips_paste_order", false)]
+    [InlineData(ClipSortOption.LargestFirst, "idx_clips_size_order", false)]
+    // Alphabetical orders from a bounded prefix, so SQLite still sorts within
+    // each group of clips sharing those first 64 characters. That residual sort
+    // is over ties only, not the library.
+    [InlineData(ClipSortOption.Alphabetical, "idx_clips_alpha_order", true)]
+    public async Task EverySort_IsServedFromItsOwnIndex(ClipSortOption sortOption, string expectedIndex, bool allowsTieBreakSort)
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        await SeedSortableClipsAsync(scope);
+
+        var plan = new List<string>();
+        await using (var connection = scope.ConnectionFactory.CreateConnection())
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"EXPLAIN QUERY PLAN SELECT c.id FROM clips c {ClipStoreService.BuildOrderClause(sortOption)} LIMIT 200;";
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                plan.Add(reader.GetString(3));
+            }
+        }
+
+        var text = string.Join(" | ", plan);
+        Assert.Contains(expectedIndex, text, StringComparison.Ordinal);
+        if (!allowsTieBreakSort)
+        {
+            Assert.DoesNotContain("TEMP B-TREE", text, StringComparison.Ordinal);
+        }
+    }
 }

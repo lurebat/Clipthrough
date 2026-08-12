@@ -1425,12 +1425,23 @@ public sealed class ClipStoreService : IClipStoreService
         return clauses;
     }
 
-    private static string BuildOrderClause(ClipSortOption sortOption) => sortOption switch
+    /// <summary>
+    /// The single authority for list ordering. Internal rather than private so
+    /// the index-coverage test can assert each arm's query plan against the
+    /// real clause instead of a copy that could drift out of sync.
+    /// </summary>
+    internal static string BuildOrderClause(ClipSortOption sortOption) => sortOption switch
     {
         ClipSortOption.MostRecent => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, COALESCE(c.last_copied_at, c.captured_at) DESC, c.id DESC",
         ClipSortOption.OldestFirst => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, COALESCE(c.last_copied_at, c.captured_at) ASC, c.id ASC",
         ClipSortOption.MostPasted => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, c.paste_count DESC, c.id DESC",
-        ClipSortOption.Alphabetical => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, c.content ASC, c.id ASC",
+        // Leading with the same bounded prefix that idx_clips_alpha_order
+        // stores lets SQLite order from the index instead of sorting the whole
+        // library. It is order-equivalent to plain "c.content ASC": when two
+        // prefixes differ, the first differing character is inside the prefix,
+        // so the prefix comparison already agrees with the full one; when they
+        // match, c.content breaks the tie exactly as before.
+        ClipSortOption.Alphabetical => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, substr(c.content, 1, 64) ASC, c.content ASC, c.id ASC",
         ClipSortOption.LargestFirst => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, c.byte_size DESC, c.id DESC",
         ClipSortOption.BestMatching => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, COALESCE(c.last_copied_at, c.captured_at) DESC, c.id DESC",
         _ => "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, COALESCE(c.last_copied_at, c.captured_at) DESC, c.id DESC",

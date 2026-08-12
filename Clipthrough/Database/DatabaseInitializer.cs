@@ -91,14 +91,54 @@ public sealed class DatabaseInitializer
         CREATE INDEX IF NOT EXISTS idx_clips_is_favorite ON clips(is_favorite) WHERE is_favorite = 1;
         CREATE INDEX IF NOT EXISTS idx_clips_is_sensitive ON clips(is_sensitive) WHERE is_sensitive = 1;
 
+        -- One index per BuildOrderClause arm. Every arm leads with the pinned
+        -- prefix, so an index lacking it can never satisfy the ORDER BY - which
+        -- is why the two below are dropped rather than kept.
+        --
+        -- These must be maintained as a COMPLETE SET. With partial coverage
+        -- SQLite still picks whichever pinned-prefixed index exists for an
+        -- uncovered sort, then fetches each row by rowid in an order
+        -- uncorrelated with the table, which measured ~2x SLOWER than having no
+        -- index at all (Alphabetical: 118ms unindexed -> 206ms with only the
+        -- three scalar indexes -> 0.2ms with all four, at 20k clips).
+        DROP INDEX IF EXISTS idx_clips_paste_count;
+        DROP INDEX IF EXISTS idx_clips_byte_size;
+
         CREATE INDEX IF NOT EXISTS idx_clips_default_order ON clips(
             (pinned_at IS NULL),
             pinned_at DESC,
             COALESCE(last_copied_at, captured_at) DESC,
             id DESC
         );
-        CREATE INDEX IF NOT EXISTS idx_clips_paste_count ON clips(paste_count DESC, id DESC);
-        CREATE INDEX IF NOT EXISTS idx_clips_byte_size ON clips(byte_size DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_clips_oldest_order ON clips(
+            (pinned_at IS NULL),
+            pinned_at DESC,
+            COALESCE(last_copied_at, captured_at) ASC,
+            id ASC
+        );
+        CREATE INDEX IF NOT EXISTS idx_clips_paste_order ON clips(
+            (pinned_at IS NULL),
+            pinned_at DESC,
+            paste_count DESC,
+            id DESC
+        );
+        CREATE INDEX IF NOT EXISTS idx_clips_size_order ON clips(
+            (pinned_at IS NULL),
+            pinned_at DESC,
+            byte_size DESC,
+            id DESC
+        );
+        -- Indexing content itself would copy the entire text corpus into the
+        -- index (+71% database on a 2KB-average fixture). A bounded prefix
+        -- costs +2.6% and orders just as well, because BuildOrderClause's
+        -- Alphabetical arm leads with this same expression and falls back to
+        -- the full content only to break prefix ties.
+        CREATE INDEX IF NOT EXISTS idx_clips_alpha_order ON clips(
+            (pinned_at IS NULL),
+            pinned_at DESC,
+            substr(content, 1, 64) ASC,
+            id ASC
+        );
 
         CREATE TABLE IF NOT EXISTS app_metadata (
             key   TEXT PRIMARY KEY,
