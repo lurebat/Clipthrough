@@ -1492,22 +1492,47 @@ public sealed class ClipStoreServiceTests
         await scope.DatabaseInitializer.InitializeAsync();
         await SeedSortableClipsAsync(scope);
 
-        var plan = new List<string>();
-        await using (var connection = scope.ConnectionFactory.CreateConnection())
-        {
-            await connection.OpenAsync();
-            await using var command = connection.CreateCommand();
-            command.CommandText = $"EXPLAIN QUERY PLAN SELECT c.id FROM clips c {ClipStoreService.BuildOrderClause(sortOption)} LIMIT 200;";
-            await using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
-            {
-                plan.Add(reader.GetString(3));
-            }
-        }
+        var text = await ExplainOrderPlanAsync(scope, sortOption);
 
-        var text = string.Join(" | ", plan);
         Assert.Contains(expectedIndex, text, StringComparison.Ordinal);
         Assert.DoesNotContain("TEMP B-TREE", text, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Alphabetical keeps a TEMP B-TREE for the terms that break prefix ties, so
+    /// it cannot join the theory above. It still has to be *served* from its own
+    /// index: with that index missing SQLite grabs another pinned-prefixed one
+    /// and then fetches rows in an order uncorrelated with the table, which
+    /// measured ~2x slower than having no index at all (206ms vs 118ms at 20k
+    /// clips). Asserting only that the clause and the index agree does not cover
+    /// this - an index can be perfectly well-formed and still not be chosen.
+    /// </summary>
+    [Fact]
+    public async Task Alphabetical_IsServedFromItsOwnIndex()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        await SeedSortableClipsAsync(scope);
+
+        var text = await ExplainOrderPlanAsync(scope, ClipSortOption.Alphabetical);
+
+        Assert.Contains("idx_clips_alpha_order", text, StringComparison.Ordinal);
+    }
+
+    private static async Task<string> ExplainOrderPlanAsync(TemporaryDatabaseScope scope, ClipSortOption sortOption)
+    {
+        var plan = new List<string>();
+        await using var connection = scope.ConnectionFactory.CreateConnection();
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"EXPLAIN QUERY PLAN SELECT c.id FROM clips c {ClipStoreService.BuildOrderClause(sortOption)} LIMIT 200;";
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            plan.Add(reader.GetString(3));
+        }
+
+        return string.Join(" | ", plan);
     }
     /// <summary>
     /// Alphabetical is the one sort whose query plan proves nothing. With
