@@ -214,5 +214,37 @@
     "find": "            case InsufficientMemoryException:\n                return false;\n            case OutOfMemoryException:",
     "replace": "            case OutOfMemoryException:",
     "filter": "DispatcherExceptionHandlingTests"
+  },
+  {
+    "id": "failed-restore-abandons-the-live-database",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Without the rollback, any failure after the stash leaves the live path empty and the user's history under a .before-restore name that nothing looks for.",
+    "find": "        catch\n        {\n            RollBackRestore(stashed);\n            throw;\n        }",
+    "replace": "        catch\n        {\n            throw;\n        }",
+    "filter": "DatabaseBackupServiceTests"
+  },
+  {
+    "id": "restore-rollback-skips-wal-and-shm",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Stashing only the main file leaves stale -wal/-shm beside a different database, which SQLite may replay into it.",
+    "find": "            foreach (var suffix in new[] { string.Empty, \"-wal\", \"-shm\" })",
+    "replace": "            foreach (var suffix in new[] { string.Empty })",
+    "filter": "DatabaseBackupServiceTests"
+  },
+  {
+    "id": "restore-rollback-leaves-the-half-restored-file",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "File.Move refuses an existing destination, so failing to clear the half-restored file makes the rollback a no-op.",
+    "find": "                if (File.Exists(live))\n                {\n                    File.Delete(live);\n                }\n\n                File.Move(stash, live);",
+    "replace": "                File.Move(stash, live);",
+    "filter": "DatabaseBackupServiceTests"
+  },
+  {
+    "id": "restore-keeps-no-undo-copy",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "The .before-restore copy is the user's only undo for a restore they did not mean to run; deleting the live files instead of renaming them destroys it.",
+    "find": "                    var stash = $\"{live}.before-restore-{stamp}\";\n                    File.Move(live, stash);\n                    stashed.Add((live, stash));",
+    "replace": "                    var stash = $\"{live}.before-restore-{stamp}\";\n                    File.Delete(live);\n                    stashed.Add((live, stash));",
+    "filter": "DatabaseBackupServiceTests"
   }
 ]

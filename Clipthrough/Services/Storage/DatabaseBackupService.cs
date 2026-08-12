@@ -203,8 +203,9 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
     ///   4. Copy backup → temp + atomic rename to live path.
     ///   5. Validate the restored DB opens before returning.
     ///
-    /// On any failure the live .before-restore files are preserved so the
-    /// pre-restore state remains recoverable.
+    /// If anything from step 3 onwards fails the stashed files are moved back,
+    /// so a failed restore leaves the user exactly where they started rather
+    /// than with no database at all.
     /// </summary>
     public async Task RestoreAsync(string backupPath, CancellationToken cancellationToken = default)
     {
@@ -235,51 +236,102 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         var dir = Path.GetDirectoryName(dbPath)!;
         Directory.CreateDirectory(dir);
 
-        // Step 3: Stash whatever's currently live so the operation is reversible.
         var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
-        foreach (var suffix in new[] { string.Empty, "-wal", "-shm" })
-        {
-            var live = dbPath + suffix;
-            if (File.Exists(live))
-            {
-                File.Move(live, $"{live}.before-restore-{stamp}");
-            }
-        }
+        var stashed = new System.Collections.Generic.List<(string Live, string Stashed)>();
 
-        // Step 4: Copy via a temp file + atomic rename so the restore is also
-        // crash-safe: if we die between Copy and Move, the live path is still
-        // empty and the user re-runs the restore.
-        var tempPath = dbPath + ".restoring";
-        // overwrite: a prior attempt that died between the copy and the move would
-        // otherwise leave a stale .restoring file, and File.Copy throws when the
-        // destination exists — silently blocking every future restore.
-        File.Copy(backupPath, tempPath, overwrite: true);
         try
         {
-            File.Move(tempPath, dbPath);
+            // Step 3: Stash whatever's currently live so the operation is reversible.
+            // The -wal and -shm files have to move with the main file: leaving them
+            // beside a *different* database would let SQLite replay stale frames
+            // into it.
+            foreach (var suffix in new[] { string.Empty, "-wal", "-shm" })
+            {
+                var live = dbPath + suffix;
+                if (File.Exists(live))
+                {
+                    var stash = $"{live}.before-restore-{stamp}";
+                    File.Move(live, stash);
+                    stashed.Add((live, stash));
+                }
+            }
+
+            // Step 4: Copy via a temp file + atomic rename so the restore is also
+            // crash-safe: if we die between Copy and Move, the live path is still
+            // empty and the user re-runs the restore.
+            var tempPath = dbPath + ".restoring";
+            // overwrite: a prior attempt that died between the copy and the move would
+            // otherwise leave a stale .restoring file, and File.Copy throws when the
+            // destination exists — silently blocking every future restore.
+            File.Copy(backupPath, tempPath, overwrite: true);
+            try
+            {
+                File.Move(tempPath, dbPath);
+            }
+            catch
+            {
+                // The swap into the live path failed; remove the temp so the next
+                // restore attempt starts clean instead of tripping over a stray file.
+                try { File.Delete(tempPath); } catch { /* best effort */ }
+                throw;
+            }
+
+            // Step 5: Validate the restored DB opens with the stored password.
+            // ValidateBackupReadable accepts a backup that opens with *either* the
+            // live password or none, so an unencrypted backup reaches this point
+            // and fails here when the live database is encrypted.
+            var password = _storageOptionsService.Current.DatabasePassword;
+            if (!StorageOptionsService.CanOpenWithPassword(dbPath, password ?? string.Empty))
+            {
+                throw new InvalidOperationException(
+                    "The restored database does not open with the current password. " +
+                    "The previous database has been put back unchanged.");
+            }
         }
         catch
         {
-            // The swap into the live path failed; remove the temp so the next
-            // restore attempt starts clean instead of tripping over a stray file.
-            try { File.Delete(tempPath); } catch { /* best effort */ }
+            RollBackRestore(stashed);
             throw;
         }
 
-        // Step 5: Validate the restored DB opens with the stored password.
-        var password = _storageOptionsService.Current.DatabasePassword;
-        if (!StorageOptionsService.CanOpenWithPassword(dbPath, password ?? string.Empty))
-        {
-            // The restored file is present but unreadable — likely a mismatched
-            // password or a corrupt backup. Roll back so the caller can retry
-            // with a different backup.
-            try { File.Delete(dbPath); } catch { /* best effort */ }
-            throw new InvalidOperationException(
-                "The restored database does not open with the current password. " +
-                "The previous database files are preserved as '.before-restore' copies.");
-        }
-
         Trace.TraceInformation($"Restored database from backup '{backupPath}'. Previous live files renamed with suffix '.before-restore-{stamp}'.");
+    }
+
+    /// <summary>
+    /// Puts the pre-restore files back after a failed restore.
+    ///
+    /// Without this, every failure from the stash onwards left the live path
+    /// empty: the previous database was still on disk, but under a
+    /// <c>.before-restore-*</c> name that the application does not look for, so
+    /// the user's history simply disappeared and only a manual rename brought it
+    /// back. A restore that fails must be a no-op.
+    /// </summary>
+    private static void RollBackRestore(
+        System.Collections.Generic.IReadOnlyList<(string Live, string Stashed)> stashed)
+    {
+        foreach (var (live, stash) in stashed)
+        {
+            try
+            {
+                // Whatever the failed attempt left at the live path has to go first:
+                // File.Move refuses an existing destination, and a half-restored
+                // file is worthless next to the original we are putting back.
+                if (File.Exists(live))
+                {
+                    File.Delete(live);
+                }
+
+                File.Move(stash, live);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Never mask the failure that started the rollback. Say plainly
+                // where the data still is.
+                Trace.TraceError(
+                    $"Restore rollback could not put '{stash}' back as '{live}': {ex.Message}. " +
+                    "The pre-restore database is still on disk under that name.");
+            }
+        }
     }
 
     /// <summary>

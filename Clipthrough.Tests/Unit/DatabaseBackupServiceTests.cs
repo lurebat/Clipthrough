@@ -41,6 +41,49 @@ public sealed class DatabaseBackupServiceTests : IDisposable
         return new DatabaseBackupService(storage, null, null, null, retention);
     }
 
+    private DatabaseBackupService NewEncryptedService(string password)
+    {
+        var storage = new TestStorageOptionsService(_dbPath);
+        storage.SetInMemoryPassword(password);
+        return new DatabaseBackupService(storage, null, null, null, DatabaseBackupService.DefaultRetention);
+    }
+
+    /// <summary>
+    /// Creates an encrypted SQLite database with one row.
+    /// </summary>
+    private static async Task CreateEncryptedDbWithRow(string dbPath, string password, string value)
+    {
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = dbPath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Password = password,
+        };
+        await using var conn = new SqliteConnection(builder.ToString());
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "CREATE TABLE IF NOT EXISTS clips (v TEXT); INSERT INTO clips VALUES (@v);";
+        cmd.Parameters.AddWithValue("@v", value);
+        await cmd.ExecuteNonQueryAsync();
+        await conn.CloseAsync();
+        SqliteConnection.ClearAllPools();
+    }
+
+    private static string? ReadSingleRow(string dbPath, string password)
+    {
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = dbPath,
+            Mode = SqliteOpenMode.ReadOnly,
+            Password = password,
+        };
+        using var conn = new SqliteConnection(builder.ToString());
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT v FROM clips LIMIT 1;";
+        return cmd.ExecuteScalar() as string;
+    }
+
     /// <summary>
     /// Creates a minimal unencrypted SQLite database with an optional row value.
     /// Closes all connections and clears the pool before returning.
@@ -324,6 +367,87 @@ public sealed class DatabaseBackupServiceTests : IDisposable
         await service.RestoreAsync(backupPath);
 
         Assert.Empty(Directory.GetFiles(_tempRoot, "*.restoring*"));
+    }
+
+    /// <summary>
+    /// A backup that passes the up-front readability check but turns out not to
+    /// open with the live password must leave the live database exactly as it
+    /// was. ValidateBackupReadable accepts a backup that opens with *either* the
+    /// live password or none, so an unencrypted backup gets past it and only
+    /// fails after the live files have already been moved aside. The restore
+    /// used to delete the half-restored file and stop there, leaving the
+    /// application pointing at a path with no database on it while the user's
+    /// real history sat under a .before-restore name nothing looks for.
+    /// </summary>
+    [Fact]
+    public async Task RestoreAsync_BackupThatFailsThePasswordCheck_PutsTheLiveDatabaseBack()
+    {
+        const string password = "hunter2";
+        await CreateEncryptedDbWithRow(_dbPath, password, "live-data");
+
+        Directory.CreateDirectory(_backupDir);
+        var plaintextBackup = Path.Combine(_backupDir, "clipthrough-20200101.db");
+        await CreateDbWithRow(plaintextBackup, "backup-data");
+
+        var service = NewEncryptedService(password);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.RestoreAsync(plaintextBackup));
+
+        SqliteConnection.ClearAllPools();
+        Assert.True(File.Exists(_dbPath), "The live database was left missing after a failed restore.");
+        Assert.Equal("live-data", ReadSingleRow(_dbPath, password));
+    }
+
+    /// <summary>
+    /// Rolling back must also reclaim the -wal and -shm files. Leaving them
+    /// stashed beside a restored main database would let SQLite replay frames
+    /// belonging to a different database into it.
+    /// </summary>
+    [Fact]
+    public async Task RestoreAsync_FailedRestore_LeavesNoStashedFilesBehind()
+    {
+        const string password = "hunter2";
+        await CreateEncryptedDbWithRow(_dbPath, password, "live-data");
+        File.WriteAllText(_dbPath + "-wal", "wal");
+        File.WriteAllText(_dbPath + "-shm", "shm");
+
+        Directory.CreateDirectory(_backupDir);
+        var plaintextBackup = Path.Combine(_backupDir, "clipthrough-20200101.db");
+        await CreateDbWithRow(plaintextBackup, "backup-data");
+
+        var service = NewEncryptedService(password);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.RestoreAsync(plaintextBackup));
+
+        Assert.Empty(Directory.GetFiles(_tempRoot, "*.before-restore-*"));
+        Assert.Empty(Directory.GetFiles(_tempRoot, "*.restoring"));
+        Assert.True(File.Exists(_dbPath + "-wal"), "The -wal file was not put back.");
+        Assert.True(File.Exists(_dbPath + "-shm"), "The -shm file was not put back.");
+    }
+
+    /// <summary>
+    /// The old -wal and -shm must not survive a successful restore. SQLite treats
+    /// them as belonging to whatever database now sits at that path, so leaving
+    /// yesterday's WAL beside a restored file invites it to replay frames into a
+    /// database they were never written for.
+    /// </summary>
+    [Fact]
+    public async Task RestoreAsync_Success_DoesNotLeaveTheOldWalBesideTheRestoredDatabase()
+    {
+        await CreateDbWithRow(_dbPath, "before");
+        var service = NewService();
+        await service.EnsureDailyBackupAsync();
+        var backupPath = Directory.GetFiles(_backupDir, "clipthrough-*.db").Single();
+        SqliteConnection.ClearAllPools();
+
+        // A live database that is mid-transaction has both sidecars on disk.
+        File.WriteAllText(_dbPath + "-wal", "stale wal frames");
+        File.WriteAllText(_dbPath + "-shm", "stale shm");
+
+        await service.RestoreAsync(backupPath);
+
+        Assert.False(File.Exists(_dbPath + "-wal"), "The pre-restore -wal was left beside the restored database.");
+        Assert.False(File.Exists(_dbPath + "-shm"), "The pre-restore -shm was left beside the restored database.");
     }
 
     // Bug #6: a prior restore that died between the copy and the move strands a
