@@ -23,6 +23,7 @@
 .EXAMPLE
     pwsh Clipthrough.Tests\Mutation\Invoke-MutationCheck.ps1
     pwsh Clipthrough.Tests\Mutation\Invoke-MutationCheck.ps1 -Id deferred-refresh-rethrows
+    pwsh Clipthrough.Tests\Mutation\Invoke-MutationCheck.ps1 -ValidateOnly
 #>
 [CmdletBinding()]
 param(
@@ -34,7 +35,11 @@ param(
 
     # Skip the unmutated baseline run. Faster, but a test that is already
     # failing will then look like a kill.
-    [switch]$SkipBaseline
+    [switch]$SkipBaseline,
+
+    # Check every anchor and stop, without building or running anything.
+    # Seconds rather than an hour, so manifest rot is worth checking often.
+    [switch]$ValidateOnly
 )
 
 Set-StrictMode -Version Latest
@@ -113,6 +118,44 @@ if ($Id) {
     if ($missing) { throw "No such mutant id: $($missing -join ', ')" }
 }
 if (-not $mutants) { throw "No mutants selected." }
+
+# Pre-flight. The per-mutant check below already refuses a stale anchor, but it
+# only gets there after every earlier mutant has built and run - so a manifest
+# that rotted months ago is discovered an hour into the sweep, if at all. Every
+# anchor is cheap to check, so check them all first and report them together.
+#
+# Anchors rot silently: they name code that a later change renamed, reworded or
+# renumbered. The mutant then tests nothing while still reading as coverage.
+$preflight = foreach ($mutant in $mutants) {
+    $target = Join-Path $RepoRoot $mutant.file
+    $detail =
+        if (-not (Test-Path $target)) { 'file is missing' }
+        else {
+            $hits = [regex]::Matches([System.IO.File]::ReadAllText($target), [regex]::Escape($mutant.find)).Count
+            if ($hits -ne 1) { "anchor matched $hits times, expected exactly 1" }
+        }
+    if ($detail) { [pscustomobject]@{ Id = $mutant.id; File = $mutant.file; Detail = $detail } }
+}
+
+# Two mutants sharing an id makes -Id ambiguous and the summary misleading.
+$duplicateIds = @($mutants | Group-Object id | Where-Object Count -gt 1 | ForEach-Object Name)
+if ($duplicateIds) {
+    Write-Host "Duplicate mutant id(s): $($duplicateIds -join ', ')" -ForegroundColor Red
+}
+
+if ($preflight) {
+    Write-Host ""
+    Write-Host "$(@($preflight).Count) of $($mutants.Count) anchor(s) stale:" -ForegroundColor Red
+    $preflight | Format-Table -AutoSize | Out-String | Write-Host
+}
+
+if ($ValidateOnly) {
+    if (-not $preflight -and -not $duplicateIds) {
+        Write-Host "All $($mutants.Count) anchor(s) match exactly once." -ForegroundColor Green
+        exit 0
+    }
+    exit 1
+}
 
 $baselineCache = @{}
 $results = [System.Collections.Generic.List[object]]::new()

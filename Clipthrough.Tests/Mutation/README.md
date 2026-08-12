@@ -13,10 +13,18 @@ rebuilds, runs only the covering test, and requires that test to **fail**.
 ```pwsh
 pwsh Clipthrough.Tests\Mutation\Invoke-MutationCheck.ps1
 pwsh Clipthrough.Tests\Mutation\Invoke-MutationCheck.ps1 -Id deferred-refresh-rethrows
+pwsh Clipthrough.Tests\Mutation\Invoke-MutationCheck.ps1 -ValidateOnly
 ```
 
 Roughly a minute per mutant, since each one is a fresh build plus a filtered
 test run. Run it when you touch guarded code, not on every commit.
+
+`-ValidateOnly` checks every anchor and stops without building anything, so the
+whole manifest is verified in seconds. Anchors rot quietly — they name code that
+a later change renamed, reworded or renumbered, and the mutant then tests
+nothing while still reading as coverage. The full sweep does catch that, but
+only once it reaches the mutant, which can be an hour in. Run `-ValidateOnly`
+after any refactor that touches guarded files; it is cheap enough to run often.
 
 ## Outcomes
 
