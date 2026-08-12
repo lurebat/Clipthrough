@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -91,5 +92,100 @@ public class SensitivityServiceTests
         Assert.Contains(service.Scan("-----BEGIN RSA PRIVATE KEY-----"), match => match.RuleName == "Private Keys");
         Assert.Contains(service.Scan("password = hunter2000"), match => match.RuleName == "Passwords");
         Assert.Empty(service.Scan("an entirely ordinary sentence"));
+    }
+
+    /// <summary>
+    /// Patterns are user-authored and were persisted without ever being
+    /// compiled. CompileRules ran after CommitAsync, so an invalid pattern was
+    /// written to the database and only then threw: the bad rule survived the
+    /// failure permanently, and every later GetRulesAsync threw on it too -
+    /// leaving the user's whole rule set unloadable.
+    /// </summary>
+    [Fact]
+    public async Task SaveRules_InvalidPattern_IsRejectedBeforeItReachesTheDatabase()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        var service = new SensitivityService(scope.ConnectionFactory);
+        await service.SaveRulesAsync([Rule("Good", "alpha")]);
+
+        // ThrowsAny, because Regex reports a RegexParseException - a subclass of
+        // ArgumentException, which the exact-match Throws would reject.
+        await Assert.ThrowsAnyAsync<ArgumentException>(
+            () => service.SaveRulesAsync([Rule("Broken", "([unclosed")]));
+
+        var reloaded = new SensitivityService(scope.ConnectionFactory);
+        var stored = await reloaded.GetRulesAsync();
+
+        Assert.Equal(new[] { "Good" }, stored.Select(rule => rule.Name));
+        Assert.Single(reloaded.Scan("alpha"));
+    }
+
+    /// <summary>
+    /// A rule set already poisoned by an older build must still load. Skipping
+    /// the one bad pattern keeps the remaining rules working; throwing would
+    /// leave sensitivity scanning permanently unable to load anything.
+    /// </summary>
+    [Fact]
+    public async Task GetRules_PatternStoredByAnOlderBuild_DoesNotBlockTheOtherRules()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        await using (var connection = scope.ConnectionFactory.CreateConnection())
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                DELETE FROM sensitivity_rules;
+                INSERT INTO sensitivity_rules (name, pattern, severity, is_enabled, is_builtin)
+                VALUES ('Broken', '([unclosed', 'warning', 1, 0),
+                       ('Good', 'alpha', 'warning', 1, 0);
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var service = new SensitivityService(scope.ConnectionFactory);
+        await service.GetRulesAsync();
+
+        Assert.Single(service.Scan("alpha"));
+    }
+
+    /// <summary>
+    /// Scan runs on the capture path for every clip, against regexes the user
+    /// can type. Measured on .NET 10: "(a+)+$" against 32 characters had still
+    /// not returned after three minutes, so without a match timeout one bad rule
+    /// hangs clipboard capture permanently.
+    ///
+    /// The scan runs on a pool thread and is only read once it has completed, so
+    /// an unbounded regex fails this test quickly instead of wedging the run.
+    /// </summary>
+    [Fact]
+    public async Task Scan_CatastrophicPattern_GivesUpInsteadOfHanging()
+    {
+        var service = await WithRulesAsync(Rule("Runaway", "(a+)+$"));
+        var input = new string('a', 32) + "!";
+
+        var scan = Task.Run(() => service.Scan(input));
+        var finished = await Task.WhenAny(scan, Task.Delay(TimeSpan.FromSeconds(10)));
+
+        Assert.True(ReferenceEquals(finished, scan), "Scan never abandoned the catastrophic pattern.");
+        Assert.Empty(scan.Result);
+    }
+
+    [Fact]
+    public async Task Scan_CatastrophicPattern_DoesNotStopLaterRulesMatching()
+    {
+        var service = await WithRulesAsync(
+            Rule("Runaway", "(a+)+$"),
+            Rule("Normal", "needle"));
+        var input = new string('a', 32) + "! needle";
+
+        var scan = Task.Run(() => service.Scan(input));
+        var finished = await Task.WhenAny(scan, Task.Delay(TimeSpan.FromSeconds(10)));
+
+        Assert.True(ReferenceEquals(finished, scan), "Scan never abandoned the catastrophic pattern.");
+        Assert.Equal(new[] { "Normal" }, scan.Result.Select(match => match.RuleName));
     }
 }

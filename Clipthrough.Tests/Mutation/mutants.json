@@ -46,5 +46,37 @@
     "find": "        CREATE INDEX IF NOT EXISTS idx_clips_alpha_order ON clips(\n            (pinned_at IS NULL),\n            pinned_at DESC,\n            substr(content, 1, 64) ASC,\n            id ASC\n        );",
     "replace": "",
     "filter": "Alphabetical_IsServedFromItsOwnIndex"
+  },
+  {
+    "id": "sensitivity-ignores-disabled-rules",
+    "file": "Clipthrough/Services/Security/SensitivityService.cs",
+    "why": "Disabling a sensitivity rule stops having any effect. Found by audit: this survived all 278 non-headless tests before SensitivityServiceTests existed.",
+    "find": "if (!rule.Rule.IsEnabled || !IsMatch(rule, content))",
+    "replace": "if (!IsMatch(rule, content))",
+    "filter": "SensitivityServiceTests"
+  },
+  {
+    "id": "sensitivity-regex-has-no-timeout",
+    "file": "Clipthrough/Services/Security/SensitivityService.cs",
+    "why": "Scan runs on the capture path against user-authored regexes. Unbounded backtracking hangs clipboard capture: \"(a+)+$\" over 32 chars had not returned after three minutes.",
+    "find": "RegexOptions.Compiled | RegexOptions.CultureInvariant, RegexMatchTimeout",
+    "replace": "RegexOptions.Compiled | RegexOptions.CultureInvariant",
+    "filter": "SensitivityServiceTests"
+  },
+  {
+    "id": "sensitivity-persists-uncompilable-pattern",
+    "file": "Clipthrough/Services/Security/SensitivityService.cs",
+    "why": "Compiling leniently on save lets an invalid pattern reach the database, which is the original bug: it was stored, then threw, and every later load threw on it too.",
+    "find": "var compiledRules = CompileRules(normalizedRules);",
+    "replace": "var compiledRules = CompileStoredRules(normalizedRules);",
+    "filter": "SensitivityServiceTests"
+  },
+  {
+    "id": "sensitivity-load-rejects-whole-rule-set",
+    "file": "Clipthrough/Services/Security/SensitivityService.cs",
+    "why": "Strict compilation on load makes one bad stored pattern take down the entire rule set, leaving sensitivity scanning permanently unable to load.",
+    "find": "_compiledRules = CompileStoredRules(rules);",
+    "replace": "_compiledRules = CompileRules(rules);",
+    "filter": "SensitivityServiceTests"
   }
 ]

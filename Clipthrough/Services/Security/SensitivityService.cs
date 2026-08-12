@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -57,7 +58,7 @@ public sealed class SensitivityService : ISensitivityService
                 rules = GetDefaultRules();
             }
 
-            _compiledRules = CompileRules(rules);
+            _compiledRules = CompileStoredRules(rules);
             return rules.Select(CloneRule).ToArray();
         }
         finally
@@ -83,6 +84,12 @@ public sealed class SensitivityService : ISensitivityService
                 .Where(static rule => !string.IsNullOrWhiteSpace(rule.Name) && !string.IsNullOrWhiteSpace(rule.Pattern))
                 .Select(NormalizeRule)
                 .ToArray();
+
+            // Compile before writing anything. This used to run after
+            // CommitAsync, so a pattern that failed to compile was already
+            // stored: the save threw, the bad rule stayed in the database, and
+            // every later load threw on it as well.
+            var compiledRules = CompileRules(normalizedRules);
 
             await using var connection = _connectionFactory.CreateConnection();
             await connection.OpenAsync(cancellationToken);
@@ -173,7 +180,7 @@ public sealed class SensitivityService : ISensitivityService
             }
 
             await transaction.CommitAsync(cancellationToken);
-            _compiledRules = CompileRules(normalizedRules);
+            _compiledRules = compiledRules;
         }
         finally
         {
@@ -197,7 +204,7 @@ public sealed class SensitivityService : ISensitivityService
 
         foreach (var rule in _compiledRules)
         {
-            if (!rule.Rule.IsEnabled || !rule.Regex.IsMatch(content))
+            if (!rule.Rule.IsEnabled || !IsMatch(rule, content))
             {
                 continue;
             }
@@ -211,6 +218,19 @@ public sealed class SensitivityService : ISensitivityService
         }
 
         return matches;
+    }
+
+    private static bool IsMatch(CompiledRule rule, string content)
+    {
+        try
+        {
+            return rule.Regex.IsMatch(content);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            Trace.TraceWarning($"Sensitivity rule '{rule.Rule.Name}' timed out and was skipped for this clip.");
+            return false;
+        }
     }
 
     private async Task<IReadOnlyList<SensitivityRule>> LoadRulesCoreAsync(CancellationToken cancellationToken)
@@ -284,11 +304,57 @@ public sealed class SensitivityService : ISensitivityService
         IsBuiltIn = rule.IsBuiltIn,
     };
 
+    // Scan runs on the capture path for every clip, against patterns the user
+    // can type. Regex backtracking is exponential in the worst case - "(a+)+$"
+    // against 32 characters had not returned after three minutes on .NET 10 -
+    // so an unbounded match here hangs clipboard capture outright.
+    //
+    // A rule that times out is treated as not matching. Treating it as a match
+    // would be the privacy-cautious reading, but a pattern that times out does
+    // so on almost any input, which would flag the entire library sensitive -
+    // and sensitive clips expire under a shorter lifetime that ignores pinning,
+    // so failing that way loses data. Failing open costs detection by one
+    // broken rule; failing closed silently deletes clips.
+    private static readonly TimeSpan RegexMatchTimeout = TimeSpan.FromMilliseconds(100);
+
+    private static Regex CompilePattern(string pattern)
+        => new(pattern, RegexOptions.Compiled | RegexOptions.CultureInvariant, RegexMatchTimeout);
+
     private static IReadOnlyList<CompiledRule> CompileRules(IEnumerable<SensitivityRule> rules)
         => rules
             .Where(static rule => !string.IsNullOrWhiteSpace(rule.Pattern))
-            .Select(rule => new CompiledRule(CloneRule(rule), new Regex(rule.Pattern, RegexOptions.Compiled | RegexOptions.CultureInvariant)))
+            .Select(rule => new CompiledRule(CloneRule(rule), CompilePattern(rule.Pattern)))
             .ToArray();
+
+    /// <summary>
+    /// Compiles what it can and drops what it cannot. Only for rules read back
+    /// from the database: an older build persisted patterns without ever
+    /// compiling them, so a stored rule set can contain one that does not
+    /// compile. Throwing on it would make the user's entire rule set
+    /// permanently unloadable rather than costing them the one bad rule.
+    /// </summary>
+    private static IReadOnlyList<CompiledRule> CompileStoredRules(IEnumerable<SensitivityRule> rules)
+    {
+        var compiled = new List<CompiledRule>();
+        foreach (var rule in rules)
+        {
+            if (string.IsNullOrWhiteSpace(rule.Pattern))
+            {
+                continue;
+            }
+
+            try
+            {
+                compiled.Add(new CompiledRule(CloneRule(rule), CompilePattern(rule.Pattern)));
+            }
+            catch (ArgumentException ex)
+            {
+                Trace.TraceWarning($"Sensitivity rule '{rule.Name}' has an invalid pattern and was skipped: {ex.Message}");
+            }
+        }
+
+        return compiled;
+    }
 
     private sealed record CompiledRule(SensitivityRule Rule, Regex Regex);
 }

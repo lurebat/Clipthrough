@@ -95,7 +95,14 @@ function Invoke-TestFilter([string]$Filter) {
 }
 
 $mutants = [object[]](Get-Content $Manifest -Raw | ConvertFrom-Json)
-if ($Id) { $mutants = [object[]]($mutants | Where-Object { $Id -contains $_.id }) }
+if ($Id) {
+    # "pwsh -File script.ps1 -Id a,b" hands over the single string "a,b", so
+    # split defensively rather than silently selecting nothing.
+    $wanted = @($Id | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $mutants = [object[]]($mutants | Where-Object { $wanted -contains $_.id })
+    $missing = @($wanted | Where-Object { $mutants.id -notcontains $_ })
+    if ($missing) { throw "No such mutant id: $($missing -join ', ')" }
+}
 if (-not $mutants) { throw "No mutants selected." }
 
 $baselineCache = @{}
