@@ -23,7 +23,7 @@ shortcuts, and pluggable source attribution.
 - `Clipthrough.Tests/` — xUnit test project
   - `TestDoubles.cs` — fakes/stubs for each service interface.
   - Service tests use real SQLite (in-memory or temp files).
-  - Headless Avalonia tests live in `*HeadlessTests.cs` — some of these hang in CI; exclude them via `--filter "FullyQualifiedName!~HeadlessTests"` if you need a fast run.
+  - Headless Avalonia tests live in `*HeadlessTests.cs` — a few still flake in cleanup; exclude them via `--filter "FullyQualifiedName!~HeadlessTests"` if you need a fast run.
 - `external/` — vendored dependencies.
 - `__decompiled/` — reference decompilation artifacts (do not edit, do not commit new ones).
 
@@ -54,7 +54,13 @@ dotnet build .\Clipthrough\Clipthrough.csproj
 dotnet test .\Clipthrough.Tests\Clipthrough.Tests.csproj --filter "FullyQualifiedName!~HeadlessTests"
 ```
 
-The headless filter is there because some Avalonia headless tests hang intermittently in CI. Run them locally if you are specifically touching view code.
+The headless filter is there because a few Avalonia headless tests still fail
+intermittently — a couple of percent of runs — with a `[Test Case Cleanup
+Failure]` naming an innocent test. That is work outliving a previous test, not
+a bug in the test named; see
+`docs/solutions/headless-teardown-leaks-dispatcher-jobs.md` before spending
+time on it. Run them locally if you are specifically touching view code, and
+re-run before believing a single red result.
 
 If Clipthrough is running it holds a lock on its own output, and any build that
 needs to copy a changed assembly into it fails with `MSB3027` / `MSB3021` on
@@ -78,7 +84,7 @@ unexpectedly passing run after a lock error as untrustworthy.
 
 - **Pure logic** (formatting, parsing, fuzzy matching, text transformation): unit tests in the service's test class.
 - **Persistence** (schema, migrations, store behavior): SQLite-backed tests using an in-memory or temp-file connection factory.
-- **Views / input**: Avalonia headless tests for control loading, bindings, and basic input. Keep these small — they're flaky under load.
+- **Views / input**: Avalonia headless tests for control loading, bindings, and basic input. Keep these small — they're flaky under load. Tear the window and view model down *before* draining the dispatcher in any test harness; draining first leaves the jobs they post for Avalonia's post-test `RunJobs()`, which fails a later test in cleanup (`docs/solutions/headless-teardown-leaks-dispatcher-jobs.md`).
 - **Fakes**: extend `TestDoubles.cs` when adding new service methods. Keep the fakes minimal but realistic.
 
 ### Prove a regression test can fail
