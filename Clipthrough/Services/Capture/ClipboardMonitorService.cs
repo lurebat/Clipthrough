@@ -116,13 +116,27 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
 
         _isDisposed = true;
         Stop();
+
+        // Completing the subjects drops every subscriber, which is all the
+        // teardown they hold. Disposing them as well would make a later OnNext
+        // throw ObjectDisposedException - and the only writers left are an
+        // in-flight `async void` capture and its fire-and-forget enrichment,
+        // whose continuations run after this method returns and have no catch
+        // above them. The busy subject in particular is written from an
+        // unguarded `finally`, so that throw would go straight to the
+        // dispatcher's unhandled-exception path.
+        //
+        // The capture gate is left alone for the same reason: its Release()
+        // runs in that continuation's finally, and SemaphoreSlim only owns a
+        // disposable resource once AvailableWaitHandle has been read, which
+        // this class never does.
+        //
+        // Blocking here until the capture finishes is not an alternative -
+        // Dispose runs on the UI thread and those continuations need that same
+        // thread, so waiting deadlocks instead of racing.
         _capturedClips.OnCompleted();
         _updatedClips.OnCompleted();
         _captureBusy.OnCompleted();
-        _capturedClips.Dispose();
-        _updatedClips.Dispose();
-        _captureBusy.Dispose();
-        _captureGate.Dispose();
     }
 
     private IntPtr WndProcHook(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -412,18 +426,33 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
             var enrichmentStopwatch = Stopwatch.StartNew();
             if (deferredContent is not null)
             {
+                if (_isDisposed)
+                {
+                    return;
+                }
+
                 var updated = await Task.Run(() => _clipStoreService.UpdateDeferredContentAsync(capturedClip.Id, deferredContent));
                 PublishUpdatedClip(updated);
+            }
+
+            if (_isDisposed)
+            {
+                return;
             }
 
             var sensitivityUpdated = await Task.Run(() => _clipStoreService.ApplySensitivityAsync(capturedClip.Id));
             PublishUpdatedClip(sensitivityUpdated);
 
             var iconBytes = await Task.Run(() => _sourceApplicationResolver.TryResolveIcon(capturedClip.SourceAppPath));
-            if (iconBytes is { Length: > 0 })
+            if (iconBytes is { Length: > 0 } && !_isDisposed)
             {
                 var iconUpdated = await Task.Run(() => _clipStoreService.UpdateSourceAppIconAsync(capturedClip.Id, iconBytes));
                 PublishUpdatedClip(iconUpdated);
+            }
+
+            if (_isDisposed)
+            {
+                return;
             }
 
             await Task.Run(() => _clipStoreService.ApplyMaintenanceAsync());

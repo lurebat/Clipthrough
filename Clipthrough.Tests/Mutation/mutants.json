@@ -694,5 +694,37 @@
     "filter": "BuildCfHtml_HeaderOffsetsAddressTheRealFragmentBytes",
     "find": "        var endFragment = startFragment + Encoding.UTF8.GetByteCount(StartFragmentMarker) + Encoding.UTF8.GetByteCount(fragment);",
     "replace": "        var endFragment = startFragment + Encoding.UTF8.GetByteCount(StartFragmentMarker) + fragment.Length;"
+  },
+  {
+    "id": "monitor-disposes-capture-subjects",
+    "why": "Restores the subject disposal. The in-flight capture's finally then throws ObjectDisposedException out of an async void, straight to the dispatcher's unhandled-exception path.",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "filter": "ClipboardMonitorServiceDisposalTests",
+    "find": "        _capturedClips.OnCompleted();\n        _updatedClips.OnCompleted();\n        _captureBusy.OnCompleted();\n    }",
+    "replace": "        _capturedClips.OnCompleted();\n        _updatedClips.OnCompleted();\n        _captureBusy.OnCompleted();\n        _capturedClips.Dispose();\n        _updatedClips.Dispose();\n        _captureBusy.Dispose();\n    }"
+  },
+  {
+    "id": "monitor-disposes-capture-gate",
+    "why": "Restores the semaphore disposal. The capture releases the gate in a finally after several awaits, so shutdown mid-capture turns that release into ObjectDisposedException.",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "filter": "ClipboardMonitorServiceDisposalTests",
+    "find": "        _capturedClips.OnCompleted();\n        _updatedClips.OnCompleted();\n        _captureBusy.OnCompleted();\n    }",
+    "replace": "        _capturedClips.OnCompleted();\n        _updatedClips.OnCompleted();\n        _captureBusy.OnCompleted();\n        _captureGate.Dispose();\n    }"
+  },
+  {
+    "id": "monitor-skips-subject-completion",
+    "why": "Over-corrects by not tearing the subjects down at all. Subscribers never see completion and keep receiving clips after shutdown - a leak in the opposite direction.",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "filter": "ClipboardMonitorServiceDisposalTests",
+    "find": "        _capturedClips.OnCompleted();\n        _updatedClips.OnCompleted();\n        _captureBusy.OnCompleted();\n    }",
+    "replace": "    }"
+  },
+  {
+    "id": "monitor-enriches-after-disposal",
+    "why": "Drops the disposal guard from the fire-and-forget enrichment, so a clip captured just before shutdown keeps writing into a database that is closing or being rekeyed.",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "filter": "Enrichment_AbandonsItsRemainingWorkOnceDisposed",
+    "find": "            if (_isDisposed)\n            {\n                return;\n            }\n\n            var sensitivityUpdated = await Task.Run(() => _clipStoreService.ApplySensitivityAsync(capturedClip.Id));",
+    "replace": "            var sensitivityUpdated = await Task.Run(() => _clipStoreService.ApplySensitivityAsync(capturedClip.Id));"
   }
 ]
