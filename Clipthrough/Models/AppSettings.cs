@@ -202,6 +202,63 @@ public sealed record AppSettings
 
     public static AppSettings Default { get; } = new();
 
+    /// <summary>
+    /// True when the only difference between two saved settings is the
+    /// <c>Last*</c> view state the history window persists as the user clicks
+    /// around - filter toggles, search modes, the content-type selection.
+    ///
+    /// Callers use this to skip re-applying system state (global hotkeys, the
+    /// Run registry key) for a save that cannot possibly have changed it.
+    /// Filter toggles are persisted on a 500 ms debounce, so without a gate
+    /// every checkbox click tears down and re-registers every global hotkey.
+    ///
+    /// Deliberately conservative: it answers "is this *definitely* only view
+    /// state?", so a setting added later is treated as relevant until someone
+    /// says otherwise. Over-applying wastes work; under-applying leaves a
+    /// hotkey the user just rebound silently dead until the next restart.
+    /// </summary>
+    public static bool OnlyViewStateChanged(AppSettings previous, AppSettings current)
+    {
+        System.ArgumentNullException.ThrowIfNull(previous);
+        System.ArgumentNullException.ThrowIfNull(current);
+
+        return WithoutViewState(previous) == WithoutViewState(current)
+            && previous.AiPresets.SequenceEqual(current.AiPresets)
+            && previous.CustomHotkeys.SequenceEqual(current.CustomHotkeys);
+    }
+
+    /// <summary>
+    /// Blanks the view-state fields so the record's synthesized equality can
+    /// answer "is everything else the same?".
+    ///
+    /// The three list properties need care. Record equality compares them by
+    /// *reference*, and <see cref="Normalize"/> rebuilds AiPresets and
+    /// CustomHotkeys into fresh lists on every single save - so comparing two
+    /// saved instances directly always reports a difference and any gate built
+    /// on it would never fire. Pinning both sides to
+    /// <see cref="System.Array.Empty{T}"/>, which returns one cached instance,
+    /// makes that comparison meaningful; the contents are then compared
+    /// structurally by the caller.
+    /// </summary>
+    private static AppSettings WithoutViewState(AppSettings settings) => settings with
+    {
+        LastContentDisplayMode = default,
+        LastImageViewMode = default,
+        LastShowFavoritesOnly = default,
+        LastShowSensitiveOnly = default,
+        LastShowPastedOnly = default,
+        LastUseRegexSearch = default,
+        LastCaseSensitiveSearch = default,
+        LastUseWildcardSearch = default,
+        LastWholeWordSearch = default,
+        LastUseFuzzyClipSearch = default,
+        LastUseSemanticClipSearch = default,
+        LastContentTypeFilter = default,
+        LastContentTypeFilters = System.Array.Empty<ContentType>(),
+        AiPresets = System.Array.Empty<AiPreset>(),
+        CustomHotkeys = System.Array.Empty<CustomHotkeyBinding>(),
+    };
+
     public AppSettings Normalize() => this with
     {
         EnableToggleRegexHotkey = EnableToggleRegexHotkey,

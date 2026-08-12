@@ -862,5 +862,45 @@
     "filter": "DatabaseBackupServiceTests",
     "find": "                .OrderByDescending(BackupOrderKey)\n                .Skip(_retention)\n                .ToArray();",
     "replace": "                .OrderBy(BackupOrderKey)\n                .Skip(_retention)\n                .ToArray();"
+  },
+  {
+    "id": "appsettings-view-state-gate-always-fires",
+    "why": "The gate exists so a debounced filter save does not re-register every global hotkey. Always reporting a real change restores the old unconditional behaviour.",
+    "file": "Clipthrough/Models/AppSettings.cs",
+    "filter": "AppSettingsTests",
+    "find": "        return WithoutViewState(previous) == WithoutViewState(current)",
+    "replace": "        return false && WithoutViewState(previous) == WithoutViewState(current)"
+  },
+  {
+    "id": "appsettings-view-state-gate-ignores-custom-hotkeys",
+    "why": "Custom hotkeys are neutralised for the record comparison, so dropping the structural compare makes a rebound custom hotkey look like view state and it is never re-registered.",
+    "file": "Clipthrough/Models/AppSettings.cs",
+    "filter": "AppSettingsTests",
+    "find": "            && previous.CustomHotkeys.SequenceEqual(current.CustomHotkeys);",
+    "replace": "            && true;"
+  },
+  {
+    "id": "appsettings-view-state-gate-ignores-ai-presets",
+    "why": "Same hazard as custom hotkeys: AiPresets are neutralised for the record comparison, so without the structural compare an edited preset is invisible.",
+    "file": "Clipthrough/Models/AppSettings.cs",
+    "filter": "AppSettingsTests",
+    "find": "            && previous.AiPresets.SequenceEqual(current.AiPresets)",
+    "replace": "            && true"
+  },
+  {
+    "id": "appsettings-view-state-keeps-content-type-filters",
+    "why": "LastContentTypeFilters is view state and is compared by reference by the record. Leaving it in place means a filter save never matches, so the gate never fires.",
+    "file": "Clipthrough/Models/AppSettings.cs",
+    "filter": "AppSettingsTests",
+    "find": "        LastContentTypeFilters = System.Array.Empty<ContentType>(),",
+    "replace": "        LastContentTypeFilters = settings.LastContentTypeFilters,"
+  },
+  {
+    "id": "appsettings-view-state-uses-a-fresh-empty-array",
+    "why": "The whole trap: Normalize rebuilds AiPresets every save, and the record compares it by reference, so both sides must be pinned to the SAME cached instance. A fresh empty array is reference-unequal and the gate silently never fires.",
+    "file": "Clipthrough/Models/AppSettings.cs",
+    "filter": "AppSettingsTests",
+    "find": "        AiPresets = System.Array.Empty<AiPreset>(),",
+    "replace": "        AiPresets = new AiPreset[0],"
   }
 ]

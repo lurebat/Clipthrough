@@ -41,6 +41,14 @@ public partial class App : Application
     private bool _hasShownTrayNotification;
     private int _incrementalPasteOffset = 0;
     private bool _firstOpenComplete;
+
+    /// <summary>
+    /// The settings this class last applied to system state, so a save that
+    /// only moved view state can be recognised and skipped. Null until the
+    /// first change event, which therefore always applies everything.
+    /// </summary>
+    private AppSettings? _lastAppliedSettings;
+
     private readonly System.Collections.Generic.List<Avalonia.Input.KeyBinding> _customLocalKeyBindings = new();
 
     public App()
@@ -383,9 +391,31 @@ public partial class App : Application
 
     private void OnSettingsChanged(object? sender, AppSettings e)
     {
-        UpdateGlobalHotKeyRegistration();
-        _systemInteractionService?.SyncStartWithWindows(e.StartWithWindows);
-        ApplyThemeMode(e.ThemeMode);
+        var previous = _lastAppliedSettings;
+        _lastAppliedSettings = e;
+
+        // Filter toggles reach here on a 500 ms debounce, and re-registering
+        // hotkeys is not free of consequences: UpdateGlobalHotKeyRegistration
+        // unregisters everything first, and a re-registration that loses a race
+        // to another process for the same combination fails silently and is
+        // never retried. So a filter checkbox used to be able to permanently
+        // kill a working global hotkey. Skip the work when nothing but view
+        // state moved; a null previous means this is the first event, which
+        // always applies.
+        if (previous is null || !AppSettings.OnlyViewStateChanged(previous, e))
+        {
+            UpdateGlobalHotKeyRegistration();
+        }
+
+        if (previous is null || previous.StartWithWindows != e.StartWithWindows)
+        {
+            _systemInteractionService?.SyncStartWithWindows(e.StartWithWindows);
+        }
+
+        if (previous is null || previous.ThemeMode != e.ThemeMode)
+        {
+            ApplyThemeMode(e.ThemeMode);
+        }
     }
 
     public static void ApplyThemeMode(ThemeMode mode)
