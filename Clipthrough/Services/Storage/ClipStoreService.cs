@@ -293,13 +293,38 @@ public sealed class ClipStoreService : IClipStoreService
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        var content = await ExecuteScalarStringAsync(connection, "SELECT content FROM clips WHERE id = $id;", cancellationToken, ("$id", clipId));
-        if (content is null)
+        string? content;
+        string? ocrText;
+        await using (var read = connection.CreateCommand())
         {
-            return null;
+            read.CommandText = "SELECT content, ocr_text FROM clips WHERE id = $id;";
+            read.Parameters.AddWithValue("$id", clipId);
+            await using var reader = await read.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return null;
+            }
+
+            content = reader.IsDBNull(0) ? null : reader.GetString(0);
+            ocrText = reader.IsDBNull(1) ? null : reader.GetString(1);
         }
 
-        var matches = _sensitivityService.Scan(content);
+        // Image clips only ever store an "Image (WxH)" summary in `content`, so
+        // anything sensitive in a screenshot lives in `ocr_text`. SetOcrResultAsync
+        // already scans it; if this re-scan didn't, it would clear the matches and
+        // is_sensitive flag OCR had set - silently declassifying the clip and
+        // re-enabling embedding for it.
+        var matches = new List<SensitivityMatch>();
+        if (!string.IsNullOrWhiteSpace(content))
+        {
+            matches.AddRange(_sensitivityService.Scan(content));
+        }
+
+        if (!string.IsNullOrWhiteSpace(ocrText))
+        {
+            matches.AddRange(_sensitivityService.Scan(ocrText));
+        }
+
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
 
         await using (var clear = connection.CreateCommand())

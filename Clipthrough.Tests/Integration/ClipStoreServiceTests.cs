@@ -406,6 +406,44 @@ public sealed class ClipStoreServiceTests
         Assert.NotEmpty(updated.SensitivityMatches);
     }
 
+    /// <summary>
+    /// An image clip stores only an "Image (WxH)" summary in `content`; anything
+    /// sensitive in a screenshot lives in `ocr_text`. SetOcrResultAsync scans it
+    /// and flags the clip, but ApplySensitivityAsync used to re-scan `content`
+    /// alone — so any later re-scan wiped the matches, cleared is_sensitive, and
+    /// flipped embedding_status back off 'excluded', silently declassifying a
+    /// screenshot of a credential and re-admitting it to the embedding queue.
+    /// </summary>
+    [Fact]
+    public async Task ApplySensitivityAsync_KeepsSensitivityDetectedInOcrText()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Image,
+            ContentFormat = ClipContentFormat.Bitmap,
+            ContentText = string.Empty,
+            ContentBytes = new byte[] { 0x89, 0x50, 0x4E, 0x47, 1, 2, 3, 4 },
+            ImageWidth = 640,
+            ImageHeight = 480,
+        });
+
+        Assert.NotNull(clip);
+        Assert.True(await scope.ClipStoreService.SetOcrResultAsync(clip!.Id, SyntheticSecretText));
+
+        var afterOcr = Assert.Single(await scope.ClipStoreService.GetByIdsAsync(new[] { clip.Id }));
+        Assert.True(afterOcr.IsSensitive, "OCR text carrying a credential must classify the clip as sensitive");
+
+        var rescanned = await scope.ClipStoreService.ApplySensitivityAsync(clip.Id);
+
+        Assert.NotNull(rescanned);
+        Assert.True(rescanned!.IsSensitive, "A re-scan must not declassify a clip flagged from its OCR text");
+        Assert.NotEmpty(rescanned.SensitivityMatches);
+    }
+
     [Fact]
     public async Task CaptureFastAsync_DuplicatePayloadIncrementsCopyCount()
     {
