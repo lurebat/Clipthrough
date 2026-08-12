@@ -1321,6 +1321,158 @@ public sealed class MainWindowViewModelHeadlessTests
     }
 
     /// <summary>
+    /// The refresh loop retries when a clip write is still in flight, and it can
+    /// also discard a result and requeue. Recording the query at request-build
+    /// time meant the retry compared the new query against itself, decided
+    /// "unchanged", and re-read at the old depth - so changing the search never
+    /// reset paging whenever a write happened to straddle it.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task Refresh_ResetsPaging_EvenWhenAClipWriteStraddlesTheQueryChange()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        var seedRequests = Enumerable.Range(1, 201)
+            .Select(i => new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = $"keep {i}",
+                ContentBytes = Encoding.UTF8.GetBytes($"keep {i}"),
+            })
+            .ToList();
+        Assert.Equal(201, (await scope.ClipStoreService.CaptureBatchAsync(seedRequests)).Imported);
+
+        var blockingStore = new BlockingWriteClipStore(scope.ClipStoreService);
+        using var viewModel = CreateViewModel(
+            scope,
+            new TestClipboardMonitorService(),
+            new TestSystemInteractionService(),
+            new TestSessionLogService(),
+            clipStore: blockingStore);
+        await viewModel.InitializeAsync();
+
+        for (var attempt = 0; attempt < 80 && viewModel.Clips.Count < 200; attempt++)
+        {
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.Equal(200, viewModel.Clips.Count);
+        await viewModel.LoadMoreCommand.Execute().ToTask();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(201, viewModel.Clips.Count);
+
+        // Hold a write open so every refresh attempt sees a pending mutation and
+        // takes the retry path.
+        blockingStore.BlockWrites = true;
+        viewModel.SelectedClip = viewModel.Clips[0];
+        var pendingWrite = viewModel.ToggleFavoriteCommand.Execute().ToTask();
+
+        for (var attempt = 0; attempt < 80 && !blockingStore.IsWriteBlocked; attempt++)
+        {
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.True(blockingStore.IsWriteBlocked);
+
+        // Change the query while that write is still open.
+        viewModel.SearchText = "keep";
+        for (var attempt = 0; attempt < 200 && blockingStore.CountSearchesFor("keep") < 2; attempt++)
+        {
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.True(blockingStore.CountSearchesFor("keep") >= 2);
+
+        blockingStore.ReleaseWrites();
+        await pendingWrite;
+
+        for (var attempt = 0; attempt < 200 && viewModel.Clips.Count != 200; attempt++)
+        {
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        // All 201 clips still match "keep", so a depth that failed to reset
+        // shows up as 201.
+        Assert.Equal(200, viewModel.Clips.Count);
+    }
+
+    /// <summary>
+    /// Regression test for F20: a refresh always re-read a single page from
+    /// offset 0, and the incremental diff then removed every row past it. Any
+    /// background refresh - a capture, an OCR completion, periodic maintenance -
+    /// silently threw away every extra page the user had scrolled in.
+    /// Seeds one clip past the 200-row page so real paging is exercised.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task Refresh_KeepsLoadedPages_ButANewSearchResetsThem()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        var seedRequests = Enumerable.Range(1, 201)
+            .Select(i => new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = $"keep {i}",
+                ContentBytes = Encoding.UTF8.GetBytes($"keep {i}"),
+            })
+            .ToList();
+        var seeded = await scope.ClipStoreService.CaptureBatchAsync(seedRequests);
+        Assert.Equal(201, seeded.Imported);
+
+        using var viewModel = CreateViewModel(
+            scope,
+            new TestClipboardMonitorService(),
+            new TestSystemInteractionService(),
+            new TestSessionLogService());
+        await viewModel.InitializeAsync();
+
+        for (var attempt = 0; attempt < 80 && viewModel.Clips.Count < 200; attempt++)
+        {
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.Equal(200, viewModel.Clips.Count);
+
+        await viewModel.LoadMoreCommand.Execute().ToTask();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(201, viewModel.Clips.Count);
+
+        // Same query: the refresh must re-read to the depth already loaded
+        // instead of dropping the row that only the second page brought in.
+        await viewModel.RefreshCommand.Execute().ToTask();
+        for (var attempt = 0; attempt < 80 && viewModel.Clips.Count != 201; attempt++)
+        {
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.Equal(201, viewModel.Clips.Count);
+        Assert.Equal(201, viewModel.Clips.Select(clip => clip.Id).Distinct().Count());
+
+        // A different query starts over at one page even though 201 rows are
+        // loaded and all 201 still match, so the depth cannot ratchet upward.
+        viewModel.SearchText = "keep";
+        for (var attempt = 0; attempt < 80 && viewModel.Clips.Count != 200; attempt++)
+        {
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.Equal(200, viewModel.Clips.Count);
+    }
+
+    /// <summary>
     /// Regression test for F19: the paging offset was a counter that only the
     /// load paths maintained. Deleting a clip removed it from the list without
     /// adjusting the counter, so once the undo window expired and the row left
@@ -1554,6 +1706,89 @@ public sealed class MainWindowViewModelHeadlessTests
         public Task<ClipEntry?> ApplySensitivityAsync(long clipId, CancellationToken cancellationToken = default) => inner.ApplySensitivityAsync(clipId, cancellationToken);
         public Task<int> ApplyPendingSensitivityAsync(CancellationToken cancellationToken = default) => inner.ApplyPendingSensitivityAsync(cancellationToken);
         public Task SetFavoriteAsync(long clipId, bool isFavorite, CancellationToken cancellationToken = default) => inner.SetFavoriteAsync(clipId, isFavorite, cancellationToken);
+        public Task SetPinnedAsync(long clipId, bool isPinned, CancellationToken cancellationToken = default) => inner.SetPinnedAsync(clipId, isPinned, cancellationToken);
+        public Task DeleteAsync(long clipId, CancellationToken cancellationToken = default) => inner.DeleteAsync(clipId, cancellationToken);
+        public Task ClearSensitivityAsync(long clipId, CancellationToken cancellationToken = default) => inner.ClearSensitivityAsync(clipId, cancellationToken);
+        public Task SetSensitiveAsync(long clipId, bool isSensitive, CancellationToken cancellationToken = default) => inner.SetSensitiveAsync(clipId, isSensitive, cancellationToken);
+        public Task MarkPastedAsync(long clipId, CancellationToken cancellationToken = default) => inner.MarkPastedAsync(clipId, cancellationToken);
+        public Task<bool> TryClaimForOcrAsync(long clipId, CancellationToken cancellationToken = default) => inner.TryClaimForOcrAsync(clipId, cancellationToken);
+        public Task<bool> SetOcrResultAsync(long clipId, string ocrText, CancellationToken cancellationToken = default) => inner.SetOcrResultAsync(clipId, ocrText, cancellationToken);
+        public Task<bool> SetOcrFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => inner.SetOcrFailureAsync(clipId, error, cancellationToken);
+        public Task<IReadOnlyList<long>> GetPendingOcrClipIdsAsync(CancellationToken cancellationToken = default) => inner.GetPendingOcrClipIdsAsync(cancellationToken);
+        public Task<bool> MarkOcrForRerunAsync(long clipId, CancellationToken cancellationToken = default) => inner.MarkOcrForRerunAsync(clipId, cancellationToken);
+        public Task<IReadOnlyList<long>> MarkAllSucceededForRerunAsync(CancellationToken cancellationToken = default) => inner.MarkAllSucceededForRerunAsync(cancellationToken);
+        public Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default) => inner.GetOcrCoverageAsync(cancellationToken);
+        public Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default) => inner.ApplyMaintenanceAsync(cancellationToken);
+        public Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default) => inner.RebuildSensitivityMatchesAsync(cancellationToken);
+        public Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default) => inner.GetClipAtOffsetAsync(offset, cancellationToken);
+        public Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default) => inner.GetByIdAsync(clipId, cancellationToken);
+        public Task<IReadOnlyList<ClipEntry>> GetByIdsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default) => inner.GetByIdsAsync(clipIds, cancellationToken);
+        public Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default) => inner.ClaimPendingEmbeddingsAsync(batchSize, cancellationToken);
+        public Task SaveEmbeddingBatchAsync(IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion, CancellationToken cancellationToken = default) => inner.SaveEmbeddingBatchAsync(records, modelVersion, cancellationToken);
+        public Task<bool> SetEmbeddingFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => inner.SetEmbeddingFailureAsync(clipId, error, cancellationToken);
+        public Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default) => inner.MarkAllEmbeddingsForRerunAsync(cancellationToken);
+        public Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default) => inner.GetEmbeddingCoverageAsync(cancellationToken);
+        public Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default) => inner.LoadAllEmbeddingsAsync(cancellationToken);
+        public Task PrewarmAsync(CancellationToken cancellationToken = default) => inner.PrewarmAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Records every search the view model issues and can hold a clip write
+    /// open, so a test can force the refresh loop down its retry path while a
+    /// query change is in flight.
+    /// </summary>
+    private sealed class BlockingWriteClipStore(IClipStoreService inner) : IClipStoreService
+    {
+        private readonly List<string> m_searches = [];
+        private readonly object m_gate = new();
+        private TaskCompletionSource m_release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool BlockWrites { get; set; }
+
+        public bool IsWriteBlocked { get; private set; }
+
+        public int CountSearchesFor(string searchText)
+        {
+            lock (m_gate)
+            {
+                return m_searches.Count(text => string.Equals(text, searchText, StringComparison.Ordinal));
+            }
+        }
+
+        public void ReleaseWrites()
+        {
+            BlockWrites = false;
+            m_release.TrySetResult();
+        }
+
+        public Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default)
+        {
+            lock (m_gate)
+            {
+                m_searches.Add(filters.SearchText ?? string.Empty);
+            }
+
+            return inner.SearchAsync(filters, cancellationToken);
+        }
+
+        public async Task SetFavoriteAsync(long clipId, bool isFavorite, CancellationToken cancellationToken = default)
+        {
+            if (BlockWrites)
+            {
+                IsWriteBlocked = true;
+                await m_release.Task;
+                IsWriteBlocked = false;
+            }
+
+            await inner.SetFavoriteAsync(clipId, isFavorite, cancellationToken);
+        }
+        public Task<BulkCaptureResult> CaptureBatchAsync(IReadOnlyList<ClipCaptureRequest> requests, CancellationToken cancellationToken = default) => inner.CaptureBatchAsync(requests, cancellationToken);
+        public Task<ClipEntry?> CaptureAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default) => inner.CaptureAsync(request, cancellationToken);
+        public Task<ClipEntry?> CaptureFastAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default) => inner.CaptureFastAsync(request, cancellationToken);
+        public Task<ClipEntry?> UpdateDeferredContentAsync(long clipId, ClipCaptureRequest request, CancellationToken cancellationToken = default) => inner.UpdateDeferredContentAsync(clipId, request, cancellationToken);
+        public Task<ClipEntry?> UpdateSourceAppIconAsync(long clipId, byte[] iconBytes, CancellationToken cancellationToken = default) => inner.UpdateSourceAppIconAsync(clipId, iconBytes, cancellationToken);
+        public Task<ClipEntry?> ApplySensitivityAsync(long clipId, CancellationToken cancellationToken = default) => inner.ApplySensitivityAsync(clipId, cancellationToken);
+        public Task<int> ApplyPendingSensitivityAsync(CancellationToken cancellationToken = default) => inner.ApplyPendingSensitivityAsync(cancellationToken);
         public Task SetPinnedAsync(long clipId, bool isPinned, CancellationToken cancellationToken = default) => inner.SetPinnedAsync(clipId, isPinned, cancellationToken);
         public Task DeleteAsync(long clipId, CancellationToken cancellationToken = default) => inner.DeleteAsync(clipId, cancellationToken);
         public Task ClearSensitivityAsync(long clipId, CancellationToken cancellationToken = default) => inner.ClearSensitivityAsync(clipId, cancellationToken);

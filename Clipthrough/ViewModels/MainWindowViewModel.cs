@@ -122,6 +122,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // previous selection. Set by SetMainWindowVisible(true) and consumed by
     // ApplyRefreshResult.
     private bool _selectNewestOnNextRefresh;
+    // The query the last refresh ran, so the next one can tell "same query, keep
+    // the pages the user loaded" apart from "new query, reset to one page".
+    private ClipSearchFilters? _lastRefreshFilters;
+    private bool _lastRefreshUsedSemantic;
     private int _recentSearchNavigationIndex = -1;
     private bool _isNavigatingSearchHistory;
     private bool _isSearchBoxFocused;
@@ -2502,7 +2506,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 attempt++;
                 var versionBefore = Interlocked.Read(ref _clipMutationVersion);
 
-                request = await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => new RefreshRequest(BuildFilters(offset: 0), UseSemanticClipSearch));
+                request = await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    // A refresh re-reads from offset 0 and the diff replaces the
+                    // whole list, so requesting a single page would discard every
+                    // extra page the user had paged in. Re-read to the depth they
+                    // reached - but only while the query is unchanged, otherwise a
+                    // new search would inherit the old depth and never shrink.
+                    var probe = BuildFilters(offset: 0);
+                    var limit = SameResultSet(_lastRefreshFilters, probe, _lastRefreshUsedSemantic, UseSemanticClipSearch)
+                        ? Math.Max(PageSize, LoadedResultCount)
+                        : PageSize;
+
+                    return new RefreshRequest(BuildFilters(offset: 0, limit: limit), UseSemanticClipSearch);
+                });
                 if (sw is not null) Trace.TraceInformation($"[refresh-timing] built-request @ {sw.ElapsedMilliseconds}ms search='{request.Filters.SearchText}' semantic={request.UseSemanticClipSearch}");
                 result = await SearchClipsAsync(request.Filters, request.UseSemanticClipSearch).ConfigureAwait(false);
                 if (sw is not null) Trace.TraceInformation($"[refresh-timing] db-search-complete @ {sw.ElapsedMilliseconds}ms items={result.Items.Count} total={result.TotalMatchingCount}");
@@ -2562,6 +2579,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
                 ApplyRefreshResult(result, preferredSelectionId);
                 _isClipListStale = false;
+
+                // Record the query only once its rows are actually on screen.
+                // LoadedResultCount measures what is displayed, so recording at
+                // request time would let a retried or discarded attempt re-arm
+                // the deep re-read for a query whose page-one reset never ran.
+                _lastRefreshFilters = request.Filters;
+                _lastRefreshUsedSemantic = request.UseSemanticClipSearch;
+
                 return true;
             });
 
@@ -2661,7 +2686,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return ftsResult;
         }
 
-        var topK = Math.Max(filters.Limit * 2, 50);
+        // The candidate pool exists to find semantic hits the FTS query missed;
+        // it is a recall knob, not a paging depth. Clamp it to one page so a
+        // deep refresh does not hydrate proportionally more candidate rows.
+        var topK = Math.Max(Math.Min(filters.Limit, PageSize) * 2, 50);
         IReadOnlyList<(long ClipId, float Score)> semantic;
         try
         {
@@ -2755,7 +2783,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// deletes, and undo, none of which used to adjust it.
     /// </summary>
     private int LoadedResultCount => Clips.Count + _hiddenPendingDeletes.Count;
-
     private async Task LoadMoreAsync()
     {
         if (!_isDatabaseReady || !HasMoreResults)
@@ -3989,7 +4016,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _hiddenPendingDeletes.Clear();
     }
 
-    private ClipSearchFilters BuildFilters(int offset) => new()
+    private ClipSearchFilters BuildFilters(int offset, int? limit = null) => new()
     {
         SearchText = SearchText,
         ContentTypes = _selectedContentTypes.Count == 0
@@ -4004,9 +4031,46 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         WholeWord = WholeWordSearch,
         UseFuzzy = UseFuzzyClipSearch && !UseRegexSearch && !UseWildcardSearch && !WholeWordSearch,
         SortOption = SelectedSortOption.Value,
-        Limit = PageSize,
+        Limit = limit ?? PageSize,
         Offset = offset,
     };
+
+    /// <summary>
+    /// Compares everything that determines the result set, ignoring Limit and
+    /// Offset. Used to decide whether a refresh is re-reading the same query
+    /// (so the depth the user paged to must be preserved) or running a new one
+    /// (so paging resets to a single page).
+    /// </summary>
+    private static bool SameResultSet(ClipSearchFilters? a, ClipSearchFilters b, bool semanticA, bool semanticB)
+    {
+        if (a is null || semanticA != semanticB)
+        {
+            return false;
+        }
+
+        if (!string.Equals(a.SearchText, b.SearchText, StringComparison.Ordinal)
+            || a.FavoritesOnly != b.FavoritesOnly
+            || a.SensitiveOnly != b.SensitiveOnly
+            || a.PastedOnly != b.PastedOnly
+            || a.UseRegex != b.UseRegex
+            || a.CaseSensitive != b.CaseSensitive
+            || a.UseWildcard != b.UseWildcard
+            || a.WholeWord != b.WholeWord
+            || a.UseFuzzy != b.UseFuzzy
+            || a.SortOption != b.SortOption)
+        {
+            return false;
+        }
+
+        var typesA = a.ContentTypes;
+        var typesB = b.ContentTypes;
+        if (typesA is null || typesA.Count == 0)
+        {
+            return typesB is null || typesB.Count == 0;
+        }
+
+        return typesB is not null && typesA.Count == typesB.Count && !typesA.Except(typesB).Any();
+    }
 
     public void ToggleClipCheckedSelection(ClipItemViewModel clip)
     {
