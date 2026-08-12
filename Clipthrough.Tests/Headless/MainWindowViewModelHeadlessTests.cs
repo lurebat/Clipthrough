@@ -837,6 +837,57 @@ public sealed class MainWindowViewModelHeadlessTests
     }
 
     [AvaloniaFact]
+    public async Task SaveSettings_WithChangedSensitivityRules_ReloadsSemanticCacheAndPokesEmbeddingWorker()
+    {
+        // A rule change moves clips into and out of embedding eligibility. The
+        // semantic cache is a snapshot taken under the old rules, so without a
+        // reload a clip the user just made sensitive stays semantically
+        // searchable for the rest of the session.
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        var semantic = new StubSemanticSearchService();
+        var embeddingWorker = new RecordingEmbeddingWorker();
+        using var viewModel = CreateViewModel(
+            scope, clipboardMonitor, systemInteraction, sessionLogService,
+            semanticSearchService: semantic, embeddingWorker: embeddingWorker);
+
+        await viewModel.InitializeAsync();
+
+        // InitializeAsync kicks the database open on a worker thread and returns.
+        // SaveSettingsAsync short-circuits to "still loading" until that lands, so
+        // the rebuild would never run.
+        for (var attempt = 0; attempt < 100 && viewModel.IsLoadingDatabase; attempt++)
+        {
+            await Task.Delay(50);
+            Dispatcher.UIThread.RunJobs();
+        }
+        Assert.False(viewModel.IsLoadingDatabase);
+
+        var refreshesBefore = semantic.RefreshCount;
+        var pokesBefore = embeddingWorker.PokeCount;
+
+        viewModel.AddSensitivityRuleCommand.Execute().Subscribe();
+        var added = viewModel.SensitivityRules[^1];
+        added.Name = "k8 rule";
+        added.Pattern = "k8-secret-token";
+        added.IsEnabled = true;
+
+        await viewModel.SaveSettingsCommand.Execute().ToTask();
+
+        for (var attempt = 0; attempt < 50 && (semantic.RefreshCount == refreshesBefore || embeddingWorker.PokeCount == pokesBefore); attempt++)
+        {
+            await Task.Delay(50);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.True(semantic.RefreshCount > refreshesBefore, "Expected the semantic cache to be reloaded after a sensitivity rule change.");
+        Assert.True(embeddingWorker.PokeCount > pokesBefore, "Expected the embedding worker to be poked after a sensitivity rule change.");
+    }
+
+    [AvaloniaFact]
     public async Task SaveSettings_FromWelcome_ClosesWelcomeAndStartsApp()
     {
         using var scope = new TemporaryDatabaseScope();
@@ -1445,6 +1496,7 @@ public sealed class MainWindowViewModelHeadlessTests
     private sealed class StubSemanticSearchService(params long[] clipIds) : Clipthrough.Services.Search.ISemanticSearchService
     {
         private int _queryCount;
+        private int _refreshCount;
 
         public bool IsReady => true;
 
@@ -1453,7 +1505,14 @@ public sealed class MainWindowViewModelHeadlessTests
         /// <summary>Queries run so far. Incremented from the background search thread.</summary>
         public int QueryCount => Volatile.Read(ref _queryCount);
 
-        public Task RefreshCacheAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        /// <summary>Cache reloads requested so far.</summary>
+        public int RefreshCount => Volatile.Read(ref _refreshCount);
+
+        public Task RefreshCacheAsync(CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _refreshCount);
+            return Task.CompletedTask;
+        }
 
         public Task AppendEmbeddingsAsync(IReadOnlyList<ClipEmbeddingRecord> records, CancellationToken cancellationToken = default) => Task.CompletedTask;
 

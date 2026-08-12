@@ -494,5 +494,69 @@
     "filter": "ResetStalledEmbeddingClaims_ReturnsProcessingRowsToPendingAndLeavesOtherStatesAlone",
     "find": "        command.CommandText = \"UPDATE clips SET embedding_status = 'pending' WHERE embedding_status = 'processing';\";",
     "replace": "        command.CommandText = \"UPDATE clips SET embedding_status = 'pending' WHERE embedding_status IS NOT NULL;\";"
+  },
+  {
+    "id": "sensitivity-rebuild-keeps-secret-vectors",
+    "why": "Drops the embedding purge from the sensitivity rebuild. A clip the user's new rules just classified as sensitive keeps the vector derived from its secret, and keeps counting as embedded.",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "filter": "RebuildSensitivityMatches_ReconcilesEmbeddingStateInBothDirections",
+    "find": "                DELETE FROM clip_embeddings WHERE clip_id IN (SELECT id FROM clips WHERE is_sensitive = 1);\n                UPDATE clips SET embedding_status = 'excluded' WHERE is_sensitive = 1;\n",
+    "replace": ""
+  },
+  {
+    "id": "sensitivity-rebuild-strands-declassified",
+    "why": "Drops the un-exclude half of the rebuild. A clip that stopped being sensitive stays 'excluded', a state ClaimPendingEmbeddingsAsync never selects, so it can never be embedded again.",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "filter": "RebuildSensitivityMatches_ReconcilesEmbeddingStateInBothDirections",
+    "find": "                UPDATE clips SET embedding_status = NULL, embedding_attempts = 0 WHERE is_sensitive = 0 AND embedding_status = 'excluded';\n",
+    "replace": ""
+  },
+  {
+    "id": "sensitivity-rebuild-leaves-semantic-cache-stale",
+    "why": "Drops the semantic cache reload after a rule change. The cache still holds vectors for clips the user just made sensitive, so they stay semantically searchable for the rest of the session.",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "filter": "SaveSettings_WithChangedSensitivityRules_ReloadsSemanticCacheAndPokesEmbeddingWorker",
+    "find": "                        await semantic.RefreshCacheAsync().ConfigureAwait(false);",
+    "replace": "                        await Task.CompletedTask.ConfigureAwait(false);"
+  },
+  {
+    "id": "sensitivity-rebuild-no-embedding-poke",
+    "why": "Drops the worker poke after a rule change, so clips that just became eligible wait a full idle period (or forever, if the worker is idle and never poked again) before being embedded.",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "filter": "SaveSettings_WithChangedSensitivityRules_ReloadsSemanticCacheAndPokesEmbeddingWorker",
+    "find": "                _embeddingWorker?.Poke();\n            }\n        });",
+    "replace": "            }\n        });"
+  },
+  {
+    "id": "sensitivity-rebuild-ignores-manual-flag",
+    "why": "Makes the rebuild blanket-clear is_sensitive instead of preserving hand-marked clips. Any sensitivity rule change silently declassifies every clip the user marked by hand, and the reconcile block below then hands those secrets to the embedding worker.",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "filter": "RebuildSensitivityMatches_KeepsHandMarkedClipsSensitiveAndUnembedded",
+    "find": "            resetSensitiveCommand.CommandText = \"UPDATE clips SET is_sensitive = sensitivity_is_manual;\";",
+    "replace": "            resetSensitiveCommand.CommandText = \"UPDATE clips SET is_sensitive = 0;\";"
+  },
+  {
+    "id": "manual-sensitivity-not-recorded",
+    "why": "Stops SetSensitiveAsync recording that the verdict was the user's own. The clip is sensitive now, but the next rule change cannot tell it from a rule hit and declassifies it.",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "filter": "RebuildSensitivityMatches_KeepsHandMarkedClipsSensitiveAndUnembedded",
+    "find": "            command.CommandText = \"UPDATE clips SET is_sensitive = $s, sensitivity_is_manual = $s WHERE id = $id;\";",
+    "replace": "            command.CommandText = \"UPDATE clips SET is_sensitive = $s WHERE id = $id;\";"
+  },
+  {
+    "id": "manual-sensitivity-migration-not-backfilled",
+    "why": "Adds the provenance column without recovering the marks that already exist. Every clip the user hand-marked before upgrading is declassified by the first rule change after it, which is exactly the data loss the column was added to stop.",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "filter": "Migration_BackfillsManualSensitivityForClipsUpgradedFromAnOlderSchema",
+    "find": "            await ExecuteNonQueryAsync(connection, \"\"\"\n                UPDATE clips\n                SET sensitivity_is_manual = 1\n                WHERE is_sensitive = 1\n                  AND NOT EXISTS (SELECT 1 FROM clip_sensitivity_matches m WHERE m.clip_id = clips.id);\n                \"\"\", cancellationToken);",
+    "replace": ""
+  },
+  {
+    "id": "manual-sensitivity-migration-over-backfills",
+    "why": "Backfills every sensitive clip as manual, including rule-derived ones. Those verdicts freeze permanently: disabling or deleting the rule that produced them no longer declassifies the clip.",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "filter": "Migration_BackfillsManualSensitivityForClipsUpgradedFromAnOlderSchema",
+    "find": "                WHERE is_sensitive = 1\n                  AND NOT EXISTS (SELECT 1 FROM clip_sensitivity_matches m WHERE m.clip_id = clips.id);",
+    "replace": "                WHERE is_sensitive = 1;"
   }
 ]

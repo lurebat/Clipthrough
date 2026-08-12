@@ -195,7 +195,7 @@ public sealed class DatabaseInitializer
     /// no-ops on a current database but still pay several SQLite round trips
     /// each, which adds up to ~800ms on a cold OS file cache).
     /// </summary>
-    private const int CurrentSchemaVersion = 5;
+    private const int CurrentSchemaVersion = 6;
 
     private readonly SqliteConnectionFactory _connectionFactory;
     private readonly ISensitivityService _sensitivityService;
@@ -594,6 +594,29 @@ public sealed class DatabaseInitializer
         if (!existingColumns.Contains("embedding_attempts"))
         {
             await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN embedding_attempts INTEGER NOT NULL DEFAULT 0;", cancellationToken);
+        }
+
+        // Records that the user marked this clip sensitive by hand rather than a
+        // rule matching it. Provenance cannot be inferred from clip_sensitivity_matches:
+        // saving rules deletes the old ones, and the ON DELETE CASCADE above takes the
+        // match rows with them, so by the time a rebuild runs every rule-matched clip
+        // looks hand-marked. Existing rows default to 0, which is the safe direction —
+        // a rule change re-derives them exactly as it does today.
+        if (!existingColumns.Contains("sensitivity_is_manual"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN sensitivity_is_manual INTEGER NOT NULL DEFAULT 0;", cancellationToken);
+
+            // Recover the existing hand-marked clips while it is still possible.
+            // Right now the match rows are intact, so "sensitive with no match row"
+            // really does mean hand-marked; the ambiguity only appears later, once a
+            // rule save has cascaded them away. Defaulting these to 0 would let the
+            // next rule change declassify them and hand them to the embedding worker.
+            await ExecuteNonQueryAsync(connection, """
+                UPDATE clips
+                SET sensitivity_is_manual = 1
+                WHERE is_sensitive = 1
+                  AND NOT EXISTS (SELECT 1 FROM clip_sensitivity_matches m WHERE m.clip_id = clips.id);
+                """, cancellationToken);
         }
 
         await ExecuteNonQueryAsync(connection, """

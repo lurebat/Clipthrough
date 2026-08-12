@@ -340,10 +340,10 @@ public sealed class ClipStoreService : IClipStoreService
             update.Transaction = transaction;
             update.CommandText = """
                 UPDATE clips
-                SET is_sensitive = $isSensitive,
+                SET is_sensitive = CASE WHEN $isSensitive = 1 OR sensitivity_is_manual = 1 THEN 1 ELSE 0 END,
                     sensitivity_scanned_at = $scannedAt,
                     embedding_status = CASE
-                        WHEN $isSensitive = 1 THEN 'excluded'
+                        WHEN $isSensitive = 1 OR sensitivity_is_manual = 1 THEN 'excluded'
                         WHEN embedding_status = 'excluded' THEN NULL
                         ELSE embedding_status
                     END
@@ -503,7 +503,7 @@ public sealed class ClipStoreService : IClipStoreService
         await using (var updateClipCommand = connection.CreateCommand())
         {
             updateClipCommand.Transaction = transaction;
-            updateClipCommand.CommandText = "UPDATE clips SET is_sensitive = 0 WHERE id = $id;";
+            updateClipCommand.CommandText = "UPDATE clips SET is_sensitive = 0, sensitivity_is_manual = 0 WHERE id = $id;";
             updateClipCommand.Parameters.AddWithValue("$id", clipId);
             await updateClipCommand.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -521,7 +521,7 @@ public sealed class ClipStoreService : IClipStoreService
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = "UPDATE clips SET is_sensitive = $s WHERE id = $id;";
+            command.CommandText = "UPDATE clips SET is_sensitive = $s, sensitivity_is_manual = $s WHERE id = $id;";
             command.Parameters.AddWithValue("$s", isSensitive ? 1 : 0);
             command.Parameters.AddWithValue("$id", clipId);
             await command.ExecuteNonQueryAsync(cancellationToken);
@@ -869,6 +869,12 @@ public sealed class ClipStoreService : IClipStoreService
         await connection.OpenAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
 
+        // Sensitivity the rules did not derive must survive a rule change. A clip
+        // the user marked by hand carries sensitivity_is_manual, so the blanket
+        // reset below would otherwise silently declassify it - and then hand it to
+        // the embedding worker. This cannot be inferred from the match rows: saving
+        // rules deletes the old ones and cascades their matches away, so by the time
+        // a rebuild runs every rule-matched clip looks hand-marked.
         await using (var deleteMatchesCommand = connection.CreateCommand())
         {
             deleteMatchesCommand.Transaction = transaction;
@@ -879,7 +885,7 @@ public sealed class ClipStoreService : IClipStoreService
         await using (var resetSensitiveCommand = connection.CreateCommand())
         {
             resetSensitiveCommand.Transaction = transaction;
-            resetSensitiveCommand.CommandText = "UPDATE clips SET is_sensitive = 0;";
+            resetSensitiveCommand.CommandText = "UPDATE clips SET is_sensitive = sensitivity_is_manual;";
             await resetSensitiveCommand.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -887,7 +893,10 @@ public sealed class ClipStoreService : IClipStoreService
         await using (var clipsCommand = connection.CreateCommand())
         {
             clipsCommand.Transaction = transaction;
-            clipsCommand.CommandText = "SELECT id, content FROM clips;";
+            // Scan the same text every other sensitivity path scans. Reading only
+            // `content` skipped image clips entirely, so a rebuild dropped the
+            // sensitivity that OCR had derived from their recognised text.
+            clipsCommand.CommandText = $"SELECT id, ({EmbeddingTextExpression}) AS stext FROM clips;";
             await using var reader = await clipsCommand.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
@@ -912,6 +921,23 @@ public sealed class ClipStoreService : IClipStoreService
             }
 
             await AddSensitivityMatchesAsync(connection, transaction, clip.Id, matches, cancellationToken);
+        }
+
+        // Reconcile embedding state with the sensitivity verdicts we just rewrote.
+        // The per-clip paths (ApplyPendingSensitivityAsync, SetSensitiveAsync) keep
+        // this invariant; without it here a rule change silently breaks it in both
+        // directions: a clip that just became sensitive keeps the vector derived
+        // from its secret, and a clip that stopped being sensitive stays 'excluded'
+        // — a state the claim query never selects — so it can never be embedded.
+        await using (var reconcile = connection.CreateCommand())
+        {
+            reconcile.Transaction = transaction;
+            reconcile.CommandText = """
+                DELETE FROM clip_embeddings WHERE clip_id IN (SELECT id FROM clips WHERE is_sensitive = 1);
+                UPDATE clips SET embedding_status = 'excluded' WHERE is_sensitive = 1;
+                UPDATE clips SET embedding_status = NULL, embedding_attempts = 0 WHERE is_sensitive = 0 AND embedding_status = 'excluded';
+                """;
+            await reconcile.ExecuteNonQueryAsync(cancellationToken);
         }
 
         await transaction.CommitAsync(cancellationToken);

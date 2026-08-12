@@ -970,6 +970,224 @@ public sealed class ClipStoreServiceTests
     }
 
     [Fact]
+    public async Task RebuildSensitivityMatches_ReconcilesEmbeddingStateInBothDirections()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        await scope.SensitivityService.SaveRulesAsync([
+            new SensitivityRule { Name = "alpha", Pattern = "alpha", IsEnabled = true },
+        ]);
+        await scope.SensitivityService.ReloadAsync();
+
+        var secret = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "beta token value",
+            ContentBytes = Encoding.UTF8.GetBytes("beta token value"),
+            SourceApp = "Editor",
+        });
+        Assert.NotNull(secret);
+
+        var innocuous = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "alpha harmless note",
+            ContentBytes = Encoding.UTF8.GetBytes("alpha harmless note"),
+            SourceApp = "Editor",
+        });
+        Assert.NotNull(innocuous);
+
+        await scope.ClipStoreService.ApplyPendingSensitivityAsync();
+
+        // Capture-time scanning sets is_sensitive but leaves embedding_status NULL.
+        // Run the explicit rule-derived classification so the clip really is in the
+        // 'excluded' state the rebuild has to undo - and note this is a rule verdict,
+        // not a hand mark, so it must NOT survive the rule change.
+        await scope.ClipStoreService.ApplySensitivityAsync(innocuous!.Id);
+
+        // "alpha" matched, so that clip is excluded; the other one embeds normally.
+        var claimed = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10);
+        Assert.Equal([secret!.Id], claimed.Select(c => c.ClipId).ToArray());
+
+        var beforeCoverage = await scope.ClipStoreService.GetEmbeddingCoverageAsync();
+        Assert.Equal(1, beforeCoverage.Excluded);
+
+
+        var vec = new float[8];
+        for (var k = 0; k < vec.Length; k++) vec[k] = 0.35355339f;
+        await scope.ClipStoreService.SaveEmbeddingBatchAsync([new ClipEmbeddingRecord(secret.Id, vec)], "test-model-v1");
+        Assert.Single(await scope.ClipStoreService.LoadAllEmbeddingsAsync());
+
+        // Flip the rules: "beta" is now the secret, "alpha" no longer is.
+        await scope.SensitivityService.SaveRulesAsync([
+            new SensitivityRule { Name = "beta", Pattern = "beta", IsEnabled = true },
+        ]);
+        await scope.ClipStoreService.RebuildSensitivityMatchesAsync();
+
+        // The clip that just became sensitive must not keep the vector derived
+        // from it, and must not still count as embedded.
+        Assert.Empty(await scope.ClipStoreService.LoadAllEmbeddingsAsync());
+
+        // The clip that stopped being sensitive must become embeddable again
+        // rather than staying stuck in 'excluded'.
+        var reclaimed = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10);
+        Assert.Equal([innocuous!.Id], reclaimed.Select(c => c.ClipId).ToArray());
+
+        var coverage = await scope.ClipStoreService.GetEmbeddingCoverageAsync();
+        Assert.Equal(0, coverage.Embedded);
+        Assert.Equal(1, coverage.Excluded);
+    }
+
+    [Fact]
+    public async Task RebuildSensitivityMatches_KeepsHandMarkedClipsSensitiveAndUnembedded()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        await scope.SensitivityService.SaveRulesAsync([
+            new SensitivityRule { Name = "alpha", Pattern = "alpha", IsEnabled = true },
+        ]);
+        await scope.SensitivityService.ReloadAsync();
+
+        var handMarked = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "nothing any rule would ever match",
+            ContentBytes = Encoding.UTF8.GetBytes("nothing any rule would ever match"),
+            SourceApp = "Editor",
+        });
+        Assert.NotNull(handMarked);
+
+        await scope.ClipStoreService.ApplyPendingSensitivityAsync();
+
+        // The user marks it sensitive themselves — no rule produced this verdict,
+        // so there are no match rows backing it.
+        await scope.ClipStoreService.SetSensitiveAsync(handMarked!.Id, true);
+        Assert.Empty(await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10));
+
+        // Any rule change triggers a full rebuild. It must not quietly undo the
+        // user's own decision, and must certainly not then embed the clip.
+        await scope.SensitivityService.SaveRulesAsync([
+            new SensitivityRule { Name = "beta", Pattern = "beta", IsEnabled = true },
+        ]);
+        await scope.ClipStoreService.RebuildSensitivityMatchesAsync();
+
+        var reloaded = await scope.ClipStoreService.GetByIdAsync(handMarked.Id);
+        Assert.NotNull(reloaded);
+        Assert.True(reloaded!.IsSensitive, "A hand-marked clip must stay sensitive across a sensitivity rule change.");
+        Assert.Empty(await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10));
+    }
+
+    [Fact]
+    public async Task Migration_BackfillsManualSensitivityForClipsUpgradedFromAnOlderSchema()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        await scope.SensitivityService.SaveRulesAsync([
+            new SensitivityRule { Name = "alpha", Pattern = "alpha", IsEnabled = true },
+        ]);
+        await scope.SensitivityService.ReloadAsync();
+
+        var ruleMatched = await CaptureTextAsync(scope, "alpha harmless note");
+        var handMarked = await CaptureTextAsync(scope, "nothing any rule would ever match");
+        await scope.ClipStoreService.ApplyPendingSensitivityAsync();
+        await scope.ClipStoreService.SetSensitiveAsync(handMarked.Id, true);
+
+        // Rewind to the pre-migration schema so the upgrade path runs for real.
+        await using (var connection = scope.ConnectionFactory.CreateConnection())
+        {
+            await connection.OpenAsync();
+            await using var drop = connection.CreateCommand();
+            drop.CommandText = """
+                ALTER TABLE clips DROP COLUMN sensitivity_is_manual;
+                UPDATE app_metadata SET value = '5' WHERE key = 'schema_version';
+                """;
+            await drop.ExecuteNonQueryAsync();
+        }
+
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        // The upgrade must not silently discard a mark the user made before it. The
+        // match rows are still intact here, which is what makes the two cases
+        // distinguishable - that is precisely why the backfill has to happen now.
+        await scope.SensitivityService.SaveRulesAsync([
+            new SensitivityRule { Name = "beta", Pattern = "beta", IsEnabled = true },
+        ]);
+        await scope.ClipStoreService.RebuildSensitivityMatchesAsync();
+
+        var reloadedManual = await scope.ClipStoreService.GetByIdAsync(handMarked.Id);
+        Assert.NotNull(reloadedManual);
+        Assert.True(reloadedManual!.IsSensitive, "A clip hand-marked before the upgrade must survive it.");
+
+        var reloadedRuleMatched = await scope.ClipStoreService.GetByIdAsync(ruleMatched.Id);
+        Assert.NotNull(reloadedRuleMatched);
+        Assert.False(reloadedRuleMatched!.IsSensitive, "A rule-derived verdict must still be re-derived, not frozen by the backfill.");
+
+        var claimable = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10);
+        Assert.DoesNotContain(handMarked.Id, claimable.Select(c => c.ClipId));
+    }
+
+    private static async Task<ClipEntry> CaptureTextAsync(TemporaryDatabaseScope scope, string text)
+    {
+        var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = text,
+            ContentBytes = Encoding.UTF8.GetBytes(text),
+            SourceApp = "Editor",
+        });
+        Assert.NotNull(clip);
+        return clip!;
+    }
+
+    [Fact]
+    public async Task RebuildSensitivityMatches_KeepsImageClipsMatchedOnTheirOcrText()    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 65536 });
+
+        await scope.SensitivityService.SaveRulesAsync([
+            new SensitivityRule { Name = "token", Pattern = "sk-live", IsEnabled = true },
+        ]);
+        await scope.SensitivityService.ReloadAsync();
+
+        var image = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Image,
+            ContentFormat = ClipContentFormat.Bitmap,
+            ContentBytes = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 },
+            SourceApp = "Snipper",
+        });
+        Assert.NotNull(image);
+
+        await scope.ClipStoreService.ApplyPendingSensitivityAsync();
+
+        // OCR recognises a secret in the screenshot and marks it sensitive.
+        Assert.True(await scope.ClipStoreService.TryClaimForOcrAsync(image!.Id));
+        Assert.True(await scope.ClipStoreService.SetOcrResultAsync(image.Id, "credential sk-live-9182"));
+
+        var afterOcr = await scope.ClipStoreService.GetByIdAsync(image.Id);
+        Assert.True(afterOcr!.IsSensitive);
+
+        // A rebuild scanning only `content` would find nothing for an image clip
+        // and silently declassify it.
+        await scope.ClipStoreService.RebuildSensitivityMatchesAsync();
+
+        var afterRebuild = await scope.ClipStoreService.GetByIdAsync(image.Id);
+        Assert.True(afterRebuild!.IsSensitive, "An image clip whose OCR text matches a rule must stay sensitive across a rebuild.");
+        Assert.Empty(await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(10));
+    }
+
+    [Fact]
     public async Task Embeddings_SaveBatch_SkipsDeletedClaimedClip()
     {
         using var scope = new TemporaryDatabaseScope();

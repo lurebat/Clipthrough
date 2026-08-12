@@ -5875,6 +5875,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (SensitivityRulesChanged(existingRules, sensitivityRules))
             {
                 await _clipStoreService.RebuildSensitivityMatchesAsync().ConfigureAwait(false);
+
+                // The rebuild changes which clips are eligible for embedding, in both
+                // directions. The in-memory semantic cache is a snapshot taken when
+                // sensitivity said something different, so without a reload a clip the
+                // user just made sensitive stays semantically searchable for the rest
+                // of the session. The poke picks up clips that stopped being sensitive.
+                var semantic = _semanticSearchService;
+                if (semantic is not null)
+                {
+                    try
+                    {
+                        await semantic.RefreshCacheAsync().ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        Trace.TraceError($"Refreshing the semantic cache after a sensitivity rebuild failed: {ex}");
+                    }
+                }
+
+                _embeddingWorker?.Poke();
             }
         });
         _ = ApplyMaintenanceAndRefreshAsync();
