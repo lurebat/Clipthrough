@@ -1,6 +1,7 @@
 using System;
 using System.Data;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -60,7 +61,7 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
 
         var backupDir = Path.Combine(Path.GetDirectoryName(dbPath)!, "backups");
         var stamp = DateTime.UtcNow.ToString("yyyyMMdd");
-        var todayPath = Path.Combine(backupDir, $"clipthrough-{stamp}.db");
+        var todayPath = Path.Combine(backupDir, $"{BackupNamePrefix}{stamp}{BackupNameSuffix}");
 
         if (File.Exists(todayPath))
         {
@@ -99,13 +100,62 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         }
     }
 
+    private const string BackupNamePrefix = "clipthrough-";
+    private const string BackupNameSuffix = ".db";
+    private const string BackupNamePattern = BackupNamePrefix + "*" + BackupNameSuffix;
+
+    /// <summary>
+    /// The day a backup covers, taken from its name.
+    ///
+    /// <see cref="EnsureDailyBackupAsync"/> already treats the file name as the
+    /// identity of a backup — it decides whether today is already covered purely
+    /// by whether <c>clipthrough-{today}.db</c> exists, never by reading a
+    /// timestamp. Readers have to use the same identity, or writer and reader
+    /// disagree about what a given file is.
+    ///
+    /// The last-write time is not that identity. It is ordinary filesystem
+    /// metadata: any tool that moves the backups folder without preserving it
+    /// (robocopy without <c>/COPY:DAT</c>, rsync without <c>-t</c>, several
+    /// cloud sync clients) rewrites every stamp to the moment of the sync, and
+    /// with it the order in which these files get deleted.
+    /// </summary>
+    private static DateTime? ParseBackupDay(string fileName)
+    {
+        if (!fileName.StartsWith(BackupNamePrefix, StringComparison.Ordinal)
+            || !fileName.EndsWith(BackupNameSuffix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var stamp = fileName[BackupNamePrefix.Length..^BackupNameSuffix.Length];
+        return DateTime.TryParseExact(
+            stamp,
+            "yyyyMMdd",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out var day)
+            ? day
+            : null;
+    }
+
+    /// <summary>
+    /// Newest first, by the day in the name; the last-write time only breaks
+    /// ties within a day and stands in for names this version did not write.
+    /// Shared so pruning and listing cannot drift into different orders.
+    /// </summary>
+    private static (DateTime Day, DateTime Written) BackupOrderKey(FileInfo file)
+    {
+        var written = file.LastWriteTimeUtc;
+        return (ParseBackupDay(file.Name) ?? written.Date, written);
+    }
+
     private void PruneOldBackups(string backupDir)
     {
         try
         {
-            var files = Directory.EnumerateFiles(backupDir, "clipthrough-*.db")
+            var files = Directory.EnumerateFiles(backupDir, BackupNamePattern)
                 .Select(p => new FileInfo(p))
-                .OrderByDescending(f => f.LastWriteTimeUtc)
+                .OrderByDescending(BackupOrderKey)
                 .Skip(_retention)
                 .ToArray();
 
@@ -144,9 +194,9 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
 
         try
         {
-            return Directory.EnumerateFiles(backupDir, "clipthrough-*.db")
+            return Directory.EnumerateFiles(backupDir, BackupNamePattern)
                 .Select(p => new FileInfo(p))
-                .OrderByDescending(f => f.LastWriteTimeUtc)
+                .OrderByDescending(BackupOrderKey)
                 .Select(f => new DatabaseBackupInfo(f.FullName, new DateTimeOffset(f.LastWriteTimeUtc, TimeSpan.Zero), f.Length))
                 .ToArray();
         }

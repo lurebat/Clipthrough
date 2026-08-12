@@ -350,8 +350,9 @@ public sealed class DatabaseBackupServiceTests : IDisposable
     }
 
     /// <summary>
-    /// PruneOldBackups must keep exactly <paramref name="retention"/> newest
-    /// files and delete older ones.
+    /// Which files survive is the contract. The previous version of this test
+    /// asserted only that three files remained, which passes just as happily
+    /// when the wrong three are kept.
     /// </summary>
     [Fact]
     public async Task PruneOldBackups_KeepsNewestN()
@@ -359,22 +360,65 @@ public sealed class DatabaseBackupServiceTests : IDisposable
         await CreateDbWithRow(_dbPath);
         Directory.CreateDirectory(_backupDir);
 
-        // Seed 5 fake backup files with different timestamps.
-        for (int i = 0; i < 5; i++)
+        for (var day = 1; day <= 5; day++)
         {
-            var path = Path.Combine(_backupDir, $"clipthrough-2024010{i}.db");
-            File.WriteAllText(path, $"backup{i}");
-            File.SetLastWriteTimeUtc(path, new DateTime(2024, 1, i + 1, 0, 0, 0, DateTimeKind.Utc));
+            var path = Path.Combine(_backupDir, $"clipthrough-2024010{day}.db");
+            File.WriteAllText(path, $"backup{day}");
+            File.SetLastWriteTimeUtc(path, new DateTime(2024, 1, day, 0, 0, 0, DateTimeKind.Utc));
         }
 
         const int retention = 3;
         var service = NewService(retention);
         await service.EnsureDailyBackupAsync(); // adds today + prunes
 
-        var remaining = Directory.GetFiles(_backupDir, "clipthrough-*.db");
-        // Prune runs after adding today's backup, so total should be retention.
-        Assert.Equal(retention, remaining.Length);
+        Assert.Equal(
+            Sorted($"clipthrough-{DateTime.UtcNow:yyyyMMdd}.db", "clipthrough-20240105.db", "clipthrough-20240104.db"),
+            RemainingBackupNames());
     }
+
+    /// <summary>
+    /// The name is a backup's identity: <c>EnsureDailyBackupAsync</c> decides
+    /// whether today is already covered purely by whether the matching file
+    /// exists, never by reading a timestamp. Pruning has to agree with that.
+    ///
+    /// The last-write time is not that identity — it is ordinary filesystem
+    /// metadata. Moving the backups folder with a tool that does not preserve
+    /// it (robocopy without /COPY:DAT, rsync without -t, several cloud sync
+    /// clients) rewrites every stamp, and mtime-ordered pruning then deletes
+    /// whichever backups the sync happened to touch first. This inverts the
+    /// stamps outright so mtime order is exactly backwards from name order.
+    /// </summary>
+    [Fact]
+    public async Task PruneOldBackups_IgnoresLastWriteTimesThatContradictTheNames()
+    {
+        await CreateDbWithRow(_dbPath);
+        Directory.CreateDirectory(_backupDir);
+
+        for (var day = 1; day <= 5; day++)
+        {
+            var path = Path.Combine(_backupDir, $"clipthrough-2024010{day}.db");
+            File.WriteAllText(path, $"backup{day}");
+            File.SetLastWriteTimeUtc(path, new DateTime(2024, 1, 6 - day, 0, 0, 0, DateTimeKind.Utc));
+        }
+
+        var service = NewService(retention: 3);
+        await service.EnsureDailyBackupAsync();
+
+        // Ordered by mtime this keeps 20240101 and 20240102 - the two oldest
+        // backups - and deletes the newest three.
+        Assert.Equal(
+            Sorted($"clipthrough-{DateTime.UtcNow:yyyyMMdd}.db", "clipthrough-20240105.db", "clipthrough-20240104.db"),
+            RemainingBackupNames());
+    }
+
+    private string[] RemainingBackupNames()
+        => Directory.GetFiles(_backupDir, "clipthrough-*.db")
+            .Select(Path.GetFileName)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToArray()!;
+
+    private static string[] Sorted(params string[] names)
+        => names.OrderBy(n => n, StringComparer.Ordinal).ToArray();
 
     // ── ListBackups ─────────────────────────────────────────────────────────────
 
@@ -404,6 +448,30 @@ public sealed class DatabaseBackupServiceTests : IDisposable
         // Newest (Jan 3) must be first.
         Assert.Contains("20240103", list[0].Path);
         Assert.Contains("20240101", list[list.Count - 1].Path);
+    }
+
+    /// <summary>
+    /// The restore list has to agree with pruning about which backup is newest,
+    /// or the app deletes by one order while offering the user another.
+    /// </summary>
+    [Fact]
+    public async Task ListBackups_OrdersByNameWhenLastWriteTimesContradictIt()
+    {
+        await CreateDbWithRow(_dbPath);
+        Directory.CreateDirectory(_backupDir);
+
+        for (var day = 1; day <= 3; day++)
+        {
+            var path = Path.Combine(_backupDir, $"clipthrough-2024010{day}.db");
+            File.WriteAllText(path, $"b{day}");
+            File.SetLastWriteTimeUtc(path, new DateTime(2024, 1, 4 - day, 0, 0, 0, DateTimeKind.Utc));
+        }
+
+        var list = NewService().ListBackups();
+
+        Assert.Equal(
+            new[] { "clipthrough-20240103.db", "clipthrough-20240102.db", "clipthrough-20240101.db" },
+            list.Select(b => Path.GetFileName(b.Path)).ToArray());
     }
 
     // ── RestoreAsync ────────────────────────────────────────────────────────────

@@ -822,5 +822,45 @@
     "filter": "SyntaxTextEditorHeadlessTests",
     "find": "        if (_textMateInstall is null) return;\n\n        var isDark = ActualThemeVariant != ThemeVariant.Light;\n        var registry = isDark ? _darkRegistry : _lightRegistry;\n\n        _textMateInstall.Dispose();",
     "replace": "        var isDark = ActualThemeVariant != ThemeVariant.Light;\n        var registry = isDark ? _darkRegistry : _lightRegistry;\n\n        _textMateInstall?.Dispose();"
+  },
+  {
+    "id": "s16-prune-orders-by-mtime",
+    "why": "Restores mtime ordering in the pruner. A backups folder moved by any tool that does not preserve timestamps then gets its newest snapshots deleted and its oldest kept.",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "filter": "DatabaseBackupServiceTests",
+    "find": "                .OrderByDescending(BackupOrderKey)\n                .Skip(_retention)",
+    "replace": "                .OrderByDescending(f => f.LastWriteTimeUtc)\n                .Skip(_retention)"
+  },
+  {
+    "id": "s16-list-orders-by-mtime",
+    "why": "Restores mtime ordering in the restore list, so the app offers the user one order while deleting by another.",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "filter": "DatabaseBackupServiceTests",
+    "find": "                .OrderByDescending(BackupOrderKey)\n                .Select(f => new DatabaseBackupInfo(",
+    "replace": "                .OrderByDescending(f => f.LastWriteTimeUtc)\n                .Select(f => new DatabaseBackupInfo("
+  },
+  {
+    "id": "s16-day-parse-accepts-anything",
+    "why": "Makes the name parser give up and fall back to mtime for every file, which silently reinstates mtime ordering everywhere while looking like the name is still being used.",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "filter": "DatabaseBackupServiceTests",
+    "find": "        var stamp = fileName[BackupNamePrefix.Length..^BackupNameSuffix.Length];",
+    "replace": "        var stamp = string.Empty;"
+  },
+  {
+    "id": "s16-order-key-ignores-the-day",
+    "why": "Keeps the shared key but drops the name-derived day from it, leaving the write time as the only ordering component.",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "filter": "DatabaseBackupServiceTests",
+    "find": "        return (ParseBackupDay(file.Name) ?? written.Date, written);",
+    "replace": "        return (written.Date, written);"
+  },
+  {
+    "id": "s16-prune-keeps-oldest",
+    "why": "Inverts the retention direction so pruning deletes the newest backups and keeps the oldest. The old count-only assertion could not tell the difference.",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "filter": "DatabaseBackupServiceTests",
+    "find": "                .OrderByDescending(BackupOrderKey)\n                .Skip(_retention)\n                .ToArray();",
+    "replace": "                .OrderBy(BackupOrderKey)\n                .Skip(_retention)\n                .ToArray();"
   }
 ]
