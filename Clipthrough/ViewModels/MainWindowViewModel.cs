@@ -58,7 +58,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly IImageEditorService _imageEditorService;
     private readonly ISearchHistoryService _searchHistoryService;
     private readonly IAiTransformService _aiTransformService;
-    private readonly IScriptingService _scriptingService;
     private readonly IOcrService _ocrService;
     private readonly IBackgroundOcrQueue _backgroundOcrQueue;
     private readonly IBackgroundJobIndicator _jobIndicator;
@@ -167,7 +166,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _editedClipSelectionLength;
     private long? _checkedSelectionAnchorId;
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IScriptingService scriptingService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, IClipAngelImportService? clipAngelImportService = null, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null, Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null, ICopilotAuthService? copilotAuthService = null, IUpdateService? updateService = null, IDatabaseBackupService? databaseBackupService = null, IDragDropService? dragDropService = null)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, IClipAngelImportService? clipAngelImportService = null, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null, Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null, ICopilotAuthService? copilotAuthService = null, IUpdateService? updateService = null, IDatabaseBackupService? databaseBackupService = null, IDragDropService? dragDropService = null)
     {
         _clipStoreService = clipStoreService;
         _clipAngelImportService = clipAngelImportService ?? new ClipAngelImportService(clipStoreService);
@@ -183,7 +182,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _imageEditorService = imageEditorService;
         _searchHistoryService = searchHistoryService;
         _aiTransformService = aiTransformService;
-        _scriptingService = scriptingService;
         _ocrService = ocrService;
         _backgroundOcrQueue = backgroundOcrQueue;
         _jobIndicator = jobIndicator;
@@ -253,20 +251,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         CancelAiPromptCommand = ReactiveCommand.Create(CancelAiPrompt);
         ApplyAiPresetCommand = ReactiveCommand.CreateFromTask<AiPreset>(ApplyAiPresetAsync);
         InvokeAiMenuEntryCommand = ReactiveCommand.CreateFromTask<AiMenuEntry>(InvokeAiMenuEntryAsync);
-        AddScriptDraftCommand = ReactiveCommand.Create(() =>
-        {
-            var draft = new UserScriptDraft { Name = "New script", Code = "return input;" };
-            SettingsUserScriptDrafts.Add(draft);
-            SelectedScriptDraft = draft;
-            RebuildCustomHotkeyTargetSuggestions();
-        });
-        RemoveScriptDraftCommand = ReactiveCommand.Create<UserScriptDraft>(draft =>
-        {
-            if (draft is null) return;
-            SettingsUserScriptDrafts.Remove(draft);
-            SelectedScriptDraft = SettingsUserScriptDrafts.FirstOrDefault();
-            RebuildCustomHotkeyTargetSuggestions();
-        });
         AddCustomHotkeyDraftCommand = ReactiveCommand.Create(() =>
         {
             var draft = new CustomHotkeyDraft { Gesture = "Ctrl+Alt+T", Target = "builtin:UpperCase", PasteAfter = true };
@@ -279,7 +263,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SettingsCustomHotkeyDrafts.Remove(draft);
             SelectedCustomHotkeyDraft = SettingsCustomHotkeyDrafts.FirstOrDefault();
         });
-        ApplyUserScriptCommand = ReactiveCommand.CreateFromTask<UserScript>(ApplyUserScriptAsync);
         RunOcrOnSelectedImageCommand = ReactiveCommand.CreateFromTask(RunOcrOnSelectedImageAsync);
         RerunAllEmbeddingsCommand = ReactiveCommand.CreateFromTask(RerunAllEmbeddingsAsync);
         RefreshSemanticCoverageCommand = ReactiveCommand.CreateFromTask(RefreshSemanticCoverageAsync);
@@ -287,7 +270,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Update = new UpdateViewModel(updateService ?? new UpdateService(settingsService), _jobIndicator, _notificationService, status => StatusText = status);
 
         _settingsService.SettingsChanged += OnSettingsChanged;
-        SyncUserScripts(_settingsService.Current);
 
         ApplyPersistedFilters(_settingsService.Current, notify: false);
 
@@ -497,8 +479,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ReactiveCommand<TextTransformation, Unit> ApplyTextTransformationCommand { get; }
 
-    public ReactiveCommand<UserScript, Unit> ApplyUserScriptCommand { get; }
-
     public ReactiveCommand<Unit, Unit> RunOcrOnSelectedImageCommand { get; }
 
     public ReactiveCommand<Unit, Unit> RerunAllEmbeddingsCommand { get; }
@@ -506,10 +486,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> RefreshSemanticCoverageCommand { get; }
 
     public UpdateViewModel Update { get; }
-
-    public ObservableCollection<UserScript> UserScripts { get; } = new();
-
-    public ObservableCollection<UserScript> VisibleUserScripts { get; } = new();
 
     public ReactiveCommand<Unit, Unit> AddSensitivityRuleCommand { get; }
 
@@ -545,18 +521,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public System.Collections.ObjectModel.ObservableCollection<AiPreset> AiPresets { get; } = new();
 
-    public System.Collections.ObjectModel.ObservableCollection<UserScriptDraft> SettingsUserScriptDrafts { get; } = new();
-
-    private UserScriptDraft? _selectedScriptDraft;
-    public UserScriptDraft? SelectedScriptDraft
-    {
-        get => _selectedScriptDraft;
-        set => this.RaiseAndSetIfChanged(ref _selectedScriptDraft, value);
-    }
-
-    public ReactiveCommand<Unit, Unit> AddScriptDraftCommand { get; }
-    public ReactiveCommand<UserScriptDraft, Unit> RemoveScriptDraftCommand { get; }
-
     public System.Collections.ObjectModel.ObservableCollection<CustomHotkeyDraft> SettingsCustomHotkeyDrafts { get; } = new();
 
     private CustomHotkeyDraft? _selectedCustomHotkeyDraft;
@@ -581,8 +545,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public System.Collections.ObjectModel.ObservableCollection<AiMenuEntry> VisibleAiMenuEntries { get; } = new();
 
     public bool IsAiMenuVisible => _aiTransformService.IsConfigured && VisibleAiMenuEntries.Count > 0;
-
-    public bool HasVisibleUserScripts => VisibleUserScripts.Count > 0;
 
     public ReactiveCommand<AiMenuEntry, Unit> InvokeAiMenuEntryCommand { get; }
 
@@ -928,7 +890,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             UpdateSelectedClipPresentation();
             _ = EnsureSelectedClipHydratedAsync();
             RaiseSelectionStateProperties();
-            // Selection drives which AI entries / user scripts are eligible
+            // Selection drives which AI entries are eligible
             // (text vs. image). Without this the visible-entries collection
             // stays stuck on whatever the previous selection allowed.
             RefreshVisibleTransformMenus();
@@ -1632,6 +1594,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 return $"From clip #{sourceId}";
             }
             var pretty = kind.Contains(':') ? kind.Split(':', 2)[1] : kind;
+            // "script:" clips predate the removal of user scripting; keep the
+            // label so their provenance still reads correctly.
             var prefix = kind.StartsWith("ai:", StringComparison.Ordinal) ? "AI"
                 : kind.StartsWith("script:", StringComparison.Ordinal) ? "script"
                 : "transform";
@@ -1992,7 +1956,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isSettingsSectionAiExpanded;
     private bool _isSettingsSectionUpdatesExpanded;
     private bool _isSettingsSectionOcrExpanded;
-    private bool _isSettingsSectionUserScriptsExpanded;
     private bool _isSettingsSectionSemanticExpanded;
 
     public bool IsSettingsSectionBehaviorExpanded
@@ -2061,12 +2024,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => this.RaiseAndSetIfChanged(ref _isSettingsSectionOcrExpanded, value);
     }
 
-    public bool IsSettingsSectionUserScriptsExpanded
-    {
-        get => _isSettingsSectionUserScriptsExpanded;
-        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionUserScriptsExpanded, value);
-    }
-
     public bool IsSettingsSectionSemanticExpanded
     {
         get => _isSettingsSectionSemanticExpanded;
@@ -2086,7 +2043,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private static readonly string _aiKeywords = "ai openai chatgpt gpt model api key base url prompt transform";
     private static readonly string _updatesKeywords = "update updates auto-update velopack feed url release version";
     private static readonly string _ocrKeywords = "ocr image text extract recognition language bcp-47 windows.media.ocr";
-    private static readonly string _userScriptsKeywords = "script scripts user roslyn csharp c# code custom transform";
     private static readonly string _semanticKeywords = "semantic embedding embeddings similarity vector search meaning ai ml rerun reembed sort relevance date proximity";
 
     private bool MatchesFilter(string keywords)
@@ -2116,7 +2072,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsSettingsSectionAiVisible => MatchesFilter(_aiKeywords);
     public bool IsSettingsSectionUpdatesVisible => MatchesFilter(_updatesKeywords);
     public bool IsSettingsSectionOcrVisible => MatchesFilter(_ocrKeywords);
-    public bool IsSettingsSectionUserScriptsVisible => MatchesFilter(_userScriptsKeywords);
     public bool IsSettingsSectionSemanticVisible => MatchesFilter(_semanticKeywords);
 
     private void RaiseSettingsSectionVisibility()
@@ -2132,7 +2087,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(IsSettingsSectionAiVisible));
         this.RaisePropertyChanged(nameof(IsSettingsSectionUpdatesVisible));
         this.RaisePropertyChanged(nameof(IsSettingsSectionOcrVisible));
-        this.RaisePropertyChanged(nameof(IsSettingsSectionUserScriptsVisible));
         this.RaisePropertyChanged(nameof(IsSettingsSectionSemanticVisible));
 
         // Auto-expand sections that match the current filter, collapse those that don't.
@@ -2149,7 +2103,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             IsSettingsSectionAiExpanded = IsSettingsSectionAiVisible;
             IsSettingsSectionUpdatesExpanded = IsSettingsSectionUpdatesVisible;
             IsSettingsSectionOcrExpanded = IsSettingsSectionOcrVisible;
-            IsSettingsSectionUserScriptsExpanded = IsSettingsSectionUserScriptsVisible;
             IsSettingsSectionSemanticExpanded = IsSettingsSectionSemanticVisible;
         }
     }
@@ -3482,37 +3435,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private async Task ApplyUserScriptAsync(UserScript? script)
-    {
-        if (script is null || string.IsNullOrWhiteSpace(script.Code))
-        {
-            return;
-        }
-
-        var previous = StatusText;
-        StatusText = $"Running script '{script.Name}'…";
-        try
-        {
-            await _jobIndicator.TrackAsync($"Script: {script.Name}", () => ApplyTransformToTargetsAsync(
-                (source, ct) => Task.Run(() => _scriptingService.EvaluateAsync(script.Code, source, ct), ct),
-                $"script '{script.Name}'",
-                multiSummary: count => $"Applied '{script.Name}' to {count} clips",
-                transformKind: $"script:{script.Name}"));
-        }
-        catch (Exception ex)
-        {
-            Trace.TraceWarning($"User script '{script.Name}' failed: {ex}");
-            StatusText = $"Script '{script.Name}' failed: {ex.Message}";
-            _notificationService.PublishError($"Script '{script.Name}' failed", ex.Message);
-            return;
-        }
-
-        if (string.Equals(StatusText, $"Running script '{script.Name}'…", StringComparison.Ordinal))
-        {
-            StatusText = previous;
-        }
-    }
-
     private async Task<string?> CopyTransformResultToClipboardAsync(string result, ClipContentFormat format)
     {
         if (string.IsNullOrEmpty(result))
@@ -3681,8 +3603,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             TextTransformation.BoxTableToHtml => "text table → HTML",
             _ => "transformation",
         };
-
-    // Old single-clip script body replaced above; keep old method signature for legacy callers (none left).
 
     private async Task RunOcrOnSelectedImageAsync()
     {
@@ -5610,10 +5530,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             UpdateFeedUrl = (Settings.UpdateFeedUrl ?? string.Empty).Trim(),
             OcrLanguages = (Settings.OcrLanguages ?? string.Empty).Trim(),
             AutoOcrImageClips = Settings.AutoOcrImageClips,
-            UserScripts = SettingsUserScriptDrafts
-                .Select(s => new UserScript { Name = s.Name.Trim(), Code = s.Code })
-                .Where(s => !string.IsNullOrWhiteSpace(s.Name) && !string.IsNullOrWhiteSpace(s.Code))
-                .ToList(),
             CustomHotkeys = SettingsCustomHotkeyDrafts
                 .Select(d => d.ToBinding())
                 .Where(b => !string.IsNullOrWhiteSpace(b.Gesture) && !string.IsNullOrWhiteSpace(b.Target))
@@ -5769,12 +5685,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.UpdateFeedUrl = settings.UpdateFeedUrl;
         Settings.OcrLanguages = settings.OcrLanguages;
         Settings.AutoOcrImageClips = settings.AutoOcrImageClips;
-        SettingsUserScriptDrafts.Clear();
-        foreach (var s in settings.UserScripts)
-        {
-            SettingsUserScriptDrafts.Add(new UserScriptDraft { Name = s.Name, Code = s.Code });
-        }
-        SelectedScriptDraft = SettingsUserScriptDrafts.FirstOrDefault();
         SettingsCustomHotkeyDrafts.Clear();
         foreach (var h in settings.CustomHotkeys)
         {
@@ -5795,7 +5705,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             LoadSettingsDraft(settings);
         }
 
-        SyncUserScripts(settings);
         SyncAiPresets(settings);
         RebuildCustomHotkeyTargetSuggestions();
         UpdateSelectedClipPresentation();
@@ -5814,17 +5723,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(IsAiMenuVisible));
     }
 
-    private void SyncUserScripts(AppSettings settings)
-    {
-        UserScripts.Clear();
-        foreach (var s in settings.UserScripts)
-        {
-            UserScripts.Add(s);
-        }
-
-        RefreshVisibleTransformMenus();
-    }
-
     private void RebuildCustomHotkeyTargetSuggestions()
     {
         var suggestions = new List<string>();
@@ -5833,12 +5731,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (tx == TextTransformation.None) continue;
             suggestions.Add($"builtin:{tx}");
-        }
-
-        foreach (var s in SettingsUserScriptDrafts)
-        {
-            if (!string.IsNullOrWhiteSpace(s.Name))
-                suggestions.Add($"script:{s.Name}");
         }
 
         foreach (var p in AiPresets)
@@ -5907,7 +5799,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             await _settingsService.InitializeAsync();
         }
 
-        await EnsureDefaultScriptsLoadedAsync();
+        await EnsureDefaultAiPresetsLoadedAsync();
 
         await LoadSensitivityRulesAsync();
         Trace.TraceInformation($"[startup-timing] sensitivity rules loaded @ {sw.ElapsedMilliseconds}ms");
@@ -6005,7 +5897,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private async Task EnsureDefaultScriptsLoadedAsync()
+    private async Task EnsureDefaultAiPresetsLoadedAsync()
     {
         try
         {
@@ -6750,16 +6642,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                               && targets.Any(static clip => clip.IsImageClip && clip.Clip.ContentBytes is { Length: > 0 });
 
         ReplaceVisibleCollection(
-            VisibleUserScripts,
-            hasTextTargets ? UserScripts : []);
-
-        ReplaceVisibleCollection(
             VisibleAiMenuEntries,
             AiMenuEntries.Where(entry =>
                 (entry.Kind == AiPresetKind.TextToText && hasTextTargets)
                 || (entry.Kind is AiPresetKind.ImageToText or AiPresetKind.ImageToImage && hasImageTargets)));
         this.RaisePropertyChanged(nameof(IsAiMenuVisible));
-        this.RaisePropertyChanged(nameof(HasVisibleUserScripts));
     }
 
     private static void ReplaceVisibleCollection<T>(ObservableCollection<T> target, IEnumerable<T> source)

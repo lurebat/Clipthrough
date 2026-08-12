@@ -176,15 +176,11 @@ cutting per-row binding count.
 
 ---
 
-## Transforms and scripting
+## Transforms
 
 **TextTransformation** — Enum of built-in text operations (case, whitespace,
 lines, `BoxTableToHtml`). Applied by `TextTransformationService.Apply` — a pure
 static function.
-
-**ScriptingService** — Roslyn `CSharpScript` wrapper with a wall-clock timeout
-and resource bounds. Scripts receive an `Input` global and return any value
-coerced to string.
 
 **AiTransformService** — OpenAI-compatible chat-completions client. Base URL /
 key / model come from `AppSettings.Ai*` with env-var fallback.

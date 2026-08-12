@@ -33,7 +33,6 @@ public partial class App : Application
     private IAppNotificationService? _notificationService;
     private IUpdateService? _updateService;
     private IAiTransformService? _aiTransformService;
-    private IScriptingService? _scriptingService;
     private Clipthrough.Services.Search.IEmbeddingWorker? _embeddingWorker;
     private IDisposable? _embeddingWorkerCaptureSubscription;
     private IDisposable? _embeddingWorkerBatchSubscription;
@@ -73,7 +72,6 @@ public partial class App : Application
             _notificationService = Services.GetRequiredService<IAppNotificationService>();
             _updateService = Services.GetRequiredService<IUpdateService>();
             _aiTransformService = Services.GetRequiredService<IAiTransformService>();
-            _scriptingService = Services.GetRequiredService<IScriptingService>();
 
             _mainWindow = desktop.MainWindow = new MainWindow(_systemInteractionService)
             {
@@ -165,7 +163,6 @@ public partial class App : Application
         services.AddSingleton<IDragDropService, DragDropService>();
         services.AddSingleton<ICopilotAuthService, CopilotAuthService>();
         services.AddSingleton<IAiTransformService, AiTransformService>();
-        services.AddSingleton<IScriptingService, ScriptingService>();
         services.AddSingleton<IUpdateService, UpdateService>();
         services.AddSingleton<IOcrService, OcrService>();
         services.AddSingleton<IBackgroundOcrQueue, BackgroundOcrQueue>();
@@ -601,19 +598,6 @@ public partial class App : Application
                     output = Clipthrough.Services.TextTransformationService.Apply(tx, input);
                     isHtmlOutput = tx == TextTransformation.BoxTableToHtml;
                     break;
-                case "script":
-                {
-                    if (_scriptingService is null) return;
-                    var script = _settingsService?.Current.UserScripts.FirstOrDefault(s =>
-                        string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
-                    if (script is null)
-                    {
-                        Trace.TraceWarning($"Custom hotkey '{binding.Gesture}': user script '{name}' not found");
-                        return;
-                    }
-                    output = await _scriptingService.EvaluateAsync(script.Code, input);
-                    break;
-                }
                 case "ai":
                 {
                     if (_aiTransformService is null || !_aiTransformService.IsConfigured) return;

@@ -62,7 +62,6 @@ internal sealed class MainWindowTestHarness : IDisposable
             new TestImageEditorService(),
             scope.SearchHistoryService,
             new TestAiTransformService(),
-            new ScriptingService(),
             new TestOcrService(),
             new NoOpBackgroundOcrQueue(),
             new BackgroundJobIndicator(),

@@ -1141,14 +1141,11 @@ public partial class MainWindow : Window
         ("Convert", "Text table → HTML", TextTransformation.BoxTableToHtml),
     };
 
-    private readonly System.Collections.Generic.List<MenuItem> m_scriptsRoots = new();
     private readonly System.Collections.Generic.List<MenuItem> m_aiRoots = new();
-    private System.Collections.Specialized.INotifyCollectionChanged? m_scriptsSubscription;
     private System.Collections.Specialized.INotifyCollectionChanged? m_aiSubscription;
 
     private void PopulateTransformMenus()
     {
-        m_scriptsRoots.Clear();
         m_aiRoots.Clear();
 
         var editMenu = this.FindControl<MenuItem>("EditTransformMenu");
@@ -1179,7 +1176,6 @@ public partial class MainWindow : Window
         var vm = DataContext as MainWindowViewModel;
         var controls = new System.Collections.Generic.List<Control>();
         var showTextTransforms = vm?.HasTextTransformTarget ?? false;
-        var showScripts = vm?.VisibleUserScripts.Count > 0;
         var showAi = vm?.IsAiMenuVisible == true;
 
         if (showTextTransforms)
@@ -1215,13 +1211,6 @@ public partial class MainWindow : Window
             }
         }
 
-        if (showScripts)
-        {
-            var scriptsRoot = new MenuItem { Header = includeAccessKeys ? "_Scripts" : "Scripts" };
-            m_scriptsRoots.Add(scriptsRoot);
-            controls.Add(scriptsRoot);
-        }
-
         if (showAi)
         {
             var aiRoot = new MenuItem { Header = includeAccessKeys ? "_AI" : "AI" };
@@ -1248,19 +1237,9 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (m_scriptsSubscription is not null)
-        {
-            m_scriptsSubscription.CollectionChanged -= OnUserScriptsChanged;
-        }
         if (m_aiSubscription is not null)
         {
             m_aiSubscription.CollectionChanged -= OnAiEntriesChanged;
-        }
-
-        m_scriptsSubscription = vm.UserScripts as System.Collections.Specialized.INotifyCollectionChanged;
-        if (m_scriptsSubscription is not null)
-        {
-            m_scriptsSubscription.CollectionChanged += OnUserScriptsChanged;
         }
 
         m_aiSubscription = vm.AiMenuEntries as System.Collections.Specialized.INotifyCollectionChanged;
@@ -1269,16 +1248,7 @@ public partial class MainWindow : Window
             m_aiSubscription.CollectionChanged += OnAiEntriesChanged;
         }
 
-        RebuildScriptsSubmenus(vm);
         RebuildAiSubmenus(vm);
-    }
-
-    private void OnUserScriptsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
-    {
-        if (DataContext is MainWindowViewModel)
-        {
-            Dispatcher.UIThread.Post(PopulateTransformMenus);
-        }
     }
 
     private void OnAiEntriesChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
@@ -1286,24 +1256,6 @@ public partial class MainWindow : Window
         if (DataContext is MainWindowViewModel)
         {
             Dispatcher.UIThread.Post(PopulateTransformMenus);
-        }
-    }
-
-    private void RebuildScriptsSubmenus(MainWindowViewModel vm)
-    {
-        foreach (var root in m_scriptsRoots)
-        {
-            root.Items.Clear();
-            foreach (var script in vm.VisibleUserScripts)
-            {
-                var child = new MenuItem
-                {
-                    Header = script.Name,
-                    Command = vm.ApplyUserScriptCommand,
-                    CommandParameter = script,
-                };
-                root.Items.Add(child);
-            }
         }
     }
 
@@ -1323,20 +1275,6 @@ public partial class MainWindow : Window
                 root.Items.Add(child);
             }
         }
-    }
-
-    private void OnScriptMenuClick(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is not MainWindowViewModel viewModel || sender is not MenuItem mi)
-        {
-            return;
-        }
-        if (mi.CommandParameter is not UserScript script)
-        {
-            return;
-        }
-        viewModel.ApplyUserScriptCommand.Execute(script).Subscribe();
-        e.Handled = true;
     }
 
     private bool TryHandleClipIndexShortcut(MainWindowViewModel viewModel, KeyEventArgs e)

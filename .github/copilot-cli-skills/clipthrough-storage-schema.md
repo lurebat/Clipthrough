@@ -54,7 +54,7 @@ All `IClipStoreService` calls from ViewModel command handlers must be wrapped in
 | `ocr_attempted_at`    | TEXT    | Last OCR attempt.                                              |
 | `ocr_error`           | TEXT    | Last OCR error message.                                        |
 | `source_clip_id`      | INTEGER | When this clip was created from a transform, points at parent. |
-| `transform_kind`      | TEXT    | `builtin:UpperCase`, `script:Name`, `ai:Preset`, etc.          |
+| `transform_kind`      | TEXT    | `builtin:UpperCase`, `ai:Preset`, etc. Rows written before user scripting was removed may carry `script:Name`. |
 | `import_kind`         | TEXT    | NULL for clipboard captures; `"drag_drop"` for popup drag-and-drop imports. |
 | `embedding_status`    | TEXT    | `pending` / `done` / `failed`.                                 |
 

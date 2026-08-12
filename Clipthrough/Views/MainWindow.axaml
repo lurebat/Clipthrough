@@ -387,17 +387,6 @@
                                                   IsVisible="{Binding CanTransform}"
                                                   Command="{Binding ApplyTextTransformationCommand}"
                                                   CommandParameter="{x:Static models:TextTransformation.BoxTableToHtml}" />
-                                        <MenuItem Header="Scripts"
-                                                  ItemsSource="{Binding #ClipsListBox.DataContext.VisibleUserScripts}"
-                                                  IsVisible="{Binding #ClipsListBox.DataContext.HasVisibleUserScripts}">
-                                            <MenuItem.Styles>
-                                                <Style Selector="MenuItem" x:DataType="models:UserScript">
-                                                    <Setter Property="Header" Value="{Binding Name}" />
-                                                    <Setter Property="Command" Value="{Binding #ClipsListBox.DataContext.ApplyUserScriptCommand}" />
-                                                    <Setter Property="CommandParameter" Value="{Binding}" />
-                                                </Style>
-                                            </MenuItem.Styles>
-                                        </MenuItem>
                                         <MenuItem Header="AI"
                                                   ItemsSource="{Binding #ClipsListBox.DataContext.VisibleAiMenuEntries}"
                                                   IsVisible="{Binding #ClipsListBox.DataContext.IsAiMenuVisible}">

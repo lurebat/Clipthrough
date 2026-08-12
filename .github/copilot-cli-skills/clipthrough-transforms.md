@@ -66,13 +66,6 @@ When exactly one target is transformed (single selected clip or a selected text 
 
 Multi-clip batch transforms intentionally skip auto-copy — only the final clip would be on the clipboard anyway, and the user almost certainly wants to leave their clipboard alone.
 
-## User scripts (C# scripting)
-
-- Stored on `AppSettings.UserScripts` (`UserScript { Name, Code }`).
-- Executed by `IScriptingService.EvaluateAsync(code, input)` via Roslyn `CSharpScript`. Globals expose `Input` (string). Return value is coerced to string.
-- Compiled `Script<object?>` instances are cached per source string (bounded at 64 entries), so a script's second invocation skips the expensive Roslyn compile.
-- No defaults are seeded — everything that used to live in `GetDefaultScripts()` is now a built-in transform in the `Encoding` group.
-
 ## AI transforms
 
 - Service: `IAiTransformService.TransformAsync(systemPrompt, input)`.
@@ -100,7 +93,6 @@ record CustomHotkeyBinding {
 | Kind       | `value`                                         | Behaviour                                                            |
 | ---------- | ----------------------------------------------- | -------------------------------------------------------------------- |
 | `builtin`  | `TextTransformation` enum name                  | Runs `TextTransformationService.Apply(kind, latestClip)`.            |
-| `script`   | User script `Name`                              | Runs the matching `UserScript.Code` via `IScriptingService`.         |
 | `ai`       | AI preset `Name`                                | Runs `IAiTransformService.TransformAsync(preset.Prompt, latestClip)`.|
 | `prompt`   | Free-form prompt text                           | Runs `IAiTransformService.TransformAsync(value, latestClip)` directly — handy for one-off prompts without creating a preset. |
 | `aiprompt` | `<kind>[\|<prefill>]` (`<kind>` ∈ `auto`, `text`, `image-to-text`, `image-to-image`) | Opens the AI prompt dialog with the requested kind selected. Anything after the first `\|` is loaded into the prompt textbox so the user can edit/extend before submitting. `auto` (default) lets the VM pick the kind based on the active clip. |

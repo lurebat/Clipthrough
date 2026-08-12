@@ -64,13 +64,6 @@
 
             <Border Classes="surface-panel" Padding="16">
                 <StackPanel Spacing="6">
-                    <TextBlock FontWeight="SemiBold" Text="User scripts" />
-                    <TextBlock TextWrapping="Wrap" Text="Edit → Load default scripts seeds a set of transformations (JSON quote/unquote/minify/pretty, URL and Base64 encode/decode, collapse whitespace, reverse lines). Run any script from Edit → Run script. Scripts are plain C# expressions with a string variable 'Input' provided by the current clip; edit them in Settings → Scripts." />
-                </StackPanel>
-            </Border>
-
-            <Border Classes="surface-panel" Padding="16">
-                <StackPanel Spacing="6">
                     <TextBlock FontWeight="SemiBold" Text="Settings" />
                     <TextBlock TextWrapping="Wrap" Text="Open Settings (gear icon or the File menu) to change storage path, encryption password, retention, hotkeys, and the theme. The Fuzzy toggle next to the filter box accepts synonyms like 'keybind' → 'hotkey' or 'dark mode' → 'theme'." />
                 </StackPanel>

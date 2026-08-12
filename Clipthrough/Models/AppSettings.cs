@@ -175,8 +175,6 @@ public sealed record AppSettings
 
     public string AiReasoningEffort { get; init; } = string.Empty;
 
-    public System.Collections.Generic.IReadOnlyList<UserScript> UserScripts { get; init; } = System.Array.Empty<UserScript>();
-
     public System.Collections.Generic.IReadOnlyList<AiPreset> AiPresets { get; init; } = System.Array.Empty<AiPreset>();
 
     public System.Collections.Generic.IReadOnlyList<CustomHotkeyBinding> CustomHotkeys { get; init; } = System.Array.Empty<CustomHotkeyBinding>();
@@ -273,10 +271,6 @@ public sealed record AppSettings
         AiModel = AiModel?.Trim() ?? string.Empty,
         AiImageModel = AiImageModel?.Trim() ?? string.Empty,
         AiReasoningEffort = NormalizeReasoningEffort(AiReasoningEffort),
-        UserScripts = (UserScripts ?? System.Array.Empty<UserScript>())
-            .Where(s => s is not null && !string.IsNullOrWhiteSpace(s.Name) && !string.IsNullOrWhiteSpace(s.Code))
-            .Select(s => new UserScript { Name = s.Name.Trim(), Code = s.Code })
-            .ToList(),
         AiPresets = (AiPresets ?? System.Array.Empty<AiPreset>())
             .Where(p => p is not null && !string.IsNullOrWhiteSpace(p.Name) && !string.IsNullOrWhiteSpace(p.Prompt))
             .Select(p => new AiPreset { Name = p.Name.Trim(), Prompt = p.Prompt.Trim(), Kind = p.Kind })

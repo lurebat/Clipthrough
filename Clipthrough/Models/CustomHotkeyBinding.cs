@@ -11,7 +11,6 @@ public sealed record CustomHotkeyBinding
     /// <summary>
     /// Target identifier in the form:
     ///   "builtin:&lt;TextTransformation enum name&gt;"
-    ///   "script:&lt;user script name&gt;"
     ///   "ai:&lt;AI preset name&gt;"
     ///   "prompt:&lt;free-form AI prompt text&gt;"
     /// </summary>
