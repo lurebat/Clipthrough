@@ -1265,11 +1265,15 @@ public sealed class ClipStoreService : IClipStoreService
         await using (var queryCommand = connection.CreateCommand())
         {
             // Use metadata-only columns (no content_bytes / source_app_icon BLOBs). (U12)
+            // Ordering has exactly one authority - BuildOrderClause. This path
+            // used to hardcode the MostRecent clause, so the sort dropdown
+            // silently stopped working the moment the user ticked Regex or Case
+            // (which is what diverts us here in the first place).
             queryCommand.CommandText = $"""
                 SELECT {ClipListSelectColumns}
                 FROM clips c
                 {whereClause}
-                ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, COALESCE(c.last_copied_at, c.captured_at) DESC, c.id DESC;
+                {BuildOrderClause(filters.SortOption)};
                 """;
             AddSearchParameters(queryCommand, filters, hasSearch: false);
 

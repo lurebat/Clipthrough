@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Text;
 using Clipthrough.Localization;
@@ -1248,5 +1250,143 @@ public sealed class ClipStoreServiceTests
         Assert.Equal(Limit, result.Items.Count);
         Assert.True(result.TotalMatchingCount > Limit,
             $"Expected TotalMatchingCount > {Limit} but was {result.TotalMatchingCount}");
+    }
+
+    /// <summary>
+    /// Regression test for B2d (part 1): SearchInMemoryAsync hardcoded the
+    /// MostRecent ORDER BY instead of honouring filters.SortOption. Because
+    /// SearchAsync diverts to that path whenever the search uses regex, case
+    /// sensitivity, wildcards or whole-word matching, the sort dropdown
+    /// silently stopped working the moment the user ticked one of those boxes -
+    /// which is exactly the user who cares about ordering.
+    ///
+    /// The oracle is the no-search SQL path, which has always honoured
+    /// SortOption. Both paths see the same set of clips here, so for any given
+    /// sort they must return the same sequence.
+    /// </summary>
+    [Theory]
+    [InlineData(ClipSortOption.MostRecent)]
+    [InlineData(ClipSortOption.OldestFirst)]
+    [InlineData(ClipSortOption.MostPasted)]
+    [InlineData(ClipSortOption.Alphabetical)]
+    [InlineData(ClipSortOption.LargestFirst)]
+    [InlineData(ClipSortOption.BestMatching)]
+    public async Task SearchAsync_InMemoryPathHonoursTheSelectedSort(ClipSortOption sortOption)
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 65536 });
+
+        await SeedSortableClipsAsync(scope);
+
+        // No search text -> SQL path, which is the reference implementation.
+        var reference = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters
+        {
+            SortOption = sortOption,
+        });
+
+        // CaseSensitive forces the in-memory path. Every seeded clip contains
+        // the lowercase marker, so both paths match the identical set and any
+        // difference in the returned sequence is a difference in ordering.
+        var inMemory = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters
+        {
+            SearchText = "zulu",
+            CaseSensitive = true,
+            SortOption = sortOption,
+        });
+
+        Assert.Equal(reference.Items.Count, inMemory.Items.Count);
+        Assert.Equal(
+            reference.Items.Select(item => item.Id).ToArray(),
+            inMemory.Items.Select(item => item.Id).ToArray());
+    }
+
+    /// <summary>
+    /// Guards <see cref="SearchAsync_InMemoryPathHonoursTheSelectedSort"/>
+    /// against becoming vacuous. That test compares two orderings, so it only
+    /// proves anything if the fixture actually orders differently under each
+    /// sort. If a future change to the seed data made two sorts agree, the
+    /// theory above would pass for one of them no matter how broken the
+    /// ordering code was. This caught a real fixture mistake once already.
+    /// </summary>
+    [Fact]
+    public async Task SortableClipFixture_ProducesADistinctOrderForEverySortKey()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 65536 });
+
+        await SeedSortableClipsAsync(scope);
+
+        async Task<string> OrderFor(ClipSortOption sortOption)
+        {
+            var result = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters { SortOption = sortOption });
+            return string.Join(",", result.Items.Select(item => item.Id));
+        }
+
+        // BestMatching is excluded: with no search term it intentionally
+        // resolves to the same clause as MostRecent.
+        ClipSortOption[] distinctSorts =
+        [
+            ClipSortOption.MostRecent,
+            ClipSortOption.OldestFirst,
+            ClipSortOption.MostPasted,
+            ClipSortOption.Alphabetical,
+            ClipSortOption.LargestFirst,
+        ];
+
+        var orders = new List<string>();
+        foreach (var sortOption in distinctSorts)
+        {
+            orders.Add($"{sortOption}={await OrderFor(sortOption)}");
+        }
+
+        var sequences = orders.Select(entry => entry[(entry.IndexOf('=') + 1)..]).ToArray();
+        Assert.Equal(distinctSorts.Length, sequences.Distinct().Count());
+    }
+
+    /// <summary>
+    /// Seeds four clips that sort differently under every supported sort key,
+    /// including a pinned one so the pinned-first prefix shared by every
+    /// ORDER BY clause is exercised too.
+    /// </summary>
+    private static async Task SeedSortableClipsAsync(TemporaryDatabaseScope scope)
+    {
+        async Task<ClipEntry> Capture(string text, int extraBytes)
+        {
+            var padded = text + new string('x', extraBytes);
+            var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = padded,
+                ContentBytes = Encoding.UTF8.GetBytes(padded),
+            });
+
+            Assert.NotNull(clip);
+
+            // captured_at has second-level granularity in some paths; sleep so
+            // the recency ordering is unambiguous rather than tie-broken by id.
+            await Task.Delay(15);
+            return clip!;
+        }
+
+        // Captured oldest to newest. Content, size and paste count are each
+        // arranged to disagree with capture order AND with each other, so no
+        // two sorts produce the same sequence. Sizes in particular must not
+        // track recency: the first attempt made the largest clip the most
+        // recently pasted one, which made LargestFirst and MostRecent
+        // indistinguishable and the comparison vacuous.
+        var lastPasted = await Capture("zulu ccc", extraBytes: 100);
+        var mostPasted = await Capture("zulu aaa", extraBytes: 0);
+        await Capture("zulu bbb", extraBytes: 400);
+        var pinned = await Capture("zulu ddd", extraBytes: 50);
+
+        // MarkPastedAsync also bumps last_copied_at, so the clip pasted most
+        // often deliberately is not the clip pasted most recently.
+        await scope.ClipStoreService.MarkPastedAsync(mostPasted.Id);
+        await scope.ClipStoreService.MarkPastedAsync(mostPasted.Id);
+        await scope.ClipStoreService.MarkPastedAsync(lastPasted.Id);
+        await scope.ClipStoreService.SetPinnedAsync(pinned.Id, true);
     }
 }
