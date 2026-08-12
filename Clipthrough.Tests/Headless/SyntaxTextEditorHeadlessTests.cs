@@ -1,0 +1,209 @@
+using Avalonia.Controls;
+using Avalonia.Headless;
+using Avalonia.Headless.XUnit;
+using Avalonia.Input;
+using Avalonia.Threading;
+using Avalonia.VisualTree;
+using AvaloniaEdit.Editing;
+using Clipthrough.Controls;
+using Xunit;
+
+namespace Clipthrough.Tests.Headless;
+
+/// <summary>
+/// The clip content editor was a WCAG 2.1.2 keyboard trap. AvaloniaEdit
+/// consumes Tab inside <c>TextArea</c>'s own KeyDown - there is no Tab
+/// KeyBinding to remove - and marks it handled, so Avalonia's navigation, which
+/// runs later on the TopLevel bubble handler and only for unhandled keys, never
+/// saw it. Once focus entered the editor, Tab inserted a tab character forever
+/// and the only way out was the mouse.
+///
+/// Every test here needs a second focusable control: a window with one control
+/// keeps focus on it regardless, so it would pass even with the trap present.
+/// </summary>
+public sealed class SyntaxTextEditorHeadlessTests
+{
+    [AvaloniaFact]
+    public void Tab_MovesFocusOutOfTheEditor()
+    {
+        using var fixture = EditorFixture.Create();
+        fixture.FocusEditor();
+
+        fixture.Window.KeyPress(Key.Tab, RawInputModifiers.None, PhysicalKey.Tab, "\t");
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.False(fixture.Editor.IsKeyboardFocusWithin, "Focus is still trapped inside the editor.");
+        Assert.True(fixture.After.IsFocused);
+        Assert.Equal("\tabc", fixture.Editor.Text);
+    }
+
+    /// <summary>
+    /// Shift+Tab must navigate, not unindent. AvaloniaEdit's Shift+Tab handler
+    /// calls Document.Remove to strip one indentation level, so if the editor
+    /// still consumed the key it would silently destroy the user's leading
+    /// whitespace - and that edit flows through TextChanged into the clip and
+    /// gets persisted on the next selection change. The fixture text is
+    /// indented on purpose: with unindented text there is nothing to strip and
+    /// this assertion would pass either way.
+    /// </summary>
+    [AvaloniaFact]
+    public void ShiftTab_MovesFocusBackwardsAndLeavesIndentationAlone()
+    {
+        using var fixture = EditorFixture.Create();
+        fixture.FocusEditor();
+
+        fixture.Window.KeyPress(Key.Tab, RawInputModifiers.Shift, PhysicalKey.Tab, "\t");
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("\tabc", fixture.Editor.Text);
+        Assert.False(fixture.Editor.IsKeyboardFocusWithin);
+    }
+
+    /// <summary>
+    /// Ctrl+Tab is the deliberate way to type a tab. Asserting the exact text
+    /// rather than "contains a tab" also pins that it is inserted once - a
+    /// double insertion would mean both this handler and the editor ran.
+    /// </summary>
+    [AvaloniaFact]
+    public void CtrlTab_InsertsALiteralTabAndKeepsFocus()
+    {
+        using var fixture = EditorFixture.Create();
+        fixture.FocusEditor();
+
+        fixture.Window.KeyPress(Key.Tab, RawInputModifiers.Control, PhysicalKey.Tab, "\t");
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(fixture.Editor.IsKeyboardFocusWithin, "Ctrl+Tab must not move focus.");
+        Assert.Equal("\t\tabc", fixture.Editor.Text);
+    }
+
+    /// <summary>
+    /// A read-only editor still has to release Tab, and must not gain text from
+    /// the deliberate-insert path.
+    /// </summary>
+    [AvaloniaFact]
+    public void ReadOnlyEditor_ReleasesTabAndRejectsCtrlTabInsertion()
+    {
+        using var fixture = EditorFixture.Create();
+        fixture.Editor.IsReadOnly = true;
+        Dispatcher.UIThread.RunJobs();
+        fixture.FocusEditor();
+
+        fixture.Window.KeyPress(Key.Tab, RawInputModifiers.Control, PhysicalKey.Tab, "\t");
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("\tabc", fixture.Editor.Text);
+
+        fixture.Window.KeyPress(Key.Tab, RawInputModifiers.None, PhysicalKey.Tab, "\t");
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(fixture.Editor.IsKeyboardFocusWithin);
+    }
+    /// <summary>
+    /// The synthetic fixture above cannot catch the case that actually mattered:
+    /// in the real window the editor is the *last* tab stop, and Avalonia's ring
+    /// does not cycle through the focus manager, so TryMoveFocus(Next) fails
+    /// there and the editor would keep the key. This walks the real MainWindow
+    /// ring and asserts it comes back around instead of parking on the editor.
+    /// </summary>
+    [AvaloniaFact]
+    public void TabRingInTheRealWindowCyclesInsteadOfStoppingOnTheEditor()
+    {
+        using var harness = MainWindowTestHarness.Create();
+        harness.SeedClips(3);
+        Dispatcher.UIThread.RunJobs();
+        harness.FocusSearchBox();
+        Dispatcher.UIThread.RunJobs();
+
+        var focusManager = TopLevel.GetTopLevel(harness.Window)!.FocusManager!;
+        var reachedEditor = false;
+        var returnedToSearch = false;
+
+        // Long enough to lap the ring even if stops are added later.
+        for (var i = 0; i < 40; i++)
+        {
+            harness.Window.KeyPress(Key.Tab, RawInputModifiers.None, PhysicalKey.Tab, "\t");
+            Dispatcher.UIThread.RunJobs();
+
+            var focused = focusManager.GetFocusedElement() as Control;
+            if (focused is null)
+            {
+                continue;
+            }
+
+            if (focused.FindAncestorOfType<SyntaxTextEditor>() is not null || focused is TextArea)
+            {
+                reachedEditor = true;
+                continue;
+            }
+
+            if (reachedEditor && focused.Name == "SearchTextBox")
+            {
+                returnedToSearch = true;
+                break;
+            }
+        }
+
+        Assert.True(reachedEditor, "Tab never reached the content editor, so this test proves nothing.");
+        Assert.True(returnedToSearch, "Focus never left the content editor - Tab is trapped there again.");
+    }
+    private sealed class EditorFixture : System.IDisposable
+    {
+        private EditorFixture(Window window, Button before, SyntaxTextEditor editor, Button after)
+        {
+            Window = window;
+            Before = before;
+            Editor = editor;
+            After = after;
+        }
+
+        public Window Window { get; }
+
+        public Button Before { get; }
+
+        public SyntaxTextEditor Editor { get; }
+
+        public Button After { get; }
+
+        public static EditorFixture Create()
+        {
+            var before = new Button { Content = "before" };
+            var editor = new SyntaxTextEditor { Text = "\tabc" };
+            var after = new Button { Content = "after" };
+
+            var window = new Window
+            {
+                Width = 400,
+                Height = 300,
+                Content = new StackPanel { Children = { before, editor, after } },
+            };
+
+            window.Show();
+            window.Activate();
+            Dispatcher.UIThread.RunJobs();
+
+            return new EditorFixture(window, before, editor, after);
+        }
+
+        public void FocusEditor()
+        {
+            // Focusing the SyntaxTextEditor wrapper is not enough: focus lands on
+            // the UserControl, and the trap only manifests once the inner
+            // TextArea has it. Tab from the button ahead of it walks inward the
+            // same way a user would.
+            Before.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            for (var i = 0; i < 5 && !Editor.IsKeyboardFocusWithin; i++)
+            {
+                Window.KeyPress(Key.Tab, RawInputModifiers.None, PhysicalKey.Tab, "\t");
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            Assert.True(Editor.IsKeyboardFocusWithin, "Focus never reached the editor; the test would not exercise the trap.");
+        }
+
+        public void Dispose()
+        {
+            try { Window.Close(); } catch { /* test teardown */ }
+        }
+    }
+}

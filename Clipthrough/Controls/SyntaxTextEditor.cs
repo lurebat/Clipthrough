@@ -1,9 +1,12 @@
 using System;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using AvaloniaEdit;
 using AvaloniaEdit.TextMate;
 using TextMateSharp.Grammars;
@@ -58,6 +61,18 @@ public sealed class SyntaxTextEditor : UserControl
 
         _editor.TextChanged += OnEditorTextChanged;
         _editor.TextArea.SelectionChanged += OnEditorSelectionChanged;
+
+        // AvaloniaEdit consumes Tab inside TextArea's own KeyDown and marks it
+        // handled, so Avalonia's navigation - which runs later, on the TopLevel
+        // bubble handler, and only for unhandled keys - never saw it. Focus
+        // could then never leave the editor by keyboard: a WCAG 2.1.2 keyboard
+        // trap. All of that consumption sits behind this one option, so turning
+        // it off hands Tab and Shift+Tab back to normal focus traversal.
+        _editor.Options.AcceptsTab = false;
+
+        // Ctrl+Tab still has to be claimed before navigation sees it, and the
+        // tunnel phase is the one point that runs strictly before both.
+        _editor.TextArea.AddHandler(KeyDownEvent, OnTextAreaKeyDownTunnel, RoutingStrategies.Tunnel);
 
         this.GetObservable(TextProperty).Subscribe(OnTextPropertyChanged);
         this.GetObservable(IsReadOnlyProperty).Subscribe(v => _editor.IsReadOnly = v);
@@ -195,6 +210,37 @@ public sealed class SyntaxTextEditor : UserControl
     {
         SelectionStart = _editor.SelectionStart;
         SelectionLength = _editor.SelectionLength;
+    }
+
+    /// <summary>
+    /// Ctrl+Tab inserts a literal tab. Plain Tab and Shift+Tab are left alone so
+    /// they traverse focus like any other control, which is what
+    /// <c>Options.AcceptsTab = false</c> in the constructor arranges.
+    /// </summary>
+    /// <remarks>
+    /// This is the VS Code convention. It keeps stray indentation out of clip
+    /// text by default while leaving a deliberate way to type a tab, and it
+    /// costs nothing in reach: Ctrl+Tab is not otherwise usable from here,
+    /// because the window's own Ctrl+Tab viewer-mode shortcut already declines
+    /// to act on keys coming from a multi-line editor.
+    /// </remarks>
+    private void OnTextAreaKeyDownTunnel(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Tab || e.Handled || e.KeyModifiers != KeyModifiers.Control)
+        {
+            return;
+        }
+
+        // Claim the key before focus traversal sees it, then insert the tab.
+        e.Handled = true;
+        if (_editor.IsReadOnly)
+        {
+            return;
+        }
+
+        var textArea = _editor.TextArea;
+        textArea.Selection.ReplaceSelectionWithText("\t");
+        textArea.Caret.BringCaretToView();
     }
 
     private void ApplyTheme()
