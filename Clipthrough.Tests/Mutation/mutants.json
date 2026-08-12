@@ -758,5 +758,37 @@
     "filter": "BuiltInShortcutsTests",
     "find": "            (\"Return\", static () => AppText.BuiltInShortcutPasteSelected),",
     "replace": "            (\"Enter\", static () => AppText.BuiltInShortcutPasteSelected),"
+  },
+  {
+    "id": "k18-flush-is-fire-and-forget",
+    "why": "Restores the original fire-and-forget shutdown flush. The settings service does real async file and SQLite I/O, so the process tears down before the save lands and the last filter change is lost.",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "filter": "Dispose_PersistsCurrentFilterStateImmediately",
+    "find": "            if (!Task.Run(() => _settingsService.SaveAsync(settings)).Wait(FilterFlushTimeout))",
+    "replace": "            _ = Task.Run(() => _settingsService.SaveAsync(settings));\n            if (false)"
+  },
+  {
+    "id": "k18-flush-timeout-too-short-to-complete",
+    "why": "Cuts the shutdown flush budget to nothing, so any save that does not complete on the caller's stack is abandoned. Indistinguishable from fire-and-forget for the production service.",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "filter": "Dispose_PersistsCurrentFilterStateImmediately",
+    "find": "    private static readonly TimeSpan FilterFlushTimeout = TimeSpan.FromSeconds(2);",
+    "replace": "    private static readonly TimeSpan FilterFlushTimeout = TimeSpan.Zero;"
+  },
+  {
+    "id": "k18-flush-persists-stale-settings",
+    "why": "Flushes the settings the service already holds instead of snapshotting the live filter toggles, so shutdown dutifully rewrites the state the user just changed away from.",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "filter": "Dispose_PersistsCurrentFilterStateImmediately",
+    "find": "        var settings = BuildPersistedFilterSettings();\n\n        try\n        {\n            if (!Task.Run(() => _settingsService.SaveAsync(settings)).Wait(FilterFlushTimeout))",
+    "replace": "        var settings = _settingsService.Current;\n\n        try\n        {\n            if (!Task.Run(() => _settingsService.SaveAsync(settings)).Wait(FilterFlushTimeout))"
+  },
+  {
+    "id": "k18-settings-fake-saves-synchronously",
+    "why": "Reverts the settings fake to completing on the caller's stack. That is what made the original disposal test vacuous: a caller that never waits still observes the saved value, so the test proves nothing about production, where the save is real I/O.",
+    "file": "Clipthrough.Tests/TestDoubles.cs",
+    "filter": "Dispose_PersistsCurrentFilterStateImmediately",
+    "find": "        if (SaveDelay > TimeSpan.Zero)\n        {\n            await Task.Delay(SaveDelay, cancellationToken);\n        }",
+    "replace": "        await Task.CompletedTask;"
   }
 ]

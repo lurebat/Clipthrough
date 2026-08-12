@@ -818,7 +818,23 @@ public sealed class MainWindowViewModelHeadlessTests
         viewModel.UseSemanticClipSearch = false;
         viewModel.IsImageTypeSelected = true;
 
+        // The production settings service writes settings.json and a legacy
+        // SQLite copy, so its save only completes after several awaits. Disposal
+        // has to wait for it; with a save that completes on the caller's stack
+        // this test would pass even for a fire-and-forget flush.
+        var saveDelay = TimeSpan.FromMilliseconds(150);
+        scope.SettingsService.SaveDelay = saveDelay;
+
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
         viewModel.Dispose();
+        elapsed.Stop();
+
+        // Asserted separately from the values below: it is the part that proves
+        // disposal blocked on the save rather than merely observing a fake that
+        // happened to have finished already.
+        Assert.True(
+            elapsed.Elapsed >= saveDelay - TimeSpan.FromMilliseconds(50),
+            $"Dispose returned after {elapsed.ElapsedMilliseconds} ms without waiting for the {saveDelay.TotalMilliseconds} ms save.");
 
         Assert.True(scope.SettingsService.Current.LastShowFavoritesOnly);
         Assert.True(scope.SettingsService.Current.LastShowSensitiveOnly);

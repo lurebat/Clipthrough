@@ -71,6 +71,14 @@ internal sealed class TestSettingsService : ISettingsService
 
     public int SaveCallCount { get; private set; }
 
+    /// <summary>
+    /// Makes <see cref="SaveAsync"/> complete asynchronously rather than on the
+    /// caller's stack. The production settings service does file and SQLite I/O,
+    /// so a caller that does not await it observes no result at all; leaving this
+    /// at zero would let such a caller pass every assertion here for free.
+    /// </summary>
+    public TimeSpan SaveDelay { get; set; }
+
     public bool HasSavedSettings { get; private set; }
 
     public event EventHandler<AppSettings>? SettingsChanged;
@@ -86,13 +94,17 @@ internal sealed class TestSettingsService : ISettingsService
         return Task.CompletedTask;
     }
 
-    public Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
+    public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
     {
+        if (SaveDelay > TimeSpan.Zero)
+        {
+            await Task.Delay(SaveDelay, cancellationToken);
+        }
+
         Current = settings.Normalize();
         HasSavedSettings = true;
         SaveCallCount++;
         SettingsChanged?.Invoke(this, Current);
-        return Task.CompletedTask;
     }
 
     public void SetCurrent(AppSettings settings)

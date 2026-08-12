@@ -171,6 +171,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     private static readonly TimeSpan StaleRefreshRetryDelay = TimeSpan.FromMilliseconds(25);
 
+    /// <summary>
+    /// How long shutdown blocks on the final filter-state save. The write is
+    /// milliseconds' worth of work, so this only ever runs out when another
+    /// settings save is wedged holding the service's gate — in which case
+    /// losing one filter toggle beats hanging the app on the way out.
+    /// </summary>
+    private static readonly TimeSpan FilterFlushTimeout = TimeSpan.FromSeconds(2);
+
     private string _settingsDatabasePassword = StorageOptions.Default.DatabasePassword;
     private string _settingsDatabasePasswordConfirm = StorageOptions.Default.DatabasePassword;
     private bool _settingsEnableNormalClipLifetime = AppSettings.Default.EnableNormalClipLifetime;
@@ -4888,16 +4896,33 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private Task PersistCurrentFilterStateAsync()
         => _settingsService.SaveAsync(BuildPersistedFilterSettings());
 
+    /// <summary>
+    /// Filter toggles are normally persisted by a 500 ms debounce, so this
+    /// final flush exists to catch the change the user made just before
+    /// closing. <see cref="Dispose"/> runs from <c>Window.Closed</c>, a
+    /// synchronous event, and the process tears down right after it returns —
+    /// so a fire-and-forget save is a race the flush usually loses, and always
+    /// loses when another settings save is still holding the service's gate.
+    /// This has to block.
+    ///
+    /// It cannot block on <c>SaveAsync</c> directly: <see cref="SettingsService"/>
+    /// does not use <c>ConfigureAwait(false)</c>, so its awaits resume on the
+    /// captured dispatcher context — the very thread we would be blocking.
+    /// <see cref="Task.Run(Func{Task})"/> detaches the save from that context so
+    /// its continuations land on the thread pool instead, which makes blocking
+    /// here safe. The settings snapshot is still taken on this thread, since it
+    /// reads UI-thread state.
+    /// </summary>
     private void FlushCurrentFilterState()
     {
-        _ = FlushCurrentFilterStateSafeAsync();
-    }
+        var settings = BuildPersistedFilterSettings();
 
-    private async Task FlushCurrentFilterStateSafeAsync()
-    {
         try
         {
-            await PersistCurrentFilterStateAsync();
+            if (!Task.Run(() => _settingsService.SaveAsync(settings)).Wait(FilterFlushTimeout))
+            {
+                Trace.TraceWarning("Filter state flush timed out; the last filter change may not have been saved.");
+            }
         }
         catch (Exception ex)
         {
