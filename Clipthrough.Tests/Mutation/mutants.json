@@ -414,5 +414,37 @@
     "filter": "DisposeAsync_RestartsOnlyTheWorkersThatWereRunningOnEntry",
     "find": "        if (_ocrQueueWasRunning)\n        {\n            _ocrQueue?.Start();\n        }",
     "replace": "        {\n            _ocrQueue?.Start();\n        }"
+  },
+  {
+    "id": "ocr-claim-reset-does-nothing",
+    "why": "Makes ResetStalledOcrClaimsAsync a no-op. Clips stranded in the 'running' state by a stop are never returned to 'pending', and TryClaimForOcrAsync refuses to reclaim them - so they are never OCR'd again.",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "filter": "ResetStalledOcrClaims_MakesAnInterruptedClipClaimableAgain",
+    "find": "        command.CommandText = \"UPDATE clips SET ocr_status = 'pending' WHERE ocr_status = 'running';\";",
+    "replace": "        command.CommandText = \"UPDATE clips SET ocr_status = 'pending' WHERE ocr_status = 'no-such-status';\";"
+  },
+  {
+    "id": "ocr-claim-reset-clobbers-finished-work",
+    "why": "Widens the reset to every clip regardless of status, so succeeded and failed clips are dragged back into the OCR backlog and the whole library is re-OCR'd on every restart.",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "filter": "ResetStalledOcrClaims_LeavesCompletedClipsAlone",
+    "find": "        command.CommandText = \"UPDATE clips SET ocr_status = 'pending' WHERE ocr_status = 'running';\";",
+    "replace": "        command.CommandText = \"UPDATE clips SET ocr_status = 'pending';\";"
+  },
+  {
+    "id": "ocr-backlog-skips-stalled-claim-reset",
+    "why": "Removes the stalled-claim reset from EnqueueBacklogAsync. The backlog then re-queues nothing for clips a previous stop left mid-flight, so they stay invisible to OCR forever.",
+    "file": "Clipthrough/Services/Ocr/BackgroundOcrQueue.cs",
+    "filter": "EnqueueBacklog_RecoversAClipStrandedInRunning",
+    "find": "            var reset = await _clipStoreService.ResetStalledOcrClaimsAsync(cancellationToken).ConfigureAwait(false);",
+    "replace": "            var reset = 0;"
+  },
+  {
+    "id": "ocr-stop-strands-inflight-ids",
+    "why": "Drops the in-flight clear from StopAsync. Ids still queued when the reader stopped stay in the in-flight set, so Enqueue treats them as already queued and silently drops exactly the clips the stop interrupted.",
+    "file": "Clipthrough/Services/Ocr/BackgroundOcrQueue.cs",
+    "filter": "StopAsync_ThenRestart_ReprocessesTheClipTheStopLeftQueued",
+    "find": "        _inflight.Clear();\n        _queueChanged.OnNext(Unit.Default);",
+    "replace": "        _queueChanged.OnNext(Unit.Default);"
   }
 ]

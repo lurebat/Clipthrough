@@ -214,6 +214,8 @@ public sealed class EmbeddingWorkerTests
         public Task<bool> SetOcrResultAsync(long clipId, string ocrText, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<bool> SetOcrFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<long>> GetPendingOcrClipIdsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<int> ResetStalledOcrClaimsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<bool> MarkOcrForRerunAsync(long clipId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<long>> MarkAllSucceededForRerunAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
@@ -333,6 +335,8 @@ public sealed class EmbeddingWorkerTests
         public Task<bool> SetOcrResultAsync(long clipId, string ocrText, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<bool> SetOcrFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<long>> GetPendingOcrClipIdsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<int> ResetStalledOcrClaimsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<bool> MarkOcrForRerunAsync(long clipId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<long>> MarkAllSucceededForRerunAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();

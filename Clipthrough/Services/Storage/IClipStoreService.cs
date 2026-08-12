@@ -49,6 +49,17 @@ public interface IClipStoreService
 
     Task<System.Collections.Generic.IReadOnlyList<long>> GetPendingOcrClipIdsAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Returns every clip left in the <c>running</c> OCR state to <c>pending</c>
+    /// and reports how many were reset. A clip is marked <c>running</c> while the
+    /// OCR queue holds it; if the queue is stopped mid-job (app exit, database
+    /// maintenance) the marker outlives the work, and
+    /// <see cref="TryClaimForOcrAsync"/> refuses to reclaim it — so the clip
+    /// would never be OCR'd again. Called every time the queue enqueues its
+    /// backlog, when nothing is in flight by definition.
+    /// </summary>
+    Task<int> ResetStalledOcrClaimsAsync(CancellationToken cancellationToken = default);
+
     Task<bool> MarkOcrForRerunAsync(long clipId, CancellationToken cancellationToken = default);
 
     Task<System.Collections.Generic.IReadOnlyList<long>> MarkAllSucceededForRerunAsync(CancellationToken cancellationToken = default);

@@ -669,7 +669,7 @@ public sealed class ClipStoreService : IClipStoreService
             SELECT id FROM clips
             WHERE content_type = 'image'
               AND content_bytes IS NOT NULL
-              AND (ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'failed' OR ocr_status = 'running' OR ocr_status = 'rerun')
+              AND (ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'failed' OR ocr_status = 'rerun')
             ORDER BY COALESCE(last_copied_at, captured_at) DESC
             LIMIT 500;
             """;
@@ -680,6 +680,17 @@ public sealed class ClipStoreService : IClipStoreService
             ids.Add(reader.GetInt64(0));
         }
         return ids;
+    }
+
+    /// <inheritdoc />
+    public async Task<int> ResetStalledOcrClaimsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE clips SET ocr_status = 'pending' WHERE ocr_status = 'running';";
+        return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default)

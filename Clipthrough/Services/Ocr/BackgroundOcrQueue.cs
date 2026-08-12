@@ -76,6 +76,13 @@ public sealed class BackgroundOcrQueue : IBackgroundOcrQueue, IDisposable
         {
         }
         _worker = null;
+
+        // Ids still queued when the reader stopped never reached RunAsync's
+        // finally, so they stay in _inflight. Enqueue treats a present id as
+        // already queued, so on restart the backlog would silently drop exactly
+        // the clips the stop interrupted.
+        _inflight.Clear();
+        _queueChanged.OnNext(Unit.Default);
     }
 
     public void Enqueue(long clipId)
@@ -102,6 +109,16 @@ public sealed class BackgroundOcrQueue : IBackgroundOcrQueue, IDisposable
     {
         try
         {
+            // Nothing is in flight when the backlog is built, so any row still
+            // marked 'running' was stranded by a previous stop (app exit, database
+            // maintenance). TryClaimForOcrAsync refuses to reclaim those, so
+            // without this reset they would never be OCR'd again.
+            var reset = await _clipStoreService.ResetStalledOcrClaimsAsync(cancellationToken).ConfigureAwait(false);
+            if (reset > 0)
+            {
+                Trace.TraceInformation($"Reset {reset} stalled OCR claim(s) back to pending.");
+            }
+
             var ids = await _clipStoreService.GetPendingOcrClipIdsAsync(cancellationToken).ConfigureAwait(false);
             foreach (var id in ids)
             {
