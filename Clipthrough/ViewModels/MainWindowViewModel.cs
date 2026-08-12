@@ -340,7 +340,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _subscriptions.Add(
             _deferredRefreshRequests
                 .Throttle(TimeSpan.FromMilliseconds(300), RxSchedulers.MainThreadScheduler)
-                .SelectMany(_ => Observable.FromAsync(() => RefreshAsync()).Select(static _ => Unit.Default))
+                .SelectMany(_ => Observable
+                    .FromAsync(() => RefreshAsync())
+                    .Select(static _ => Unit.Default)
+                    // Catch inside the SelectMany: an error reaching the outer
+                    // subscription would unsubscribe it for good, and every
+                    // later declined capture would then be dropped silently -
+                    // this stream is the only record that one is pending. The
+                    // stale flag makes the next show recover the missed update.
+                    // RefreshAsync shares a queued task between callers, so a
+                    // failure somewhere else can surface here too.
+                    .Catch((Exception ex) =>
+                    {
+                        _isClipListStale = true;
+                        ReportError("Deferred refresh", ex);
+                        return Observable.Return(Unit.Default);
+                    }))
                 .Subscribe(static _ => { }, ex => ReportError("Deferred refresh", ex)));
 
         _subscriptions.Add(

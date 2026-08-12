@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Text;
 using System.IO;
 using System.Linq;
@@ -1679,6 +1681,70 @@ public sealed class MainWindowViewModelHeadlessTests
     /// total. That makes HasMoreResults true so paging can be exercised, and
     /// records the offset the view model asks for on each page.
     /// </summary>
+    /// <summary>
+    /// Fails searches while armed, so a test can make a refresh throw on
+    /// demand and then observe whether the pipeline that requested it survived.
+    /// </summary>
+    private sealed class FlakySearchClipStore(IClipStoreService inner) : IClipStoreService
+    {
+        private volatile bool _shouldFail;
+        private int _searchCount;
+        private int _failedSearchCount;
+
+        public int FailedSearchCount => Volatile.Read(ref _failedSearchCount);
+
+        public int SearchCount => Volatile.Read(ref _searchCount);
+
+        public void StartFailing() => _shouldFail = true;
+
+        public void StopFailing() => _shouldFail = false;
+
+        public Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _searchCount);
+            if (_shouldFail)
+            {
+                Interlocked.Increment(ref _failedSearchCount);
+                throw new InvalidOperationException("Simulated search failure.");
+            }
+
+            return inner.SearchAsync(filters, cancellationToken);
+        }
+
+        public Task<BulkCaptureResult> CaptureBatchAsync(IReadOnlyList<ClipCaptureRequest> requests, CancellationToken cancellationToken = default) => inner.CaptureBatchAsync(requests, cancellationToken);
+        public Task<ClipEntry?> CaptureAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default) => inner.CaptureAsync(request, cancellationToken);
+        public Task<ClipEntry?> CaptureFastAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default) => inner.CaptureFastAsync(request, cancellationToken);
+        public Task<ClipEntry?> UpdateDeferredContentAsync(long clipId, ClipCaptureRequest request, CancellationToken cancellationToken = default) => inner.UpdateDeferredContentAsync(clipId, request, cancellationToken);
+        public Task<ClipEntry?> UpdateSourceAppIconAsync(long clipId, byte[] iconBytes, CancellationToken cancellationToken = default) => inner.UpdateSourceAppIconAsync(clipId, iconBytes, cancellationToken);
+        public Task<ClipEntry?> ApplySensitivityAsync(long clipId, CancellationToken cancellationToken = default) => inner.ApplySensitivityAsync(clipId, cancellationToken);
+        public Task<int> ApplyPendingSensitivityAsync(CancellationToken cancellationToken = default) => inner.ApplyPendingSensitivityAsync(cancellationToken);
+        public Task SetFavoriteAsync(long clipId, bool isFavorite, CancellationToken cancellationToken = default) => inner.SetFavoriteAsync(clipId, isFavorite, cancellationToken);
+        public Task SetPinnedAsync(long clipId, bool isPinned, CancellationToken cancellationToken = default) => inner.SetPinnedAsync(clipId, isPinned, cancellationToken);
+        public Task DeleteAsync(long clipId, CancellationToken cancellationToken = default) => inner.DeleteAsync(clipId, cancellationToken);
+        public Task ClearSensitivityAsync(long clipId, CancellationToken cancellationToken = default) => inner.ClearSensitivityAsync(clipId, cancellationToken);
+        public Task SetSensitiveAsync(long clipId, bool isSensitive, CancellationToken cancellationToken = default) => inner.SetSensitiveAsync(clipId, isSensitive, cancellationToken);
+        public Task MarkPastedAsync(long clipId, CancellationToken cancellationToken = default) => inner.MarkPastedAsync(clipId, cancellationToken);
+        public Task<bool> TryClaimForOcrAsync(long clipId, CancellationToken cancellationToken = default) => inner.TryClaimForOcrAsync(clipId, cancellationToken);
+        public Task<bool> SetOcrResultAsync(long clipId, string ocrText, CancellationToken cancellationToken = default) => inner.SetOcrResultAsync(clipId, ocrText, cancellationToken);
+        public Task<bool> SetOcrFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => inner.SetOcrFailureAsync(clipId, error, cancellationToken);
+        public Task<IReadOnlyList<long>> GetPendingOcrClipIdsAsync(CancellationToken cancellationToken = default) => inner.GetPendingOcrClipIdsAsync(cancellationToken);
+        public Task<bool> MarkOcrForRerunAsync(long clipId, CancellationToken cancellationToken = default) => inner.MarkOcrForRerunAsync(clipId, cancellationToken);
+        public Task<IReadOnlyList<long>> MarkAllSucceededForRerunAsync(CancellationToken cancellationToken = default) => inner.MarkAllSucceededForRerunAsync(cancellationToken);
+        public Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default) => inner.GetOcrCoverageAsync(cancellationToken);
+        public Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default) => inner.ApplyMaintenanceAsync(cancellationToken);
+        public Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default) => inner.RebuildSensitivityMatchesAsync(cancellationToken);
+        public Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default) => inner.GetClipAtOffsetAsync(offset, cancellationToken);
+        public Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default) => inner.GetByIdAsync(clipId, cancellationToken);
+        public Task<IReadOnlyList<ClipEntry>> GetByIdsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default) => inner.GetByIdsAsync(clipIds, cancellationToken);
+        public Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default) => inner.ClaimPendingEmbeddingsAsync(batchSize, cancellationToken);
+        public Task SaveEmbeddingBatchAsync(IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion, CancellationToken cancellationToken = default) => inner.SaveEmbeddingBatchAsync(records, modelVersion, cancellationToken);
+        public Task<bool> SetEmbeddingFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => inner.SetEmbeddingFailureAsync(clipId, error, cancellationToken);
+        public Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default) => inner.MarkAllEmbeddingsForRerunAsync(cancellationToken);
+        public Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default) => inner.GetEmbeddingCoverageAsync(cancellationToken);
+        public Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default) => inner.LoadAllEmbeddingsAsync(cancellationToken);
+        public Task PrewarmAsync(CancellationToken cancellationToken = default) => inner.PrewarmAsync(cancellationToken);
+    }
+
     private sealed class PagedSearchClipStore(IClipStoreService inner, int pageSize) : IClipStoreService
     {
         public List<int> RequestedOffsets { get; } = [];
@@ -2001,6 +2067,106 @@ public sealed class MainWindowViewModelHeadlessTests
         }
     }
 
+    private const string DeferredRefreshFailure = "Deferred refresh failed";
+
+    /// <summary>
+    /// The deferred-refresh stream is the only record that a declined capture
+    /// is pending, so it must survive a failing refresh. OnError is terminal in
+    /// Rx: without a Catch inside the SelectMany, one transient search failure
+    /// would unsubscribe it for the rest of the session and every later
+    /// declined capture would be dropped silently - the clip list would simply
+    /// stop updating while a non-default sort was active.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task DeferredRefresh_SurvivesAFailingRefresh()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        var flakyStore = new FlakySearchClipStore(scope.ClipStoreService);
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService, clipStore: flakyStore);
+
+        var traced = new ConcurrentQueue<string>();
+        var listener = new TraceCaptureListener(traced);
+        Trace.Listeners.Add(listener);
+        try
+        {
+            await CaptureTextClipAsync(scope.ClipStoreService, "oldest clip");
+
+            await viewModel.InitializeAsync();
+            viewModel.SetMainWindowVisible(true);
+
+            // Oldest first makes every capture take the declined path, which is
+            // the one routed through the deferred-refresh stream.
+            viewModel.SelectedSortOption = viewModel.SortOptions.Single(option => option.Value == ClipSortOption.OldestFirst);
+
+            // Let the sort change's own throttled refresh finish before arming
+            // the failure. Without this wait the failure lands on that refresh
+            // instead, and the deferred stream is never exercised at all - an
+            // earlier draft of this test failed exactly that way, passing
+            // whether or not the code under test was correct.
+            await PumpAsync(() => false, maxAttempts: 16);
+            var searchesBeforeOutage = flakyStore.SearchCount;
+
+            flakyStore.StartFailing();
+            var duringOutage = await CaptureTextClipAsync(scope.ClipStoreService, "captured during the outage");
+            clipboardMonitor.Emit(duringOutage);
+            await PumpAsync(
+                () => traced.Any(message => message.Contains(DeferredRefreshFailure, StringComparison.Ordinal)),
+                maxAttempts: 30);
+
+            Assert.True(
+                flakyStore.SearchCount > searchesBeforeOutage,
+                "The declined capture was expected to request a refresh.");
+
+            // Without this the test would pass even if the failure had landed
+            // on some other refresh - which is exactly how an earlier draft
+            // fooled itself.
+            Assert.Contains(traced, message => message.Contains(DeferredRefreshFailure, StringComparison.Ordinal));
+
+            // Now that the deferred pipeline has seen a failure, a later
+            // declined capture must still reach the list.
+            flakyStore.StopFailing();
+            var searchesAfterOutage = flakyStore.SearchCount;
+            var afterRecovery = await CaptureTextClipAsync(scope.ClipStoreService, "captured after recovery");
+            clipboardMonitor.Emit(afterRecovery);
+            await PumpAsync(() => viewModel.Clips.Any(clip => clip.Id == afterRecovery.Id), maxAttempts: 30);
+
+            Assert.True(
+                flakyStore.SearchCount > searchesAfterOutage,
+                "The deferred-refresh subscription died: the capture after recovery never triggered a search.");
+            Assert.Contains(viewModel.Clips, clip => clip.Id == afterRecovery.Id);
+        }
+        finally
+        {
+            Trace.Listeners.Remove(listener);
+        }
+    }
+
+    /// <summary>
+    /// Collects Trace output so a test can assert which code path reported an
+    /// error, not merely that some error was reported.
+    /// </summary>
+    private sealed class TraceCaptureListener(ConcurrentQueue<string> sink) : TraceListener
+    {
+        public override void Write(string? message)
+        {
+            if (message is not null)
+            {
+                sink.Enqueue(message);
+            }
+        }
+
+        public override void WriteLine(string? message)
+        {
+            if (message is not null)
+            {
+                sink.Enqueue(message);
+            }
+        }
+    }
     /// <summary>
     /// Runs the dispatcher until <paramref name="isSatisfied"/> holds or the
     /// attempts run out. Returning without satisfying the condition is not an
