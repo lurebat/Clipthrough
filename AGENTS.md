@@ -81,6 +81,45 @@ unexpectedly passing run after a lock error as untrustworthy.
 - **Views / input**: Avalonia headless tests for control loading, bindings, and basic input. Keep these small — they're flaky under load.
 - **Fakes**: extend `TestDoubles.cs` when adding new service methods. Keep the fakes minimal but realistic.
 
+### Prove a regression test can fail
+
+A test that passes against the bug it was written to catch is worse than no
+test: it reports safety that does not exist. Several in this repo did exactly
+that, and each was caught only by luck or by a reviewer.
+
+So for any test written to defend a specific fix, break the fix on purpose and
+watch the test fail before you commit. `Clipthrough.Tests/Mutation/` automates
+this — add the mutant to `mutants.json` and run
+`pwsh Clipthrough.Tests\Mutation\Invoke-MutationCheck.ps1`. Note that coverage
+cannot substitute: every vacuous test found here fully executed the code it
+failed to defend.
+
+These four patterns produced the vacuous tests. Avoid them by construction:
+
+- **Never let the old implementation be the oracle.** An equivalence test that
+  compares new behaviour against the old code passes trivially once someone
+  reverts to the old code. Pin the new behaviour to something independent — the
+  index definition read back from `sqlite_master`, a fixture with hand-written
+  expectations, a golden file.
+- **Do not assert on a proxy without proving it discriminates.** `EXPLAIN QUERY
+  PLAN` output for the `Alphabetical` sort is byte-identical with and without
+  its optimisation, so a plan assertion passes against a full revert. Before
+  asserting on any derived artifact, check it actually differs when the code is
+  wrong.
+- **Assert on the identified event, not on a count or a bare "something
+  failed".** An async test that waited for *an* error passed because a
+  completely different operation errored first. Match the specific traced
+  context, and settle unrelated work before asserting.
+- **Assert over intermediate states when the bug is transient.** If a later
+  refresh repairs the state, a test that only inspects the end result sees
+  nothing. Subscribe to `CollectionChanged` (or equivalent) and assert across
+  the sequence.
+
+One measurement trap is worth knowing, because it makes manual verification lie:
+restoring a file with `Copy-Item` or `Move-Item` restores its old timestamp, so
+MSBuild thinks the assembly is current and silently runs the *previous* build.
+Always `(Get-Item $path).LastWriteTime = Get-Date` after restoring a file.
+
 ## Commits and code changes
 
 - Small, focused commits. One feature or fix per commit. Descriptive message with a body when the change is more than cosmetic.
