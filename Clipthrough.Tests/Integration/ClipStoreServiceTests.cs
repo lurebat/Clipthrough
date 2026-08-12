@@ -722,6 +722,74 @@ public sealed class ClipStoreServiceTests
         Assert.Equal("cat is here", results.Items[0].Content);
     }
 
+    /// <summary>
+    /// A multi-token whole-word search has to require every token, the same as
+    /// the plain-text path (tokens.All) and the FTS path (AND). This used to
+    /// join the tokens into one alternation, so ticking "whole word" silently
+    /// turned an AND search into an OR and widened the result set.
+    /// </summary>
+    [Fact]
+    public async Task SearchAsync_WholeWordRequiresEveryToken()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        foreach (var content in new[] { "cat and dog", "cat alone", "dog alone" })
+        {
+            await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = content,
+                ContentBytes = Encoding.UTF8.GetBytes(content),
+            });
+        }
+
+        var results = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters
+        {
+            SearchText = "cat dog",
+            WholeWord = true,
+        });
+
+        Assert.Single(results.Items);
+        Assert.Equal("cat and dog", results.Items[0].Content);
+        Assert.Equal(1, results.TotalMatchingCount);
+    }
+
+    /// <summary>
+    /// Whole word still has to mean whole word when several tokens are given —
+    /// requiring every token must not be achieved by falling back to substring
+    /// matching.
+    /// </summary>
+    [Fact]
+    public async Task SearchAsync_WholeWordMultiTokenStillExcludesPartialMatches()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        foreach (var content in new[] { "category dogma", "cat dog" })
+        {
+            await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = content,
+                ContentBytes = Encoding.UTF8.GetBytes(content),
+            });
+        }
+
+        var results = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters
+        {
+            SearchText = "cat dog",
+            WholeWord = true,
+        });
+
+        Assert.Single(results.Items);
+        Assert.Equal("cat dog", results.Items[0].Content);
+    }
+
     [Fact]
     public async Task SearchHistory_SavesAndRetrievesQueries()
     {

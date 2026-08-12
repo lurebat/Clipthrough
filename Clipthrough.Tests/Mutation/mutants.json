@@ -342,5 +342,13 @@
     "filter": "StorageOptionsServicePhase2Tests",
     "find": "            if (scope is not null)\n            {\n                Current = normalized;\n            }",
     "replace": "            Current = normalized;"
+  },
+  {
+    "id": "whole-word-search-ors-its-tokens",
+    "why": "Restores joining whole-word tokens into one alternation. Ticking 'whole word' then silently turns a two-word AND search into an OR and returns clips containing either word, while the plain-text and FTS paths for the same query still require both.",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "filter": "SearchAsync_WholeWord",
+    "find": "        return [.. tokens.Select(token => new Regex($@\"\\b{Regex.Escape(token)}\\b\", options))];",
+    "replace": "        return [new Regex(string.Join(\"|\", tokens.Select(t => $@\"\\b{Regex.Escape(t)}\\b\")), options)];"
   }
 ]

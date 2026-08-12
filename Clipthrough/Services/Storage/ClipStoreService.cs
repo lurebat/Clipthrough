@@ -1245,15 +1245,10 @@ public sealed class ClipStoreService : IClipStoreService
 
     private async Task<ClipSearchResult> SearchInMemoryAsync(SqliteConnection connection, ClipSearchFilters filters, CancellationToken cancellationToken)
     {
-        // Build the single regex for this search ONCE here — not per row. (U13)
-        // UseRegex / UseWildcard / WholeWord all become a single Regex reference.
-        var regex = filters.UseRegex
-            ? BuildSearchRegex(filters.SearchText, filters.CaseSensitive)
-            : filters.UseWildcard
-                ? BuildWildcardRegex(filters.SearchText, filters.CaseSensitive, filters.WholeWord)
-                : filters.WholeWord
-                    ? BuildWholeWordRegex(filters.SearchText, filters.CaseSensitive)
-                    : null;
+        // Build the matcher set for this search ONCE here — not per row. (U13)
+        // UseRegex / UseWildcard / WholeWord all become a matcher set that a clip
+        // must satisfy in full.
+        var matchers = BuildSearchMatchers(filters);
 
         var items = new List<ClipEntry>(filters.Limit);
         var whereClauses = BuildWhereClauses(filters, hasSearch: false);
@@ -1281,7 +1276,7 @@ public sealed class ClipStoreService : IClipStoreService
             while (await reader.ReadAsync(cancellationToken))
             {
                 var clip = ReadClipMeta(reader);
-                if (!MatchesSearch(clip, filters, regex))
+                if (!MatchesSearch(clip, filters, matchers))
                 {
                     continue;
                 }
@@ -1317,22 +1312,24 @@ public sealed class ClipStoreService : IClipStoreService
 
     /// <summary>
     /// Returns true when <paramref name="clip"/> matches the current search filters.
-    /// <paramref name="regex"/> must already be built by the caller ONCE per search —
+    /// <paramref name="matchers"/> must already be built by the caller ONCE per search —
     /// never build a new <see cref="Regex"/> inside this method. (U13)
     /// Covers the same five columns as the FTS index: content, source_app,
     /// source_window_title, source_url, ocr_text. (U13)
     /// </summary>
-    private static bool MatchesSearch(ClipEntry clip, ClipSearchFilters filters, Regex? regex)
+    private static bool MatchesSearch(ClipEntry clip, ClipSearchFilters filters, Regex[]? matchers)
     {
         if (string.IsNullOrWhiteSpace(filters.SearchText))
         {
             return true;
         }
 
-        // regex covers UseRegex, UseWildcard, and WholeWord — all pre-built by the caller.
-        if (regex is not null)
+        // matchers covers UseRegex, UseWildcard, and WholeWord — all pre-built by the
+        // caller. Every matcher has to hit, so a two-word whole-word search requires
+        // both words, matching the plain-text path below and the FTS path.
+        if (matchers is not null)
         {
-            return IsRegexMatch(clip, regex);
+            return Array.TrueForAll(matchers, matcher => IsRegexMatch(clip, matcher));
         }
 
         // Plain-text token search over the same 5 columns as FTS.
@@ -1367,18 +1364,43 @@ public sealed class ClipStoreService : IClipStoreService
         return new Regex(escaped, options);
     }
 
-    private static Regex BuildWholeWordRegex(string searchText, bool caseSensitive)
+    /// <summary>
+    /// Builds the regex set an in-memory search has to satisfy in full, or null
+    /// for a plain substring search (which <see cref="MatchesSearch"/> handles
+    /// directly). Whole-word search yields one matcher per token rather than one
+    /// alternation, because the other two search paths both AND their tokens:
+    /// the plain-text path with <c>tokens.All</c> and the FTS path with
+    /// <c>string.Join(" AND ", ...)</c>. Ticking "whole word" narrows a search;
+    /// it must not silently widen it into an OR.
+    /// </summary>
+    private static Regex[]? BuildSearchMatchers(ClipSearchFilters filters)
+    {
+        if (filters.UseRegex)
+        {
+            return [BuildSearchRegex(filters.SearchText, filters.CaseSensitive)];
+        }
+
+        if (filters.UseWildcard)
+        {
+            return [BuildWildcardRegex(filters.SearchText, filters.CaseSensitive, filters.WholeWord)];
+        }
+
+        return filters.WholeWord
+            ? BuildWholeWordMatchers(filters.SearchText, filters.CaseSensitive)
+            : null;
+    }
+
+    private static Regex[] BuildWholeWordMatchers(string searchText, bool caseSensitive)
     {
         var tokens = searchText
             .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var pattern = string.Join("|", tokens.Select(static t => $@"\b{Regex.Escape(t)}\b"));
         var options = RegexOptions.Singleline | RegexOptions.NonBacktracking;
         if (!caseSensitive)
         {
             options |= RegexOptions.IgnoreCase;
         }
 
-        return new Regex(pattern, options);
+        return [.. tokens.Select(token => new Regex($@"\b{Regex.Escape(token)}\b", options))];
     }
 
     /// <summary>
