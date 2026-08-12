@@ -90,6 +90,10 @@ Measured at 20k clips, Alphabetical went 118 ms (no new indexes) -> 206 ms
 - `idx_clips_size_order` — `(..., byte_size DESC, id DESC)`. Serves `LargestFirst`.
 - `idx_clips_alpha_order` — `(..., substr(content, 1, 64) ASC, id ASC)`. Serves `Alphabetical`, whose ORDER BY leads with the same `substr` expression and then falls back to full `content` to break prefix ties. That is order-equivalent to ordering by `content` alone, because when two prefixes differ the first differing character is inside the prefix. Indexing full `content` instead would copy the whole text corpus into the index (+71% database on a 2 KB-average fixture); the prefix costs 2.6%.
 
+`content` must stay BINARY-collated, or the `Alphabetical` clause must change with it. `substr()` is a function, so its result is always BINARY and does **not** inherit the column's collation, while a bare `c.content` does; a `NOCASE` column would leave the prefix term and the tie-break term disagreeing about what "less than" means. The clause names `COLLATE BINARY` explicitly for that reason, and `Alphabetical_OrdersIdenticallyToOrderingByWholeContent` fails if the collation changes underneath it.
+
+Do not assert on `Alphabetical`'s query plan. With `idx_clips_alpha_order` present, ordering by whole `content` and ordering by the prefix produce a byte-identical plan string, so a plan assertion passes even against a full revert. `Alphabetical_OrdersByTheExpressionItsIndexStores` pins the clause to the index definition read from `sqlite_master` instead.
+
 ### `clips_fts` (FTS5)
 
 External-content virtual table over `clips`:
