@@ -1,0 +1,50 @@
+[
+  {
+    "id": "deferred-refresh-rethrows",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "A refresh that faults must end the inner sequence, not the outer subscription. Rethrowing kills the deferred-refresh stream permanently, so the list silently stops updating.",
+    "find": "return Observable.Return(Unit.Default);",
+    "replace": "return Observable.Throw<Unit>(ex);",
+    "filter": "DeferredRefresh_SurvivesAFailingRefresh"
+  },
+  {
+    "id": "alphabetical-reverts-to-whole-content",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "The whole point of the prefix clause. A revert costs the index and re-sorts the library, but produces a byte-identical query plan - only a structural assertion catches it.",
+    "find": "substr(c.content, 1, 64) ASC, c.content COLLATE BINARY ASC",
+    "replace": "c.content ASC",
+    "filter": "Alphabetical_OrdersByTheExpressionItsIndexStores"
+  },
+  {
+    "id": "alphabetical-prefix-length-drifts",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "The clause prefix and the index expression must agree. Changing one and not the other silently drops back to a full sort.",
+    "find": "substr(c.content, 1, 64) ASC",
+    "replace": "substr(c.content, 1, 32) ASC",
+    "filter": "Alphabetical_OrdersByTheExpressionItsIndexStores"
+  },
+  {
+    "id": "content-column-becomes-nocase",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "substr() returns a BINARY result and does not inherit the column collation, but bare c.content does. A NOCASE column leaves the two halves of the ORDER BY disagreeing.",
+    "find": "        content      TEXT,",
+    "replace": "        content      TEXT COLLATE NOCASE,",
+    "filter": "Alphabetical_OrdersIdenticallyToOrderingByWholeContent"
+  },
+  {
+    "id": "oldest-sort-index-dropped",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Every sort needs its own pinned-prefixed index. Without one, the sort falls back to a temp B-tree over the whole library (252ms at 20k clips).",
+    "find": "        CREATE INDEX IF NOT EXISTS idx_clips_oldest_order ON clips(\n            (pinned_at IS NULL),\n            pinned_at DESC,\n            COALESCE(last_copied_at, captured_at) ASC,\n            id ASC\n        );",
+    "replace": "",
+    "filter": "EverySort_IsServedFromItsOwnIndex"
+  },
+  {
+    "id": "alphabetical-sort-index-dropped",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Same, for the expression index. Partial index coverage measured worse than none at all.",
+    "find": "        CREATE INDEX IF NOT EXISTS idx_clips_alpha_order ON clips(\n            (pinned_at IS NULL),\n            pinned_at DESC,\n            substr(content, 1, 64) ASC,\n            id ASC\n        );",
+    "replace": "",
+    "filter": "Alphabetical_IsServedFromItsOwnIndex"
+  }
+]
