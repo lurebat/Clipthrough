@@ -638,5 +638,29 @@
     "filter": "CamelCaseTransforms_AreNotCorruptedByTheTurkishDotlessI",
     "find": "        return result[..1].ToUpper(CultureInfo.InvariantCulture) + result[1..];",
     "replace": "        return result[..1].ToUpper(CultureInfo.CurrentCulture) + result[1..];"
+  },
+  {
+    "id": "table-detection-accepts-bare-pipes",
+    "why": "Drops the structural requirement, so a leading '|' alone is treated as table evidence again. A KQL, SQL or shell pipeline becomes a one-column HTML table and the original query is destroyed.",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "filter": "BoxTableToHtml_LeavesPipelineSyntaxAlone",
+    "find": "        if (!sawBorderLine && !sawBoxDrawingSeparator)\n        {\n            return null;\n        }\n",
+    "replace": ""
+  },
+  {
+    "id": "table-detection-always-demands-a-border",
+    "why": "The over-correction: requires a border line even for box-drawing verticals, which no pipeline syntax uses. A borderless box table silently stops converting.",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "filter": "BoxTableToHtml_ConvertsBorderlessBoxDrawingTable",
+    "find": "        if (!sawBorderLine && !sawBoxDrawingSeparator)",
+    "replace": "        if (!sawBorderLine)"
+  },
+  {
+    "id": "rich-plain-text-flavour-keeps-html-entities",
+    "why": "Stops the plain-text flavour decoding entities. The HTML flavour must escape prose around a converted table, so without this decode the user pastes a literal '&amp;' into any plain-text target.",
+    "file": "Clipthrough/Presentation/ClipDisplayFormatter.cs",
+    "filter": "BoxTableToHtml_EscapesProseForHtmlButThePlainTextFlavourStaysLiteral",
+    "find": "            return NormalizePreviewText(WebUtility.HtmlDecode(withoutTags));",
+    "replace": "            return NormalizePreviewText(withoutTags);"
   }
 ]

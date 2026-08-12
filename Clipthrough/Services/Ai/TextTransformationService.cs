@@ -303,16 +303,28 @@ public static partial class TextTransformationService
     private static string? TryRenderTableBlock(System.Collections.Generic.List<string> blockLines)
     {
         var rows = new System.Collections.Generic.List<string[]>();
+        var sawBorderLine = false;
+        var sawBoxDrawingSeparator = false;
         foreach (var rawLine in blockLines)
         {
             var trimmed = rawLine.Trim();
-            if (trimmed.Length == 0 || IsTableBorderLine(trimmed))
+            if (trimmed.Length == 0)
             {
+                continue;
+            }
+            if (IsTableBorderLine(trimmed))
+            {
+                sawBorderLine = true;
                 continue;
             }
             if (!IsRowSeparator(trimmed[0]))
             {
                 continue;
+            }
+
+            if (trimmed[0] != '|')
+            {
+                sawBoxDrawingSeparator = true;
             }
 
             var cells = SplitOnRowSeparator(trimmed);
@@ -329,6 +341,16 @@ public static partial class TextTransformationService
         }
 
         if (rows.Count == 0)
+        {
+            return null;
+        }
+
+        // A leading '|' is not evidence of a table. It also begins every line of
+        // a KQL, SQL or shell pipeline, and turning one of those into a
+        // one-column table destroys it - so require positive structure: either a
+        // border line (box-drawing, "|---|", or "+---+") or a box-drawing
+        // vertical, which no pipeline syntax uses.
+        if (!sawBorderLine && !sawBoxDrawingSeparator)
         {
             return null;
         }

@@ -43,7 +43,15 @@ All values live in the `Clipthrough.Models.TextTransformation` enum and are appl
   - Markdown pipe tables (`| a | b |` with a `|---|---|` separator row)
   - ASCII bordered tables (`+----+----+` borders + `| ... |` rows)
 - Multiple tables in the same input are converted independently.
-- Non-table text around tables is preserved, HTML-escaped, and emitted as `<div>...<br>...</div>` so Teams/Outlook keep paragraph breaks.
+- **A block needs positive structure to count as a table**: either a border line
+  (box-drawing, `|---|`, or `+---+`) or a box-drawing vertical (`│ ┃ ║`). A
+  leading ASCII `|` alone is *not* evidence — it also begins every line of a
+  KQL/SQL/shell pipeline, and treating one as a one-column table destroyed it.
+  Box-drawing verticals need no border because no pipeline syntax uses them.
+- Non-table text around tables is preserved, HTML-escaped, and emitted as `<div>...<br>...</div>` so Teams/Outlook keep paragraph breaks. The escaping is
+  correct for the HTML flavour only; the plain-text flavour handed to
+  `CopyRichContentAsync` runs through `ClipDisplayFormatter.RenderRichContent`,
+  which decodes the entities again, so a plain-text paste gets a literal `&`.
 - Returns the original input verbatim if no table block is detected.
 
 To add a new transformation:

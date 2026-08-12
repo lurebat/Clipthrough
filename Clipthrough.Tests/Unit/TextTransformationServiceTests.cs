@@ -280,6 +280,68 @@ public sealed class TextTransformationServiceTests
         Assert.Contains("a&lt;b&gt;&amp;&quot;c&quot;", result);
     }
 
+    /// <summary>
+    /// A leading pipe is how KQL, SQL and shell pipelines are conventionally
+    /// wrapped, and it was the transform's only evidence that a block was a
+    /// table - so a query became a one-column HTML table and the original text
+    /// was gone. Structure is now required, and a pipeline has none.
+    /// </summary>
+    [Theory]
+    [InlineData("| where Timestamp > ago(1h)\n| project Operation, Count")]
+    [InlineData("| summarize count() by bin(Timestamp, 1h)")]
+    [InlineData("cat file.txt\n| grep foo\n| sort -u")]
+    public void BoxTableToHtml_LeavesPipelineSyntaxAlone(string input)
+        => Assert.Equal(input, TextTransformationService.Apply(TextTransformation.BoxTableToHtml, input));
+
+    /// <summary>
+    /// The counterpart: box-drawing verticals are unambiguous table markup - no
+    /// pipeline syntax uses them - so a borderless box table is still converted.
+    /// This is what stops the rule above from being tightened into "a border
+    /// line is always required".
+    /// </summary>
+    [Fact]
+    public void BoxTableToHtml_ConvertsBorderlessBoxDrawingTable()
+    {
+        var input = string.Join('\n',
+            "\u2502 Name  \u2502 Status \u2502",
+            "\u2502 alpha \u2502 ok     \u2502");
+
+        var result = TextTransformationService.Apply(TextTransformation.BoxTableToHtml, input);
+
+        Assert.StartsWith("<table", result);
+        Assert.Contains("<th>Name</th>", result);
+        Assert.Contains("<td>alpha</td>", result);
+    }
+
+    /// <summary>
+    /// A review flagged the HTML escaping of prose around a table as corruption
+    /// reaching the clipboard. Escaping is correct for the HTML flavour; the
+    /// claim rests on the plain-text flavour being derived from the escaped
+    /// string. It is derived from it, but through RenderRichContent, which
+    /// decodes entities - so the user gets a bare ampersand. Pin both flavours
+    /// so that stays true.
+    /// </summary>
+    [Fact]
+    public void BoxTableToHtml_EscapesProseForHtmlButThePlainTextFlavourStaysLiteral()
+    {
+        var input = string.Join('\n',
+            "Q1 sales & margin <draft>",
+            "| a | b |",
+            "|---|---|",
+            "| 1 | 2 |");
+
+        var html = TextTransformationService.Apply(TextTransformation.BoxTableToHtml, input);
+
+        Assert.Contains("&amp;", html, StringComparison.Ordinal);
+        Assert.Contains("&lt;draft&gt;", html, StringComparison.Ordinal);
+
+        var plain = Clipthrough.Presentation.ClipDisplayFormatter.RenderRichContent(html);
+
+        Assert.Contains("Q1 sales & margin <draft>", plain, StringComparison.Ordinal);
+        Assert.DoesNotContain("&amp;", plain, StringComparison.Ordinal);
+        Assert.DoesNotContain("&lt;", plain, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void BoxTableToHtml_ReturnsInputWhenNoTableRows()
     {
