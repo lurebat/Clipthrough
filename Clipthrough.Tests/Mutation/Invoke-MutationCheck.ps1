@@ -79,6 +79,15 @@ function Invoke-TestFilter([string]$Filter) {
     if ($raw -match 'error [A-Z]{2}\d+' -or $raw -match 'Build FAILED') {
         return [pscustomobject]@{ Ran = $false; Failed = 0; Passed = 0; Reason = 'build failed'; Raw = $raw }
     }
+    # CS0436 means a type in the test project's own sources is shadowing the
+    # same type from the referenced assembly, so the tests bind to the copy and
+    # mutating the real file changes nothing. It is only a warning, and it made
+    # four mutants look survivable when the guards were fine - the tests simply
+    # were not running against the code under test.
+    if ($raw -match 'warning CS0436') {
+        $shadowed = [regex]::Match($raw, "The type '([^']+)'").Groups[1].Value
+        return [pscustomobject]@{ Ran = $false; Failed = 0; Passed = 0; Reason = "type '$shadowed' is shadowed by a copy in the test project (CS0436)"; Raw = $raw }
+    }
     if ($raw -match 'No test matches the given testcase filter') {
         return [pscustomobject]@{ Ran = $false; Failed = 0; Passed = 0; Reason = 'filter matched no tests'; Raw = $raw }
     }

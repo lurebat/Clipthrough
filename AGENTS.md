@@ -120,6 +120,12 @@ restoring a file with `Copy-Item` or `Move-Item` restores its old timestamp, so
 MSBuild thinks the assembly is current and silently runs the *previous* build.
 Always `(Get-Item $path).LastWriteTime = Get-Date` after restoring a file.
 
+A second one: never leave a scratch copy of a production `.cs` file anywhere
+inside a project cone, including `Clipthrough.Tests/artifacts/`. The SDK compiles
+it, it shadows the real type, and the only signal is a `CS0436` *warning* while
+the whole test class quietly binds to the copy. `artifacts/**` is excluded from
+compilation for this reason; put scratch files in the session folder instead.
+
 ## Commits and code changes
 
 - Small, focused commits. One feature or fix per commit. Descriptive message with a body when the change is more than cosmetic.

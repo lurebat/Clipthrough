@@ -24,12 +24,20 @@ test run. Run it when you touch guarded code, not on every commit.
 | --- | --- |
 | `KILLED` | The test failed as it should. The guard is real. |
 | `SURVIVED` | The test passed against broken code. **The guard is fake.** |
-| `INCONCLUSIVE` | The build broke, or the filter matched no tests. Proves nothing. |
+| `INCONCLUSIVE` | The build broke, the filter matched no tests, or a type was shadowed. Proves nothing. |
 | `STALE` | The anchor text no longer exists. The mutant needs updating. |
 
 `INCONCLUSIVE` is reported separately on purpose. A compile error also makes
 `dotnet test` exit non-zero, so treating "exit code was non-zero" as a kill is
 how you end up trusting a test that never ran.
+
+The shadowing case is the nastiest of the three, because it is only a *warning*.
+`CS0436` means a `.cs` file inside the test project declares the same type as the
+referenced app assembly, and the compiler silently prefers the local copy — so
+the tests bind to that copy and mutating the real file changes nothing. Four
+mutants here reported `SURVIVED` for exactly this reason: a scratch copy of a
+service left in `artifacts/` was being compiled in. The harness now treats any
+`CS0436` as `INCONCLUSIVE`, and `artifacts/**` is excluded from compilation.
 
 `STALE` is a hard failure rather than a skip. A mutant whose anchor no longer
 matches silently tests nothing — which recreates the very false-confidence

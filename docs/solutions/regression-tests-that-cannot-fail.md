@@ -29,8 +29,9 @@ to xUnit v2, which is not worth doing to ~370 tests. Revisit if MTP support land
 ## Root cause
 
 A test is only a guard if some plausible wrong version of the code makes it red.
-Nothing in the writing process checks that, so four distinct mechanisms each
-produced a test that was green either way.
+Nothing in the writing process checks that, so distinct mechanisms each produced a
+test that was green either way. Two of them are not about the test at all -
+the test never ran against the code it names.
 
 1. **Self-referential oracle.** An equivalence test asserted the new sort matched
    the old sort. Reverting to the old implementation satisfies it by definition.
@@ -42,6 +43,10 @@ produced a test that was green either way.
 4. **Stale build.** A mutant was verified manually, but the restore handed back
    an older file timestamp, MSBuild skipped the rebuild, and the "verification"
    ran the pre-mutation assembly.
+5. **Shadowed type.** A scratch copy of a service left in `Clipthrough.Tests/artifacts/`
+   was compiled into the test project and shadowed the real one. The compiler
+   said so — `CS0436` — but only as a warning, so an entire test class ran
+   against the copy while mutations to the production file did nothing.
 
 ## Solution
 
@@ -69,13 +74,15 @@ Four design points, each of which came from a real failure:
 - **Force the timestamp after restoring.** `(Get-Item $p).LastWriteTime = Get-Date`.
   Without it MSBuild can skip the rebuild and run the mutant assembly against the
   *next* mutant's test.
+- **Fail on CS0436.** A type shadowed by a copy inside the test project is a
+  warning, not an error, and it makes every mutant in that file look survivable.
 - **Restore on crash.** The harness writes a pending-restore marker before
   mutating and replays it on startup, so an interrupted run can never leave
   broken production code in the tree.
 
 ## Prevention
 
-The four mechanisms above are restated as rules in `AGENTS.md` § Testing
+The mechanisms above are restated as rules in `AGENTS.md` § Testing
 expectations. Beyond following them: any test written to defend a specific fix
 gets a mutant in `mutants.json` at the same time, so the proof is repeatable
 rather than a one-off manual check.

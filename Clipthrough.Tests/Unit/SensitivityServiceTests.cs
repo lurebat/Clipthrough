@@ -171,7 +171,7 @@ public class SensitivityServiceTests
         var finished = await Task.WhenAny(scan, Task.Delay(TimeSpan.FromSeconds(10)));
 
         Assert.True(ReferenceEquals(finished, scan), "Scan never abandoned the catastrophic pattern.");
-        Assert.Empty(scan.Result);
+        Assert.Empty(await scan);
     }
 
     [Fact]
@@ -186,6 +186,6 @@ public class SensitivityServiceTests
         var finished = await Task.WhenAny(scan, Task.Delay(TimeSpan.FromSeconds(10)));
 
         Assert.True(ReferenceEquals(finished, scan), "Scan never abandoned the catastrophic pattern.");
-        Assert.Equal(new[] { "Normal" }, scan.Result.Select(match => match.RuleName));
+        Assert.Equal(new[] { "Normal" }, (await scan).Select(match => match.RuleName));
     }
 }

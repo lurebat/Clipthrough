@@ -4,6 +4,14 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <NoWarn>$(NoWarn);xUnit1051</NoWarn>
+    <!--
+      AGENTS.md tells agents to build into artifacts/ and to keep scratch files
+      there, and .gitignore hides it. Nothing stopped the SDK compiling a stray
+      .cs from it, though: a scratch copy of a service silently shadowed the
+      real one (CS0436) and a whole test class ran against the copy, so a
+      mutation check on the production file changed nothing.
+    -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
