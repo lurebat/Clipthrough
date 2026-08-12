@@ -134,5 +134,21 @@
     "find": "                if (m_clipsListBox is null\n                    || TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is not null)",
     "replace": "                if (m_clipsListBox is null)",
     "filter": "ClipListFocusHeadlessTests"
+  },
+  {
+    "id": "settings-changed-raised-off-ui-thread",
+    "file": "Clipthrough/Services/Storage/SettingsService.cs",
+    "why": "App.OnSettingsChanged registers global hotkeys. RegisterHotKey binds WM_HOTKEY to the calling thread's message queue, so raising this from the pool kills every global hotkey silently until restart.",
+    "find": "        if (Dispatcher.UIThread.CheckAccess())\n        {\n            SettingsChanged.Invoke(this, _current);\n            return;\n        }",
+    "replace": "        SettingsChanged.Invoke(this, _current);\n        if (true)\n        {\n            return;\n        }",
+    "filter": "SettingsThreadingHeadlessTests"
+  },
+  {
+    "id": "settings-changed-loses-its-snapshot",
+    "file": "Clipthrough/Services/Storage/SettingsService.cs",
+    "why": "A deferred raise that reads the live field instead of the snapshot delivers the newest settings to every queued subscriber, so an earlier save is reported as the later one.",
+    "find": "        var snapshot = _current;\n        Dispatcher.UIThread.Post(() => SettingsChanged?.Invoke(this, snapshot));",
+    "replace": "        Dispatcher.UIThread.Post(() => SettingsChanged?.Invoke(this, _current));",
+    "filter": "SettingsThreadingHeadlessTests"
   }
 ]

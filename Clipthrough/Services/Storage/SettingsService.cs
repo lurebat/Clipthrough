@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Threading;
 using Clipthrough.Database;
 using Clipthrough.Models;
 using Microsoft.Data.Sqlite;
@@ -80,7 +81,7 @@ public sealed class SettingsService : ISettingsService
 
         if (shouldNotify)
         {
-            SettingsChanged?.Invoke(this, _current);
+            RaiseSettingsChanged();
         }
     }
 
@@ -114,12 +115,45 @@ public sealed class SettingsService : ISettingsService
             _gate.Release();
         }
 
-        SettingsChanged?.Invoke(this, _current);
+        RaiseSettingsChanged();
 
         if (secretFailure is not null)
         {
             throw secretFailure;
         }
+    }
+
+    /// <summary>
+    /// Subscribers to this event touch the UI and Win32 from inside their
+    /// handlers, so it must not be raised on whatever thread happened to save.
+    /// The settings dialog saves inside <c>Task.Run</c>, which used to put
+    /// <c>App.OnSettingsChanged</c> on a thread-pool thread, where it mutated
+    /// <c>Window.KeyBindings</c> and called <c>RegisterHotKey</c>. That API binds
+    /// the hotkey to the *calling thread's* message queue, and a pool thread has
+    /// no message pump — so every global hotkey silently stopped working after
+    /// the user saved settings, and stayed dead until the app restarted.
+    ///
+    /// Posting rather than awaiting is deliberate: <c>SaveAsync</c> is called
+    /// from background threads, and blocking one on a dispatcher that nothing is
+    /// pumping would deadlock instead.
+    /// </summary>
+    private void RaiseSettingsChanged()
+    {
+        if (SettingsChanged is null)
+        {
+            return;
+        }
+
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            SettingsChanged.Invoke(this, _current);
+            return;
+        }
+
+        // Snapshotted so a subscriber sees the settings that raised it rather
+        // than whatever a later save has since installed.
+        var snapshot = _current;
+        Dispatcher.UIThread.Post(() => SettingsChanged?.Invoke(this, snapshot));
     }
 
     private async Task<AppSettings> LoadSettingsAsync(CancellationToken cancellationToken)
