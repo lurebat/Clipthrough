@@ -118,14 +118,70 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Global safety net for unhandled dispatcher exceptions.
-    /// Logs the error and marks it as handled to prevent app termination.
+    /// Last-resort net for exceptions that reach the dispatcher without anyone
+    /// having handled them: a throwing event handler in code-behind, a binding
+    /// converter, a lambda passed to <c>Dispatcher.Post</c>.
+    ///
+    /// It used to mark every one of them handled and log nothing but a trace
+    /// line, so the application carried on in whatever state the exception left
+    /// it and the user was told nothing at all - the click simply did nothing.
+    /// Two things changed. The failure is now surfaced as an error notification,
+    /// because a silent no-op is indistinguishable from a broken feature; and a
+    /// failure that means the process itself is no longer trustworthy is
+    /// deliberately *not* handled, so the app dies and restarts clean rather than
+    /// continuing to write to the user's clipboard database from a corrupted
+    /// state.
     /// </summary>
-    private static void OnDispatcherUnhandledException(
+    private void OnDispatcherUnhandledException(
         object sender, DispatcherUnhandledExceptionEventArgs e)
     {
-        Trace.TraceError($"Dispatcher unhandled exception (handled): {e.Exception}");
-        e.Handled = true;
+        e.Handled = TryHandleDispatcherException(e.Exception, _notificationService);
+    }
+
+    /// <summary>
+    /// Returns whether <paramref name="exception"/> may be swallowed to keep the
+    /// application running, publishing it to the user when it may.
+    /// </summary>
+    internal static bool TryHandleDispatcherException(
+        Exception exception, IAppNotificationService? notifications)
+    {
+        if (IsProcessLevelFailure(exception))
+        {
+            Trace.TraceError($"Dispatcher unhandled exception (fatal, not handled): {exception}");
+            return false;
+        }
+
+        Trace.TraceError($"Dispatcher unhandled exception (handled): {exception}");
+        notifications?.PublishError(AppText.UnexpectedErrorTitle, exception.Message);
+        return true;
+    }
+
+    /// <summary>
+    /// Whether the exception indicates the process, rather than one operation,
+    /// has failed. These leave managed state undefined, so continuing risks
+    /// corrupting the clip database instead of merely losing one action.
+    /// Wrappers are unwrapped: a fatal cause reaching the dispatcher inside an
+    /// <see cref="AggregateException"/> is still fatal.
+    /// </summary>
+    private static bool IsProcessLevelFailure(Exception exception)
+    {
+        switch (exception)
+        {
+            // InsufficientMemoryException derives from OutOfMemoryException but is
+            // thrown *before* allocating, so nothing is corrupted and it is safe
+            // to continue. Order matters: it must be tested first.
+            case InsufficientMemoryException:
+                return false;
+            case OutOfMemoryException:
+            case StackOverflowException:
+            case AccessViolationException:
+            case System.Runtime.InteropServices.SEHException:
+                return true;
+            case AggregateException aggregate:
+                return aggregate.InnerExceptions.Any(IsProcessLevelFailure);
+        }
+
+        return exception.InnerException is not null && IsProcessLevelFailure(exception.InnerException);
     }
 
     private static ServiceProvider ConfigureServices()

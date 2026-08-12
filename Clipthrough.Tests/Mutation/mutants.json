@@ -182,5 +182,37 @@
     "find": "                && typeof(IReactiveCommand).IsAssignableFrom(p.PropertyType))",
     "replace": "                && typeof(IHandleObservableErrors).IsAssignableFrom(p.PropertyType))",
     "filter": "ViewModelCommandCoverageTests"
+  },
+  {
+    "id": "dispatcher-swallows-everything",
+    "file": "Clipthrough/App.axaml.cs",
+    "why": "Marking every dispatcher exception handled lets the app keep writing to the clip database after a failure that leaves managed state undefined.",
+    "find": "        if (IsProcessLevelFailure(exception))\n        {\n            Trace.TraceError($\"Dispatcher unhandled exception (fatal, not handled): {exception}\");\n            return false;\n        }",
+    "replace": "        if (false)\n        {\n            Trace.TraceError($\"Dispatcher unhandled exception (fatal, not handled): {exception}\");\n            return false;\n        }",
+    "filter": "DispatcherExceptionHandlingTests"
+  },
+  {
+    "id": "dispatcher-failure-not-surfaced",
+    "file": "Clipthrough/App.axaml.cs",
+    "why": "Without a notification the user cannot tell a failed action from one that silently did nothing, which is the whole defect.",
+    "find": "        notifications?.PublishError(AppText.UnexpectedErrorTitle, exception.Message);",
+    "replace": "",
+    "filter": "DispatcherExceptionHandlingTests"
+  },
+  {
+    "id": "dispatcher-fatal-check-ignores-wrappers",
+    "file": "Clipthrough/App.axaml.cs",
+    "why": "A fatal cause usually arrives wrapped in an AggregateException or a rethrow; only checking the outer type lets it through.",
+    "find": "        return exception.InnerException is not null && IsProcessLevelFailure(exception.InnerException);",
+    "replace": "        return false;",
+    "filter": "DispatcherExceptionHandlingTests"
+  },
+  {
+    "id": "dispatcher-treats-insufficient-memory-as-fatal",
+    "file": "Clipthrough/App.axaml.cs",
+    "why": "InsufficientMemoryException derives from OutOfMemoryException but is thrown before allocating, so it is recoverable; killing the app on it loses the user's session for nothing.",
+    "find": "            case InsufficientMemoryException:\n                return false;\n            case OutOfMemoryException:",
+    "replace": "            case OutOfMemoryException:",
+    "filter": "DispatcherExceptionHandlingTests"
   }
 ]
