@@ -53,6 +53,18 @@ public static partial class TextTransformationService
         };
     }
 
+    // Casing splits two ways, and the split is deliberate.
+    //
+    // UpperCase/LowerCase/TitleCase/SentenceCase are linguistic: the user is
+    // recasing text written in their own language, so they follow
+    // CurrentCulture. A Turkish user upper-casing "istanbul" wants "İSTANBUL";
+    // forcing invariant here would produce "ISTANBUL", which is simply wrong
+    // Turkish - the same class of corruption, just pointed the other way.
+    //
+    // The camel-case transforms below are structural: they produce identifiers,
+    // where the Turkish dotless i is unambiguous corruption ("ID" -> "ıd",
+    // "identifier" -> "İdentifier") and where output must not depend on the
+    // machine's locale. Those use InvariantCulture.
     private static string ToTitleCase(string input)
         => CultureInfo.CurrentCulture.TextInfo.ToTitleCase(input.ToLower(CultureInfo.CurrentCulture));
 
@@ -102,7 +114,7 @@ public static partial class TextTransformationService
     {
         var words = WordBoundaryRegex().Split(input).Where(static w => w.Length > 0);
         return string.Concat(words.Select(static w =>
-            char.ToUpper(w[0], CultureInfo.CurrentCulture) + w[1..].ToLower(CultureInfo.CurrentCulture)));
+            char.ToUpper(w[0], CultureInfo.InvariantCulture) + w[1..].ToLower(CultureInfo.InvariantCulture)));
     }
 
     private static string ToLowerCamelCase(string input)
@@ -114,11 +126,11 @@ public static partial class TextTransformationService
         }
 
         var sb = new StringBuilder();
-        sb.Append(words[0].ToLower(CultureInfo.CurrentCulture));
+        sb.Append(words[0].ToLower(CultureInfo.InvariantCulture));
         for (var i = 1; i < words.Length; i++)
         {
-            sb.Append(char.ToUpper(words[i][0], CultureInfo.CurrentCulture));
-            sb.Append(words[i][1..].ToLower(CultureInfo.CurrentCulture));
+            sb.Append(char.ToUpper(words[i][0], CultureInfo.InvariantCulture));
+            sb.Append(words[i][1..].ToLower(CultureInfo.InvariantCulture));
         }
 
         return sb.ToString();
@@ -127,7 +139,7 @@ public static partial class TextTransformationService
     private static string FromCamelCase(string input)
     {
         var result = CamelCaseBoundaryRegex().Replace(input, " $1");
-        return result[..1].ToUpper(CultureInfo.CurrentCulture) + result[1..];
+        return result[..1].ToUpper(CultureInfo.InvariantCulture) + result[1..];
     }
 
     private static string TrimWhitespace(string input)
@@ -184,7 +196,15 @@ public static partial class TextTransformationService
     private static string SortLines(string input)
     {
         var lines = SplitLines(NormalizeEol(input));
-        Array.Sort(lines, StringComparer.CurrentCulture);
+
+        // InvariantCulture, not CurrentCulture and not Ordinal. CurrentCulture
+        // made the same clip sort differently on two machines. Ordinal would be
+        // deterministic but compares codepoints, so every capitalised line would
+        // be banished ahead of every lowercase one ("Zebra" before "apple") and
+        // accented letters would land past "z" - the opposite of what someone
+        // asking to sort lines expects. Invariant is deterministic AND orders
+        // like a dictionary.
+        Array.Sort(lines, StringComparer.InvariantCulture);
         return string.Join('\n', lines);
     }
 

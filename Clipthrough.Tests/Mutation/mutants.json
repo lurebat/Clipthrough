@@ -574,5 +574,69 @@
     "filter": "Alphabetical_OrdersByTheExpressionItsIndexStores",
     "find": "            substr(content, 1, 64) COLLATE NOCASE ASC,\n            id ASC\n        );",
     "replace": "            substr(content, 1, 64) ASC,\n            id ASC\n        );"
+  },
+  {
+    "id": "sortlines-follows-machine-culture",
+    "why": "Reverts SortLines to the machine's culture, so the same clip sorts differently on different machines (on sv-SE 'A-ring' sorts after Z).",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "filter": "SortLines_IsCaseAwareAndIndependentOfTheMachineCulture",
+    "find": "        Array.Sort(lines, StringComparer.InvariantCulture);",
+    "replace": "        Array.Sort(lines, StringComparer.CurrentCulture);"
+  },
+  {
+    "id": "sortlines-becomes-ordinal",
+    "why": "The over-correction: deterministic, but compares codepoints, so every capitalised line is banished ahead of every lowercase one ('Zebra' before 'apple') and accented letters land past 'z'.",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "filter": "SortLines_IsCaseAwareAndIndependentOfTheMachineCulture",
+    "find": "        Array.Sort(lines, StringComparer.InvariantCulture);",
+    "replace": "        Array.Sort(lines, StringComparer.Ordinal);"
+  },
+  {
+    "id": "lower-camel-case-follows-machine-culture",
+    "why": "Makes the identifier-producing camelCase transform locale-dependent again. Under tr-TR 'ID' lowercases to the dotless 'id', silently corrupting code on its way back to the clipboard.",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "filter": "CamelCaseTransforms_AreNotCorruptedByTheTurkishDotlessI",
+    "find": "        sb.Append(words[0].ToLower(CultureInfo.InvariantCulture));",
+    "replace": "        sb.Append(words[0].ToLower(CultureInfo.CurrentCulture));"
+  },
+  {
+    "id": "upper-camel-case-follows-machine-culture",
+    "why": "Same for UpperCamelCase: under tr-TR 'identifier' becomes the dotted 'Identifier', which is not the identifier the user asked for.",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "filter": "CamelCaseTransforms_AreNotCorruptedByTheTurkishDotlessI",
+    "find": "            char.ToUpper(w[0], CultureInfo.InvariantCulture) + w[1..].ToLower(CultureInfo.InvariantCulture)));",
+    "replace": "            char.ToUpper(w[0], CultureInfo.CurrentCulture) + w[1..].ToLower(CultureInfo.CurrentCulture)));"
+  },
+  {
+    "id": "prose-casing-forced-invariant",
+    "why": "The opposite over-correction, and the reason the split exists. Recasing prose is linguistic: forcing invariant turns Turkish 'istanbul' into 'ISTANBUL' instead of the correct dotted capital, which is the same corruption pointed the other way.",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "filter": "UpperCase_StaysLinguisticSoTurkishPreservesItsDottedCapital",
+    "find": "            Models.TextTransformation.UpperCase => input.ToUpper(CultureInfo.CurrentCulture),",
+    "replace": "            Models.TextTransformation.UpperCase => input.ToUpper(CultureInfo.InvariantCulture),"
+  },
+  {
+    "id": "lower-camel-case-later-word-initial-follows-culture",
+    "why": "The leading character of every word after the first. Under tr-TR 'user id' becomes 'user' + dotted capital I, so the identifier is not the one the user asked for.",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "filter": "CamelCaseTransforms_AreNotCorruptedByTheTurkishDotlessI",
+    "find": "            sb.Append(char.ToUpper(words[i][0], CultureInfo.InvariantCulture));",
+    "replace": "            sb.Append(char.ToUpper(words[i][0], CultureInfo.CurrentCulture));"
+  },
+  {
+    "id": "lower-camel-case-later-word-tail-follows-culture",
+    "why": "The tail of every word after the first. Under tr-TR 'user MAIL' becomes 'userMa' + dotless i + 'l'.",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "filter": "CamelCaseTransforms_AreNotCorruptedByTheTurkishDotlessI",
+    "find": "            sb.Append(words[i][1..].ToLower(CultureInfo.InvariantCulture));",
+    "replace": "            sb.Append(words[i][1..].ToLower(CultureInfo.CurrentCulture));"
+  },
+  {
+    "id": "from-camel-case-follows-machine-culture",
+    "why": "FromCamelCase capitalises the first character of its result. Under tr-TR 'identifierValue' gains a dotted capital I, so round-tripping an identifier through the two camel transforms no longer returns the original.",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "filter": "CamelCaseTransforms_AreNotCorruptedByTheTurkishDotlessI",
+    "find": "        return result[..1].ToUpper(CultureInfo.InvariantCulture) + result[1..];",
+    "replace": "        return result[..1].ToUpper(CultureInfo.CurrentCulture) + result[1..];"
   }
 ]

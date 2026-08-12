@@ -1,3 +1,5 @@
+using System;
+using System.Globalization;
 using Clipthrough.Models;
 using Clipthrough.Services;
 using Xunit;
@@ -123,6 +125,81 @@ public sealed class TextTransformationServiceTests
         var input = "charlie\nalpha\nbravo";
         var result = TextTransformationService.Apply(TextTransformation.SortLines, input);
         Assert.Equal("alpha\nbravo\ncharlie", result);
+    }
+
+    /// <summary>
+    /// Sorting used the machine's culture, so the same clip sorted differently
+    /// on two machines. Ordinal would fix that but compares codepoints, which
+    /// banishes every capitalised line ahead of every lowercase one. Invariant
+    /// is both deterministic and dictionary-ordered, and this pins it: the
+    /// expected order is wrong under Ordinal (which yields Banana, Zebra, apple,
+    /// cherry) and unstable under CurrentCulture.
+    /// </summary>
+    [Fact]
+    public void SortLines_IsCaseAwareAndIndependentOfTheMachineCulture()
+    {
+        // "Ahre" with a diaeresis is the discriminator: sv-SE treats it as a
+        // distinct letter sorting after Z, while invariant groups it with A.
+        // Without it the fixture sorts identically under every culture and
+        // proves nothing.
+        const string input = "Zebra\napple\nBanana\ncherry\n\u00c4hre";
+        const string expected = "\u00c4hre\napple\nBanana\ncherry\nZebra";
+
+        Assert.Equal(expected, WithCulture("en-US", () => TextTransformationService.Apply(TextTransformation.SortLines, input)));
+        Assert.Equal(expected, WithCulture("sv-SE", () => TextTransformationService.Apply(TextTransformation.SortLines, input)));
+        Assert.Equal(expected, WithCulture("tr-TR", () => TextTransformationService.Apply(TextTransformation.SortLines, input)));
+    }
+
+    /// <summary>
+    /// The camel-case transforms produce identifiers, so they must not depend on
+    /// the machine's locale. Under tr-TR the culture-aware overloads map "ID" to
+    /// the dotless "\u0131d" and "identifier" to the dotted "\u0130dentifier", silently
+    /// corrupting code on its way back to the clipboard.
+    ///
+    /// Every case below places an i/I where exactly one of the conversion sites
+    /// will touch it - first word, leading character of a later word, and the
+    /// tail of a later word - because an input without an i in that position
+    /// cannot tell the two cultures apart.
+    /// </summary>
+    [Theory]
+    [InlineData(TextTransformation.LowerCamelCase, "ID number", "idNumber")]
+    [InlineData(TextTransformation.LowerCamelCase, "user id", "userId")]
+    [InlineData(TextTransformation.LowerCamelCase, "user MAIL", "userMail")]
+    [InlineData(TextTransformation.UpperCamelCase, "user identifier", "UserIdentifier")]
+    [InlineData(TextTransformation.FromCamelCase, "identifierValue", "Identifier Value")]
+    public void CamelCaseTransforms_AreNotCorruptedByTheTurkishDotlessI(
+        TextTransformation transformation, string input, string expected)
+    {
+        Assert.Equal(expected, WithCulture("en-US", () => TextTransformationService.Apply(transformation, input)));
+        Assert.Equal(expected, WithCulture("tr-TR", () => TextTransformationService.Apply(transformation, input)));
+    }
+
+    /// <summary>
+    /// The counterpart to the test above: recasing prose is a linguistic
+    /// operation, so it deliberately stays culture-aware. Forcing invariant here
+    /// would turn "istanbul" into "ISTANBUL", which is not Turkish - the same
+    /// corruption pointed the other way. This is what stops a well-meaning
+    /// sweep from making every case transform invariant.
+    /// </summary>
+    [Fact]
+    public void UpperCase_StaysLinguisticSoTurkishPreservesItsDottedCapital()
+    {
+        Assert.Equal("ISTANBUL", WithCulture("en-US", () => TextTransformationService.Apply(TextTransformation.UpperCase, "istanbul")));
+        Assert.Equal("\u0130STANBUL", WithCulture("tr-TR", () => TextTransformationService.Apply(TextTransformation.UpperCase, "istanbul")));
+    }
+
+    private static T WithCulture<T>(string cultureName, Func<T> action)
+    {
+        var previous = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(cultureName);
+            return action();
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previous;
+        }
     }
 
     [Fact]
