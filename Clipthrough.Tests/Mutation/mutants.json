@@ -902,5 +902,21 @@
     "filter": "AppSettingsTests",
     "find": "        AiPresets = System.Array.Empty<AiPreset>(),",
     "replace": "        AiPresets = new AiPreset[0],"
+  },
+  {
+    "id": "readonly-connection-skips-busy-timeout",
+    "why": "A maintenance probe without busy_timeout fails immediately with 'database is locked' the moment a background worker holds the write lock, instead of waiting the five seconds every other connection waits. That is the duplication this overload exists to remove.",
+    "file": "Clipthrough/Database/SqliteConnectionFactory.cs",
+    "filter": "SqliteConcurrencyTests",
+    "find": "    public SqliteConnection CreateReadOnlyConnection() => Create(SqliteOpenMode.ReadOnly);",
+    "replace": "    public SqliteConnection CreateReadOnlyConnection() { var c = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = _storageOptionsService.Current.DatabasePath, Mode = SqliteOpenMode.ReadOnly }.ToString()); return c; }"
+  },
+  {
+    "id": "readonly-connection-creates-a-missing-database",
+    "why": "Read-only is what stops a probe pointed at the wrong path from creating an empty file and then reporting a perfectly healthy database containing none of the user's clips.",
+    "file": "Clipthrough/Database/SqliteConnectionFactory.cs",
+    "filter": "SqliteConcurrencyTests",
+    "find": "    public SqliteConnection CreateReadOnlyConnection() => Create(SqliteOpenMode.ReadOnly);",
+    "replace": "    public SqliteConnection CreateReadOnlyConnection() => Create(SqliteOpenMode.ReadWriteCreate);"
   }
 ]

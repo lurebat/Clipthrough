@@ -50,6 +50,63 @@ public sealed class SqliteConcurrencyTests
         Assert.Equal(5000L, observedTimeout);
     }
 
+    /// <summary>
+    /// The read-only overload exists so maintenance probes stop hand-rolling
+    /// their own connection string. It is only worth having if it carries the
+    /// same busy_timeout - a probe that skips it fails immediately with
+    /// "database is locked" the moment a background worker holds the write
+    /// lock, instead of waiting the five seconds every other connection waits.
+    /// </summary>
+    [Fact]
+    public async Task ReadOnlyFactory_AppliesBusyTimeout_OnOpen()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        long? observedTimeout = null;
+
+        await using var conn = scope.ConnectionFactory.CreateReadOnlyConnection();
+        conn.StateChange += (_, e) =>
+        {
+            if (e.CurrentState == ConnectionState.Open)
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "PRAGMA busy_timeout;";
+                var result = cmd.ExecuteScalar();
+                if (result is not null)
+                {
+                    observedTimeout = Convert.ToInt64(result);
+                }
+            }
+        };
+        await conn.OpenAsync();
+
+        Assert.Equal(5000L, observedTimeout);
+    }
+
+    /// <summary>
+    /// Read-only rather than read-write-create is the whole point for a probe:
+    /// pointed at a path with no database, it must fail rather than quietly
+    /// create an empty file and let the caller report a perfectly healthy
+    /// database that contains none of the user's clips.
+    /// </summary>
+    [Fact]
+    public async Task ReadOnlyFactory_MissingDatabase_FailsInsteadOfCreatingOne()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        // Same (existing) directory, no such file - the realistic misconfiguration.
+        var missing = scope.DatabasePath + ".nonexistent";
+        Assert.False(System.IO.File.Exists(missing));
+
+        var factory = new SqliteConnectionFactory(new TestStorageOptionsService(missing));
+        await using var conn = factory.CreateReadOnlyConnection();
+
+        await Assert.ThrowsAsync<SqliteException>(() => conn.OpenAsync());
+        Assert.False(System.IO.File.Exists(missing));
+    }
+
     [Fact]
     public async Task ParallelWrites_EmbeddingStyleBatchSaveAndCapture_AllSucceedWithoutLockErrors()
     {

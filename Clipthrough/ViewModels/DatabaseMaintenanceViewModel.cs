@@ -21,6 +21,7 @@ public sealed class DatabaseMaintenanceViewModel : ViewModelBase
 {
     private readonly IDatabaseBackupService _databaseBackupService;
     private readonly IStorageOptionsService _storageOptionsService;
+    private readonly Database.SqliteConnectionFactory _connectionFactory;
     private readonly ISystemInteractionService _systemInteractionService;
     private readonly IAppNotificationService _notificationService;
     private readonly IClipboardMonitorService _clipboardMonitorService;
@@ -40,6 +41,11 @@ public sealed class DatabaseMaintenanceViewModel : ViewModelBase
     {
         _databaseBackupService = databaseBackupService;
         _storageOptionsService = storageOptionsService;
+        // Built here rather than injected: it is a stateless wrapper over the
+        // service above, and going through it keeps the connection string,
+        // password and busy_timeout in one place instead of a hand-rolled copy
+        // that omits whichever part its author forgot.
+        _connectionFactory = new Database.SqliteConnectionFactory(storageOptionsService);
         _systemInteractionService = systemInteractionService;
         _notificationService = notificationService;
         _clipboardMonitorService = clipboardMonitorService;
@@ -128,18 +134,7 @@ public sealed class DatabaseMaintenanceViewModel : ViewModelBase
             var problems = await Task.Run(() =>
             {
                 var found = new System.Collections.Generic.List<string>();
-                var dbPath = _storageOptionsService.Current.DatabasePath;
-                var password = _storageOptionsService.Current.DatabasePassword;
-                var builder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
-                {
-                    DataSource = dbPath,
-                    Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly,
-                };
-                if (!string.IsNullOrEmpty(password))
-                {
-                    builder.Password = password;
-                }
-                using var connection = new Microsoft.Data.Sqlite.SqliteConnection(builder.ToString());
+                using var connection = _connectionFactory.CreateReadOnlyConnection();
                 connection.Open();
                 using var cmd = connection.CreateCommand();
                 cmd.CommandText = "PRAGMA integrity_check;";

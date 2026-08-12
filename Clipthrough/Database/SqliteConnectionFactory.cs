@@ -12,13 +12,23 @@ public sealed class SqliteConnectionFactory
         _storageOptionsService = storageOptionsService;
     }
 
-    public SqliteConnection CreateConnection()
+    public SqliteConnection CreateConnection() => Create(SqliteOpenMode.ReadWriteCreate);
+
+    /// <summary>
+    /// A read-only connection for maintenance probes that must not alter the
+    /// database. Read-only rather than read-write is load-bearing: it cannot
+    /// create an empty file when the path is wrong, so a missing database fails
+    /// loudly instead of quietly reporting a healthy empty one.
+    /// </summary>
+    public SqliteConnection CreateReadOnlyConnection() => Create(SqliteOpenMode.ReadOnly);
+
+    private SqliteConnection Create(SqliteOpenMode mode)
     {
         var options = _storageOptionsService.Current;
         var builder = new SqliteConnectionStringBuilder
         {
             DataSource = options.DatabasePath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
+            Mode = mode,
             ForeignKeys = true,
             // Private cache (the default) is required: shared cache surfaces
             // in-process write contention as SQLITE_LOCKED, which busy_timeout
