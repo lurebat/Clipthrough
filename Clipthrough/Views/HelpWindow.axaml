@@ -21,7 +21,7 @@
                 <StackPanel Spacing="6">
                     <TextBlock FontWeight="SemiBold" Text="Getting started" />
                     <TextBlock TextWrapping="Wrap" Text="• Copy anything — text, HTML, rich text, images, files — and it appears in the left pane." />
-                    <TextBlock TextWrapping="Wrap" Text="• Use the global hotkey (default Ctrl+Shift+Space) to toggle the Clipthrough window from anywhere." />
+                    <TextBlock TextWrapping="Wrap" Text="• Use the global hotkey (default Alt+V) to toggle the Clipthrough window from anywhere." />
                     <TextBlock TextWrapping="Wrap" Text="• Select a clip to preview / edit it in the right pane. Double-click or press Enter to copy it to the system clipboard." />
                 </StackPanel>
             </Border>
@@ -39,8 +39,8 @@
                 <StackPanel Spacing="6">
                     <TextBlock FontWeight="SemiBold" Text="Actions" />
                     <TextBlock TextWrapping="Wrap" Text="• Pin a clip to keep it at the top regardless of recency." />
-                    <TextBlock TextWrapping="Wrap" Text="• Mark as favorite to quickly filter it later (Ctrl+Shift+F toggles the filter)." />
-                    <TextBlock TextWrapping="Wrap" Text="• Filter toggles: Ctrl+Shift+F (favorites), Ctrl+Shift+S (sensitive), Ctrl+Shift+R (regex), Ctrl+Shift+A (case), Ctrl+Shift+W (wildcard), Ctrl+Shift+H (whole word), Ctrl+Shift+P (pasted). Ctrl+Home jumps to the top of the list. Typing any letter with the list focused jumps to the filter box." />
+                    <TextBlock TextWrapping="Wrap" Text="• Mark as favorite to quickly filter it later (Ctrl+B toggles the filter)." />
+                    <TextBlock TextWrapping="Wrap" Text="• Filter toggles: Ctrl+B (favorites), Ctrl+L (sensitive), Ctrl+R (regex), Ctrl+K (case), Ctrl+M (wildcard), Ctrl+E (whole word), Ctrl+U (pasted), Ctrl+T (fuzzy), Ctrl+J (semantic). Ctrl+Home jumps to the top of the list. Typing any letter with the list focused jumps to the filter box." />
                     <TextBlock TextWrapping="Wrap" Text="• Sensitivity rules scrub/auto-expire clips that match configured patterns (credit cards, tokens, …)." />
                     <TextBlock TextWrapping="Wrap" Text="• Ctrl+Shift+V from the search box pastes the currently selected (or first) clip without leaving the filter; plain Ctrl+V still pastes into the filter text." />
                     <TextBlock TextWrapping="Wrap" Text="• Up arrow in the search box walks back through recent searches (Alt+Up/Down also works)." />

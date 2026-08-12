@@ -5701,6 +5701,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        // The window's own handlers run before TryHandleShortcut, so a filter
+        // hotkey that matches one of them never fires while that built-in
+        // applies - and for the clip-list built-ins that is the window's normal
+        // focus state. Refuse the assignment rather than let the user configure
+        // a shortcut that silently does nothing.
+        foreach (var draft in localHotkeys.Where(static draft => draft.IsEnabled))
+        {
+            var normalized = normalizedHotkeys[draft.Name];
+            if (BuiltInShortcuts.DescribeCollision(normalized) is { } builtIn)
+            {
+                StatusText = AppText.FormatSettingsValidationError(AppText.FormatHotkeyReservedByBuiltIn(normalized, builtIn));
+                return;
+            }
+        }
+
         if (!TryParseMaxClipSizeBytes(Settings.MaxClipSizeKilobytes, out var maxClipSizeBytes))
         {
             StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidClipSize);

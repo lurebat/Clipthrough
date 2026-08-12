@@ -161,6 +161,17 @@ public static class AppText
         [nameof(UnmarkSensitiveButtonLabel)] = "Unsevere",
         [nameof(SettingsSavedStatus)] = "Settings saved.",
         [nameof(SettingsInvalidHotkeyFallback)] = "Enter a valid hotkey such as Ctrl+Shift+R.",
+        [nameof(BuiltInShortcutSelectAllClips)] = "select or clear all clips",
+        [nameof(BuiltInShortcutCopySelected)] = "copy the selected clip",
+        [nameof(BuiltInShortcutCopySelectedAsPlainText)] = "copy the selected clip as plain text",
+        [nameof(BuiltInShortcutPasteSelected)] = "paste the selected clip",
+        [nameof(BuiltInShortcutDeleteSelected)] = "delete the selected clip",
+        [nameof(BuiltInShortcutToggleClipChecked)] = "tick or untick the selected clip",
+        [nameof(BuiltInShortcutClearFilter)] = "clear the filter or close the window",
+        [nameof(BuiltInShortcutOpenSettings)] = "open settings",
+        [nameof(BuiltInShortcutMoveThroughClips)] = "move through the clip list",
+        [nameof(BuiltInShortcutCopyClipByPosition)] = "copy the clip at that position",
+        [nameof(BuiltInShortcutSelectClipByPosition)] = "select the clip at that position",
         [nameof(SettingsInvalidClipSize)] = "Enter a clip size between 0.25 KB and 32768 KB.",
         [nameof(SettingsInvalidDatabasePath)] = "Enter a valid absolute database path.",
         [nameof(SettingsInvalidNormalLifetime)] = "Enter a normal clip lifetime between 1 and 3650 days.",
@@ -268,6 +279,7 @@ public static class AppText
         ["Format.SettingsValidationError"] = "Settings error: {0}",
         ["Format.PathNotFound"] = "The requested file or directory could not be found: {0}",
         ["Format.DuplicateHotkey"] = "The hotkey {0} is assigned more than once.",
+        ["Format.HotkeyReservedByBuiltIn"] = "The hotkey {0} is already used by the window to {1}. Choose another.",
         ["Format.DuplicateSensitivityRule"] = "The sensitivity rule {0} is defined more than once.",
         ["Format.InvalidSensitivityRule"] = "The sensitivity rule {0} is invalid: {1}",
         ["Format.RelativeSeconds"] = "{0}s ago",
@@ -462,6 +474,28 @@ public static class AppText
     public static string UnmarkSensitiveButtonLabel => Text(nameof(UnmarkSensitiveButtonLabel));
     public static string SettingsSavedStatus => Text(nameof(SettingsSavedStatus));
     public static string SettingsInvalidHotkeyFallback => Text(nameof(SettingsInvalidHotkeyFallback));
+
+    public static string BuiltInShortcutSelectAllClips => Text(nameof(BuiltInShortcutSelectAllClips));
+
+    public static string BuiltInShortcutCopySelected => Text(nameof(BuiltInShortcutCopySelected));
+
+    public static string BuiltInShortcutCopySelectedAsPlainText => Text(nameof(BuiltInShortcutCopySelectedAsPlainText));
+
+    public static string BuiltInShortcutPasteSelected => Text(nameof(BuiltInShortcutPasteSelected));
+
+    public static string BuiltInShortcutDeleteSelected => Text(nameof(BuiltInShortcutDeleteSelected));
+
+    public static string BuiltInShortcutToggleClipChecked => Text(nameof(BuiltInShortcutToggleClipChecked));
+
+    public static string BuiltInShortcutClearFilter => Text(nameof(BuiltInShortcutClearFilter));
+
+    public static string BuiltInShortcutOpenSettings => Text(nameof(BuiltInShortcutOpenSettings));
+
+    public static string BuiltInShortcutMoveThroughClips => Text(nameof(BuiltInShortcutMoveThroughClips));
+
+    public static string BuiltInShortcutCopyClipByPosition => Text(nameof(BuiltInShortcutCopyClipByPosition));
+
+    public static string BuiltInShortcutSelectClipByPosition => Text(nameof(BuiltInShortcutSelectClipByPosition));
     public static string SettingsInvalidClipSize => Text(nameof(SettingsInvalidClipSize));
     public static string SettingsInvalidDatabasePath => Text(nameof(SettingsInvalidDatabasePath));
     public static string SettingsInvalidNormalLifetime => Text(nameof(SettingsInvalidNormalLifetime));
@@ -662,6 +696,9 @@ public static class AppText
     public static string FormatMissingPath(string path) => Format("Format.PathNotFound", path);
 
     public static string FormatDuplicateHotkey(string hotkey) => Format("Format.DuplicateHotkey", hotkey);
+
+    public static string FormatHotkeyReservedByBuiltIn(string hotkey, string builtInDescription)
+        => Format("Format.HotkeyReservedByBuiltIn", hotkey, builtInDescription);
 
     public static string FormatDuplicateSensitivityRule(string name) => Format("Format.DuplicateSensitivityRule", name);
 

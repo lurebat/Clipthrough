@@ -887,6 +887,32 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.True(embeddingWorker.PokeCount > pokesBefore, "Expected the embedding worker to be poked after a sensitivity rule change.");
     }
 
+    /// <summary>
+    /// The window handles Ctrl+D itself ("copy selected") before the
+    /// configurable filter hotkeys get a look, so assigning it to a filter
+    /// produces a shortcut that silently never fires. Validation has to say so
+    /// rather than save a dead binding.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task SaveSettings_RefusesAFilterHotkeyTheWindowHandlesItself()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+
+        await viewModel.InitializeAsync();
+
+        viewModel.Settings.EnableToggleFavoritesHotkey = true;
+        viewModel.Settings.ToggleFavoritesHotkey = "Ctrl+D";
+
+        await viewModel.SaveSettingsCommand.Execute().ToTask();
+
+        Assert.Contains("Ctrl+D", viewModel.StatusText ?? string.Empty, StringComparison.Ordinal);
+        Assert.False(scope.SettingsService.HasSavedSettings);
+    }
+
     [AvaloniaFact]
     public async Task SaveSettings_FromWelcome_ClosesWelcomeAndStartsApp()
     {

@@ -726,5 +726,37 @@
     "filter": "Enrichment_AbandonsItsRemainingWorkOnceDisposed",
     "find": "            if (_isDisposed)\n            {\n                return;\n            }\n\n            var sensitivityUpdated = await Task.Run(() => _clipStoreService.ApplySensitivityAsync(capturedClip.Id));",
     "replace": "            var sensitivityUpdated = await Task.Run(() => _clipStoreService.ApplySensitivityAsync(capturedClip.Id));"
+  },
+  {
+    "id": "favorites-default-returns-to-the-builtin-gesture",
+    "why": "Puts the favorites filter default back on Ctrl+D, which the clip list already handles as 'copy selected'. The favorites hotkey is then dead whenever the list has focus - the window's normal state.",
+    "file": "Clipthrough/Models/AppSettings.cs",
+    "filter": "BuiltInShortcutsTests",
+    "find": "    public string ToggleFavoritesHotkey { get; init; } = \"Ctrl+B\";",
+    "replace": "    public string ToggleFavoritesHotkey { get; init; } = \"Ctrl+D\";"
+  },
+  {
+    "id": "favorites-migration-strands-existing-installs",
+    "why": "Drops Ctrl+D from the favorites migration list. New installs get the working default but every existing install keeps the dead binding, so the fix reaches nobody who is actually affected.",
+    "file": "Clipthrough/Models/AppSettings.cs",
+    "filter": "BuiltInShortcutsTests",
+    "find": "Default.ToggleFavoritesHotkey, \"Alt+F\", \"Ctrl+Shift+F\", \"Ctrl+D\")",
+    "replace": "Default.ToggleFavoritesHotkey, \"Alt+F\", \"Ctrl+Shift+F\")"
+  },
+  {
+    "id": "settings-saves-hotkeys-the-window-swallows",
+    "why": "Removes the reserved-gesture check from settings validation, so the user can still save a filter hotkey that the window handles first and that therefore never fires.",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "filter": "SaveSettings_RefusesAFilterHotkeyTheWindowHandlesItself",
+    "find": "        foreach (var draft in localHotkeys.Where(static draft => draft.IsEnabled))\n        {\n            var normalized = normalizedHotkeys[draft.Name];\n            if (BuiltInShortcuts.DescribeCollision(normalized) is { } builtIn)\n            {\n                StatusText = AppText.FormatSettingsValidationError(AppText.FormatHotkeyReservedByBuiltIn(normalized, builtIn));\n                return;\n            }\n        }",
+    "replace": ""
+  },
+  {
+    "id": "reserved-table-entry-uses-a-non-canonical-alias",
+    "why": "Spells a reserved gesture with a valid alias instead of its canonical form. It still parses, so nothing breaks visibly - but validation compares canonical text, so the entry silently never matches and that built-in stops being reserved.",
+    "file": "Clipthrough/Models/BuiltInShortcuts.cs",
+    "filter": "BuiltInShortcutsTests",
+    "find": "            (\"Return\", static () => AppText.BuiltInShortcutPasteSelected),",
+    "replace": "            (\"Enter\", static () => AppText.BuiltInShortcutPasteSelected),"
   }
 ]

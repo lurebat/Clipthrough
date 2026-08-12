@@ -27,7 +27,11 @@ public sealed record AppSettings
 
     public bool EnableToggleFavoritesHotkey { get; init; } = true;
 
-    public string ToggleFavoritesHotkey { get; init; } = "Ctrl+D";
+    // Not Ctrl+D: the clip list handles that itself as "copy selected" (and the
+    // Edit menu advertises it), and the built-in handlers run before the
+    // configurable filter hotkeys, so a Ctrl+D favorites toggle never fired
+    // while the list had focus - the window's normal state.
+    public string ToggleFavoritesHotkey { get; init; } = "Ctrl+B";
 
     public bool EnableToggleSensitiveHotkey { get; init; } = true;
 
@@ -203,7 +207,7 @@ public sealed record AppSettings
         EnableToggleRegexHotkey = EnableToggleRegexHotkey,
         ToggleRegexHotkey = MigrateFilterHotkey(ToggleRegexHotkey, Default.ToggleRegexHotkey, "Alt+R", "Ctrl+Shift+R"),
         EnableToggleFavoritesHotkey = EnableToggleFavoritesHotkey,
-        ToggleFavoritesHotkey = MigrateFilterHotkey(ToggleFavoritesHotkey, Default.ToggleFavoritesHotkey, "Alt+F", "Ctrl+Shift+F"),
+        ToggleFavoritesHotkey = MigrateFilterHotkey(ToggleFavoritesHotkey, Default.ToggleFavoritesHotkey, "Alt+F", "Ctrl+Shift+F", "Ctrl+D"),
         EnableToggleSensitiveHotkey = EnableToggleSensitiveHotkey,
         ToggleSensitiveHotkey = MigrateFilterHotkey(ToggleSensitiveHotkey, Default.ToggleSensitiveHotkey, "Alt+S", "Ctrl+Shift+S"),
         EnableToggleCaseSensitiveHotkey = EnableToggleCaseSensitiveHotkey,
