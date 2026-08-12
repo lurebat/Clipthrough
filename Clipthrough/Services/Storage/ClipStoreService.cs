@@ -1381,6 +1381,12 @@ public sealed class ClipStoreService : IClipStoreService
         return new Regex(pattern, options);
     }
 
+    /// <summary>
+    /// Builds the SQL WHERE clauses for a filter set. The structural subset
+    /// here (content types, favorites, sensitive, pasted) is mirrored in
+    /// <see cref="Clipthrough.Models.ClipStructuralFilter"/> so the UI can test
+    /// a single clip without a round trip - keep the two in step.
+    /// </summary>
     private static List<string> BuildWhereClauses(ClipSearchFilters filters, bool hasSearch)
     {
         var clauses = new List<string>();
