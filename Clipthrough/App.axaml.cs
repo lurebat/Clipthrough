@@ -173,7 +173,6 @@ public partial class App : Application
         services.AddSingleton<Clipthrough.Services.Search.IEmbeddingService, Clipthrough.Services.Search.EmbeddingService>();
         services.AddSingleton<Clipthrough.Services.Search.IEmbeddingWorker, Clipthrough.Services.Search.EmbeddingWorker>();
         services.AddSingleton<Clipthrough.Services.Search.ISemanticSearchService, Clipthrough.Services.Search.SemanticSearchService>();
-        services.AddSingleton<IRemoteControlService, RemoteControlService>();
         services.AddSingleton<MainWindowViewModel>();
 
         return services.BuildServiceProvider();
@@ -191,8 +190,8 @@ public partial class App : Application
         }
 
         // Avalonia fires `Opened` on every Show() after a Hide(). The hotkey
-        // registration, update check, and remote-API kick-off are one-time
-        // startup concerns — running them on every popup costs ~3s because
+        // registration and update check are one-time startup
+        // concerns — running them on every popup costs ~3s because
         // RegisterHotKey is synchronous and we now register a dozen filter
         // hotkeys by default. Settings changes already re-apply hotkeys via
         // OnSettingsChanged, so guarding by _firstOpenComplete is safe.
@@ -204,24 +203,6 @@ public partial class App : Application
         _firstOpenComplete = true;
         UpdateGlobalHotKeyRegistration();
         _ = KickOffUpdateCheckAsync();
-        _ = KickOffRemoteApiAsync();
-    }
-
-    private async Task KickOffRemoteApiAsync()
-    {
-        try
-        {
-            var svc = Services?.GetService<IRemoteControlService>();
-            if (svc is null)
-            {
-                return;
-            }
-            await svc.ApplySettingsAsync().ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Trace.TraceWarning($"Remote API startup failed: {ex}");
-        }
     }
 
     private async Task KickOffUpdateCheckAsync()

@@ -15,7 +15,7 @@ timestamps (`FirstCopiedAt`, `LastCopiedAt`), and optional OCR/embedding status.
 **ContentType / ContentFormat** — `ContentType` distinguishes Text, Image,
 RichText, and Files. `ContentFormat` refines stored format to PlainText, Html,
 Rtf, Bitmap, FileDropList, etc. Both are stored in the DB and drive rendering
-decisions in the UI and remote API.
+decisions in the UI.
 
 **clip hash** — SHA-256 of the raw content bytes. Used for deduplication:
 re-copying identical content increments `CopyCount` and updates
@@ -26,8 +26,7 @@ atomically. CopyCount tracks how many times the same content was copied;
 PasteCount tracks how many times Clipthrough pasted it back.
 
 **sensitivity** — A clip is marked sensitive when a `SensitivityRule` matches
-its content. Sensitive clips are hidden from the remote API response body and
-displayed with a warning badge in the UI.
+its content. Sensitive clips are displayed with a warning badge in the UI.
 
 **SensitivityMatch** — A join result indicating which rule(s) triggered for a
 clip. Stored in a separate `sensitivity_matches` table; recomputed on rule
@@ -90,8 +89,7 @@ Resolves worker services lazily via `IServiceProvider` to avoid a circular DI
 dependency.
 
 **DPAPI** — Windows Data Protection API used to protect secrets at rest:
-SQLCipher password (`storage.json`), AI API key, and remote API bearer token
-(sidecar `.bin` files). Non-Windows falls back to `NoOpDataProtectionService`,
+SQLCipher password (`storage.json`) and AI API key (sidecar `.bin` files). Non-Windows falls back to `NoOpDataProtectionService`,
 keeping secrets in memory only.
 
 **schema version** — Integer stored in `PRAGMA user_version`. Migrations in
@@ -175,16 +173,6 @@ text, content preview).
 renders metadata as a single `TextBlock` with coloured `Run` inlines (via the
 `MetaInlines` attached property) instead of a `WrapPanel` of ~14 controls,
 cutting per-row binding count.
-
----
-
-## Remote API
-
-**RemoteControlService** — Optional Kestrel HTTP API (loopback-only by default).
-Bearer-token auth required on all endpoints including `/docs` and `/openapi`.
-Auth failures trigger a configurable backoff. Sensitive clip content is redacted.
-See `.github/copilot-cli-skills/clipthrough-remote-api.md` for the endpoint
-reference.
 
 ---
 

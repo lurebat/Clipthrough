@@ -22,7 +22,7 @@ public sealed class SettingsService : ISettingsService
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _settingsPath;
     private readonly string _aiKeyPath;
-    private readonly string _remoteTokenPath;
+    private readonly string _legacyRemoteTokenPath;
     private AppSettings _current = AppSettings.Default;
     private bool _isInitialized;
 
@@ -44,7 +44,7 @@ public sealed class SettingsService : ISettingsService
         // Sidecar files live alongside settings.json; each holds one DPAPI blob.
         var stem = Path.Combine(Path.GetDirectoryName(settingsPath)!, Path.GetFileNameWithoutExtension(settingsPath));
         _aiKeyPath = stem + "-ai-key.bin";
-        _remoteTokenPath = stem + "-remote-token.bin";
+        _legacyRemoteTokenPath = stem + "-remote-token.bin";
     }
 
     public AppSettings Current => _current;
@@ -166,8 +166,8 @@ public sealed class SettingsService : ISettingsService
         // Merge protected secrets from sidecar files into the loaded settings.
         // If the settings.json still carries plaintext credentials (legacy), use
         // them in-memory and migrate to sidecars (auto-migration, KTD2).
-        var (aiApiKey, remoteApiToken, needsMigration) = LoadAndMergeSecrets(loaded);
-        var merged = loaded with { AiApiKey = aiApiKey, RemoteApiToken = remoteApiToken };
+        var (aiApiKey, needsMigration) = LoadAndMergeSecrets(loaded);
+        var merged = loaded with { AiApiKey = aiApiKey };
 
         if (needsMigration)
         {
@@ -188,20 +188,21 @@ public sealed class SettingsService : ISettingsService
     }
 
     /// <summary>
-    /// Loads protected secrets from sidecar files, falling back to plaintext
-    /// fields in <paramref name="settings"/> (legacy). Returns the resolved
-    /// values and a flag indicating whether the caller should re-save to
+    /// Loads the protected AI credential from its sidecar file, falling back to
+    /// the plaintext field in <paramref name="settings"/> (legacy). Returns the
+    /// resolved value and a flag indicating whether the caller should re-save to
     /// complete the migration away from plaintext.
     /// </summary>
-    private (string aiApiKey, string remoteApiToken, bool needsMigration) LoadAndMergeSecrets(AppSettings settings)
+    private (string aiApiKey, bool needsMigration) LoadAndMergeSecrets(AppSettings settings)
     {
-        var aiApiKey = string.Empty;
-        var remoteApiToken = string.Empty;
         var needsMigration = false;
 
-        // Try to load each secret from its sidecar first.
-        aiApiKey = TryLoadSecret(_aiKeyPath) ?? string.Empty;
-        remoteApiToken = TryLoadSecret(_remoteTokenPath) ?? string.Empty;
+        // The remote-control API was removed; drop any credential it left behind
+        // rather than leaving a protected secret orphaned on disk.
+        try { File.Delete(_legacyRemoteTokenPath); } catch { /* best-effort */ }
+
+        // Try to load the secret from its sidecar first.
+        var aiApiKey = TryLoadSecret(_aiKeyPath) ?? string.Empty;
 
         // Fall back to legacy plaintext if no sidecar exists.
         if (string.IsNullOrEmpty(aiApiKey) && !string.IsNullOrEmpty(settings.AiApiKey))
@@ -210,13 +211,7 @@ public sealed class SettingsService : ISettingsService
             needsMigration = true;
         }
 
-        if (string.IsNullOrEmpty(remoteApiToken) && !string.IsNullOrEmpty(settings.RemoteApiToken))
-        {
-            remoteApiToken = settings.RemoteApiToken;
-            needsMigration = true;
-        }
-
-        return (aiApiKey, remoteApiToken, needsMigration);
+        return (aiApiKey, needsMigration);
     }
 
     /// <summary>
@@ -245,15 +240,14 @@ public sealed class SettingsService : ISettingsService
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
 
-        // Persist AiApiKey and RemoteApiToken via protected sidecars rather than
-        // as plaintext in settings.json. The fields are stripped from the JSON so
-        // settings.json never carries readable credentials.
+        // Persist AiApiKey via a protected sidecar rather than as plaintext in
+        // settings.json. The field is stripped from the JSON so settings.json
+        // never carries a readable credential.
         var failedSecrets = new List<string>();
         if (!TrySaveSecret(_aiKeyPath, settings.AiApiKey)) failedSecrets.Add("AI API key");
-        if (!TrySaveSecret(_remoteTokenPath, settings.RemoteApiToken)) failedSecrets.Add("Remote API token");
 
-        // Serialize without the secret fields.
-        var stripped = settings with { AiApiKey = string.Empty, RemoteApiToken = string.Empty };
+        // Serialize without the secret field.
+        var stripped = settings with { AiApiKey = string.Empty };
         var json = JsonSerializer.Serialize(stripped, JsonOptions);
         await File.WriteAllTextAsync(_settingsPath, json, cancellationToken);
 
@@ -321,7 +315,7 @@ public sealed class SettingsService : ISettingsService
                 """;
             command.Parameters.AddWithValue("$key", SettingsKey);
             // Legacy DB copy also strips secrets — never mirror credentials to SQLite.
-            var stripped = settings with { AiApiKey = string.Empty, RemoteApiToken = string.Empty };
+            var stripped = settings with { AiApiKey = string.Empty };
             command.Parameters.AddWithValue("$value", JsonSerializer.Serialize(stripped, JsonOptions));
             await command.ExecuteNonQueryAsync(cancellationToken);
         }

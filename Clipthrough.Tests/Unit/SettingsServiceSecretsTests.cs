@@ -10,7 +10,7 @@ using Xunit;
 namespace Clipthrough.Tests.Unit;
 
 /// <summary>
-/// Unit tests for U2 (DPAPI protection of AiApiKey + RemoteApiToken in SettingsService).
+/// Unit tests for U2 (DPAPI protection of AiApiKey in SettingsService).
 /// Verifies: no plaintext in settings.json; legacy plaintext migrates on load;
 /// Unprotect failure drops key; no-op protector keeps secrets in-memory only.
 /// </summary>
@@ -19,7 +19,7 @@ public sealed class SettingsServiceSecretsTests : IDisposable
     private readonly string _tempRoot;
     private readonly string _settingsPath;
     private readonly string _aiKeyPath;
-    private readonly string _remoteTokenPath;
+    private readonly string _legacyRemoteTokenPath;
 
     public SettingsServiceSecretsTests()
     {
@@ -27,7 +27,7 @@ public sealed class SettingsServiceSecretsTests : IDisposable
         Directory.CreateDirectory(_tempRoot);
         _settingsPath = Path.Combine(_tempRoot, "settings.json");
         _aiKeyPath = Path.Combine(_tempRoot, "settings-ai-key.bin");
-        _remoteTokenPath = Path.Combine(_tempRoot, "settings-remote-token.bin");
+        _legacyRemoteTokenPath = Path.Combine(_tempRoot, "settings-remote-token.bin");
     }
 
     public void Dispose()
@@ -60,12 +60,10 @@ public sealed class SettingsServiceSecretsTests : IDisposable
         await service.SaveAsync(AppSettings.Default with
         {
             AiApiKey = "sk-secret-key",
-            RemoteApiToken = "my-remote-token",
         });
 
         var json = await File.ReadAllTextAsync(_settingsPath);
         Assert.DoesNotContain("sk-secret-key", json);
-        Assert.DoesNotContain("my-remote-token", json);
     }
 
     [Fact]
@@ -76,13 +74,10 @@ public sealed class SettingsServiceSecretsTests : IDisposable
 
         await service.SaveAsync(AppSettings.Default with
         {
-            EnableRemoteApi = true,
             AiApiKey = "sk-secret-key",
-            RemoteApiToken = "remote-tok",
         });
 
         Assert.True(File.Exists(_aiKeyPath), "AI key sidecar should be written");
-        Assert.True(File.Exists(_remoteTokenPath), "Remote token sidecar should be written");
 
         // Sidecar must not contain plaintext.
         var aiBytes = await File.ReadAllBytesAsync(_aiKeyPath);
@@ -97,9 +92,7 @@ public sealed class SettingsServiceSecretsTests : IDisposable
 
         await service.SaveAsync(AppSettings.Default with
         {
-            EnableRemoteApi = true,
             AiApiKey = "my-ai-key",
-            RemoteApiToken = "my-token",
         });
 
         // Reload: fresh service with same protector.
@@ -107,7 +100,24 @@ public sealed class SettingsServiceSecretsTests : IDisposable
         await reloaded.InitializeAsync();
 
         Assert.Equal("my-ai-key", reloaded.Current.AiApiKey);
-        Assert.Equal("my-token", reloaded.Current.RemoteApiToken);
+    }
+
+    /// <summary>
+    /// The remote-control API was removed. A token sidecar left over from an
+    /// older install is a live credential on disk with nothing to consume it, so
+    /// loading settings must delete it rather than leave it behind.
+    /// </summary>
+    [Fact]
+    public async Task InitializeAsync_DeletesOrphanedRemoteTokenSidecar()
+    {
+        await File.WriteAllBytesAsync(_legacyRemoteTokenPath, new byte[] { 1, 2, 3, 4 });
+        Assert.True(File.Exists(_legacyRemoteTokenPath));
+
+        var service = NewService(new FakeDataProtectionService());
+        await service.InitializeAsync();
+
+        Assert.False(File.Exists(_legacyRemoteTokenPath),
+            "A remote API token sidecar from an older version must not survive load");
     }
 
     // ─── NoOp protector: in-memory only ──────────────────────────────────────
@@ -120,23 +130,18 @@ public sealed class SettingsServiceSecretsTests : IDisposable
 
         await service.SaveAsync(AppSettings.Default with
         {
-            EnableRemoteApi = true,
             AiApiKey = "sk-in-memory-only",
-            RemoteApiToken = "tok-in-memory-only",
         });
 
-        // In-memory state should carry the secrets.
+        // In-memory state should carry the secret.
         Assert.Equal("sk-in-memory-only", service.Current.AiApiKey);
-        Assert.Equal("tok-in-memory-only", service.Current.RemoteApiToken);
 
         // But no sidecar files should exist.
         Assert.False(File.Exists(_aiKeyPath), "No AI key sidecar should be written for no-op protector");
-        Assert.False(File.Exists(_remoteTokenPath), "No remote token sidecar should be written for no-op protector");
 
         // settings.json must not contain the plaintext.
         var json = await File.ReadAllTextAsync(_settingsPath);
         Assert.DoesNotContain("sk-in-memory-only", json);
-        Assert.DoesNotContain("tok-in-memory-only", json);
     }
 
     [Fact]
@@ -160,7 +165,7 @@ public sealed class SettingsServiceSecretsTests : IDisposable
     public async Task InitializeAsync_LegacyPlaintext_MigratesOnLoad_RealProtector()
     {
         // Simulate settings.json written by an older version with plaintext secrets.
-        var legacy = AppSettings.Default with { EnableRemoteApi = true, AiApiKey = "legacy-key", RemoteApiToken = "legacy-tok" };
+        var legacy = AppSettings.Default with { AiApiKey = "legacy-key" };
         await File.WriteAllTextAsync(_settingsPath,
             System.Text.Json.JsonSerializer.Serialize(legacy,
                 new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)));
@@ -171,22 +176,18 @@ public sealed class SettingsServiceSecretsTests : IDisposable
 
         // In-memory secrets should be restored.
         Assert.Equal("legacy-key", service.Current.AiApiKey);
-        Assert.Equal("legacy-tok", service.Current.RemoteApiToken);
 
         // settings.json must no longer contain the plaintext.
         var json = await File.ReadAllTextAsync(_settingsPath);
         Assert.DoesNotContain("legacy-key", json);
-        Assert.DoesNotContain("legacy-tok", json);
 
-        // Sidecar files must now exist.
+        // The sidecar file must now exist.
         Assert.True(File.Exists(_aiKeyPath));
-        Assert.True(File.Exists(_remoteTokenPath));
 
         // A fresh load must still return the secrets.
         var reloaded = NewService(new FakeDataProtectionService());
         await reloaded.InitializeAsync();
         Assert.Equal("legacy-key", reloaded.Current.AiApiKey);
-        Assert.Equal("legacy-tok", reloaded.Current.RemoteApiToken);
     }
 
     // ─── Unprotect failure: drop key ─────────────────────────────────────────
@@ -216,16 +217,15 @@ public sealed class SettingsServiceSecretsTests : IDisposable
     [Fact]
     public async Task SaveAsync_EmptySecrets_DeletesSidecarFiles()
     {
-        // Write non-empty secrets first.
+        // Write a non-empty secret first.
         var service = NewService(new FakeDataProtectionService());
         await service.InitializeAsync();
-        await service.SaveAsync(AppSettings.Default with { AiApiKey = "key", RemoteApiToken = "tok" });
+        await service.SaveAsync(AppSettings.Default with { AiApiKey = "key" });
         Assert.True(File.Exists(_aiKeyPath));
 
-        // Now save with empty secrets — sidecars should be deleted.
-        await service.SaveAsync(AppSettings.Default with { AiApiKey = string.Empty, RemoteApiToken = string.Empty });
+        // Now save with an empty secret — the sidecar should be deleted.
+        await service.SaveAsync(AppSettings.Default with { AiApiKey = string.Empty });
         Assert.False(File.Exists(_aiKeyPath), "AI key sidecar should be removed when secret is empty");
-        Assert.False(File.Exists(_remoteTokenPath), "Remote token sidecar should be removed when secret is empty");
     }
 
     // ─── S2: a credential that could not be persisted must not report success ──
@@ -246,12 +246,9 @@ public sealed class SettingsServiceSecretsTests : IDisposable
             service.SaveAsync(AppSettings.Default with
             {
                 AiApiKey = "sk-secret-key",
-                EnableRemoteApi = true,
-                RemoteApiToken = "remote-tok",
             }));
 
         Assert.Contains("AI API key", failure.SecretNameList);
-        Assert.Contains("Remote API token", failure.SecretNameList);
     }
 
     /// <summary>
@@ -267,7 +264,7 @@ public sealed class SettingsServiceSecretsTests : IDisposable
         var settings = AppSettings.Default with
         {
             AiApiKey = "sk-secret-key",
-            EnableRemoteApi = true,
+            OcrLanguages = "fr",
         };
 
         await Assert.ThrowsAsync<SecretPersistenceException>(() => service.SaveAsync(settings));
@@ -278,7 +275,7 @@ public sealed class SettingsServiceSecretsTests : IDisposable
         Assert.DoesNotContain("sk-secret-key", json);
 
         // In-memory state is still published so the key works for this session.
-        Assert.True(service.Current.EnableRemoteApi);
+        Assert.Equal("fr", service.Current.OcrLanguages);
         Assert.Equal("sk-secret-key", service.Current.AiApiKey);
 
         // But nothing was written to the sidecar, which is exactly what the

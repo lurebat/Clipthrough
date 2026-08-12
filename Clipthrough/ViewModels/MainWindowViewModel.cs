@@ -283,30 +283,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RunOcrOnSelectedImageCommand = ReactiveCommand.CreateFromTask(RunOcrOnSelectedImageAsync);
         RerunAllEmbeddingsCommand = ReactiveCommand.CreateFromTask(RerunAllEmbeddingsAsync);
         RefreshSemanticCoverageCommand = ReactiveCommand.CreateFromTask(RefreshSemanticCoverageAsync);
-        GenerateRemoteApiTokenCommand = ReactiveCommand.Create(() =>
-            Settings.RemoteApiToken = System.Guid.NewGuid().ToString("N"));
-        CopyRemoteApiTokenCommand = ReactiveCommand.CreateFromTask(async () =>
-        {
-            if (!string.IsNullOrWhiteSpace(Settings.RemoteApiToken))
-            {
-                await _systemInteractionService.CopyTextAsync(Settings.RemoteApiToken);
-                StatusText = "Remote API token copied";
-            }
-        });
-        CopyRemoteApiDocsUrlCommand = ReactiveCommand.CreateFromTask(async () =>
-        {
-            await _systemInteractionService.CopyTextAsync(Settings.RemoteApiDocsUrl);
-            StatusText = "Swagger URL copied";
-        });
-        CopyRemoteApiSchemaUrlCommand = ReactiveCommand.CreateFromTask(async () =>
-        {
-            await _systemInteractionService.CopyTextAsync(Settings.RemoteApiSchemaUrl);
-            StatusText = "OpenAPI schema URL copied";
-        });
-        OpenRemoteApiDocsUrlCommand = ReactiveCommand.CreateFromTask(async () =>
-            await _systemInteractionService.OpenUrlAsync(Settings.RemoteApiDocsUrl));
-        OpenRemoteApiSchemaUrlCommand = ReactiveCommand.CreateFromTask(async () =>
-            await _systemInteractionService.OpenUrlAsync(Settings.RemoteApiSchemaUrl));
 
         Update = new UpdateViewModel(updateService ?? new UpdateService(settingsService), _jobIndicator, _notificationService, status => StatusText = status);
 
@@ -528,14 +504,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> RerunAllEmbeddingsCommand { get; }
 
     public ReactiveCommand<Unit, Unit> RefreshSemanticCoverageCommand { get; }
-
-    public ReactiveCommand<Unit, string> GenerateRemoteApiTokenCommand { get; }
-
-    public ReactiveCommand<Unit, Unit> CopyRemoteApiTokenCommand { get; }
-    public ReactiveCommand<Unit, Unit> CopyRemoteApiDocsUrlCommand { get; }
-    public ReactiveCommand<Unit, Unit> CopyRemoteApiSchemaUrlCommand { get; }
-    public ReactiveCommand<Unit, Unit> OpenRemoteApiDocsUrlCommand { get; }
-    public ReactiveCommand<Unit, Unit> OpenRemoteApiSchemaUrlCommand { get; }
 
     public UpdateViewModel Update { get; }
 
@@ -2024,7 +1992,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isSettingsSectionAiExpanded;
     private bool _isSettingsSectionUpdatesExpanded;
     private bool _isSettingsSectionOcrExpanded;
-    private bool _isSettingsSectionRemoteApiExpanded;
     private bool _isSettingsSectionUserScriptsExpanded;
     private bool _isSettingsSectionSemanticExpanded;
 
@@ -2094,12 +2061,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => this.RaiseAndSetIfChanged(ref _isSettingsSectionOcrExpanded, value);
     }
 
-    public bool IsSettingsSectionRemoteApiExpanded
-    {
-        get => _isSettingsSectionRemoteApiExpanded;
-        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionRemoteApiExpanded, value);
-    }
-
     public bool IsSettingsSectionUserScriptsExpanded
     {
         get => _isSettingsSectionUserScriptsExpanded;
@@ -2125,7 +2086,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private static readonly string _aiKeywords = "ai openai chatgpt gpt model api key base url prompt transform";
     private static readonly string _updatesKeywords = "update updates auto-update velopack feed url release version";
     private static readonly string _ocrKeywords = "ocr image text extract recognition language bcp-47 windows.media.ocr";
-    private static readonly string _remoteApiKeywords = "remote api http server kestrel bearer token port bind loopback swagger openapi mcp";
     private static readonly string _userScriptsKeywords = "script scripts user roslyn csharp c# code custom transform";
     private static readonly string _semanticKeywords = "semantic embedding embeddings similarity vector search meaning ai ml rerun reembed sort relevance date proximity";
 
@@ -2156,7 +2116,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsSettingsSectionAiVisible => MatchesFilter(_aiKeywords);
     public bool IsSettingsSectionUpdatesVisible => MatchesFilter(_updatesKeywords);
     public bool IsSettingsSectionOcrVisible => MatchesFilter(_ocrKeywords);
-    public bool IsSettingsSectionRemoteApiVisible => MatchesFilter(_remoteApiKeywords);
     public bool IsSettingsSectionUserScriptsVisible => MatchesFilter(_userScriptsKeywords);
     public bool IsSettingsSectionSemanticVisible => MatchesFilter(_semanticKeywords);
 
@@ -2173,7 +2132,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(IsSettingsSectionAiVisible));
         this.RaisePropertyChanged(nameof(IsSettingsSectionUpdatesVisible));
         this.RaisePropertyChanged(nameof(IsSettingsSectionOcrVisible));
-        this.RaisePropertyChanged(nameof(IsSettingsSectionRemoteApiVisible));
         this.RaisePropertyChanged(nameof(IsSettingsSectionUserScriptsVisible));
         this.RaisePropertyChanged(nameof(IsSettingsSectionSemanticVisible));
 
@@ -2191,7 +2149,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             IsSettingsSectionAiExpanded = IsSettingsSectionAiVisible;
             IsSettingsSectionUpdatesExpanded = IsSettingsSectionUpdatesVisible;
             IsSettingsSectionOcrExpanded = IsSettingsSectionOcrVisible;
-            IsSettingsSectionRemoteApiExpanded = IsSettingsSectionRemoteApiVisible;
             IsSettingsSectionUserScriptsExpanded = IsSettingsSectionUserScriptsVisible;
             IsSettingsSectionSemanticExpanded = IsSettingsSectionSemanticVisible;
         }
@@ -5653,10 +5610,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             UpdateFeedUrl = (Settings.UpdateFeedUrl ?? string.Empty).Trim(),
             OcrLanguages = (Settings.OcrLanguages ?? string.Empty).Trim(),
             AutoOcrImageClips = Settings.AutoOcrImageClips,
-            EnableRemoteApi = Settings.EnableRemoteApi,
-            RemoteApiPort = Settings.RemoteApiPort,
-            RemoteApiToken = (Settings.RemoteApiToken ?? string.Empty).Trim(),
-            RemoteApiBindAddress = (Settings.RemoteApiBindAddress ?? string.Empty).Trim(),
             UserScripts = SettingsUserScriptDrafts
                 .Select(s => new UserScript { Name = s.Name.Trim(), Code = s.Code })
                 .Where(s => !string.IsNullOrWhiteSpace(s.Name) && !string.IsNullOrWhiteSpace(s.Code))
@@ -5816,10 +5769,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.UpdateFeedUrl = settings.UpdateFeedUrl;
         Settings.OcrLanguages = settings.OcrLanguages;
         Settings.AutoOcrImageClips = settings.AutoOcrImageClips;
-        Settings.EnableRemoteApi = settings.EnableRemoteApi;
-        Settings.RemoteApiPort = settings.RemoteApiPort;
-        Settings.RemoteApiToken = settings.RemoteApiToken;
-        Settings.RemoteApiBindAddress = settings.RemoteApiBindAddress;
         SettingsUserScriptDrafts.Clear();
         foreach (var s in settings.UserScripts)
         {

@@ -641,10 +641,6 @@ public sealed class MainWindowViewModelHeadlessTests
             UpdateFeedUrl = "https://feed.example/x",
             OcrLanguages = "en-US,fr-FR",
             AutoOcrImageClips = true,
-            EnableRemoteApi = true,
-            RemoteApiPort = 12345,
-            RemoteApiToken = "tok-char",
-            RemoteApiBindAddress = "127.0.0.1",
             ThemeMode = Models.ThemeMode.Light,
             CloseToTray = true,
             // Hotkeys section
@@ -684,11 +680,6 @@ public sealed class MainWindowViewModelHeadlessTests
         // OCR section
         Assert.Equal("en-US,fr-FR", viewModel.Settings.OcrLanguages);
         Assert.True(viewModel.Settings.AutoOcrImageClips);
-        // Remote-API section
-        Assert.True(viewModel.Settings.EnableRemoteApi);
-        Assert.Equal(12345, viewModel.Settings.RemoteApiPort);
-        Assert.Equal("tok-char", viewModel.Settings.RemoteApiToken);
-        Assert.Equal("127.0.0.1", viewModel.Settings.RemoteApiBindAddress);
         // Theme / misc
         Assert.Equal(Models.ThemeMode.Light, viewModel.Settings.ThemeMode);
         Assert.True(viewModel.Settings.CloseToTray);

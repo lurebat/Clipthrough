@@ -37,18 +37,19 @@ via fakes). Not automatable below.
 ### MT-1.3 — Upgrade migration from a real prior (plaintext) install
 *Why manual:* needs an actual pre-hardening `storage.json`/`settings.json` on disk.
 1. Take a `storage.json` from the previous release (plaintext `databasePassword`) and a
-   `settings.json` with a plaintext `aiApiKey`/`remoteApiToken` (remote API enabled).
+   `settings.json` with a plaintext `aiApiKey`.
 2. Launch the hardened build over them.
 - **Expect:** the app opens normally (no lockout). After launch, `storage.json` contains
   `databasePasswordProtected` and **no** plaintext `databasePassword`; `settings.json`
-  contains neither secret (moved to `settings-ai-key.bin` / `settings-remote-token.bin`).
+  no longer contains the key (moved to `settings-ai-key.bin`), and any stale
+  `settings-remote-token.bin` from the removed remote API is deleted.
 - [ ]
 
 ### MT-1.4 — Secrets are in-memory only when no real protector exists
 *Why manual:* requires a non-Windows run (no DPAPI) — `NoOpDataProtectionService`.
-1. Run on Linux/macOS (or force the no-op protector). Set an AI key / remote token and a DB password.
+1. Run on Linux/macOS (or force the no-op protector). Set an AI key and a DB password.
 2. Inspect the config dir; then restart.
-- **Expect:** no `*-ai-key.bin` / `*-remote-token.bin` sidecars and no `databasePasswordProtected`
+- **Expect:** no `*-ai-key.bin` sidecar and no `databasePasswordProtected`
   on disk; the secrets work for the session but are gone after restart (re-prompt). No plaintext anywhere.
 - [ ]
 
@@ -78,35 +79,6 @@ Automated: `SqliteConcurrencyTests` (in-process parallel writes, no lock errors;
 - [ ]
 
 ---
-
-## Phase 4 — Remote API (R3)
-
-Automated: `RemoteControlServiceTests` (real Kestrel on loopback: `/transform` removed,
-sensitive redaction, 401 matrix, loopback-only `ResolveBindAddress`, docs require auth).
-Not automatable below.
-
-### MT-4.1 — Non-loopback bind is refused on a real network
-*Why manual:* needs a real second host on the LAN.
-1. Configure `RemoteApiBindAddress` to `0.0.0.0` (or the machine's LAN IP) and enable the API.
-2. From another machine on the LAN, try to reach `http://<machine-ip>:<port>/clips` with the token.
-- **Expect:** the server is **not** reachable off-host (it bound to loopback regardless); only
-  `127.0.0.1` works. A trace warning notes the downgrade.
-- [ ]
-
-### MT-4.2 — Existing remote `script`/`ai` clients get a hard failure (breaking change)
-*Why manual:* validates the intended break against a real external client.
-1. Point any previously-working remote automation that POSTs `/clips/{id}/transform` (kind
-   `script` or `ai`) at the new build.
-- **Expect:** `404` (endpoint removed); no code executes. Confirm this is acceptable for your
-  integrations and noted in release notes.
-- [ ]
-
-### MT-4.3 — Auth-failure backoff
-*Why manual:* timing-dependent; deferred from unit tests (no injectable clock).
-1. Send 6+ requests with a wrong bearer token within ~10 minutes from one IP.
-- **Expect:** after 5 failures the responses are delayed ~1s; a subsequent **correct** token
-  clears the penalty and responds promptly.
-- [ ]
 
 ## Phase 2 — Storage-lifecycle crash-safety (R2)
 

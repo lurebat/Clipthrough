@@ -198,14 +198,6 @@ public sealed record AppSettings
 
     public bool AutoOcrImageClips { get; init; } = true;
 
-    public bool EnableRemoteApi { get; init; }
-
-    public int RemoteApiPort { get; init; } = 53117;
-
-    public string RemoteApiToken { get; init; } = string.Empty;
-
-    public string RemoteApiBindAddress { get; init; } = "127.0.0.1";
-
     public static AppSettings Default { get; } = new();
 
     public AppSettings Normalize() => this with
@@ -304,10 +296,6 @@ public sealed record AppSettings
         AutoApplyUpdatesOnStartup = AutoApplyUpdatesOnStartup,
         OcrLanguages = string.IsNullOrWhiteSpace(OcrLanguages) ? "en" : OcrLanguages.Trim(),
         AutoOcrImageClips = AutoOcrImageClips,
-        EnableRemoteApi = EnableRemoteApi,
-        RemoteApiPort = RemoteApiPort <= 0 || RemoteApiPort > 65535 ? 53117 : RemoteApiPort,
-        RemoteApiToken = EnableRemoteApi ? (RemoteApiToken?.Trim() ?? string.Empty) : string.Empty,
-        RemoteApiBindAddress = string.IsNullOrWhiteSpace(RemoteApiBindAddress) ? "127.0.0.1" : RemoteApiBindAddress.Trim(),
     };
 
     private static string NormalizeHotkey(string? value, string fallback)
