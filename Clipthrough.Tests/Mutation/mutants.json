@@ -286,5 +286,45 @@
     "filter": "DatabaseBackupServiceTests",
     "find": "        // and would block every future copy to this path, so clear it.\n        File.Delete(destinationPath);",
     "replace": "        // and would block every future copy to this path, so clear it.\n        _ = destinationPath;"
+  },
+  {
+    "id": "sort-indexes-run-before-the-column-migrations",
+    "why": "Puts the column-dependent indexes back in the DDL batch that runs before the Ensure*Columns helpers. The batch then aborts with 'no such column' on any database predating those columns, so the app cannot open the user's history.",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "filter": "DatabaseInitializerMigrationTests",
+    "find": "            schemaCommand.CommandText = Schema;",
+    "replace": "            schemaCommand.CommandText = Schema + SortOrderIndexes;"
+  },
+  {
+    "id": "sort-order-indexes-never-created",
+    "why": "Skips the sort-order indexes entirely. They only work as a complete set - with partial coverage SQLite picks a pinned-prefixed index for an uncovered sort and fetches rows in an uncorrelated order, measured slower than no index at all.",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "filter": "DatabaseInitializerMigrationTests",
+    "find": "            indexCommand.CommandText = SortOrderIndexes;",
+    "replace": "            indexCommand.CommandText = \"SELECT 1;\";"
+  },
+  {
+    "id": "byte-size-has-no-column-migration",
+    "why": "byte_size was declared in CREATE TABLE but never added by a migration, so databases older than the column never gained it and could not be opened once an index referenced it.",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "filter": "DatabaseInitializerMigrationTests",
+    "find": "        if (!existingColumns.Contains(\"byte_size\"))",
+    "replace": "        if (false && !existingColumns.Contains(\"byte_size\"))"
+  },
+  {
+    "id": "schema-version-not-bumped-for-the-new-migration",
+    "why": "The migration helpers are skipped when the stored version already matches, so new migration work is dead code unless the constant is bumped. Existing databases would silently never gain byte_size.",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "filter": "DatabaseInitializerMigrationTests",
+    "find": "    private const int CurrentSchemaVersion = 5;",
+    "replace": "    private const int CurrentSchemaVersion = 4;"
+  },
+  {
+    "id": "sort-indexes-only-created-during-migration",
+    "why": "Puts index creation behind the schema-version gate, so an index dropped or lost on an up-to-date database is never restored - queries silently fall back to a scan.",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "filter": "DatabaseInitializerMigrationTests",
+    "find": "            indexCommand.CommandText = SortOrderIndexes;",
+    "replace": "            indexCommand.CommandText = storedVersion < CurrentSchemaVersion ? SortOrderIndexes : \"SELECT 1;\";"
   }
 ]

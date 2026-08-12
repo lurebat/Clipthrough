@@ -91,6 +91,50 @@ public sealed class DatabaseInitializer
         CREATE INDEX IF NOT EXISTS idx_clips_is_favorite ON clips(is_favorite) WHERE is_favorite = 1;
         CREATE INDEX IF NOT EXISTS idx_clips_is_sensitive ON clips(is_sensitive) WHERE is_sensitive = 1;
 
+        CREATE TABLE IF NOT EXISTS app_metadata (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS sensitivity_rules (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL,
+            pattern     TEXT NOT NULL,
+            severity    TEXT NOT NULL DEFAULT 'warning',
+            is_enabled  INTEGER NOT NULL DEFAULT 1,
+            is_builtin  INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_sensitivity_rules_name ON sensitivity_rules(name);
+
+        CREATE TABLE IF NOT EXISTS clip_sensitivity_matches (
+            clip_id INTEGER NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+            rule_id INTEGER NOT NULL REFERENCES sensitivity_rules(id) ON DELETE CASCADE,
+            PRIMARY KEY (clip_id, rule_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS search_history (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            query    TEXT NOT NULL UNIQUE,
+            used_at  TEXT NOT NULL
+        );
+        """;
+
+    /// <summary>
+    /// Indexes over columns that only exist after the Ensure*Columns helpers
+    /// have run. They are deliberately kept out of <see cref="Schema"/>: that
+    /// batch executes before the migrations, so declaring them there made the
+    /// whole batch abort with "no such column" on any database predating
+    /// pinned_at, last_copied_at, paste_count or byte_size - the app could not
+    /// open the user's history at all, and because the batch drops clips_au
+    /// before recreating it, a database could also be left without its FTS
+    /// update trigger.
+    ///
+    /// This runs on every startup rather than behind the schema-version gate,
+    /// so an index missing for any reason is restored on the next launch. The
+    /// statements are all IF NOT EXISTS and cost one round trip in total.
+    /// </summary>
+    private const string SortOrderIndexes = """
         -- One index per BuildOrderClause arm. Every arm leads with the pinned
         -- prefix, so an index lacking it can never satisfy the ORDER BY - which
         -- is why the two below are dropped rather than kept.
@@ -139,34 +183,6 @@ public sealed class DatabaseInitializer
             substr(content, 1, 64) ASC,
             id ASC
         );
-
-        CREATE TABLE IF NOT EXISTS app_metadata (
-            key   TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS sensitivity_rules (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            name        TEXT NOT NULL,
-            pattern     TEXT NOT NULL,
-            severity    TEXT NOT NULL DEFAULT 'warning',
-            is_enabled  INTEGER NOT NULL DEFAULT 1,
-            is_builtin  INTEGER NOT NULL DEFAULT 0
-        );
-
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_sensitivity_rules_name ON sensitivity_rules(name);
-
-        CREATE TABLE IF NOT EXISTS clip_sensitivity_matches (
-            clip_id INTEGER NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
-            rule_id INTEGER NOT NULL REFERENCES sensitivity_rules(id) ON DELETE CASCADE,
-            PRIMARY KEY (clip_id, rule_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS search_history (
-            id       INTEGER PRIMARY KEY AUTOINCREMENT,
-            query    TEXT NOT NULL UNIQUE,
-            used_at  TEXT NOT NULL
-        );
         """;
 
     /// <summary>
@@ -179,7 +195,7 @@ public sealed class DatabaseInitializer
     /// no-ops on a current database but still pay several SQLite round trips
     /// each, which adds up to ~800ms on a cold OS file cache).
     /// </summary>
-    private const int CurrentSchemaVersion = 4;
+    private const int CurrentSchemaVersion = 5;
 
     private readonly SqliteConnectionFactory _connectionFactory;
     private readonly ISensitivityService _sensitivityService;
@@ -255,6 +271,15 @@ public sealed class DatabaseInitializer
         {
             TraceStep(sw, "schema-up-to-date (migrations skipped)");
         }
+
+        // After the column migrations, never before: these index expressions
+        // reference columns the Ensure* helpers add.
+        await using (var indexCommand = connection.CreateCommand())
+        {
+            indexCommand.CommandText = SortOrderIndexes;
+            await indexCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+        TraceStep(sw, "sort-order-indexes");
 
         foreach (var rule in _sensitivityService.GetDefaultRules())
         {
@@ -376,6 +401,14 @@ public sealed class DatabaseInitializer
         if (!existingColumns.Contains("image_height"))
         {
             await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN image_height INTEGER;", cancellationToken);
+        }
+
+        // byte_size was declared in the CREATE TABLE but had no migration, so
+        // databases created before it existed never gained the column and the
+        // size sort index could not be built over them.
+        if (!existingColumns.Contains("byte_size"))
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN byte_size INTEGER NOT NULL DEFAULT 0;", cancellationToken);
         }
     }
 
@@ -598,6 +631,14 @@ public sealed class DatabaseInitializer
             END
             WHERE content_format IS NULL OR TRIM(content_format) = '';
             """, cancellationToken);
+
+        // Rows that predate byte_size default to 0, which sorts them all
+        // together at one end of the size ordering. The stored text length is
+        // the best measure available without rehydrating every payload.
+        await ExecuteNonQueryAsync(
+            connection,
+            "UPDATE clips SET byte_size = COALESCE(LENGTH(CAST(content AS BLOB)), LENGTH(content_bytes), 0) WHERE byte_size = 0;",
+            cancellationToken);
     }
 
     private static async Task BackfillClipAggregationColumnsAsync(SqliteConnection connection, CancellationToken cancellationToken)
