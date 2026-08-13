@@ -1502,5 +1502,53 @@
     "find": "    private const int CurrentSchemaVersion = 7;",
     "replace": "    private const int CurrentSchemaVersion = 6;",
     "filter": "FullyQualifiedName~EmbeddingClaimIndexTests"
+  },
+  {
+    "id": "stored-bytes-trigger-ignores-the-late-icon",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "The source-app icon is written by a background lookup after the clip lands; without the UPDATE trigger the stored total silently omits every icon.",
+    "find": "            CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF byte_size, source_app_icon ON clips BEGIN",
+    "replace": "            CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF byte_size ON clips BEGIN",
+    "filter": "FullyQualifiedName~ClipStoredBytesTests"
+  },
+  {
+    "id": "stored-bytes-not-maintained-on-insert",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Without the insert trigger every new clip is totalled as zero bytes, so the library size cap never fires.",
+    "find": "                SET stored_bytes = new.byte_size + COALESCE(LENGTH(new.source_app_icon), 0)\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        await ExecuteNonQueryAsync(connection, \"DROP TRIGGER IF EXISTS clips_stored_bytes_au;\", cancellationToken);",
+    "replace": "                SET stored_bytes = 0\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        await ExecuteNonQueryAsync(connection, \"DROP TRIGGER IF EXISTS clips_stored_bytes_au;\", cancellationToken);",
+    "filter": "FullyQualifiedName~ClipStoredBytesTests"
+  },
+  {
+    "id": "stored-bytes-has-no-covering-index",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Without the index the library total falls back to a full table scan that reads every content and icon blob off disk.",
+    "find": "            \"CREATE INDEX IF NOT EXISTS idx_clips_stored_bytes ON clips(stored_bytes);\",",
+    "replace": "            \"SELECT 1;\",",
+    "filter": "FullyQualifiedName~ClipStoredBytesTests"
+  },
+  {
+    "id": "stored-bytes-is-never-backfilled",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "An upgraded database would keep zeros for every existing clip, so the cap would think the library was empty.",
+    "find": "            UPDATE clips\n            SET stored_bytes = byte_size + COALESCE(LENGTH(source_app_icon), 0)\n            WHERE stored_bytes <> byte_size + COALESCE(LENGTH(source_app_icon), 0);",
+    "replace": "            SELECT 1;",
+    "filter": "FullyQualifiedName~ClipStoredBytesTests"
+  },
+  {
+    "id": "recency-index-missing",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "MAX(COALESCE(last_copied_at, captured_at)) then scans the whole library on every refresh - 458ms at 60k clips.",
+    "find": "        CREATE INDEX IF NOT EXISTS idx_clips_recency ON clips(\n            COALESCE(last_copied_at, captured_at)\n        );",
+    "replace": "        CREATE INDEX IF NOT EXISTS idx_clips_recency ON clips(id);",
+    "filter": "FullyQualifiedName~ClipStoredBytesTests"
+  },
+  {
+    "id": "library-total-uses-the-unindexable-expression",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Reverting the total to the inline expression restores the 445ms-per-capture full scan.",
+    "find": "    private const string StoredRowBytes = \"stored_bytes\";",
+    "replace": "    private const string StoredRowBytes = \"(byte_size + COALESCE(LENGTH(source_app_icon), 0))\";",
+    "filter": "FullyQualifiedName~ClipStoredBytesTests"
   }
 ]

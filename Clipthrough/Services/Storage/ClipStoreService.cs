@@ -2029,12 +2029,17 @@ public sealed class ClipStoreService : IClipStoreService
     /// by 12.5x on a measured 4,000-clip library (1.6MB counted, 20MB on disk), so
     /// "Max library size: 500 MB" bounded nothing near 500 MB.
     ///
-    /// Computed rather than stored because the icon is written after the clip, by
-    /// a background lookup, and a stored total would go stale the moment it landed.
+    /// Stored rather than computed. The icon is written after the clip, by a
+    /// background lookup, so a column maintained by the write paths would go stale -
+    /// but a trigger pair on the clips table keeps it exact through every path
+    /// (see DatabaseInitializer.EnsureClipStoredBytesAsync). Spelling it as the
+    /// expression instead is correct but unindexable, and cost 445 ms per capture at
+    /// 60k clips against 2.5 ms here.
+    ///
     /// The remaining gap is the FTS index and SQLite's own page overhead, which no
     /// per-row figure can express.
     /// </summary>
-    private const string StoredRowBytes = "(byte_size + COALESCE(LENGTH(source_app_icon), 0))";
+    private const string StoredRowBytes = "stored_bytes";
 
     private static async Task<int> DeleteOldestAsync(SqliteConnection connection, SqliteTransaction transaction, int deleteCount, CancellationToken cancellationToken)
     {

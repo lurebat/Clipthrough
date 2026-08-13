@@ -31,6 +31,7 @@ public sealed class DatabaseInitializer
             first_copied_at TEXT NOT NULL,
             last_copied_at  TEXT NOT NULL,
             byte_size    INTEGER NOT NULL DEFAULT 0,
+            stored_bytes INTEGER NOT NULL DEFAULT 0,
             image_width  INTEGER,
             image_height INTEGER,
             source_window_title TEXT,
@@ -214,6 +215,22 @@ public sealed class DatabaseInitializer
             is_sensitive,
             last_copied_at
         );
+
+        -- Recency, spelled exactly as every stats/sort clause spells it. The library
+        -- stats read MAX(COALESCE(last_copied_at, captured_at)), which without this
+        -- index is a full table scan - and because the row carries content and the
+        -- source-app icon inline, that scan drags the entire library off disk:
+        -- measured 458 ms at 60k clips, on every refresh, against 0.05 ms here.
+        --
+        -- Spelled WITH the COALESCE, unlike idx_clips_retention above, because this
+        -- one has to match an expression in a projection rather than a WHERE range
+        -- term. Where last_copied_at is NOT NULL SQLite simplifies the COALESCE away
+        -- on both the index and the query, so they still match; where a legacy-
+        -- migrated schema leaves it nullable the COALESCE survives on both sides and
+        -- they match as a real expression index.
+        CREATE INDEX IF NOT EXISTS idx_clips_recency ON clips(
+            COALESCE(last_copied_at, captured_at)
+        );
         """;
 
     /// <summary>
@@ -226,7 +243,7 @@ public sealed class DatabaseInitializer
     /// no-ops on a current database but still pay several SQLite round trips
     /// each, which adds up to ~800ms on a cold OS file cache).
     /// </summary>
-    private const int CurrentSchemaVersion = 7;
+    private const int CurrentSchemaVersion = 8;
 
     private readonly SqliteConnectionFactory _connectionFactory;
     private readonly ISensitivityService _sensitivityService;
@@ -292,6 +309,8 @@ public sealed class DatabaseInitializer
             TraceStep(sw, "ensure-lineage-columns");
             await EnsureClipEmbeddingSchemaAsync(connection, cancellationToken);
             TraceStep(sw, "ensure-embedding-schema");
+            await EnsureClipStoredBytesAsync(connection, cancellationToken);
+            TraceStep(sw, "ensure-stored-bytes");
             await BackfillClipAggregationColumnsAsync(connection, cancellationToken);
             TraceStep(sw, "backfill-aggregation");
             await BackfillClipPayloadColumnsAsync(connection, cancellationToken);
@@ -687,6 +706,80 @@ public sealed class DatabaseInitializer
             connection,
             "UPDATE clips SET embedding_status = 'pending' WHERE embedding_status = 'processing';",
             cancellationToken);
+    }
+
+    /// <summary>
+    /// Materialises the on-disk size of each clip row into a real, indexed column.
+    /// </summary>
+    /// <remarks>
+    /// The library size cap has to total what a row actually costs, which is its
+    /// payload plus the source-app icon stored beside it. Spelling that as
+    /// <c>SUM(byte_size + LENGTH(source_app_icon))</c> is correct but unindexable:
+    /// SQLite cannot answer it from a covering index, so it reads every row - and
+    /// because content and the icon live inline, that drags the whole library off
+    /// disk. Measured at 60k clips: 445 ms, against 2.5 ms for a plain
+    /// <c>SUM(byte_size)</c> served by a covering index. Maintenance runs after every
+    /// capture and the stats read runs on every refresh, so both paid it per copy.
+    ///
+    /// An expression index does not fix this, and neither does a generated column:
+    /// both were measured and SQLite still chose a full scan. The value has to be
+    /// stored to be indexable.
+    ///
+    /// Kept current by triggers rather than by the write paths, because there are six
+    /// statements that write byte_size or the icon and a seventh would silently
+    /// corrupt the total. Both triggers write only <c>stored_bytes</c>, which appears
+    /// in neither trigger's UPDATE OF list, so they cannot re-enter - and it is
+    /// likewise absent from the clips_fts trigger's column list, so maintaining it
+    /// never re-tokenises a clip.
+    /// </remarks>
+    private static async Task EnsureClipStoredBytesAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var hasColumn = false;
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('clips') WHERE name = 'stored_bytes';";
+            hasColumn = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) > 0;
+        }
+
+        if (!hasColumn)
+        {
+            await ExecuteNonQueryAsync(
+                connection,
+                "ALTER TABLE clips ADD COLUMN stored_bytes INTEGER NOT NULL DEFAULT 0;",
+                cancellationToken);
+        }
+
+        // Also repairs drift, so a database written by a build whose triggers were
+        // missing converges the next time it is opened.
+        await ExecuteNonQueryAsync(connection, """
+            UPDATE clips
+            SET stored_bytes = byte_size + COALESCE(LENGTH(source_app_icon), 0)
+            WHERE stored_bytes <> byte_size + COALESCE(LENGTH(source_app_icon), 0);
+            """, cancellationToken);
+
+        await ExecuteNonQueryAsync(
+            connection,
+            "CREATE INDEX IF NOT EXISTS idx_clips_stored_bytes ON clips(stored_bytes);",
+            cancellationToken);
+
+        // Dropped rather than IF NOT EXISTS so the definitions here stay authoritative.
+        await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_stored_bytes_ai;", cancellationToken);
+        await ExecuteNonQueryAsync(connection, """
+            CREATE TRIGGER clips_stored_bytes_ai AFTER INSERT ON clips BEGIN
+                UPDATE clips
+                SET stored_bytes = new.byte_size + COALESCE(LENGTH(new.source_app_icon), 0)
+                WHERE id = new.id;
+            END;
+            """, cancellationToken);
+
+        await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_stored_bytes_au;", cancellationToken);
+        await ExecuteNonQueryAsync(connection, """
+            CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF byte_size, source_app_icon ON clips BEGIN
+                UPDATE clips
+                SET stored_bytes = new.byte_size + COALESCE(LENGTH(new.source_app_icon), 0)
+                WHERE id = new.id;
+            END;
+            """, cancellationToken);
     }
 
     private static async Task BackfillClipPayloadColumnsAsync(SqliteConnection connection, CancellationToken cancellationToken)
