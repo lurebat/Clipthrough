@@ -1374,5 +1374,45 @@
     "find": "            problems.Add(ex.Message);",
     "replace": "            throw;",
     "filter": "FullyQualifiedName~DatabaseIntegrityCheckTests"
+  },
+  {
+    "id": "password-verification-runs-inline",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "Verifying inline puts ~530ms of SQLCipher key derivation on the caller's thread.",
+    "find": "        return Task.Run(() => TryOpenWithPassword(dbPath, password), cancellationToken);",
+    "replace": "        return Task.FromResult(TryOpenWithPassword(dbPath, password));",
+    "filter": "FullyQualifiedName~DatabasePasswordVerificationTests"
+  },
+  {
+    "id": "missing-database-passes-verification",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "A missing file must fail verification, not be treated as successfully opened.",
+    "find": "            return new SqliteException($\"Database file not found: {dbPath}\", SqliteCantOpen);",
+    "replace": "            return null;",
+    "filter": "FullyQualifiedName~DatabasePasswordVerificationTests"
+  },
+  {
+    "id": "missing-database-looks-like-a-wrong-password",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "Reporting a moved database as a wrong password sends the user off to retype a correct one.",
+    "find": "            return new SqliteException($\"Database file not found: {dbPath}\", SqliteCantOpen);",
+    "replace": "            return new SqliteException($\"Database file not found: {dbPath}\", 26);",
+    "filter": "FullyQualifiedName~DatabasePasswordVerificationTests"
+  },
+  {
+    "id": "auto-unlock-verifies-on-the-ui-thread",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "The startup auto-unlock must not derive the key on the UI thread.",
+    "find": "                    && await _storageOptionsService.TryOpenWithPasswordAsync(\n                        _storageOptionsService.Current.DatabasePassword) is null)",
+    "replace": "                    && StorageOptionsService.CanOpenWithPassword(\n                        _storageOptionsService.Current.DatabasePath,\n                        _storageOptionsService.Current.DatabasePassword))",
+    "filter": "FullyQualifiedName~DatabasePasswordVerificationTests"
+  },
+  {
+    "id": "unlock-prompt-verifies-on-the-ui-thread",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "SqliteConnection.OpenAsync derives the key on the calling thread, so the prompt would freeze the window.",
+    "find": "        var failure = await _storageOptionsService.TryOpenWithPasswordAsync(password);",
+    "replace": "        Microsoft.Data.Sqlite.SqliteException? failure = null;\n        try\n        {\n            var mutantBuilder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder\n            {\n                DataSource = _storageOptionsService.Current.DatabasePath,\n                Password = password,\n            };\n            await using var mutantConnection = new Microsoft.Data.Sqlite.SqliteConnection(mutantBuilder.ToString());\n            await mutantConnection.OpenAsync();\n        }\n        catch (Microsoft.Data.Sqlite.SqliteException mutantEx)\n        {\n            failure = mutantEx;\n        }",
+    "filter": "FullyQualifiedName~DatabasePasswordVerificationTests"
   }
 ]

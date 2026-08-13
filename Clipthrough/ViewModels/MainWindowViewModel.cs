@@ -2368,9 +2368,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     _storageOptionsService.SetInMemoryPassword(preset);
                 }
                 else if (!string.IsNullOrEmpty(_storageOptionsService.Current.DatabasePassword)
-                    && StorageOptionsService.CanOpenWithPassword(
-                        _storageOptionsService.Current.DatabasePath,
-                        _storageOptionsService.Current.DatabasePassword))
+                    && await _storageOptionsService.TryOpenWithPasswordAsync(
+                        _storageOptionsService.Current.DatabasePassword) is null)
                 {
                     // Persisted ("Remember password" was on) and verified — skip the prompt.
                     Trace.TraceInformation("Database auto-unlocked with the persisted password.");
@@ -6481,29 +6480,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        try
+        // Not every failure here is a bad password: a moved or deleted file, a
+        // disk error or a lock held past the busy timeout all fail the open too,
+        // and reporting those as "incorrect password" sends the user off to
+        // retype a password that was right.
+        var failure = await _storageOptionsService.TryOpenWithPasswordAsync(password);
+        if (failure is not null)
         {
-            var dbPath = _storageOptionsService.Current.DatabasePath;
-            var builder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
-            {
-                DataSource = dbPath,
-                Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly,
-                Password = password,
-            };
-
-            await using var connection = new Microsoft.Data.Sqlite.SqliteConnection(builder.ToString());
-            await connection.OpenAsync();
-            await using var command = connection.CreateCommand();
-            command.CommandText = "SELECT count(*) FROM sqlite_master;";
-            await command.ExecuteScalarAsync();
-        }
-        catch (Microsoft.Data.Sqlite.SqliteException ex)
-        {
-            // Not every failure here is a bad password: a moved or deleted
-            // file, a disk error or a lock held past the busy timeout all land
-            // in this catch too, and reporting those as "incorrect password"
-            // sends the user off to retype a password that was right.
-            PasswordPromptError = Database.SqliteErrors.DescribeUnlockFailure(ex);
+            PasswordPromptError = Database.SqliteErrors.DescribeUnlockFailure(failure);
             return;
         }
 

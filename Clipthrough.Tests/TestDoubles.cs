@@ -61,6 +61,19 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
     }
 
     public void SetHasSavedConfig(bool value) => _hasSavedConfig = value;
+
+    /// <summary>Set to make a persisted password fail verification.</summary>
+    public Microsoft.Data.Sqlite.SqliteException? OpenFailure { get; set; }
+
+    public int TryOpenWithPasswordCallCount { get; private set; }
+
+    public Task<Microsoft.Data.Sqlite.SqliteException?> TryOpenWithPasswordAsync(
+        string password,
+        CancellationToken cancellationToken = default)
+    {
+        TryOpenWithPasswordCallCount++;
+        return Task.FromResult(OpenFailure);
+    }
 }
 
 internal sealed class TestSettingsService : ISettingsService

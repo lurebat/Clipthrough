@@ -112,11 +112,37 @@ public sealed class StorageOptionsService : IStorageOptionsService
     /// validate a persisted "Remember password" entry before skipping the
     /// unlock prompt.
     /// </summary>
+    private const int SqliteCantOpen = 14;
+
     public static bool CanOpenWithPassword(string dbPath, string password)
+        => TryOpenWithPassword(dbPath, password) is null;
+
+    /// <inheritdoc />
+    public Task<SqliteException?> TryOpenWithPasswordAsync(string password, CancellationToken cancellationToken = default)
+    {
+        var dbPath = Current.DatabasePath;
+        return Task.Run(() => TryOpenWithPassword(dbPath, password), cancellationToken);
+    }
+
+    /// <summary>
+    /// Opens the database with <paramref name="password"/> and returns the failure,
+    /// or <c>null</c> when it opened. Callers that need to tell a wrong password
+    /// apart from a missing file or a disk error need the exception, not a bool.
+    ///
+    /// Synchronous and slow by nature: SQLCipher derives the key on open, which
+    /// measures ~530ms on this machine and does not get cheaper with a smaller
+    /// database. Anything on the UI thread must go through
+    /// <see cref="TryOpenWithPasswordAsync"/> instead - note that awaiting
+    /// SqliteConnection.OpenAsync is not an alternative, because it does the whole
+    /// derivation on the calling thread and hands back an already-completed task.
+    /// </summary>
+    private static SqliteException? TryOpenWithPassword(string dbPath, string password)
     {
         if (!File.Exists(dbPath))
         {
-            return false;
+            // The same code SQLite itself reports for a file it cannot open, so
+            // callers classifying the failure do not need a special case.
+            return new SqliteException($"Database file not found: {dbPath}", SqliteCantOpen);
         }
 
         try
@@ -134,11 +160,11 @@ public sealed class StorageOptionsService : IStorageOptionsService
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT count(*) FROM sqlite_master;";
             command.ExecuteScalar();
-            return true;
+            return null;
         }
-        catch (SqliteException)
+        catch (SqliteException ex)
         {
-            return false;
+            return ex;
         }
     }
 
