@@ -436,7 +436,7 @@ public sealed class ClipStoreService : IClipStoreService
         {
             var totalClips = await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips;", cancellationToken);
             var sensitiveClips = await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips WHERE is_sensitive = 1;", cancellationToken);
-            var storedBytes = await ExecuteScalarLongAsync(connection, "SELECT COALESCE(SUM(byte_size), 0) FROM clips;", cancellationToken);
+            var storedBytes = await ExecuteScalarLongAsync(connection, $"SELECT COALESCE(SUM({StoredRowBytes}), 0) FROM clips;", cancellationToken);
             var lastCapturedAtStr = await ExecuteScalarStringAsync(connection, "SELECT MAX(COALESCE(last_copied_at, captured_at)) FROM clips;", cancellationToken);
 
             // Only publish if no concurrent invalidation happened during the queries.
@@ -828,7 +828,7 @@ public sealed class ClipStoreService : IClipStoreService
 
         if (settings.EnableMaxLibrarySize)
         {
-            var totalStoredBytes = await ExecuteScalarLongAsync(connection, "SELECT COALESCE(SUM(byte_size), 0) FROM clips;", cancellationToken, transaction);
+            var totalStoredBytes = await ExecuteScalarLongAsync(connection, $"SELECT COALESCE(SUM({StoredRowBytes}), 0) FROM clips;", cancellationToken, transaction);
             finalStoredBytes = totalStoredBytes;
             var maxBytes = settings.MaxLibrarySizeMegabytes * 1024L * 1024L;
             if (totalStoredBytes > maxBytes)
@@ -849,7 +849,7 @@ public sealed class ClipStoreService : IClipStoreService
         {
             PurgedClipCount = purgedClipCount,
             TotalClipCount = finalClipCount ?? await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips;", cancellationToken),
-            TotalStoredBytes = finalStoredBytes ?? await ExecuteScalarLongAsync(connection, "SELECT COALESCE(SUM(byte_size), 0) FROM clips;", cancellationToken),
+            TotalStoredBytes = finalStoredBytes ?? await ExecuteScalarLongAsync(connection, $"SELECT COALESCE(SUM({StoredRowBytes}), 0) FROM clips;", cancellationToken),
         };
     }
 
@@ -1404,7 +1404,7 @@ public sealed class ClipStoreService : IClipStoreService
             TotalMatchingCount = totalMatchingCount,
             TotalClipCount = _cachedTotalClipCount >= 0 ? _cachedTotalClipCount : await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips;", cancellationToken),
             SensitiveClipCount = _cachedSensitiveClipCount >= 0 ? _cachedSensitiveClipCount : await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips WHERE is_sensitive = 1;", cancellationToken),
-            TotalStoredBytes = _cachedTotalStoredBytes >= 0 ? _cachedTotalStoredBytes : await ExecuteScalarLongAsync(connection, "SELECT COALESCE(SUM(byte_size), 0) FROM clips;", cancellationToken),
+            TotalStoredBytes = _cachedTotalStoredBytes >= 0 ? _cachedTotalStoredBytes : await ExecuteScalarLongAsync(connection, $"SELECT COALESCE(SUM({StoredRowBytes}), 0) FROM clips;", cancellationToken),
             LastCapturedAt = _cachedLastCapturedAt,
         };
     }
@@ -2021,6 +2021,21 @@ public sealed class ClipStoreService : IClipStoreService
     /// </summary>
     private const string OldestFirstEvictionOrder = "ORDER BY COALESCE(last_copied_at, captured_at) ASC, id ASC";
 
+    /// <summary>
+    /// What a clip actually costs in the file. byte_size alone counts only the
+    /// clip's own content, but every row also carries the source app's icon as a
+    /// second blob - measured at 2.7KB, which for a typical text clip is several
+    /// times the text itself. Leaving it out made the library size cap under-count
+    /// by 12.5x on a measured 4,000-clip library (1.6MB counted, 20MB on disk), so
+    /// "Max library size: 500 MB" bounded nothing near 500 MB.
+    ///
+    /// Computed rather than stored because the icon is written after the clip, by
+    /// a background lookup, and a stored total would go stale the moment it landed.
+    /// The remaining gap is the FTS index and SQLite's own page overhead, which no
+    /// per-row figure can express.
+    /// </summary>
+    private const string StoredRowBytes = "(byte_size + COALESCE(LENGTH(source_app_icon), 0))";
+
     private static async Task<int> DeleteOldestAsync(SqliteConnection connection, SqliteTransaction transaction, int deleteCount, CancellationToken cancellationToken)
     {
         if (deleteCount <= 0)
@@ -2068,7 +2083,7 @@ public sealed class ClipStoreService : IClipStoreService
         {
             command.Transaction = transaction;
             command.CommandText = $"""
-                SELECT byte_size
+                SELECT {StoredRowBytes}
                 FROM clips
                 WHERE NOT {UserKeptClipPredicate}
                 {OldestFirstEvictionOrder};

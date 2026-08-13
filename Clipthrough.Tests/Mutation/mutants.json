@@ -1414,5 +1414,21 @@
     "find": "        var failure = await _storageOptionsService.TryOpenWithPasswordAsync(password);",
     "replace": "        Microsoft.Data.Sqlite.SqliteException? failure = null;\n        try\n        {\n            var mutantBuilder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder\n            {\n                DataSource = _storageOptionsService.Current.DatabasePath,\n                Password = password,\n            };\n            await using var mutantConnection = new Microsoft.Data.Sqlite.SqliteConnection(mutantBuilder.ToString());\n            await mutantConnection.OpenAsync();\n        }\n        catch (Microsoft.Data.Sqlite.SqliteException mutantEx)\n        {\n            failure = mutantEx;\n        }",
     "filter": "FullyQualifiedName~DatabasePasswordVerificationTests"
+  },
+  {
+    "id": "library-size-ignores-the-icons-it-stores",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Counting only byte_size under-counted the library by 12.5x, so the size cap bounded nothing near its setting.",
+    "find": "    private const string StoredRowBytes = \"(byte_size + COALESCE(LENGTH(source_app_icon), 0))\";",
+    "replace": "    private const string StoredRowBytes = \"byte_size\";",
+    "filter": "FullyQualifiedName~ClipRetentionTests"
+  },
+  {
+    "id": "size-purge-measures-rows-differently-to-the-total",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "The eviction loop must measure rows the same way the total does, or it evicts the wrong number.",
+    "find": "                SELECT {StoredRowBytes}\n                FROM clips",
+    "replace": "                SELECT byte_size\n                FROM clips",
+    "filter": "FullyQualifiedName~ClipRetentionTests"
   }
 ]

@@ -106,6 +106,42 @@ public sealed class ClipRetentionTests
     }
 
     /// <summary>
+    /// The library size cap used to measure only byte_size, which counts a clip's
+    /// own content and nothing else. Every row also stores the source app's icon -
+    /// measured at 2.7KB, several times the size of a typical text clip. On a
+    /// 4,000-clip library that made the cap under-count by 12.5x: 1.6MB counted
+    /// against 20MB on disk, so "Max library size: 500 MB" bounded nothing near it.
+    /// </summary>
+    [Fact]
+    public async Task Maintenance_LibrarySizeCap_CountsTheSourceAppIconsItStores()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings
+        {
+            MaxClipSizeBytes = 4096,
+            EnableMaxLibrarySize = true,
+            MaxLibrarySizeMegabytes = 1,
+        });
+
+        var oldest = await CaptureAsync(scope, "oldest");
+        var newest = await CaptureAsync(scope, "newest");
+
+        // Content alone fits the 1 MB cap twice over. The icons are what push the
+        // pair past it, so nothing is evicted unless they are counted.
+        Execute(scope, "UPDATE clips SET byte_size = 400000;");
+        Execute(scope, $"UPDATE clips SET source_app_icon = zeroblob({300_000});");
+
+        var result = await scope.ClipStoreService.ApplyMaintenanceAsync();
+
+        Assert.Null(await scope.ClipStoreService.GetByIdAsync(oldest.Id));
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(newest.Id));
+
+        // And the size it reports is the size it evicted against.
+        Assert.Equal(400_000 + 300_000, result.TotalStoredBytes);
+    }
+
+    /// <summary>
     /// The deliberate exception. A pinned secret still expires — pinning must not
     /// become a way to opt out of the sensitive-clip timer.
     /// </summary>
