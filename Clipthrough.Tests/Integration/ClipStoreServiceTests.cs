@@ -1448,6 +1448,181 @@ public sealed class ClipStoreServiceTests
     }
 
     /// <summary>
+    /// A search term shorter than the trigram threshold - the first two keystrokes of
+    /// every search - cannot use the FTS index and falls back to a scan. The scan used to
+    /// build a full thirty-column ClipEntry for every row, five timestamp parses included,
+    /// and then throw almost all of them away; at 100k rows that was ~70% of a 777 ms
+    /// query. Matching now runs off the reader and only a surviving row is materialized.
+    ///
+    /// Allocation is the observable that separates the two shapes. Wall-clock would turn a
+    /// real regression into a flake on a loaded machine, and result assertions pass just as
+    /// happily against the wasteful version.
+    /// </summary>
+    [Fact]
+    public async Task NonFtsSearch_DoesNotMaterializeRowsItDiscards()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 1_048_576 });
+
+        const int rows = 4_000;
+        var random = new Random(31);
+        var words = new[] { "alpha", "bravo", "charlie", "delta", "echo", "foxtrot" };
+        var batch = new List<ClipCaptureRequest>(500);
+        for (var i = 0; i < rows; i++)
+        {
+            var builder = new StringBuilder(256);
+            for (var word = 0; word < 40; word++)
+            {
+                builder.Append(words[random.Next(words.Length)]).Append(' ');
+            }
+
+            var text = builder.Append(i).ToString();
+            batch.Add(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = text,
+                ContentBytes = Encoding.UTF8.GetBytes(text),
+                SourceApp = "App" + (i % 20),
+                SkipPostInsertMaintenance = true,
+            });
+
+            if (batch.Count == 500)
+            {
+                await scope.ClipStoreService.CaptureBatchAsync(batch);
+                batch.Clear();
+            }
+        }
+
+        if (batch.Count > 0)
+        {
+            await scope.ClipStoreService.CaptureBatchAsync(batch);
+        }
+
+        // Two characters, so the trigram index cannot serve it, and a pair that appears in
+        // none of the seeded text, so every row is read and discarded - the worst case, and
+        // exactly what typing a term that does not exist yet produces.
+        var filters = new ClipSearchFilters { SearchText = "zq", Limit = 100 };
+
+        // Warm every lazy path (statement prepare, stats cache) so the measured run only
+        // covers the scan.
+        var warm = await scope.ClipStoreService.SearchAsync(filters);
+        Assert.Empty(warm.Items);
+
+        var before = GC.GetTotalAllocatedBytes(precise: true);
+        var result = await scope.ClipStoreService.SearchAsync(filters);
+        var allocated = GC.GetTotalAllocatedBytes(precise: true) - before;
+
+        Assert.Empty(result.Items);
+        Assert.Equal(0, result.TotalMatchingCount);
+
+        // Reading the content of every row is unavoidable - that is the match. Building an
+        // entry for each of them is not. Measured at ~2.6 MB with the fix and ~7 MB
+        // without, so this budget separates the two with room for allocator noise.
+        const long budget = 4L * 1024 * 1024;
+        Assert.True(
+            allocated < budget,
+            $"scan allocated {allocated / 1024.0 / 1024.0:F1} MB over {rows} discarded rows, above the {budget / 1024 / 1024} MB budget - non-matching rows are being materialized");
+    }
+
+    /// <summary>
+    /// A non-FTS search reads five columns off the reader by ordinal and only builds a
+    /// ClipEntry once they match, so the ordinals are now load-bearing: reorder the SELECT
+    /// list and the search silently starts matching a different column instead of failing.
+    /// Each clip below carries the term in exactly one searched column, plus one that
+    /// carries it only in a column the search deliberately does not cover.
+    /// A two-character term is used because it is not FTS-compatible against a trigram
+    /// index, which is what routes the query through the scan under test.
+    /// </summary>
+    [Fact]
+    public async Task NonFtsSearch_CoversExactlyTheFiveSearchedColumns()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        // Two characters: below the trigram threshold, so this cannot go through FTS.
+        const string term = "qx";
+        Assert.Equal(2, term.Length);
+
+        async Task<long> SeedAsync(ClipCaptureRequest request)
+        {
+            var clip = await scope.ClipStoreService.CaptureAsync(request);
+            Assert.NotNull(clip);
+            return clip!.Id;
+        }
+
+        var inContent = await SeedAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "carries qx in the body",
+            ContentBytes = Encoding.UTF8.GetBytes("carries qx in the body"),
+        });
+
+        var inSourceApp = await SeedAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "plain body one",
+            ContentBytes = Encoding.UTF8.GetBytes("plain body one"),
+            SourceApp = "qx-editor",
+        });
+
+        var inWindowTitle = await SeedAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "plain body two",
+            ContentBytes = Encoding.UTF8.GetBytes("plain body two"),
+            SourceWindowTitle = "a qx window",
+        });
+
+        var inSourceUrl = await SeedAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "plain body three",
+            ContentBytes = Encoding.UTF8.GetBytes("plain body three"),
+            SourceUrl = "https://example.test/qx",
+        });
+
+        var inOcrText = await SeedAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Image,
+            ContentFormat = ClipContentFormat.Bitmap,
+            ContentText = string.Empty,
+            ContentBytes = [1, 2, 3, 4],
+        });
+        Assert.True(await scope.ClipStoreService.SetOcrResultAsync(inOcrText, "scanned qx text"));
+
+        // The search covers five columns. source_app_path is not one of them, and a clip
+        // that carries the term only there must stay out of the results - otherwise an
+        // ordinal pointing one column off would look like a pass.
+        var inUnsearchedColumn = await SeedAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "plain body four",
+            ContentBytes = Encoding.UTF8.GetBytes("plain body four"),
+            SourceApp = "Editor",
+            SourceAppPath = @"C:\qx\editor.exe",
+        });
+
+        var result = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters { SearchText = term, Limit = 50 });
+        var found = result.Items.Select(item => item.Id).ToHashSet();
+
+        Assert.Contains(inContent, found);
+        Assert.Contains(inSourceApp, found);
+        Assert.Contains(inWindowTitle, found);
+        Assert.Contains(inSourceUrl, found);
+        Assert.Contains(inOcrText, found);
+        Assert.DoesNotContain(inUnsearchedColumn, found);
+        Assert.Equal(5, result.TotalMatchingCount);
+    }
+
+    /// <summary>
     /// The list has to fetch icons back for nearly every visible row (U12 omits the blob).
     /// Doing that through GetByIdAsync pulled all thirty columns including the image blob,
     /// so a page of clips dragged megabytes of unrelated data across the wire. This is the

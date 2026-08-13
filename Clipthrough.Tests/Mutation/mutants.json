@@ -1022,5 +1022,29 @@
     "find": "                    _ = EnsureSourceAppIconAsync();",
     "replace": "                    _ = EnsureContentHydratedAsync();",
     "filter": "SourceAppIcons_AreFetchedOncePerApplication_NotOncePerRow"
+  },
+  {
+    "id": "scan-materializes-every-row",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Building a full thirty-column ClipEntry - five timestamp parses included - before knowing whether the row matches was ~70% of the cost of a non-FTS search at 100k rows.",
+    "find": "                if (!MatchesSearch(SearchableFields.Read(reader), filters, matchers))\n                {\n                    continue;\n                }",
+    "replace": "                var eager = ReadClipMeta(reader);\n                if (!MatchesSearch(new SearchableFields { Content = eager.Content, SourceApp = eager.SourceApp, SourceWindowTitle = eager.SourceWindowTitle, SourceUrl = eager.SourceUrl, OcrText = eager.OcrText }, filters, matchers))\n                {\n                    continue;\n                }",
+    "filter": "NonFtsSearch_DoesNotMaterializeRowsItDiscards"
+  },
+  {
+    "id": "search-ordinal-points-at-the-wrong-column",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "The scan reads the searched columns by ordinal, so a reordered SELECT list makes the search silently match a different column rather than fail to compile.",
+    "find": "    private const int SearchOrdinalSourceWindowTitle = 17;",
+    "replace": "    private const int SearchOrdinalSourceWindowTitle = 6;",
+    "filter": "NonFtsSearch_CoversExactlyTheFiveSearchedColumns"
+  },
+  {
+    "id": "search-drops-the-ocr-column",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "OCR text is one of the five columns the search covers; dropping it makes image clips unfindable by their scanned text on every non-FTS search.",
+    "find": "           (!string.IsNullOrWhiteSpace(row.OcrText) && row.OcrText.Contains(token, comparison));",
+    "replace": "           false;",
+    "filter": "NonFtsSearch_CoversExactlyTheFiveSearchedColumns"
   }
 ]

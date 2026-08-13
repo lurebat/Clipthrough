@@ -92,6 +92,21 @@ public sealed class ClipStoreService : IClipStoreService
             c.import_kind
         """;
 
+    /// <summary>
+    /// Ordinals of the five columns the search covers. They are deliberately identical in
+    /// <see cref="ClipSelectColumns"/> and <see cref="ClipListSelectColumns"/>. A scan
+    /// reads only these to decide whether a row matches and materializes the rest of the
+    /// entry only if it does: building a thirty-column <see cref="ClipEntry"/> - five
+    /// timestamp parses included - for a row about to be discarded was roughly 70% of the
+    /// cost of a non-FTS search.
+    /// Guarded by ClipListSelectColumns_ExposeTheSearchedColumnsAtTheExpectedOrdinals.
+    /// </summary>
+    private const int SearchOrdinalContent = 1;
+    private const int SearchOrdinalSourceApp = 5;
+    private const int SearchOrdinalSourceWindowTitle = 17;
+    private const int SearchOrdinalSourceUrl = 18;
+    private const int SearchOrdinalOcrText = 23;
+
     private readonly SqliteConnectionFactory _connectionFactory;
     private readonly ISensitivityService _sensitivityService;
     private readonly ISettingsService _settingsService;
@@ -1325,8 +1340,10 @@ public sealed class ClipStoreService : IClipStoreService
             await using var reader = await queryCommand.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                var clip = ReadClipMeta(reader);
-                if (!MatchesSearch(clip, filters, matchers))
+                // Match against the five searched columns first. Only a row that survives
+                // is worth turning into a ClipEntry - the other twenty-five columns and
+                // five timestamp parses are pure waste for a row we are about to drop.
+                if (!MatchesSearch(SearchableFields.Read(reader), filters, matchers))
                 {
                     continue;
                 }
@@ -1339,7 +1356,7 @@ public sealed class ClipStoreService : IClipStoreService
 
                 if (items.Count < filters.Limit)
                 {
-                    items.Add(clip);
+                    items.Add(ReadClipMeta(reader));
                 }
 
                 // Stop scanning once we've confirmed "at least one more beyond this page". (U15)
@@ -1361,13 +1378,35 @@ public sealed class ClipStoreService : IClipStoreService
     }
 
     /// <summary>
-    /// Returns true when <paramref name="clip"/> matches the current search filters.
+    /// The five columns a search covers, read straight off the reader so a row that does
+    /// not match never becomes a <see cref="ClipEntry"/>.
+    /// </summary>
+    private readonly ref struct SearchableFields
+    {
+        public required string Content { get; init; }
+        public required string? SourceApp { get; init; }
+        public required string? SourceWindowTitle { get; init; }
+        public required string? SourceUrl { get; init; }
+        public required string? OcrText { get; init; }
+
+        public static SearchableFields Read(SqliteDataReader reader) => new()
+        {
+            Content = reader.IsDBNull(SearchOrdinalContent) ? string.Empty : reader.GetString(SearchOrdinalContent),
+            SourceApp = reader.IsDBNull(SearchOrdinalSourceApp) ? null : reader.GetString(SearchOrdinalSourceApp),
+            SourceWindowTitle = reader.IsDBNull(SearchOrdinalSourceWindowTitle) ? null : reader.GetString(SearchOrdinalSourceWindowTitle),
+            SourceUrl = reader.IsDBNull(SearchOrdinalSourceUrl) ? null : reader.GetString(SearchOrdinalSourceUrl),
+            OcrText = reader.IsDBNull(SearchOrdinalOcrText) ? null : reader.GetString(SearchOrdinalOcrText),
+        };
+    }
+
+    /// <summary>
+    /// Returns true when the row matches the current search filters.
     /// <paramref name="matchers"/> must already be built by the caller ONCE per search —
     /// never build a new <see cref="Regex"/> inside this method. (U13)
     /// Covers the same five columns as the FTS index: content, source_app,
     /// source_window_title, source_url, ocr_text. (U13)
     /// </summary>
-    private static bool MatchesSearch(ClipEntry clip, ClipSearchFilters filters, Regex[]? matchers)
+    private static bool MatchesSearch(in SearchableFields row, ClipSearchFilters filters, Regex[]? matchers)
     {
         if (string.IsNullOrWhiteSpace(filters.SearchText))
         {
@@ -1377,9 +1416,19 @@ public sealed class ClipStoreService : IClipStoreService
         // matchers covers UseRegex, UseWildcard, and WholeWord — all pre-built by the
         // caller. Every matcher has to hit, so a two-word whole-word search requires
         // both words, matching the plain-text path below and the FTS path.
+        // A plain loop rather than Array.TrueForAll: the lambda would allocate a closure
+        // per row, and a ref struct cannot be captured by one at all.
         if (matchers is not null)
         {
-            return Array.TrueForAll(matchers, matcher => IsRegexMatch(clip, matcher));
+            foreach (var matcher in matchers)
+            {
+                if (!IsRegexMatch(row, matcher))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         // Plain-text token search over the same 5 columns as FTS.
@@ -1387,12 +1436,20 @@ public sealed class ClipStoreService : IClipStoreService
         var tokens = filters.SearchText
             .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        return tokens.All(token =>
-            clip.Content.Contains(token, comparison) ||
-            (!string.IsNullOrWhiteSpace(clip.SourceApp) && clip.SourceApp.Contains(token, comparison)) ||
-            (!string.IsNullOrWhiteSpace(clip.SourceWindowTitle) && clip.SourceWindowTitle.Contains(token, comparison)) ||
-            (!string.IsNullOrWhiteSpace(clip.SourceUrl) && clip.SourceUrl.Contains(token, comparison)) ||
-            (!string.IsNullOrWhiteSpace(clip.OcrText) && clip.OcrText.Contains(token, comparison)));
+        foreach (var token in tokens)
+        {
+            var hit = row.Content.Contains(token, comparison) ||
+                (!string.IsNullOrWhiteSpace(row.SourceApp) && row.SourceApp.Contains(token, comparison)) ||
+                (!string.IsNullOrWhiteSpace(row.SourceWindowTitle) && row.SourceWindowTitle.Contains(token, comparison)) ||
+                (!string.IsNullOrWhiteSpace(row.SourceUrl) && row.SourceUrl.Contains(token, comparison)) ||
+                (!string.IsNullOrWhiteSpace(row.OcrText) && row.OcrText.Contains(token, comparison));
+            if (!hit)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static Regex BuildWildcardRegex(string pattern, bool caseSensitive, bool wholeWord)
@@ -2069,12 +2126,12 @@ public sealed class ClipStoreService : IClipStoreService
         => new(searchText, (caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase) | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     /// <summary>Checks all five columns indexed by FTS: content, source_app, source_window_title, source_url, ocr_text. (U13)</summary>
-    private static bool IsRegexMatch(ClipEntry clip, Regex regex)
-        => regex.IsMatch(clip.Content) ||
-           (!string.IsNullOrWhiteSpace(clip.SourceApp) && regex.IsMatch(clip.SourceApp)) ||
-           (!string.IsNullOrWhiteSpace(clip.SourceWindowTitle) && regex.IsMatch(clip.SourceWindowTitle)) ||
-           (!string.IsNullOrWhiteSpace(clip.SourceUrl) && regex.IsMatch(clip.SourceUrl)) ||
-           (!string.IsNullOrWhiteSpace(clip.OcrText) && regex.IsMatch(clip.OcrText));
+    private static bool IsRegexMatch(in SearchableFields row, Regex regex)
+        => regex.IsMatch(row.Content) ||
+           (!string.IsNullOrWhiteSpace(row.SourceApp) && regex.IsMatch(row.SourceApp)) ||
+           (!string.IsNullOrWhiteSpace(row.SourceWindowTitle) && regex.IsMatch(row.SourceWindowTitle)) ||
+           (!string.IsNullOrWhiteSpace(row.SourceUrl) && regex.IsMatch(row.SourceUrl)) ||
+           (!string.IsNullOrWhiteSpace(row.OcrText) && regex.IsMatch(row.OcrText));
 
     private static async Task<long> EnsureRuleAsync(SqliteConnection connection, SqliteTransaction transaction, SensitivityMatch match, CancellationToken cancellationToken)
     {
