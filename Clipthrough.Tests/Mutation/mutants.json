@@ -1470,5 +1470,13 @@
     "find": "        if (SelectedClipFiles.Count > 0 && SelectedClip?.Clip.ContentType == ContentType.Files)",
     "replace": "        if (SelectedClipFiles.Count > 0)",
     "filter": "FullyQualifiedName~SelectedClipFiles_AreProbedOnlyForFileClips"
+  },
+  {
+    "id": "clipboard-bitmap-is-leaked",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "why": "An Avalonia Bitmap owns a native surface; undisposed, every image copy leaks one for the life of the process.",
+    "find": "        using var bitmap = await clipboardData.TryGetBitmapAsync();",
+    "replace": "        var bitmap = await clipboardData.TryGetBitmapAsync();",
+    "filter": "FullyQualifiedName~ClipboardBitmapDisposalTests"
   }
 ]

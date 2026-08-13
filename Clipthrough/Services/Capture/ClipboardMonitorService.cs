@@ -355,7 +355,10 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
             }
         }
 
-        var bitmap = await clipboardData.TryGetBitmapAsync();
+        // Avalonia's Bitmap owns a native surface. Left undisposed, every image copy
+        // leaks one full-resolution surface for the life of the process - the vendored
+        // ShareX clipboard handler disposes its own for the same reason.
+        using var bitmap = await clipboardData.TryGetBitmapAsync();
         if (bitmap is not null)
         {
             return await CreateImageRequestAsync(bitmap, sourceInfo, GetRelatedImageLabel(filePaths, relatedSourceUrl, plainText, sourceInfo?.WindowTitle));
