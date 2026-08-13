@@ -389,6 +389,146 @@ public sealed class SemanticSearchServiceTests
         Assert.Equal(lastMeasuredId, hits[0].ClipId);
     }
 
+    /// <summary>
+    /// Scoring is the whole cost of a semantic query - one pass over every cached embedding,
+    /// on every throttled keystroke - so it is worth widening to SIMD and worth keeping only
+    /// the best few rather than sorting them all. Both of those are easy to get subtly wrong,
+    /// so this checks the ranking against a scalar reference computed from the same vectors.
+    ///
+    /// The dimension counts straddle the SIMD width: 8 matches it exactly on a 256-bit machine,
+    /// while 13 always leaves a remainder that only the scalar tail can handle - it is not a
+    /// multiple of 4, 8 or 16, so the tail runs whatever width the host actually has.
+    /// </summary>
+    [Theory]
+    [InlineData(8, 5)]
+    [InlineData(13, 5)]
+    [InlineData(13, 40)]
+    public async Task QueryAsync_ReturnsTheHighestScoringClipsInOrder(int dims, int topK)
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        const int clipCount = 30;
+        for (var i = 0; i < clipCount; i++)
+        {
+            await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = $"phrase number {i}",
+                ContentBytes = Encoding.UTF8.GetBytes($"phrase number {i}"),
+                SourceApp = "Test",
+            });
+        }
+
+        var embedding = new DeterministicEmbeddingService(dims);
+        var indicator = new Clipthrough.Services.BackgroundJobIndicator();
+        var worker = new EmbeddingWorker(scope.ClipStoreService, embedding, indicator);
+        worker.Start();
+        await WaitForBatchAsync(worker);
+        await worker.StopAsync();
+
+        var semantic = new SemanticSearchService(scope.ClipStoreService, embedding);
+        await semantic.RefreshCacheAsync();
+        Assert.Equal(clipCount, semantic.CachedCount);
+
+        const string queryText = "phrase number 7";
+        var ranked = await semantic.QueryAsync(queryText, topK);
+
+        // Independent oracle: score every clip with a plain scalar loop over the same vectors.
+        var stored = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters { Limit = 100 });
+        var queryVector = embedding.VectorFor(queryText);
+        var expected = stored.Items
+            .Select(clip =>
+            {
+                var vector = embedding.VectorFor(clip.Content!);
+                var score = 0f;
+                for (var i = 0; i < dims; i++)
+                {
+                    score += vector[i] * queryVector[i];
+                }
+
+                return (clip.Id, Score: score);
+            })
+            .OrderByDescending(x => x.Score)
+            .Take(topK)
+            .ToArray();
+
+        Assert.Equal(Math.Min(topK, clipCount), ranked.Count);
+        Assert.Equal(expected.Select(x => x.Id), ranked.Select(x => x.ClipId));
+
+        for (var i = 0; i < ranked.Count; i++)
+        {
+            Assert.Equal(expected[i].Score, ranked[i].Score, 4);
+        }
+
+        // Ranking is only meaningful if the scores actually differ; an all-equal corpus would
+        // let any selection pass.
+        Assert.True(
+            ranked[0].Score - ranked[^1].Score > 0.01f,
+            $"Scores were too close to distinguish a ranking: {ranked[0].Score} vs {ranked[^1].Score}.");
+    }
+
+    /// <summary>
+    /// Vectors shorter than one SIMD register skip the widened loop entirely, so the scalar
+    /// tail has to carry the whole dot product. Three dimensions only admit eight distinct
+    /// sign patterns, which makes exact score ties likely - hence a three-clip corpus and
+    /// assertions that tolerate ties.
+    /// </summary>
+    [Fact]
+    public async Task QueryAsync_ReturnsEverythingWhenTopKExceedsTheCache()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        foreach (var phrase in new[] { "alpha", "beta", "gamma" })
+        {
+            await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = phrase,
+                ContentBytes = Encoding.UTF8.GetBytes(phrase),
+                SourceApp = "Test",
+            });
+        }
+
+        const int dims = 3;
+        var embedding = new DeterministicEmbeddingService(dims);
+        var indicator = new Clipthrough.Services.BackgroundJobIndicator();
+        var worker = new EmbeddingWorker(scope.ClipStoreService, embedding, indicator);
+        worker.Start();
+        await WaitForBatchAsync(worker);
+        await worker.StopAsync();
+
+        var semantic = new SemanticSearchService(scope.ClipStoreService, embedding);
+        await semantic.RefreshCacheAsync();
+
+        const string queryText = "alpha";
+        var ranked = await semantic.QueryAsync(queryText, topK: 50);
+
+        // The scalar tail is the only code path here, so check the values too, not just order.
+        var queryVector = embedding.VectorFor(queryText);
+        foreach (var result in ranked)
+        {
+            var clip = await scope.ClipStoreService.GetByIdAsync(result.ClipId);
+            var vector = embedding.VectorFor(clip!.Content!);
+            var expected = 0f;
+            for (var i = 0; i < dims; i++)
+            {
+                expected += vector[i] * queryVector[i];
+            }
+
+            Assert.Equal(expected, result.Score, 4);
+        }
+
+        Assert.Equal(3, ranked.Count);
+        Assert.Equal(3, ranked.Select(x => x.ClipId).Distinct().Count());
+        Assert.True(ranked[0].Score >= ranked[1].Score && ranked[1].Score >= ranked[2].Score);
+    }
+
     private static async Task<long> FindClipIdByText(TemporaryDatabaseScope scope, string text)
     {
         var result = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters { Limit = 50 });

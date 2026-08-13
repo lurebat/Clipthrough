@@ -1150,5 +1150,53 @@
     "replace": "            Avalonia.Threading.Dispatcher.UIThread.Post(() => _entriesSubject.OnNext(entry));",
     "why": "Marshalling publication wakes the dispatcher once per trace line, for every line every background worker writes, whether or not anything is listening. The one subscriber already marshals with ObserveOn.",
     "filter": "FullyQualifiedName~TheService_PublishesOnTheThreadThatLogged"
+  },
+  {
+    "id": "semantic-dot-drops-the-scalar-tail",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "why": "Embedding dimensions are not guaranteed to be a multiple of the SIMD width; without the tail loop the last few components are silently ignored and scores are wrong.",
+    "find": "        // Dimensions are not guaranteed to be a multiple of the SIMD width.\n        for (; i < a.Length; i++)\n        {\n            sum += a[i] * b[i];\n        }\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~SemanticSearchServiceTests"
+  },
+  {
+    "id": "semantic-dot-overlaps-its-simd-windows",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "why": "The widened loop must advance a whole register per iteration. A smaller stride re-reads components it already accumulated, so the score silently double-counts - and it proves the widened path is the one actually being exercised.",
+    "find": "        for (; i <= a.Length - width; i += width)",
+    "replace": "        for (; i <= a.Length - width; i += 1)",
+    "filter": "FullyQualifiedName~SemanticSearchServiceTests"
+  },
+  {
+    "id": "semantic-topk-evicts-the-strongest-candidate",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "why": "The min-heap root is the weakest survivor. Comparing the wrong way round throws away the best matches and keeps the worst.",
+    "find": "            if (_ids.Length == 0 || score <= _scores[0])",
+    "replace": "            if (_ids.Length == 0 || score >= _scores[0])",
+    "filter": "FullyQualifiedName~SemanticSearchServiceTests"
+  },
+  {
+    "id": "semantic-topk-never-restores-the-heap-after-eviction",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "why": "After replacing the root the heap invariant is broken, so the root is no longer the weakest survivor and later candidates are compared against the wrong threshold.",
+    "find": "            _scores[0] = score;\n            SiftDown();",
+    "replace": "            _scores[0] = score;",
+    "filter": "FullyQualifiedName~SemanticSearchServiceTests"
+  },
+  {
+    "id": "semantic-topk-never-restores-the-heap-after-insert",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "why": "While the heap is still filling, a new entry has to bubble up to its place. Without that the root is whatever landed at index zero first, not the weakest.",
+    "find": "                SiftUp(_count++);",
+    "replace": "                _count++;",
+    "filter": "FullyQualifiedName~SemanticSearchServiceTests"
+  },
+  {
+    "id": "semantic-results-are-sorted-ascending",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "why": "Semantic results must come back best-first; the heap's internal order is not sorted, so this final sort is what the caller relies on.",
+    "find": "            Array.Sort(result, static (a, b) => b.Score.CompareTo(a.Score));",
+    "replace": "            Array.Sort(result, static (a, b) => a.Score.CompareTo(b.Score));",
+    "filter": "FullyQualifiedName~SemanticSearchServiceTests"
   }
 ]
