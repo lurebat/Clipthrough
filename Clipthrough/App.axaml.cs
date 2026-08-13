@@ -353,6 +353,13 @@ public partial class App : Application
         _updateService?.ApplyDownloadedUpdateOnExit();
         _trayIcon?.Dispose();
         _trayIcon = null;
+
+        // Last, because everything above may still want to raise a notification -
+        // and showing one recreates the very notification host this releases. The
+        // host registers a shell icon that Windows only reaps once the user moves
+        // the mouse over the notification area, so without this a ghost icon is
+        // left behind for anyone who saw a single notification this session.
+        _systemInteractionService?.Dispose();
     }
 
     private void OnMainWindowClosing(object? sender, WindowClosingEventArgs e)

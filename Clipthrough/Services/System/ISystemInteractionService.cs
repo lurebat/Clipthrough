@@ -7,7 +7,15 @@ using Clipthrough.Models;
 
 namespace Clipthrough.Services;
 
-public interface ISystemInteractionService
+/// <summary>
+/// Disposable because the Windows implementation owns OS resources that outlive
+/// the process if they are not released: a shell notification icon registered
+/// with <c>Shell_NotifyIcon</c>, its hidden message window, and the global hotkey
+/// registrations. Windows only reaps an orphaned notification icon when the user
+/// next moves the mouse over the notification area, so skipping this leaves a
+/// ghost icon behind after the app has exited.
+/// </summary>
+public interface ISystemInteractionService : IDisposable
 {
     Task CopyTextAsync(string text);
 

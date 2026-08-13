@@ -245,6 +245,15 @@ internal sealed class TestSessionLogService : ISessionLogService
 
 internal sealed class TestSystemInteractionService : ISystemInteractionService
 {
+    /// <summary>
+    /// Recorded rather than ignored so a test can assert that shutdown released
+    /// the service - the real implementation drops a shell notification icon here,
+    /// and a missed Dispose leaves that icon on the user's taskbar.
+    /// </summary>
+    public int DisposeCount { get; private set; }
+
+    public void Dispose() => DisposeCount++;
+
     public string? LastCopiedText { get; private set; }
 
     public string? LastCopiedRichContent { get; private set; }
