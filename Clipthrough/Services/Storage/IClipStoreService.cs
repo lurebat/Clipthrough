@@ -74,6 +74,18 @@ public interface IClipStoreService
 
     Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Reads just the source-application icon blob for one clip.
+    /// </summary>
+    /// <remarks>
+    /// List reads omit the icon (U12), so the list has to fetch it back for nearly every
+    /// visible row - icons exist for almost every clip. Doing that through
+    /// <see cref="GetByIdAsync"/> pulls all thirty columns including the image blob, so a
+    /// page of text clips dragged megabytes of unrelated data across one connection per
+    /// row. This reads one column.
+    /// </remarks>
+    Task<byte[]?> GetSourceAppIconAsync(long clipId, CancellationToken cancellationToken = default);
+
     Task<System.Collections.Generic.IReadOnlyList<ClipEntry>> GetByIdsAsync(System.Collections.Generic.IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default);
 
     // -------- Semantic embeddings (sem-02) --------

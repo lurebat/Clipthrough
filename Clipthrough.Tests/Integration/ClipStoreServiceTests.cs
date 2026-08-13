@@ -1447,6 +1447,47 @@ public sealed class ClipStoreServiceTests
         Assert.Equal(16, listed.ImageHeight);
     }
 
+    /// <summary>
+    /// The list has to fetch icons back for nearly every visible row (U12 omits the blob).
+    /// Doing that through GetByIdAsync pulled all thirty columns including the image blob,
+    /// so a page of clips dragged megabytes of unrelated data across the wire. This is the
+    /// narrow read that replaced it.
+    /// </summary>
+    [Fact]
+    public async Task GetSourceAppIconAsync_ReturnsTheIconWithoutTheRestOfTheRow()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 1_048_576 });
+
+        var imageBytes = new byte[4096];
+        new Random(7).NextBytes(imageBytes);
+        var iconBytes = new byte[256];
+        new Random(8).NextBytes(iconBytes);
+
+        var withIcon = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Image,
+            ContentFormat = ClipContentFormat.Bitmap,
+            ContentBytes = imageBytes,
+            SourceAppIconBytes = iconBytes,
+            ImageWidth = 16,
+            ImageHeight = 16,
+        });
+
+        var withoutIcon = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "no icon here",
+            ContentBytes = Encoding.UTF8.GetBytes("no icon here"),
+        });
+
+        Assert.Equal(iconBytes, await scope.ClipStoreService.GetSourceAppIconAsync(withIcon!.Id));
+        Assert.Null(await scope.ClipStoreService.GetSourceAppIconAsync(withoutIcon!.Id));
+        Assert.Null(await scope.ClipStoreService.GetSourceAppIconAsync(999_999));
+    }
+
     [Fact]
     public async Task GetByIdAsync_StillReturnsFullBytes()
     {

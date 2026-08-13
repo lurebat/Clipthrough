@@ -140,6 +140,7 @@ public sealed class ClipAngelImportServiceTests
         public Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<byte[]?> GetSourceAppIconAsync(long clipId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<ClipEntry>> GetByIdsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task SaveEmbeddingBatchAsync(IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion, CancellationToken cancellationToken = default) => throw new NotImplementedException();

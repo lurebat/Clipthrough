@@ -998,5 +998,29 @@
     "find": "            var slotById = _slotById;",
     "replace": "            var slotById = new Dictionary<long, int>(existing.Count);\n            for (var si = 0; si < existing.Count; si++)\n            {\n                slotById[existing.Ids[si]] = si;\n            }",
     "filter": "AppendEmbeddingsAsync_DoesNotReallocateTheCachePerBatch"
+  },
+  {
+    "id": "icon-load-not-shared-per-app",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Without the in-flight cache lookup every visible row issues its own icon read - the whole page renders in one pass, so a per-row query is exactly the N+1 this replaced.",
+    "find": "            if (_sourceAppIconCache.TryGetValue(key, out var pending))\n            {\n                return pending;\n            }\n",
+    "replace": "",
+    "filter": "SourceAppIcons_AreFetchedOncePerApplication_NotOncePerRow"
+  },
+  {
+    "id": "icon-read-selects-the-wrong-column",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "The narrow icon read exists to return the icon blob and nothing else; selecting another column would hand callers the wrong bytes while still looking like a cheap single-column read.",
+    "find": "        command.CommandText = \"SELECT source_app_icon FROM clips WHERE id = $id LIMIT 1;\";",
+    "replace": "        command.CommandText = \"SELECT content_bytes FROM clips WHERE id = $id LIMIT 1;\";",
+    "filter": "GetSourceAppIconAsync_ReturnsTheIconWithoutTheRestOfTheRow"
+  },
+  {
+    "id": "icon-getter-hydrates-the-whole-row",
+    "file": "Clipthrough/ViewModels/ClipItemViewModel.cs",
+    "why": "Reverting the icon getter to full-row hydration reads all thirty columns - image blob included - on its own connection for every row that shows an icon.",
+    "find": "                    _ = EnsureSourceAppIconAsync();",
+    "replace": "                    _ = EnsureContentHydratedAsync();",
+    "filter": "SourceAppIcons_AreFetchedOncePerApplication_NotOncePerRow"
   }
 ]

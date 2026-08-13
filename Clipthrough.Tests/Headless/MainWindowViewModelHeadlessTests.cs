@@ -1528,6 +1528,80 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.Equal(savesAfterFirst, scope.SettingsService.SaveCallCount);
     }
 
+    /// <summary>
+    /// Icons exist for nearly every clip and list reads omit the blob (U12), so every
+    /// visible row asks for its icon back the moment it renders. Each of those used to be
+    /// a full thirty-column read - image blob included - on its own connection. The whole
+    /// page renders in one pass, so nothing is complete when the second row asks: the
+    /// sharing has to happen on the in-flight read, not on its result.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task SourceAppIcons_AreFetchedOncePerApplication_NotOncePerRow()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 1_048_576 });
+
+        var iconBytes = new byte[128];
+        new Random(11).NextBytes(iconBytes);
+
+        const int rows = 12;
+        for (var i = 0; i < rows; i++)
+        {
+            var seeded = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = $"shared app clip {i}",
+                ContentBytes = Encoding.UTF8.GetBytes($"shared app clip {i}"),
+                SourceApp = "Editor",
+                SourceAppPath = @"C:\apps\editor.exe",
+                SourceAppIconBytes = iconBytes,
+            });
+            Assert.NotNull(seeded);
+        }
+
+        var countingStore = new IconCountingClipStore(scope.ClipStoreService);
+        using var viewModel = CreateViewModel(
+            scope,
+            new TestClipboardMonitorService(),
+            new TestSystemInteractionService(),
+            new TestSessionLogService(),
+            clipStore: countingStore);
+        await viewModel.InitializeAsync();
+
+        for (var attempt = 0; attempt < 40 && viewModel.Clips.Count < rows; attempt++)
+        {
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
+        Assert.Equal(rows, viewModel.Clips.Count);
+
+        // Render every row at once, the way the list itself does.
+        foreach (var clip in viewModel.Clips)
+        {
+            _ = clip.SourceAppIconImage;
+        }
+
+        for (var attempt = 0; attempt < 60; attempt++)
+        {
+            if (viewModel.Clips.All(c => c.SourceAppIconBytes is not null))
+            {
+                break;
+            }
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        // Anti-vacuity: the icons really did arrive, so a count of one means sharing
+        // rather than a load path that never ran.
+        Assert.All(viewModel.Clips, c => Assert.Equal(iconBytes, c.SourceAppIconBytes));
+        Assert.Equal(1, countingStore.IconReads);
+
+        // And none of it went through the full-row read it used to.
+        Assert.Equal(0, countingStore.FullRowReads);
+    }
+
     private static MainWindowViewModel CreateViewModel(
         TemporaryDatabaseScope scope,
         TestClipboardMonitorService clipboardMonitor,
@@ -1758,6 +1832,7 @@ public sealed class MainWindowViewModelHeadlessTests
         public Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<byte[]?> GetSourceAppIconAsync(long clipId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<ClipEntry>> GetByIdsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default)
         {
             lock (_sync)
@@ -1782,6 +1857,70 @@ public sealed class MainWindowViewModelHeadlessTests
     /// That is the exact window in which a clip write turns a refresh snapshot
     /// stale.
     /// </summary>
+    /// <summary>
+    /// Counts source-app icon reads so a test can prove the list is not issuing one per row.
+    /// </summary>
+    /// <summary>
+    /// Counts source-app icon reads so a test can prove the list is not issuing one per row.
+    /// </summary>
+    private sealed class IconCountingClipStore(IClipStoreService inner) : IClipStoreService
+    {
+        private int _iconReads;
+        private int _fullRowReads;
+
+        public int IconReads => Volatile.Read(ref _iconReads);
+        public int FullRowReads => Volatile.Read(ref _fullRowReads);
+
+        public Task<byte[]?> GetSourceAppIconAsync(long clipId, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _iconReads);
+            return inner.GetSourceAppIconAsync(clipId, cancellationToken);
+        }
+
+        public Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _fullRowReads);
+            return inner.GetByIdAsync(clipId, cancellationToken);
+        }
+
+        public Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default) => inner.SearchAsync(filters, cancellationToken);
+
+        public Task<BulkCaptureResult> CaptureBatchAsync(IReadOnlyList<ClipCaptureRequest> requests, CancellationToken cancellationToken = default) => inner.CaptureBatchAsync(requests, cancellationToken);
+        public Task<ClipEntry?> CaptureAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default) => inner.CaptureAsync(request, cancellationToken);
+        public Task<ClipEntry?> CaptureFastAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default) => inner.CaptureFastAsync(request, cancellationToken);
+        public Task<ClipEntry?> UpdateDeferredContentAsync(long clipId, ClipCaptureRequest request, CancellationToken cancellationToken = default) => inner.UpdateDeferredContentAsync(clipId, request, cancellationToken);
+        public Task<ClipEntry?> UpdateSourceAppIconAsync(long clipId, byte[] iconBytes, CancellationToken cancellationToken = default) => inner.UpdateSourceAppIconAsync(clipId, iconBytes, cancellationToken);
+        public Task<ClipEntry?> ApplySensitivityAsync(long clipId, CancellationToken cancellationToken = default) => inner.ApplySensitivityAsync(clipId, cancellationToken);
+        public Task<int> ApplyPendingSensitivityAsync(CancellationToken cancellationToken = default) => inner.ApplyPendingSensitivityAsync(cancellationToken);
+        public Task SetFavoriteAsync(long clipId, bool isFavorite, CancellationToken cancellationToken = default) => inner.SetFavoriteAsync(clipId, isFavorite, cancellationToken);
+        public Task SetPinnedAsync(long clipId, bool isPinned, CancellationToken cancellationToken = default) => inner.SetPinnedAsync(clipId, isPinned, cancellationToken);
+        public Task DeleteAsync(long clipId, CancellationToken cancellationToken = default) => inner.DeleteAsync(clipId, cancellationToken);
+        public Task ClearSensitivityAsync(long clipId, CancellationToken cancellationToken = default) => inner.ClearSensitivityAsync(clipId, cancellationToken);
+        public Task SetSensitiveAsync(long clipId, bool isSensitive, CancellationToken cancellationToken = default) => inner.SetSensitiveAsync(clipId, isSensitive, cancellationToken);
+        public Task MarkPastedAsync(long clipId, CancellationToken cancellationToken = default) => inner.MarkPastedAsync(clipId, cancellationToken);
+        public Task<bool> TryClaimForOcrAsync(long clipId, CancellationToken cancellationToken = default) => inner.TryClaimForOcrAsync(clipId, cancellationToken);
+        public Task<bool> SetOcrResultAsync(long clipId, string ocrText, CancellationToken cancellationToken = default) => inner.SetOcrResultAsync(clipId, ocrText, cancellationToken);
+        public Task<bool> SetOcrFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => inner.SetOcrFailureAsync(clipId, error, cancellationToken);
+        public Task<IReadOnlyList<long>> GetPendingOcrClipIdsAsync(CancellationToken cancellationToken = default) => inner.GetPendingOcrClipIdsAsync(cancellationToken);
+        public Task<int> ResetStalledOcrClaimsAsync(CancellationToken cancellationToken = default) => inner.ResetStalledOcrClaimsAsync(cancellationToken);
+        public Task<bool> MarkOcrForRerunAsync(long clipId, CancellationToken cancellationToken = default) => inner.MarkOcrForRerunAsync(clipId, cancellationToken);
+        public Task<IReadOnlyList<long>> MarkAllSucceededForRerunAsync(CancellationToken cancellationToken = default) => inner.MarkAllSucceededForRerunAsync(cancellationToken);
+        public Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default) => inner.GetOcrCoverageAsync(cancellationToken);
+        public Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default) => inner.ApplyMaintenanceAsync(cancellationToken);
+        public Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default) => inner.RebuildSensitivityMatchesAsync(cancellationToken);
+        public Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default) => inner.GetClipAtOffsetAsync(offset, cancellationToken);
+        public Task<IReadOnlyList<ClipEntry>> GetByIdsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default) => inner.GetByIdsAsync(clipIds, cancellationToken);
+        public Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default) => inner.ClaimPendingEmbeddingsAsync(batchSize, cancellationToken);
+        public Task SaveEmbeddingBatchAsync(IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion, CancellationToken cancellationToken = default) => inner.SaveEmbeddingBatchAsync(records, modelVersion, cancellationToken);
+        public Task<bool> SetEmbeddingFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => inner.SetEmbeddingFailureAsync(clipId, error, cancellationToken);
+        public Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default) => inner.MarkAllEmbeddingsForRerunAsync(cancellationToken);
+        public Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default) => inner.GetEmbeddingCoverageAsync(cancellationToken);
+        public Task<int> ResetStalledEmbeddingClaimsAsync(CancellationToken cancellationToken = default) => inner.ResetStalledEmbeddingClaimsAsync(cancellationToken);
+        public Task ReleaseEmbeddingClaimsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default) => inner.ReleaseEmbeddingClaimsAsync(clipIds, cancellationToken);
+        public Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default) => inner.LoadAllEmbeddingsAsync(cancellationToken);
+        public Task PrewarmAsync(CancellationToken cancellationToken = default) => inner.PrewarmAsync(cancellationToken);
+    }
+
     private sealed class GatedSearchClipStore(IClipStoreService inner) : IClipStoreService
     {
         private TaskCompletionSource? _armed;
@@ -1844,6 +1983,7 @@ public sealed class MainWindowViewModelHeadlessTests
         public Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default) => inner.RebuildSensitivityMatchesAsync(cancellationToken);
         public Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default) => inner.GetClipAtOffsetAsync(offset, cancellationToken);
         public Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default) => inner.GetByIdAsync(clipId, cancellationToken);
+        public Task<byte[]?> GetSourceAppIconAsync(long clipId, CancellationToken cancellationToken = default) => inner.GetSourceAppIconAsync(clipId, cancellationToken);
         public Task<IReadOnlyList<ClipEntry>> GetByIdsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default) => inner.GetByIdsAsync(clipIds, cancellationToken);
         public Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default) => inner.ClaimPendingEmbeddingsAsync(batchSize, cancellationToken);
         public Task SaveEmbeddingBatchAsync(IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion, CancellationToken cancellationToken = default) => inner.SaveEmbeddingBatchAsync(records, modelVersion, cancellationToken);
@@ -2271,6 +2411,7 @@ public sealed class MainWindowViewModelHeadlessTests
         public Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default) => inner.RebuildSensitivityMatchesAsync(cancellationToken);
         public Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default) => inner.GetClipAtOffsetAsync(offset, cancellationToken);
         public Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default) => inner.GetByIdAsync(clipId, cancellationToken);
+        public Task<byte[]?> GetSourceAppIconAsync(long clipId, CancellationToken cancellationToken = default) => inner.GetSourceAppIconAsync(clipId, cancellationToken);
         public Task<IReadOnlyList<ClipEntry>> GetByIdsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default) => inner.GetByIdsAsync(clipIds, cancellationToken);
         public Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default) => inner.ClaimPendingEmbeddingsAsync(batchSize, cancellationToken);
         public Task SaveEmbeddingBatchAsync(IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion, CancellationToken cancellationToken = default) => inner.SaveEmbeddingBatchAsync(records, modelVersion, cancellationToken);
@@ -2328,6 +2469,7 @@ public sealed class MainWindowViewModelHeadlessTests
         public Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default) => inner.RebuildSensitivityMatchesAsync(cancellationToken);
         public Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default) => inner.GetClipAtOffsetAsync(offset, cancellationToken);
         public Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default) => inner.GetByIdAsync(clipId, cancellationToken);
+        public Task<byte[]?> GetSourceAppIconAsync(long clipId, CancellationToken cancellationToken = default) => inner.GetSourceAppIconAsync(clipId, cancellationToken);
         public Task<IReadOnlyList<ClipEntry>> GetByIdsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default) => inner.GetByIdsAsync(clipIds, cancellationToken);
         public Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default) => inner.ClaimPendingEmbeddingsAsync(batchSize, cancellationToken);
         public Task SaveEmbeddingBatchAsync(IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion, CancellationToken cancellationToken = default) => inner.SaveEmbeddingBatchAsync(records, modelVersion, cancellationToken);
@@ -2415,6 +2557,7 @@ public sealed class MainWindowViewModelHeadlessTests
         public Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default) => inner.RebuildSensitivityMatchesAsync(cancellationToken);
         public Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default) => inner.GetClipAtOffsetAsync(offset, cancellationToken);
         public Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default) => inner.GetByIdAsync(clipId, cancellationToken);
+        public Task<byte[]?> GetSourceAppIconAsync(long clipId, CancellationToken cancellationToken = default) => inner.GetSourceAppIconAsync(clipId, cancellationToken);
         public Task<IReadOnlyList<ClipEntry>> GetByIdsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default) => inner.GetByIdsAsync(clipIds, cancellationToken);
         public Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default) => inner.ClaimPendingEmbeddingsAsync(batchSize, cancellationToken);
         public Task SaveEmbeddingBatchAsync(IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion, CancellationToken cancellationToken = default) => inner.SaveEmbeddingBatchAsync(records, modelVersion, cancellationToken);

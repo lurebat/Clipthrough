@@ -967,6 +967,19 @@ public sealed class ClipStoreService : IClipStoreService
         return ReadClip(reader);
     }
 
+    public async Task<byte[]?> GetSourceAppIconAsync(long clipId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT source_app_icon FROM clips WHERE id = $id LIMIT 1;";
+        command.Parameters.AddWithValue("$id", clipId);
+
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return value as byte[];
+    }
+
     public async Task<IReadOnlyList<ClipEntry>> GetByIdsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default)
     {
         if (clipIds is null || clipIds.Count == 0)

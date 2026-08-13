@@ -110,6 +110,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _areBackgroundServicesStarted;
     private bool _isDisposed;
 
+    // In-flight or completed source-app icon loads, keyed by executable path and shared
+    // across every clip from that app. Guarded by its own lock: started from the UI thread,
+    // completed on the pool.
+    private readonly Dictionary<string, Task<byte[]?>> _sourceAppIconCache = new(StringComparer.OrdinalIgnoreCase);
+
     // Serialises embedding-worker start/stop transitions driven by the
     // EnableSemanticSearch setting; see ApplySemanticSearchWorkerState.
     private Task _semanticWorkerTransition = Task.CompletedTask;
@@ -3470,7 +3475,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 ContentFormat = isRich ? SelectedClip.Clip.ContentFormat : ClipContentFormat.PlainText,
                 SourceApp = SelectedClip.SourceApp,
                 SourceAppPath = SelectedClip.Clip.SourceAppPath,
-                SourceAppIconBytes = SelectedClip.Clip.SourceAppIconBytes,
+                SourceAppIconBytes = SelectedClip.SourceAppIconBytes,
                 SourceWindowTitle = SelectedClip.Clip.SourceWindowTitle,
                 IncrementExistingCopyCount = false,
             }));
@@ -3566,7 +3571,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 ContentFormat = isHtml ? ClipContentFormat.Html : ClipContentFormat.PlainText,
                 SourceApp = clip.SourceApp,
                 SourceAppPath = clip.Clip.SourceAppPath,
-                SourceAppIconBytes = clip.Clip.SourceAppIconBytes,
+                SourceAppIconBytes = clip.SourceAppIconBytes,
                 SourceWindowTitle = clip.Clip.SourceWindowTitle,
                 IncrementExistingCopyCount = false,
                 SourceClipId = clip.Clip.Id,
@@ -3705,7 +3710,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 ContentFormat = outputFormat,
                 SourceApp = target.SourceApp,
                 SourceAppPath = target.Clip.SourceAppPath,
-                SourceAppIconBytes = target.Clip.SourceAppIconBytes,
+                SourceAppIconBytes = target.SourceAppIconBytes,
                 SourceWindowTitle = target.Clip.SourceWindowTitle,
                 IncrementExistingCopyCount = false,
                 SourceClipId = target.Clip.Id,
@@ -3942,7 +3947,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ContentFormat = ClipContentFormat.PlainText,
             SourceApp = _selectedClip.SourceApp,
             SourceAppPath = _selectedClip.Clip.SourceAppPath,
-            SourceAppIconBytes = _selectedClip.Clip.SourceAppIconBytes,
+            SourceAppIconBytes = _selectedClip.SourceAppIconBytes,
             IncrementExistingCopyCount = false,
         };
 
@@ -4548,10 +4553,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (!string.Equals(a.SourceApp, b.SourceApp, StringComparison.Ordinal)) return false;
         if (!string.Equals(a.SourceWindowTitle, b.SourceWindowTitle, StringComparison.Ordinal)) return false;
         if (!string.Equals(a.SourceUrl, b.SourceUrl, StringComparison.Ordinal)) return false;
-        // Icon bytes can transition from null -> populated during enrichment.
-        var aHasIcon = a.SourceAppIconBytes is { Length: > 0 };
-        var bHasIcon = b.SourceAppIconBytes is { Length: > 0 };
-        if (aHasIcon != bHasIcon) return false;
+        // The icon can appear during enrichment, after the row is already on screen.
+        // List reads never carry the blob (U12), so the presence flag is the only
+        // field that can actually show the transition.
+        if (a.SourceAppIconAvailable != b.SourceAppIconAvailable) return false;
         // Sensitivity matches collection size is a cheap proxy for change.
         if ((a.SensitivityMatches?.Count ?? 0) != (b.SensitivityMatches?.Count ?? 0)) return false;
         return true;
@@ -5354,7 +5359,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     ContentFormat = ClipContentFormat.PlainText,
                     SourceApp = target.SourceApp,
                     SourceAppPath = target.Clip.SourceAppPath,
-                    SourceAppIconBytes = target.Clip.SourceAppIconBytes,
+                    SourceAppIconBytes = target.SourceAppIconBytes,
                     SourceWindowTitle = target.Clip.SourceWindowTitle,
                     IncrementExistingCopyCount = false,
                     SourceClipId = target.Clip.Id,
@@ -5473,7 +5478,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 ContentFormat = ClipContentFormat.PlainText,
                 SourceApp = clip.SourceApp,
                 SourceAppPath = clip.Clip.SourceAppPath,
-                SourceAppIconBytes = clip.Clip.SourceAppIconBytes,
+                SourceAppIconBytes = clip.SourceAppIconBytes,
                 SourceWindowTitle = clip.Clip.SourceWindowTitle,
                 IncrementExistingCopyCount = false,
                 SourceClipId = clip.Clip.Id,
@@ -6991,7 +6996,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ExportClipAsync,
             TogglePinClipAsync,
             ApplyTransformationToSingleClipAsync,
-            id => Task.Run(() => _clipStoreService.GetByIdAsync(id)))
+            id => Task.Run(() => _clipStoreService.GetByIdAsync(id)),
+            LoadSourceAppIconAsync)
         {
             IsChecked = checkedIds?.Contains(clip.Id) == true
         };
@@ -7004,8 +7010,75 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return item;
     }
 
-    private void DetachClip(ClipItemViewModel clip)
+    /// <summary>
+    /// Loads a row's source-application icon, sharing one blob across every clip captured
+    /// from the same application.
+    /// </summary>
+    /// <remarks>
+    /// A page is 200 rows and almost every clip has an icon, so without this the list
+    /// issues 200 queries on 200 connections to fetch what is usually a handful of distinct
+    /// icons - and it does it again on every refresh, which is throttled to 300 ms while
+    /// the user types. The whole page renders in one pass, so what is shared has to be the
+    /// in-flight task: caching only the finished bytes would let all 200 rows miss before
+    /// the first query returned, which is the entire problem. Keyed on the executable path
+    /// because that is what the icon was extracted from; clips with no path fall back to a
+    /// per-clip read.
+    /// </remarks>
+    private Task<byte[]?> LoadSourceAppIconAsync(ClipItemViewModel item)
     {
+        var clipId = item.Clip.Id;
+        var key = !string.IsNullOrWhiteSpace(item.Clip.SourceAppPath)
+            ? item.Clip.SourceAppPath!
+            : item.Clip.SourceApp;
+
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return Task.Run(() => _clipStoreService.GetSourceAppIconAsync(clipId));
+        }
+
+        lock (_sourceAppIconCache)
+        {
+            if (_sourceAppIconCache.TryGetValue(key, out var pending))
+            {
+                return pending;
+            }
+
+            var load = Task.Run(() => _clipStoreService.GetSourceAppIconAsync(clipId));
+
+            // Published before the eviction hook is attached, so a load that finishes
+            // immediately cannot remove itself from the cache before it is in it.
+            _sourceAppIconCache[key] = load;
+
+            // An empty or failed read must not be allowed to speak for every clip from
+            // this application - the row it happened to come from may simply be one that
+            // never had the blob. Drop it so the next row retries. Removing only this
+            // exact task means a later successful load is never evicted by an older
+            // failure finishing late.
+            _ = load.ContinueWith(
+                finished =>
+                {
+                    if (finished.Status == TaskStatus.RanToCompletion && finished.Result is { Length: > 0 })
+                    {
+                        return;
+                    }
+
+                    lock (_sourceAppIconCache)
+                    {
+                        if (_sourceAppIconCache.TryGetValue(key, out var current) && ReferenceEquals(current, finished))
+                        {
+                            _sourceAppIconCache.Remove(key);
+                        }
+                    }
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+
+            return load;
+        }
+    }
+
+    private void DetachClip(ClipItemViewModel clip)    {
         clip.PropertyChanged -= OnClipItemPropertyChanged;
         if (clip.IsChecked)
         {

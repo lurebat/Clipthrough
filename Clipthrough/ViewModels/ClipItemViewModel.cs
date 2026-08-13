@@ -86,8 +86,11 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     private bool _previewThumbnailLoaded;
     private bool _isDisposed;
     private readonly Func<long, Task<ClipEntry?>>? _contentHydrator;
+    private readonly Func<ClipItemViewModel, Task<byte[]?>>? _sourceAppIconLoader;
+    private byte[]? _loadedSourceAppIcon;
     private readonly IDisposable _commandErrors;
     private bool _contentHydrationStarted;
+    private bool _sourceAppIconRequested;
 
     public ClipItemViewModel(
         ClipEntry clip,
@@ -97,10 +100,12 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         Func<ClipItemViewModel, Task>? exportHandler = null,
         Func<ClipItemViewModel, Task>? togglePinHandler = null,
         Func<ClipItemViewModel, TextTransformation, Task>? applyTransformHandler = null,
-        Func<long, Task<ClipEntry?>>? contentHydrator = null)
+        Func<long, Task<ClipEntry?>>? contentHydrator = null,
+        Func<ClipItemViewModel, Task<byte[]?>>? sourceAppIconLoader = null)
     {
         Clip = clip;
         _contentHydrator = contentHydrator;
+        _sourceAppIconLoader = sourceAppIconLoader;
         _title = ClipDisplayFormatter.BuildTitle(clip);
         _previewSnippet = ClipDisplayFormatter.BuildPreviewSnippet(clip);
         _singleLinePreview = ClipDisplayFormatter.BuildSingleLinePreview(clip);
@@ -368,13 +373,15 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
                 return _sourceAppIconImage;
             }
 
-            if (Clip.SourceAppIconBytes is null)
+            var iconBytes = SourceAppIconBytes;
+            if (iconBytes is null)
             {
-                // Metadata-only list read (U12) omitted the icon bytes; pull the
-                // full entry, then this getter re-runs when SourceAppIconImage re-raises.
-                if (Clip.SourceAppIconAvailable && _contentHydrator is not null)
+                // List reads omit the icon blob (U12). Fetch just that one column
+                // rather than the whole row; this getter re-runs when the load
+                // re-raises SourceAppIconImage.
+                if (Clip.SourceAppIconAvailable && _sourceAppIconLoader is not null)
                 {
-                    _ = EnsureContentHydratedAsync();
+                    _ = EnsureSourceAppIconAsync();
                     return null;
                 }
                 _sourceAppIconLoaded = true;
@@ -382,12 +389,60 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
             }
 
             _sourceAppIconLoaded = true;
-            LoadBitmapInBackground(Clip.SourceAppIconBytes, bitmap =>
+            LoadBitmapInBackground(iconBytes, bitmap =>
             {
                 _sourceAppIconImage = bitmap;
                 this.RaisePropertyChanged(nameof(SourceAppIconImage));
             });
             return _sourceAppIconImage;
+        }
+    }
+
+    /// <summary>
+    /// The source-application icon blob, whether it arrived with the clip or was loaded
+    /// separately afterwards. Prefer this over <c>Clip.SourceAppIconBytes</c>, which is
+    /// null on list reads (U12) and stays null because the icon is not loaded back into
+    /// the entry.
+    /// </summary>
+    public byte[]? SourceAppIconBytes => Clip.SourceAppIconBytes ?? _loadedSourceAppIcon;
+
+    /// <summary>
+    /// Loads the source-app icon blob on its own, without dragging back the thirty-column
+    /// row (image blob included) that <see cref="EnsureContentHydratedAsync"/> reads.
+    /// </summary>
+    public async Task EnsureSourceAppIconAsync()
+    {
+        if (_sourceAppIconLoader is null || _sourceAppIconRequested || _isDisposed)
+        {
+            return;
+        }
+        if (!Clip.SourceAppIconAvailable || SourceAppIconBytes is not null)
+        {
+            return;
+        }
+        _sourceAppIconRequested = true;
+        try
+        {
+            var bytes = await _sourceAppIconLoader(this).ConfigureAwait(false);
+            if (bytes is not { Length: > 0 } || _isDisposed)
+            {
+                return;
+            }
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (_isDisposed)
+                {
+                    return;
+                }
+                _loadedSourceAppIcon = bytes;
+                _sourceAppIconLoaded = false;
+                this.RaisePropertyChanged(nameof(SourceAppIconImage));
+            });
+        }
+        catch (Exception ex)
+        {
+            _sourceAppIconRequested = false; // allow a later retry
+            System.Diagnostics.Trace.TraceWarning($"Clip {Clip.Id} source-app icon load failed: {ex.Message}");
         }
     }
 
@@ -431,10 +486,11 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// List/search reads omit image + source-app-icon BLOBs (U12). When this clip
-    /// is shown (thumbnail/icon) or selected, lazily reload the full entry by id so
-    /// the bytes are present for rendering, edit, export, drag, and AI-image. No-op
-    /// once started or when the entry already carries the bytes it needs.
+    /// List/search reads omit the image BLOB (U12). When this clip is shown as a
+    /// thumbnail or selected, lazily reload the full entry by id so the bytes are
+    /// present for rendering, edit, export, drag, and AI-image. No-op once started or
+    /// when the entry already carries its bytes. The source-app icon has its own,
+    /// much cheaper loader - see <see cref="EnsureSourceAppIconAsync"/>.
     /// </summary>
     public async Task EnsureContentHydratedAsync()
     {
@@ -443,8 +499,7 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
             return;
         }
         var needsImage = Clip.ContentType == ContentType.Image && Clip.ContentBytes is null;
-        var needsIcon = Clip.SourceAppIconAvailable && Clip.SourceAppIconBytes is null;
-        if (!needsImage && !needsIcon)
+        if (!needsImage)
         {
             return;
         }
@@ -463,16 +518,8 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
                     return;
                 }
                 Clip = full;
-                if (needsImage)
-                {
-                    _previewThumbnailLoaded = false;
-                    this.RaisePropertyChanged(nameof(PreviewThumbnailImage));
-                }
-                if (needsIcon)
-                {
-                    _sourceAppIconLoaded = false;
-                    this.RaisePropertyChanged(nameof(SourceAppIconImage));
-                }
+                _previewThumbnailLoaded = false;
+                this.RaisePropertyChanged(nameof(PreviewThumbnailImage));
             });
         }
         catch (Exception ex)
