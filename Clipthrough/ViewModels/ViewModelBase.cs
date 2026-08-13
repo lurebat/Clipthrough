@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Reactive.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using ReactiveUI;
 
 namespace Clipthrough.ViewModels;
@@ -11,6 +12,9 @@ namespace Clipthrough.ViewModels;
 public abstract class ViewModelBase : ReactiveObject
 {
     private static Action<string, Exception>? s_commandErrorSink;
+
+    private readonly object _trackedCommandGate = new();
+    private List<IDisposable>? _trackedCommandErrors;
 
     /// <summary>
     /// Routes every command failure reported by <see cref="ObserveCommandErrors"/>
@@ -65,6 +69,65 @@ public abstract class ViewModelBase : ReactiveObject
         }
 
         return failures.Merge().Subscribe(_ => { });
+    }
+
+    /// <summary>
+    /// Wires one command's failures into the same reporter as
+    /// <see cref="ObserveCommandErrors"/>, and returns the command so it can be
+    /// assigned in place.
+    ///
+    /// <see cref="ObserveCommandErrors"/> reflects over every command property and
+    /// reads each one, which forces a view model that builds its commands lazily to
+    /// build all of them. Per-row view models want the opposite: a
+    /// <c>ReactiveCommand</c> costs around 30 microseconds to construct, so six of
+    /// them across a 200-row page is tens of milliseconds on the UI thread for
+    /// commands that only the selected row is ever bound to. Such a view model
+    /// creates each command inside its getter and calls this instead.
+    ///
+    /// The default <paramref name="name"/> is the calling property, which makes the
+    /// reported context identical to what <see cref="ObserveCommandErrors"/> would
+    /// have produced.
+    /// </summary>
+    protected TCommand TrackCommandErrors<TCommand>(
+        TCommand command,
+        [CallerMemberName] string name = "")
+        where TCommand : IHandleObservableErrors
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        var context = $"{GetType().Name}.{name}";
+        var subscription = command.ThrownExceptions.Subscribe(ex => Report(context, ex));
+
+        lock (_trackedCommandGate)
+        {
+            (_trackedCommandErrors ??= []).Add(subscription);
+        }
+
+        return command;
+    }
+
+    /// <summary>
+    /// Releases every subscription made by <see cref="TrackCommandErrors"/>. Safe to
+    /// call when none were made, and safe to call twice.
+    /// </summary>
+    protected void DisposeTrackedCommandErrors()
+    {
+        List<IDisposable>? subscriptions;
+        lock (_trackedCommandGate)
+        {
+            subscriptions = _trackedCommandErrors;
+            _trackedCommandErrors = null;
+        }
+
+        if (subscriptions is null)
+        {
+            return;
+        }
+
+        foreach (var subscription in subscriptions)
+        {
+            subscription.Dispose();
+        }
     }
 
     /// <summary>

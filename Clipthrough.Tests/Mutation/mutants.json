@@ -1198,5 +1198,45 @@
     "find": "            Array.Sort(result, static (a, b) => b.Score.CompareTo(a.Score));",
     "replace": "            Array.Sort(result, static (a, b) => a.Score.CompareTo(b.Score));",
     "filter": "FullyQualifiedName~SemanticSearchServiceTests"
+  },
+  {
+    "id": "row-commands-are-built-during-construction",
+    "file": "Clipthrough/ViewModels/ClipItemViewModel.cs",
+    "why": "Building all six row commands eagerly cost ~35ms per 200-row page on the UI thread, repeated on every search keystroke, for commands only the selected row is ever bound to.",
+    "find": "        _metaSegments = BuildMetaSegments();\n    }",
+    "replace": "        _metaSegments = BuildMetaSegments();\n        _ = CopyCommand;\n        _ = DeleteCommand;\n    }",
+    "filter": "FullyQualifiedName~ViewModelCommandCoverageTests"
+  },
+  {
+    "id": "row-command-skips-error-tracking",
+    "file": "Clipthrough/ViewModels/ClipItemViewModel.cs",
+    "why": "A lazily built command has to be wired to the error reporter in its own getter; ObserveCommandErrors cannot cover it. Missing the call makes that command's failures reach ReactiveUI's default handler instead of the user.",
+    "find": "    public ReactiveCommand<Unit, Unit> DeleteCommand => _deleteCommand ??= TrackCommandErrors(\n        ReactiveCommand.CreateFromTask(",
+    "replace": "    public ReactiveCommand<Unit, Unit> DeleteCommand => _deleteCommand ??= (\n        ReactiveCommand.CreateFromTask(",
+    "filter": "FullyQualifiedName~ViewModelCommandCoverageTests"
+  },
+  {
+    "id": "row-command-error-subscriptions-are-never-released",
+    "file": "Clipthrough/ViewModels/ClipItemViewModel.cs",
+    "why": "The error sink is process-wide and outlives every row. A row is discarded and rebuilt on each search keystroke, so a subscription that is not released on disposal accumulates for the life of the process.",
+    "find": "        _isDisposed = true;\n        DisposeTrackedCommandErrors();",
+    "replace": "        _isDisposed = true;",
+    "filter": "FullyQualifiedName~ViewModelCommandCoverageTests"
+  },
+  {
+    "id": "tracked-command-errors-are-not-reported",
+    "file": "Clipthrough/ViewModels/ViewModelBase.cs",
+    "why": "TrackCommandErrors must actually route to the reporter. Subscribing to nothing looks identical from the outside until a command fails in front of a user.",
+    "find": "        var subscription = command.ThrownExceptions.Subscribe(ex => Report(context, ex));",
+    "replace": "        var subscription = command.ThrownExceptions.Subscribe(_ => { });",
+    "filter": "FullyQualifiedName~ViewModelCommandCoverageTests"
+  },
+  {
+    "id": "tracked-command-context-loses-the-command-name",
+    "file": "Clipthrough/ViewModels/ViewModelBase.cs",
+    "why": "The reported context must name the command, so a lazily wired command is as identifiable in a log as one covered by ObserveCommandErrors.",
+    "find": "        var context = $\"{GetType().Name}.{name}\";",
+    "replace": "        var context = GetType().Name;",
+    "filter": "FullyQualifiedName~ViewModelCommandCoverageTests"
   }
 ]

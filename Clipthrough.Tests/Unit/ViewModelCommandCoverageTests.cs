@@ -5,6 +5,7 @@ using System.Reactive;
 using System.Reactive.Linq;
 using System.Reflection;
 using System.Text;
+using System.Windows.Input;
 using System.Threading.Tasks;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
@@ -39,13 +40,22 @@ public class ViewModelCommandCoverageTests
     [Fact]
     public void EveryViewModelThatExposesCommands_ObservesTheirExceptions()
     {
-        var observe = typeof(ViewModelBase).GetMethod(
-            "ObserveCommandErrors",
-            BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+        const BindingFlags Any = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
+
+        // Two ways to satisfy the contract: reflect over every command at the end of
+        // the constructor, or - for view models that build commands lazily, where
+        // reading them all up front is the cost being avoided - wire each one as it
+        // is created.
+        var observe = typeof(ViewModelBase).GetMethod("ObserveCommandErrors", Any);
         Assert.NotNull(observe);
 
+        var track = typeof(ViewModelBase)
+            .GetMethods(Any)
+            .SingleOrDefault(m => m.Name == "TrackCommandErrors");
+        Assert.NotNull(track);
+
         var offenders = ViewModelsExposingCommands()
-            .Where(t => !CallsMethod(t, observe!))
+            .Where(t => !CallsMethod(t, observe!) && !CallsMethod(t, track!))
             .Select(t => t.Name)
             .ToArray();
 
@@ -165,6 +175,121 @@ public class ViewModelCommandCoverageTests
         Assert.Equal(new[] { "ClipItemViewModel.DeleteCommand" }, outer);
     }
 
+    /// <summary>
+    /// The IL scan above only proves the wiring method is called somewhere. A view
+    /// model that builds its commands lazily has one call site per getter, so a
+    /// seventh command added later with the call left off would still pass it.
+    /// This drives every command the type actually exposes and requires each one to
+    /// report, which is the contract the scan is standing in for.
+    /// </summary>
+    [AvaloniaFact]
+    public void EveryLazilyBuiltRowCommand_ReportsItsFailures()
+    {
+        var reported = new List<string>();
+        using var _ = ViewModelBase.UseCommandErrorSink((context, _) => reported.Add(context));
+
+        static Task Explode() => Task.FromException(new InvalidOperationException("boom"));
+
+        using var vm = new ClipItemViewModel(
+            NewClip(),
+            copyHandler: _ => Explode(),
+            toggleFavoriteHandler: _ => Explode(),
+            deleteHandler: _ => Explode(),
+            exportHandler: _ => Explode(),
+            togglePinHandler: _ => Explode(),
+            applyTransformHandler: (_, _) => Explode());
+
+        var commands = ViewModelBase.DiscoverCommandProperties(typeof(ClipItemViewModel)).ToArray();
+        Assert.Equal(6, commands.Length);
+
+        foreach (var property in commands)
+        {
+            var command = (ICommand)property.GetValue(vm)!;
+
+            // ICommand.Execute is fire-and-forget on ReactiveCommand: the failure goes
+            // to ThrownExceptions rather than to this caller, which is the path under
+            // test. The parameter type is whatever the command declares.
+            var parameterType = property.PropertyType.GetGenericArguments()[0];
+            command.Execute(parameterType == typeof(System.Reactive.Unit) ? null : Activator.CreateInstance(parameterType));
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.Equal(
+            commands.Select(p => $"ClipItemViewModel.{p.Name}").OrderBy(x => x, StringComparer.Ordinal),
+            reported.OrderBy(x => x, StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    /// A clip row is discarded and rebuilt constantly - every search keystroke
+    /// replaces the page - so its error subscriptions have to go with it. The sink
+    /// is process-wide and outlives any row, which is exactly what keeps a leaked
+    /// subscription alive and reporting.
+    ///
+    /// Once released, a failure from the orphaned command falls through to
+    /// ReactiveUI's default handler. That is the pre-existing contract - disposal
+    /// released the same subscriptions before these commands became lazy - and
+    /// asserting it here is what distinguishes "released" from "never subscribed".
+    /// </summary>
+    [AvaloniaFact]
+    public void DisposingARow_StopsItsCommandsFromReporting()
+    {
+        var reported = new List<string>();
+        using var _ = ViewModelBase.UseCommandErrorSink((context, _) => reported.Add(context));
+
+        var vm = new ClipItemViewModel(
+            NewClip(),
+            deleteHandler: _ => Task.FromException(new InvalidOperationException("boom")));
+
+        var command = vm.DeleteCommand;
+        ((ICommand)command).Execute(null);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(new[] { "ClipItemViewModel.DeleteCommand" }, reported);
+
+        vm.Dispose();
+        reported.Clear();
+
+        // With the subscription gone the failure falls through to ReactiveUI's
+        // default handler, which rethrows. That throw is the observable proof the
+        // subscription was released rather than never made.
+        Assert.Throws<UnhandledErrorException>(() =>
+        {
+            ((ICommand)command).Execute(null);
+            Dispatcher.UIThread.RunJobs();
+        });
+
+        Assert.Empty(reported);
+    }
+
+    /// <summary>
+    /// Nothing in the clip row template binds these commands - they are reached only
+    /// through the list's shared context menu and the detail pane, both bound to
+    /// SelectedClip - so constructing a page of rows should not construct any of
+    /// them. Building all six eagerly was measured at roughly 35ms per 200-row page
+    /// on the UI thread, repeated on every search keystroke.
+    /// </summary>
+    [AvaloniaFact]
+    public void ConstructingARow_DoesNotBuildItsCommands()
+    {
+        using var vm = new ClipItemViewModel(NewClip());
+
+        var backingFields = typeof(ClipItemViewModel)
+            .GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
+            .Where(f => typeof(IReactiveCommand).IsAssignableFrom(f.FieldType))
+            .ToArray();
+
+        Assert.Equal(6, backingFields.Length);
+
+        var eager = backingFields.Where(f => f.GetValue(vm) is not null).Select(f => f.Name).ToArray();
+        Assert.True(
+            eager.Length == 0,
+            $"These row commands were built during construction rather than on first use: {string.Join(", ", eager)}");
+
+        // ... and reading one builds exactly that one.
+        _ = vm.DeleteCommand;
+        var built = backingFields.Where(f => f.GetValue(vm) is not null).Select(f => f.Name).ToArray();
+        Assert.Single(built);
+    }
+
     private static ClipEntry NewClip() => new()
     {
         Id = 7,
@@ -180,15 +305,20 @@ public class ViewModelCommandCoverageTests
 
     /// <summary>
     /// Scans <paramref name="owner"/>'s own constructors and methods for a call to
-    /// <paramref name="target"/>. Both live in the same assembly, so the call site
-    /// carries <paramref name="target"/>'s MethodDef token verbatim and a byte
-    /// search for <c>call</c>/<c>callvirt</c> plus that token is exact.
+    /// <paramref name="target"/>.
+    ///
+    /// The token in the IL is compared by resolving it rather than by matching bytes:
+    /// a call to a generic method carries a MethodSpec token for the constructed
+    /// instantiation, not the MethodDef token of the definition, so a byte search for
+    /// the definition's token silently never matches one.
     /// </summary>
     private static bool CallsMethod(Type owner, MethodInfo target)
     {
-        var token = BitConverter.GetBytes(target.MetadataToken);
         const BindingFlags All = BindingFlags.Instance | BindingFlags.Static
             | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+
+        var module = owner.Module;
+        var typeArguments = owner.IsGenericType ? owner.GetGenericArguments() : null;
 
         var bodies = owner.GetConstructors(All).Cast<MethodBase>()
             .Concat(owner.GetMethods(All));
@@ -201,6 +331,8 @@ public class ViewModelCommandCoverageTests
                 continue;
             }
 
+            var methodArguments = body.IsGenericMethodDefinition ? body.GetGenericArguments() : null;
+
             for (var i = 0; i + 4 < il.Length; i++)
             {
                 if (il[i] is not (0x28 or 0x6F))
@@ -208,8 +340,31 @@ public class ViewModelCommandCoverageTests
                     continue;
                 }
 
-                if (il[i + 1] == token[0] && il[i + 2] == token[1]
-                    && il[i + 3] == token[2] && il[i + 4] == token[3])
+                var token = BitConverter.ToInt32(il, i + 1);
+
+                // The scan is not opcode-length aware, so most candidates here are
+                // operand bytes that only look like a call. Those fail to resolve.
+                MethodBase? called;
+                try
+                {
+                    called = module.ResolveMethod(token, typeArguments, methodArguments);
+                }
+                catch (Exception)
+                {
+                    continue;
+                }
+
+                if (called is null)
+                {
+                    continue;
+                }
+
+                if (called is MethodInfo info && info.IsGenericMethod && !info.IsGenericMethodDefinition)
+                {
+                    called = info.GetGenericMethodDefinition();
+                }
+
+                if (called.MetadataToken == target.MetadataToken && called.Module == target.Module)
                 {
                     return true;
                 }
