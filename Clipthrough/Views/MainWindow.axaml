@@ -873,11 +873,12 @@
                                 </Border>
 
                                 <Image Grid.Row="0"
+                                       x:Name="SelectedImagePreview"
                                        IsVisible="{Binding ShowSelectedImagePreview}"
                                        Stretch="Uniform"
                                        HorizontalAlignment="Stretch"
                                        VerticalAlignment="Stretch"
-                                       Source="{Binding SelectedClipImageBytes, Converter={x:Static conv:ImageBytesToBitmapConverter.Instance}}" />
+                                       Source="{Binding SelectedClip.FullImage}" />
 
                                 <controls:EmbeddedImageEditorView Grid.Row="0"
                                                                   x:Name="SelectedImageEditor"

@@ -1078,5 +1078,29 @@
     "replace": "            decodeWidth: ThumbnailDecodeWidth);",
     "why": "DecodeToWidth scales to exactly the requested width, so dropping the source-width guard would upscale an image narrower than the thumbnail - costing more memory than a plain decode and blurring the result.",
     "filter": "FullyQualifiedName~RowThumbnail"
+  },
+  {
+    "id": "full-image-decodes-on-the-ui-thread",
+    "file": "Clipthrough/ViewModels/ClipItemViewModel.cs",
+    "find": "            _fullImageLoaded = true;\n            LoadBitmapInBackground(Clip.ContentBytes, bitmap =>\n            {\n                _fullImage = bitmap;\n                this.RaisePropertyChanged(nameof(FullImage));\n            });\n            return _fullImage;",
+    "replace": "            _fullImageLoaded = true;\n            _fullImage = ClipBitmapFactory.TryLoad(Clip.ContentBytes);\n            return _fullImage;",
+    "why": "Decoding the selected clip's image inline is the shape this replaced: the old value converter ran a full PNG decode on the UI thread every time the selection changed, so arrowing through image clips stuttered.",
+    "filter": "FullyQualifiedName~SelectedImagePreview_DecodesOffTheUiThread"
+  },
+  {
+    "id": "full-image-decodes-at-thumbnail-resolution",
+    "file": "Clipthrough/ViewModels/ClipItemViewModel.cs",
+    "find": "            LoadBitmapInBackground(Clip.ContentBytes, bitmap =>\n            {\n                _fullImage = bitmap;",
+    "replace": "            LoadBitmapInBackground(Clip.ContentBytes, decodeWidth: ThumbnailDecodeWidth, apply: bitmap =>\n            {\n                _fullImage = bitmap;",
+    "why": "The preview pane fills the window, so unlike the row thumbnail it must decode at full resolution; scaling it down here would visibly blur the preview.",
+    "filter": "FullyQualifiedName~SelectedImagePreview_DecodesOffTheUiThread"
+  },
+  {
+    "id": "selected-image-pane-is-not-bound-to-the-decoded-image",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "find": "Source=\"{Binding SelectedClip.FullImage}\"",
+    "replace": "Source=\"{Binding SelectedClip.PreviewThumbnailImage}\"",
+    "why": "The background-decoding property is only worth anything if the pane binds to it. A binding left pointing elsewhere would decode inline again, and no view-model test would notice.",
+    "filter": "FullyQualifiedName~SelectedImagePane_BindsToTheBackgroundDecodedImage"
   }
 ]

@@ -8,6 +8,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
@@ -3093,6 +3094,86 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.True(viewModel.ShowRawTextContent, "Raw text should always show for text clips");
         Assert.False(viewModel.IsDisplayModeApplicable, "Display mode selector should not be applicable for text clips");
         Assert.Contains("hello world", viewModel.EditedClipText);
+    }
+
+    // The selected-image pane used to decode through a value converter, which runs inline on
+    // the UI thread. Arrowing through a list of screenshots therefore paid a full PNG decode
+    // per keystroke, on the thread drawing the frame.
+    [AvaloniaFact]
+    public async Task SelectedImagePreview_DecodesOffTheUiThread_AtFullResolution()
+    {
+        var bytes = CreateLargePngBytes(1200, 900);
+        using var item = new ClipItemViewModel(new ClipEntry
+        {
+            Id = 11,
+            Content = "screenshot",
+            ContentBytes = bytes,
+            ContentType = ContentType.Image,
+            ContentFormat = ClipContentFormat.Bitmap,
+            SourceApp = "Tests",
+            Hash = Guid.NewGuid().ToString("N"),
+            ByteSize = bytes.LongLength,
+            ImageWidth = 1200,
+            ImageHeight = 900,
+        });
+
+        Assert.Null(item.FullImage);
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (item.FullImage is null && DateTime.UtcNow < deadline)
+        {
+            Dispatcher.UIThread.RunJobs();
+            await Task.Delay(20);
+        }
+
+        Dispatcher.UIThread.RunJobs();
+
+        var full = item.FullImage;
+        Assert.NotNull(full);
+        Assert.NotEqual(ThumbnailDecodeWidthForTests, full!.PixelSize.Width);
+        Assert.NotSame(item.PreviewThumbnailImage, full);
+    }
+
+    // The view model property above is only worth anything if the pane actually binds to it;
+    // a binding left on the old byte-array converter would decode inline again and no
+    // view-model test would notice.
+    [AvaloniaFact]
+    public async Task SelectedImagePane_BindsToTheBackgroundDecodedImage()
+    {
+        using var harness = MainWindowTestHarness.Create();
+        var bytes = CreateLargePngBytes(1200, 900);
+        var item = new ClipItemViewModel(new ClipEntry
+        {
+            Id = 12,
+            Content = "screenshot",
+            ContentBytes = bytes,
+            ContentType = ContentType.Image,
+            ContentFormat = ClipContentFormat.Bitmap,
+            SourceApp = "Tests",
+            Hash = Guid.NewGuid().ToString("N"),
+            ByteSize = bytes.LongLength,
+            ImageWidth = 1200,
+            ImageHeight = 900,
+        });
+
+        harness.ViewModel.Clips.Add(item);
+        harness.ViewModel.SelectedClip = item;
+        Dispatcher.UIThread.RunJobs();
+
+        var preview = harness.Window.FindControl<Image>("SelectedImagePreview");
+        Assert.NotNull(preview);
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (preview!.Source is null && DateTime.UtcNow < deadline)
+        {
+            Dispatcher.UIThread.RunJobs();
+            await Task.Delay(20);
+        }
+
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.NotNull(preview.Source);
+        Assert.Same(item.FullImage, preview.Source);
     }
 
     // A decoded bitmap costs width x height x 4 bytes however small it is drawn, so a

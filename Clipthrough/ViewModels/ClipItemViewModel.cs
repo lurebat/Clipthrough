@@ -84,6 +84,10 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     private Bitmap? _previewThumbnailImage;
     private bool _sourceAppIconLoaded;
     private bool _previewThumbnailLoaded;
+
+    private Bitmap? _fullImage;
+
+    private bool _fullImageLoaded;
     private bool _isDisposed;
     private readonly Func<long, Task<ClipEntry?>>? _contentHydrator;
     private readonly Func<ClipItemViewModel, Task<byte[]?>>? _sourceAppIconLoader;
@@ -459,6 +463,46 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     public bool ShowTypeGlyph => !HasSourceAppIcon;
 
+    /// <summary>
+    /// The clip's image at full resolution, for the selected-clip preview pane. Null until a
+    /// background decode finishes, at which point this re-raises. Decoding a screenshot-sized
+    /// PNG takes tens of milliseconds, and the preview changes on every arrow key, so doing it
+    /// inline - as the old value converter did - stuttered navigation through an image-heavy
+    /// list. Full resolution on purpose: the pane fills the window, unlike the row thumbnail.
+    /// </summary>
+    public Bitmap? FullImage
+    {
+        get
+        {
+            if (_fullImageLoaded)
+            {
+                return _fullImage;
+            }
+
+            if (Clip.ContentType != ContentType.Image)
+            {
+                _fullImageLoaded = true;
+                return null;
+            }
+
+            if (Clip.ContentBytes is null)
+            {
+                // Metadata-only list read (U12) omitted the image bytes; pull the
+                // full entry, then this getter re-runs when FullImage re-raises.
+                _ = EnsureContentHydratedAsync();
+                return null;
+            }
+
+            _fullImageLoaded = true;
+            LoadBitmapInBackground(Clip.ContentBytes, bitmap =>
+            {
+                _fullImage = bitmap;
+                this.RaisePropertyChanged(nameof(FullImage));
+            });
+            return _fullImage;
+        }
+    }
+
     public Bitmap? PreviewThumbnailImage
     {
         get
@@ -530,9 +574,12 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
                 {
                     return;
                 }
+
                 Clip = full;
                 _previewThumbnailLoaded = false;
                 this.RaisePropertyChanged(nameof(PreviewThumbnailImage));
+                _fullImageLoaded = false;
+                this.RaisePropertyChanged(nameof(FullImage));
             });
         }
         catch (Exception ex)
@@ -723,6 +770,7 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         _isDisposed = true;
         _commandErrors.Dispose();
         _previewThumbnailImage?.Dispose();
+        _fullImage?.Dispose();
         _sourceAppIconImage?.Dispose();
     }
 
