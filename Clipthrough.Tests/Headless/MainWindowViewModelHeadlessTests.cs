@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -3092,6 +3093,151 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.True(viewModel.ShowRawTextContent, "Raw text should always show for text clips");
         Assert.False(viewModel.IsDisplayModeApplicable, "Display mode selector should not be applicable for text clips");
         Assert.Contains("hello world", viewModel.EditedClipText);
+    }
+
+    // A decoded bitmap costs width x height x 4 bytes however small it is drawn, so a
+    // screenshot-sized clip used to hold tens of megabytes just to fill an 84x48 row.
+    // The headless drawing backend does not really decode, so these assertions read the
+    // size the load asked the decoder for rather than real pixels - which is exactly the
+    // routing decision under test, and they hold either way: a real decode of the wide
+    // fixture also lands on 256, and a real decode of the narrow one stays at 64.
+    [AvaloniaTheory]
+    [InlineData(1200, 900, 256)]
+    [InlineData(64, 48, null)]
+    public async Task RowThumbnail_DecodesWideImagesDown_ButNeverUpscalesNarrowOnes(int width, int height, int? expectedDecodeWidth)
+    {
+        var bytes = CreateLargePngBytes(width, height);
+        using var item = new ClipItemViewModel(new ClipEntry
+        {
+            Id = 7,
+            Content = "screenshot",
+            ContentBytes = bytes,
+            ContentType = ContentType.Image,
+            ContentFormat = ClipContentFormat.Bitmap,
+            SourceApp = "Tests",
+            Hash = Guid.NewGuid().ToString("N"),
+            ByteSize = bytes.LongLength,
+            ImageWidth = width,
+            ImageHeight = height,
+        });
+
+        Assert.Null(item.PreviewThumbnailImage);
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (item.PreviewThumbnailImage is null && DateTime.UtcNow < deadline)
+        {
+            Dispatcher.UIThread.RunJobs();
+            await Task.Delay(20);
+        }
+
+        Dispatcher.UIThread.RunJobs();
+
+        var thumbnail = item.PreviewThumbnailImage;
+        Assert.NotNull(thumbnail);
+
+        if (expectedDecodeWidth is { } expected)
+        {
+            Assert.Equal(expected, thumbnail!.PixelSize.Width);
+        }
+        else
+        {
+            Assert.True(
+                thumbnail!.PixelSize.Width < ThumbnailDecodeWidthForTests,
+                $"A {width}px source was decoded at {thumbnail.PixelSize.Width}px, so it was upscaled to the thumbnail width.");
+        }
+    }
+
+    private const int ThumbnailDecodeWidthForTests = 256;
+
+    /// <summary>
+    /// A real, decodable grayscale PNG of the requested size. The 1x1 fixture above cannot
+    /// say anything about decode scaling, and the encoder here is deliberately dependency
+    /// free so the test does not rely on a rendering backend being available to produce its
+    /// own input.
+    /// </summary>
+    private static byte[] CreateLargePngBytes(int width, int height)
+    {
+        static uint[] BuildCrcTable()
+        {
+            var table = new uint[256];
+            for (uint n = 0; n < 256; n++)
+            {
+                var c = n;
+                for (var k = 0; k < 8; k++)
+                {
+                    c = (c & 1) != 0 ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+                }
+
+                table[n] = c;
+            }
+
+            return table;
+        }
+
+        var crcTable = BuildCrcTable();
+
+        uint Crc(byte[] data)
+        {
+            var c = 0xFFFFFFFFu;
+            foreach (var b in data)
+            {
+                c = crcTable[(c ^ b) & 0xFF] ^ (c >> 8);
+            }
+
+            return c ^ 0xFFFFFFFFu;
+        }
+
+        void WriteChunk(Stream output, string type, byte[] payload)
+        {
+            var length = BitConverter.GetBytes(payload.Length);
+            Array.Reverse(length);
+            output.Write(length);
+
+            var typed = new byte[4 + payload.Length];
+            Encoding.ASCII.GetBytes(type).CopyTo(typed, 0);
+            payload.CopyTo(typed, 4);
+            output.Write(typed);
+
+            var crc = BitConverter.GetBytes(Crc(typed));
+            Array.Reverse(crc);
+            output.Write(crc);
+        }
+
+        using var png = new MemoryStream();
+        png.Write([0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A]);
+
+        var header = new byte[13];
+        var w = BitConverter.GetBytes(width);
+        var h = BitConverter.GetBytes(height);
+        Array.Reverse(w);
+        Array.Reverse(h);
+        w.CopyTo(header, 0);
+        h.CopyTo(header, 4);
+        header[8] = 8;  // bit depth
+        header[9] = 0;  // colour type: grayscale
+        WriteChunk(png, "IHDR", header);
+
+        // One filter byte plus one sample per pixel, per scanline.
+        var raw = new byte[height * (1 + width)];
+        for (var y = 0; y < height; y++)
+        {
+            var row = y * (1 + width);
+            raw[row] = 0; // filter: none
+            for (var x = 0; x < width; x++)
+            {
+                raw[row + 1 + x] = (byte)((x + y) & 0xFF);
+            }
+        }
+
+        using var deflated = new MemoryStream();
+        using (var zlib = new ZLibStream(deflated, CompressionLevel.Fastest, leaveOpen: true))
+        {
+            zlib.Write(raw);
+        }
+
+        WriteChunk(png, "IDAT", deflated.ToArray());
+        WriteChunk(png, "IEND", []);
+        return png.ToArray();
     }
 
     private static byte[] CreatePngBytes(int bgraColor)

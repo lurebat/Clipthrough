@@ -92,6 +92,12 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     private bool _contentHydrationStarted;
     private bool _sourceAppIconRequested;
 
+    /// <summary>
+    /// Width the row thumbnail is decoded to. The row draws it at 84x48 logical pixels;
+    /// this leaves headroom for high-DPI displays and UniformToFill cropping.
+    /// </summary>
+    private const int ThumbnailDecodeWidth = 256;
+
     public ClipItemViewModel(
         ClipEntry clip,
         Func<ClipItemViewModel, Task>? copyHandler = null,
@@ -481,7 +487,13 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
             {
                 _previewThumbnailImage = bitmap;
                 this.RaisePropertyChanged(nameof(PreviewThumbnailImage));
-            });
+            },
+            // The row draws this into an 84x48 box, but a decoded bitmap costs
+            // width x height x 4 bytes whatever size it is drawn at. Decoding a
+            // 4000x3000 screenshot in full held ~48 MB per row. ImageWidth comes off
+            // the list read, so the guard costs nothing; a source narrower than the
+            // target is decoded plainly rather than upscaled.
+            decodeWidth: Clip.ImageWidth is > ThumbnailDecodeWidth ? ThumbnailDecodeWidth : null);
             return _previewThumbnailImage;
         }
     }
@@ -714,14 +726,14 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         _sourceAppIconImage?.Dispose();
     }
 
-    private void LoadBitmapInBackground(byte[]? bytes, Action<Bitmap?> apply)
+    private void LoadBitmapInBackground(byte[]? bytes, Action<Bitmap?> apply, int? decodeWidth = null)
     {
         if (bytes is not { Length: > 0 })
         {
             return;
         }
 
-        _ = Task.Run(() => ClipBitmapFactory.TryLoad(bytes))
+        _ = Task.Run(() => ClipBitmapFactory.TryLoad(bytes, decodeWidth))
             .ContinueWith(task =>
             {
                 var bitmap = task.Status == TaskStatus.RanToCompletion ? task.Result : null;

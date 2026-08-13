@@ -1062,5 +1062,21 @@
     "find": "        if (clip.ContentType == ContentType.RichText)\n        {\n            return BuildDisplayStrings(GetDisplayRichText(clip), ContentType.Text);\n        }",
     "replace": "        if (clip.ContentType == ContentType.RichText)\n        {\n            return new ClipDisplayStrings(\n                BuildTitle(GetDisplayRichText(clip), ContentType.Text),\n                BuildPreviewSnippet(GetDisplayRichText(clip), ContentType.Text),\n                BuildSingleLinePreview(GetDisplayRichText(clip), ContentType.Text));\n        }",
     "filter": "BuildDisplayStrings_RendersRichTextOnceNotPerString"
+  },
+  {
+    "id": "thumbnails-decode-at-full-resolution",
+    "file": "Clipthrough/ViewModels/ClipItemViewModel.cs",
+    "find": "            decodeWidth: Clip.ImageWidth is > ThumbnailDecodeWidth ? ThumbnailDecodeWidth : null);",
+    "replace": "            decodeWidth: null);",
+    "why": "Decoding the row thumbnail at full resolution is the shape this replaced: a decoded bitmap costs width x height x 4 bytes whatever size it is drawn at, so a screenshot-sized clip held tens of megabytes resident just to fill an 84x48 row.",
+    "filter": "FullyQualifiedName~RowThumbnail"
+  },
+  {
+    "id": "thumbnail-decode-upscales-small-images",
+    "file": "Clipthrough/ViewModels/ClipItemViewModel.cs",
+    "find": "            decodeWidth: Clip.ImageWidth is > ThumbnailDecodeWidth ? ThumbnailDecodeWidth : null);",
+    "replace": "            decodeWidth: ThumbnailDecodeWidth);",
+    "why": "DecodeToWidth scales to exactly the requested width, so dropping the source-width guard would upscale an image narrower than the thumbnail - costing more memory than a plain decode and blurring the result.",
+    "filter": "FullyQualifiedName~RowThumbnail"
   }
 ]
