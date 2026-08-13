@@ -84,23 +84,41 @@ function Get-FileHashHex([string]$Path) {
 # the file has become since, which silently reverted a commit made after the
 # sweep was abandoned. If the file has moved on, say so and leave it alone.
 if (Test-Path $PendingFile) {
-    $pending = [object[]](Get-Content $PendingFile -Raw | ConvertFrom-Json)
-    $stillMutated = @($pending | Where-Object {
-        # No recorded mutation means the run died before mutating, in which case
-        # the file is already original and restoring it changes nothing.
-        -not ($_.PSObject.Properties.Name -contains 'mutatedHash') `
-            -or $_.mutatedHash -eq (Get-FileHashHex $_.path)
-    })
-    $movedOn = @($pending | Where-Object { $stillMutated -notcontains $_ })
+    # A record that cannot be read is not a reason to wedge every future run, but
+    # it is very much a reason to say so: the file it was protecting may still be
+    # mutated, and only the user can tell. Deleting it silently would leave a
+    # mutated source file looking like ordinary uncommitted work.
+    $pending = $null
+    try {
+        $pending = [object[]](Get-Content $PendingFile -Raw | ConvertFrom-Json)
+    }
+    catch {
+        $pending = $null
+    }
 
-    foreach ($m in $movedOn) {
-        Write-Warning "Interrupted run recorded $($m.path), but it no longer holds that mutation - leaving it as it is."
+    if ($null -eq $pending -or $pending.Count -eq 0) {
+        Write-Warning "An interrupted mutation run left an unreadable record at $PendingFile."
+        Write-Warning "Check 'git status' before trusting this tree - a source file may still be mutated."
+        Remove-Item $PendingFile -Force
     }
-    if ($stillMutated.Count -gt 0) {
-        Write-Warning "Found interrupted mutation run - restoring original sources."
-        Restore-Files $stillMutated
+    else {
+        $stillMutated = @($pending | Where-Object {
+            # No recorded mutation means the run died before mutating, in which
+            # case the file is already original and restoring it changes nothing.
+            -not ($_.PSObject.Properties.Name -contains 'mutatedHash') `
+                -or $_.mutatedHash -eq (Get-FileHashHex $_.path)
+        })
+        $movedOn = @($pending | Where-Object { $stillMutated -notcontains $_ })
+
+        foreach ($m in $movedOn) {
+            Write-Warning "Interrupted run recorded $($m.path), but it no longer holds that mutation - leaving it as it is."
+        }
+        if ($stillMutated.Count -gt 0) {
+            Write-Warning "Found interrupted mutation run - restoring original sources."
+            Restore-Files $stillMutated
+        }
+        Remove-Item $PendingFile -Force
     }
-    Remove-Item $PendingFile -Force
 }
 
 function Invoke-TestFilter([string]$Filter) {
@@ -221,21 +239,27 @@ foreach ($mutant in $mutants) {
         }
     }
 
+    # Hash the bytes we are about to write rather than the file afterwards. The
+    # record has to be complete on disk *before* the mutation is, so that being
+    # killed at any instant leaves either an unmutated file with a stale record
+    # (harmless) or a mutated file with a good one. Recording the hash after
+    # mutating would need a second write of this file, and a kill inside that
+    # write truncates the only copy of the original bytes - exactly the loss this
+    # whole mechanism exists to prevent.
+    $mutatedText = $text.Replace($mutant.find, $mutant.replace)
+    $mutatedBytes = [System.Text.UTF8Encoding]::new($false).GetBytes($mutatedText)
+
     $saved = @([pscustomobject]@{
-        path  = $target
-        bytes = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($target))
+        path        = $target
+        bytes       = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($target))
+        # Upper-case hex, to match Get-FileHash on the way back in.
+        mutatedHash = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($mutatedBytes))
     })
     Write-Utf8NoBom $PendingFile ($saved | ConvertTo-Json -Depth 4 -AsArray)
 
     try {
-        Write-Utf8NoBom $target ($text.Replace($mutant.find, $mutant.replace))
+        Write-Utf8NoBom $target $mutatedText
         (Get-Item $target).LastWriteTime = Get-Date
-
-        # Now that the mutation is on disk, record what it looks like. A later
-        # recovery uses this to tell "still mutated, restore it" from "somebody
-        # already cleaned this up and has since moved on, keep your hands off".
-        $saved[0] | Add-Member -NotePropertyName mutatedHash -NotePropertyValue (Get-FileHashHex $target)
-        Write-Utf8NoBom $PendingFile ($saved | ConvertTo-Json -Depth 4 -AsArray)
 
         Write-Host "    mutated, running..." -NoNewline
         $r = Invoke-TestFilter $mutant.filter
