@@ -303,6 +303,92 @@ public sealed class SemanticSearchServiceTests
         Assert.True(hits[0].Score > 0.9f, $"expected near-1.0 cosine, got {hits[0].Score}");
     }
 
+    // ======== C8: a backfill must not copy the whole cache once per batch ========
+
+    /// <summary>
+    /// The embedding worker appends in batches of 32, so a 100k backfill calls this
+    /// method ~3,000 times. Rebuilding the id map and reallocating the vector array on
+    /// every one of those calls is quadratic: the review measured 223 GiB of memcpy and
+    /// ~1,000 gen-2 collections for a single backfill.
+    ///
+    /// Allocated bytes is the observable that actually distinguishes the two shapes.
+    /// Wall-clock would too, but it would turn a real regression into a flaky test on a
+    /// loaded CI box, and count/query assertions pass just as happily against the
+    /// quadratic version.
+    /// </summary>
+    [Fact]
+    public async Task AppendEmbeddingsAsync_DoesNotReallocateTheCachePerBatch()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        const int dims = 128;
+        var emb = new DeterministicEmbeddingService(dims);
+        var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
+
+        // One real clip only, to establish the dimension. Appends never touch the store,
+        // so the rest of the cache can be synthetic and the test stays fast.
+        var seed = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "seed",
+            ContentBytes = Encoding.UTF8.GetBytes("seed"),
+            IncrementExistingCopyCount = true,
+        });
+        await scope.ClipStoreService.SaveEmbeddingBatchAsync(
+            new[] { new ClipEmbeddingRecord(seed!.Id, emb.VectorFor("seed")) }, "test");
+        await semantic.RefreshCacheAsync();
+
+        // Grow to a realistic library size. Cost here is not measured.
+        const int cached = 20_000;
+        var nextId = 1_000_000L;
+        for (var i = 0; i < cached; i += 32)
+        {
+            var batch = new List<ClipEmbeddingRecord>(32);
+            for (var j = 0; j < 32; j++)
+            {
+                var id = nextId++;
+                batch.Add(new ClipEmbeddingRecord(id, emb.VectorFor($"seeded-{id}")));
+            }
+            await semantic.AppendEmbeddingsAsync(batch);
+        }
+        Assert.Equal(cached + 1, semantic.CachedCount);
+
+        // Measure only the steady-state appends against that warm cache.
+        const int measuredBatches = 100;
+        var lastMeasuredId = 0L;
+        var before = GC.GetTotalAllocatedBytes(precise: true);
+        for (var i = 0; i < measuredBatches; i++)
+        {
+            var batch = new List<ClipEmbeddingRecord>(32);
+            for (var j = 0; j < 32; j++)
+            {
+                var id = nextId++;
+                lastMeasuredId = id;
+                batch.Add(new ClipEmbeddingRecord(id, emb.VectorFor($"measured-{id}")));
+            }
+            await semantic.AppendEmbeddingsAsync(batch);
+        }
+        var allocated = GC.GetTotalAllocatedBytes(precise: true) - before;
+
+        // Copying the cache every batch costs ~20,000 x 128 x 4 = 10 MB per call, so the
+        // quadratic shape allocates about a gigabyte here. Rebuilding the id map alone
+        // costs a further ~1 MB per call. The budget sits far below either.
+        const long budget = 64L * 1024 * 1024;
+        Assert.True(
+            allocated < budget,
+            $"{measuredBatches} appends to a {cached}-entry cache allocated " +
+            $"{allocated / (1024 * 1024)} MB, over the {budget / (1024 * 1024)} MB budget. " +
+            "The cache is being reallocated or the id map rebuilt per batch.");
+
+        // Anti-vacuity: the appends really happened, and the cache is still coherent.
+        Assert.Equal(cached + 1 + (measuredBatches * 32), semantic.CachedCount);
+        var hits = await semantic.QueryAsync($"measured-{lastMeasuredId}", topK: 1);
+        Assert.Equal(lastMeasuredId, hits[0].ClipId);
+    }
+
     private static async Task<long> FindClipIdByText(TemporaryDatabaseScope scope, string text)
     {
         var result = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters { Limit = 50 });

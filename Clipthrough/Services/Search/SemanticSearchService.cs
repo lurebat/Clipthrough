@@ -23,6 +23,11 @@ public sealed class SemanticSearchService : ISemanticSearchService
     /// Immutable snapshot of the current embedding cache. All fields are final once constructed;
     /// the reference is swapped atomically via <c>Volatile</c> so consumers never see a partial state.
     /// </summary>
+    /// <remarks>
+    /// <see cref="Ids"/> and <see cref="Vectors"/> may be longer than <see cref="Count"/>
+    /// needs: they carry spare capacity so appends do not have to reallocate every time.
+    /// Everything at or past <see cref="Count"/> is reserved space and must be ignored.
+    /// </remarks>
     private sealed class CacheSnapshot
     {
         public static readonly CacheSnapshot Empty = new(Array.Empty<long>(), Array.Empty<float>(), 0, 0);
@@ -41,6 +46,10 @@ public sealed class SemanticSearchService : ISemanticSearchService
         public int Dim { get; }
     }
 
+    // Buffer.BlockCopy counts bytes in an int, so a float array longer than this
+    // cannot be copied at all. Growth stops short of it rather than overflowing.
+    private const int MaxVectorFloats = int.MaxValue / sizeof(float);
+
     private readonly IClipStoreService _clipStore;
     private readonly IEmbeddingService _embeddings;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
@@ -48,6 +57,12 @@ public sealed class SemanticSearchService : ISemanticSearchService
     // Atomic reference to the current immutable cache snapshot. Written via Volatile.Write,
     // read via Volatile.Read to guarantee all readers see a coherent snapshot.
     private CacheSnapshot _cache = CacheSnapshot.Empty;
+
+    // Clip id -> its slot in _cache. Only ever touched while _refreshGate is held, so it
+    // is not part of the published snapshot. Kept across appends rather than rebuilt per
+    // batch: rebuilding it was O(N) work and an O(N) allocation for every batch of 32,
+    // which is the same quadratic backfill cost as copying the vectors was.
+    private Dictionary<long, int> _slotById = new();
     private bool _hasLoaded;
 
     public SemanticSearchService(IClipStoreService clipStore, IEmbeddingService embeddings)
@@ -77,7 +92,19 @@ public sealed class SemanticSearchService : ISemanticSearchService
     private async Task ReloadLocked(CancellationToken cancellationToken)
     {
         var loaded = await _clipStore.LoadAllEmbeddingsAsync(cancellationToken).ConfigureAwait(false);
-        Volatile.Write(ref _cache, BuildSnapshot(loaded));
+        var snapshot = BuildSnapshot(loaded);
+
+        // Built from the snapshot rather than from `loaded`, because BuildSnapshot drops
+        // records whose vector has the wrong length - indexing off `loaded` would assign
+        // every id after the first bad one a slot holding some other clip's vector.
+        var slots = new Dictionary<long, int>(snapshot.Count);
+        for (var i = 0; i < snapshot.Count; i++)
+        {
+            slots[snapshot.Ids[i]] = i;
+        }
+
+        _slotById = slots;
+        Volatile.Write(ref _cache, snapshot);
         _hasLoaded = true;
     }
 
@@ -102,23 +129,29 @@ public sealed class SemanticSearchService : ISemanticSearchService
             }
 
             var dim = existing.Dim;
-            var slotById = new Dictionary<long, int>(existing.Count);
-            for (var i = 0; i < existing.Count; i++)
-            {
-                slotById[existing.Ids[i]] = i;
-            }
+            var slotById = _slotById;
 
-            // Partition into in-place updates (clip already cached — its vector may
-            // have been recomputed, e.g. after OCR) and appends (new clips). A
-            // re-embedded clip MUST overwrite its stale vector, not be skipped.
-            var adds = new List<ClipEmbeddingRecord>(records.Count);
-            var updates = new List<ClipEmbeddingRecord>();
+            // Collapse repeats within the batch, newest wins. The slot map holds one
+            // entry per clip, so letting a duplicate id through would append the same
+            // clip twice and leave the older copy permanently unreachable from the map
+            // - a stale vector that no later re-embedding could ever overwrite.
+            var latest = new Dictionary<long, ClipEmbeddingRecord>(records.Count);
             foreach (var r in records)
             {
                 if (r.Vector is not { Length: > 0 } v || v.Length != dim)
                 {
                     continue;
                 }
+                latest[r.ClipId] = r;
+            }
+
+            // Partition into in-place updates (clip already cached — its vector may
+            // have been recomputed, e.g. after OCR) and appends (new clips). A
+            // re-embedded clip MUST overwrite its stale vector, not be skipped.
+            var adds = new List<ClipEmbeddingRecord>(latest.Count);
+            var updates = new List<ClipEmbeddingRecord>();
+            foreach (var r in latest.Values)
+            {
                 if (slotById.ContainsKey(r.ClipId))
                 {
                     updates.Add(r);
@@ -132,22 +165,49 @@ public sealed class SemanticSearchService : ISemanticSearchService
             if (adds.Count == 0 && updates.Count == 0) return;
 
             var newCount = existing.Count + adds.Count;
-            var newIds = new long[newCount];
-            var newVectors = new float[newCount * dim];
 
-            Array.Copy(existing.Ids, newIds, existing.Count);
-            Buffer.BlockCopy(existing.Vectors, 0, newVectors, 0, existing.Count * dim * sizeof(float));
+            // Appending into the spare capacity of the live arrays is what keeps a
+            // backfill linear: the alternative copies the entire cache once per
+            // batch of 32, which is O(N^2) and hundreds of gigabytes of memcpy over
+            // a 100k library. It is safe only for pure appends. A reader holding an
+            // older snapshot never looks past its own Count, so writing beyond that
+            // point is invisible to it, and the Volatile.Write below publishes the
+            // larger Count only after those writes are complete. An in-place *update*
+            // has no such protection - it would rewrite a vector a reader is scoring
+            // right now - so any update forces the copy.
+            var canAppendInPlace = updates.Count == 0
+                && newCount <= existing.Ids.Length
+                && (long)newCount * dim <= existing.Vectors.Length;
 
-            foreach (var u in updates)
+            long[] newIds;
+            float[] newVectors;
+            if (canAppendInPlace)
             {
-                var slot = slotById[u.ClipId];
-                Buffer.BlockCopy(u.Vector!, 0, newVectors, slot * dim * sizeof(float), dim * sizeof(float));
+                newIds = existing.Ids;
+                newVectors = existing.Vectors;
+            }
+            else
+            {
+                var capacity = GrowCapacity(existing.Ids.Length, newCount, dim);
+                newIds = new long[capacity];
+                newVectors = new float[capacity * dim];
+
+                Array.Copy(existing.Ids, newIds, existing.Count);
+                Buffer.BlockCopy(existing.Vectors, 0, newVectors, 0, existing.Count * dim * sizeof(float));
+
+                foreach (var u in updates)
+                {
+                    var slot = slotById[u.ClipId];
+                    Buffer.BlockCopy(u.Vector!, 0, newVectors, slot * dim * sizeof(float), dim * sizeof(float));
+                }
             }
 
             for (var i = 0; i < adds.Count; i++)
             {
-                newIds[existing.Count + i] = adds[i].ClipId;
-                Buffer.BlockCopy(adds[i].Vector!, 0, newVectors, (existing.Count + i) * dim * sizeof(float), dim * sizeof(float));
+                var slot = existing.Count + i;
+                newIds[slot] = adds[i].ClipId;
+                Buffer.BlockCopy(adds[i].Vector!, 0, newVectors, slot * dim * sizeof(float), dim * sizeof(float));
+                slotById[adds[i].ClipId] = slot;
             }
 
             Volatile.Write(ref _cache, new CacheSnapshot(newIds, newVectors, newCount, dim));
@@ -216,6 +276,30 @@ public sealed class SemanticSearchService : ISemanticSearchService
             result.Add(scores[i]);
         }
         return result;
+    }
+
+    /// <summary>
+    /// Grows the cache by a fraction of its current size rather than to exactly what this
+    /// batch needs, so a long backfill reallocates O(log N) times instead of once per batch.
+    /// </summary>
+    /// <remarks>
+    /// A quarter is a deliberate compromise. Growing by a constant factor r copies about
+    /// N/(r-1) rows in total, so 1.25 turns a 100k backfill in batches of 32 from ~223 GiB
+    /// of memcpy into under a gigabyte, while wasting at most 25% of the cache - which for
+    /// a 154 MB embedding cache matters as much as the copying does. Doubling would trade
+    /// another 0.2% of that copying for a further 150 MB of resident memory.
+    /// </remarks>
+    private static int GrowCapacity(int currentCapacity, int required, int dim)
+    {
+        var ceiling = MaxVectorFloats / dim;
+        if (required >= ceiling)
+        {
+            return required;
+        }
+
+        var headroom = Math.Max(64, currentCapacity / 4);
+        var grown = currentCapacity <= int.MaxValue - headroom ? currentCapacity + headroom : int.MaxValue;
+        return Math.Min(Math.Max(required, grown), ceiling);
     }
 
     private static CacheSnapshot BuildSnapshot(IReadOnlyList<ClipEmbedding> loaded)

@@ -982,5 +982,21 @@
     "find": "        if (_isDisposed)\n        {\n            return;\n        }\n\n        _isDisposed = true;\n        CancelAllPendingDeletes();",
     "replace": "        _isDisposed = true;\n        CancelAllPendingDeletes();",
     "filter": "Dispose_IsIdempotent"
+  },
+  {
+    "id": "embedding-cache-grows-to-exact-size",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "why": "Without spare capacity every batch of 32 reallocates and copies the whole cache, which is the quadratic backfill the review measured at 223 GiB of memcpy over a 100k library.",
+    "find": "                var capacity = GrowCapacity(existing.Ids.Length, newCount, dim);",
+    "replace": "                var capacity = newCount;",
+    "filter": "AppendEmbeddingsAsync_DoesNotReallocateTheCachePerBatch"
+  },
+  {
+    "id": "embedding-slot-map-rebuilt-per-batch",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "why": "Rebuilding the clip-id to slot map on every append is O(N) work and an O(N) allocation per batch of 32 - the same quadratic shape as copying the vectors.",
+    "find": "            var slotById = _slotById;",
+    "replace": "            var slotById = new Dictionary<long, int>(existing.Count);\n            for (var si = 0; si < existing.Count; si++)\n            {\n                slotById[existing.Ids[si]] = si;\n            }",
+    "filter": "AppendEmbeddingsAsync_DoesNotReallocateTheCachePerBatch"
   }
 ]
