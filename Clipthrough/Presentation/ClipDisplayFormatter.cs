@@ -10,7 +10,7 @@ using Clipthrough.Models;
 
 namespace Clipthrough.Presentation;
 
-public static class ClipDisplayFormatter
+public static partial class ClipDisplayFormatter
 {
     public static string BuildTitle(ClipEntry clip)
     {
@@ -331,19 +331,19 @@ public static class ClipDisplayFormatter
 
         if (LooksLikeHtml(content))
         {
-            var withoutScripts = Regex.Replace(content, @"<(script|style)[^>]*>.*?</\1>", string.Empty, RegexOptions.IgnoreCase | RegexOptions.Singleline);
-            var withListItems = Regex.Replace(withoutScripts, @"<li[^>]*>", "• ", RegexOptions.IgnoreCase);
-            var withBreaks = Regex.Replace(withListItems, @"</?(br|p|div|section|article|ul|ol|h[1-6]|tr)[^>]*>", Environment.NewLine, RegexOptions.IgnoreCase);
-            var withoutTags = Regex.Replace(withBreaks, @"<[^>]+>", string.Empty, RegexOptions.IgnoreCase);
+            var withoutScripts = ScriptOrStyleBlockRegex().Replace(content, string.Empty);
+            var withListItems = ListItemTagRegex().Replace(withoutScripts, "• ");
+            var withBreaks = BlockLevelTagRegex().Replace(withListItems, Environment.NewLine);
+            var withoutTags = AnyTagRegex().Replace(withBreaks, string.Empty);
             return NormalizePreviewText(WebUtility.HtmlDecode(withoutTags));
         }
 
         if (LooksLikeRtf(content))
         {
-            var withParagraphs = Regex.Replace(content, @"\\par[d]? ?", Environment.NewLine, RegexOptions.IgnoreCase);
-            var withTabs = Regex.Replace(withParagraphs, @"\\tab ?", "\t", RegexOptions.IgnoreCase);
-            var withHexDecoded = Regex.Replace(withTabs, @"\\'[0-9a-fA-F]{2}", static match => DecodeRtfHex(match.Value));
-            var withoutControlWords = Regex.Replace(withHexDecoded, @"\\[a-zA-Z]+-?\d* ?", string.Empty, RegexOptions.IgnoreCase);
+            var withParagraphs = RtfParagraphRegex().Replace(content, Environment.NewLine);
+            var withTabs = RtfTabRegex().Replace(withParagraphs, "\t");
+            var withHexDecoded = RtfHexEscapeRegex().Replace(withTabs, static match => DecodeRtfHex(match.Value));
+            var withoutControlWords = RtfControlWordRegex().Replace(withHexDecoded, string.Empty);
             var withoutGroups = withoutControlWords.Replace("{", string.Empty).Replace("}", string.Empty, StringComparison.Ordinal);
             return NormalizePreviewText(withoutGroups);
         }
@@ -378,7 +378,47 @@ public static class ClipDisplayFormatter
            || (content.Contains("StartHTML:", StringComparison.OrdinalIgnoreCase)
                && content.Contains("EndHTML:", StringComparison.OrdinalIgnoreCase));
 
-    private static bool LooksLikeHtml(string content) => Regex.IsMatch(content, @"<\s*([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>", RegexOptions.IgnoreCase);
+    private static bool LooksLikeHtml(string content) => HtmlTagProbeRegex().IsMatch(content);
+
+    /// <summary>
+    /// HTML and RTF are culture-neutral formats, so every one of these carries
+    /// <see cref="RegexOptions.CultureInvariant"/>. Without it, case-insensitive matching
+    /// follows the current culture, and under tr-TR an uppercase <c>&lt;LI&gt;</c> or
+    /// <c>&lt;DIV&gt;</c> does not match its lower-case pattern at all - a Turkish user
+    /// silently loses every bullet and paragraph break when pasting HTML. The other two
+    /// markup call sites in this codebase (ClipboardMarkupDecoder, RichWebContentView)
+    /// already pass it; this file was the one that did not.
+    ///
+    /// They are also source-generated rather than built per call. These run for every clip
+    /// on every list build, so an interpreted engine and a shared static cache lookup are
+    /// both avoidable per-row cost.
+    /// </summary>
+    [GeneratedRegex(@"<(script|style)[^>]*>.*?</\1>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    private static partial Regex ScriptOrStyleBlockRegex();
+
+    [GeneratedRegex(@"<li[^>]*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ListItemTagRegex();
+
+    [GeneratedRegex(@"</?(br|p|div|section|article|ul|ol|h[1-6]|tr)[^>]*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex BlockLevelTagRegex();
+
+    [GeneratedRegex(@"<[^>]+>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex AnyTagRegex();
+
+    [GeneratedRegex(@"<\s*([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex HtmlTagProbeRegex();
+
+    [GeneratedRegex(@"\\par[d]? ?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex RtfParagraphRegex();
+
+    [GeneratedRegex(@"\\tab ?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex RtfTabRegex();
+
+    [GeneratedRegex(@"\\'[0-9a-fA-F]{2}", RegexOptions.CultureInvariant)]
+    private static partial Regex RtfHexEscapeRegex();
+
+    [GeneratedRegex(@"\\[a-zA-Z]+-?\d* ?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex RtfControlWordRegex();
 
     private static bool LooksLikeRtf(string content) => content.TrimStart().StartsWith(@"{\rtf", StringComparison.OrdinalIgnoreCase);
 

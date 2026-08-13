@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Text;
 using Clipthrough.Models;
 using Clipthrough.Presentation;
@@ -16,6 +17,45 @@ public sealed class ClipDisplayFormatterTests
         var result = ClipDisplayFormatter.RenderRichContent(html);
 
         Assert.Equal("Hello world & friends", result);
+    }
+
+    /// <summary>
+    /// The markup patterns matched case-insensitively against the CURRENT culture. Under
+    /// tr-TR, upper-case I lower-cases to a dotless i, so "&lt;LI&gt;" did not match
+    /// "&lt;li[^&gt;]*&gt;" and "&lt;DIV&gt;" did not match the block-tag pattern: a Turkish
+    /// user pasting HTML with upper-case tags lost every bullet and every paragraph break,
+    /// and the text collapsed onto one line. The tags still disappeared, because the
+    /// catch-all strip pattern contains no letters - which is exactly why this was
+    /// invisible. HTML is culture-neutral, so these must be CultureInvariant.
+    /// </summary>
+    [Theory]
+    [InlineData("en-US")]
+    [InlineData("tr-TR")]
+    public void RenderRichContent_HandlesUpperCaseMarkup_UnderAnyCulture(string cultureName)
+    {
+        var original = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo(cultureName);
+
+            const string html = "<DIV>intro</DIV><UL><LI>first</LI><LI>second</LI></UL>";
+
+            var result = ClipDisplayFormatter.RenderRichContent(html);
+
+            // Both list markers survive...
+            Assert.Equal(2, result.Split('\u2022').Length - 1);
+            Assert.Contains("first", result, StringComparison.Ordinal);
+            Assert.Contains("second", result, StringComparison.Ordinal);
+
+            // ...and the block tags became breaks rather than vanishing, so "intro" does
+            // not end up glued to the first bullet.
+            Assert.DoesNotContain("introfirst", result.Replace(" ", string.Empty, StringComparison.Ordinal), StringComparison.Ordinal);
+            Assert.Contains('\n', result);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = original;
+        }
     }
 
     [Fact]
