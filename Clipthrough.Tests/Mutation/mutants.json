@@ -1262,5 +1262,29 @@
     "find": "UPDATE clips SET last_copied_at = captured_at WHERE last_copied_at IS NULL OR TRIM(last_copied_at) = '';",
     "replace": "SELECT 1;",
     "filter": "InitializeAsync_DatabaseFromBeforeLastCopiedAt_StillExpiresItsClips"
+  },
+  {
+    "id": "maintenance-total-ignores-the-count-purge",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Reports the clip count from before the entry-count purge. The purge itself still happens, so only the number the status bar shows is wrong - and it is wrong in the direction that looks plausible.",
+    "find": "                finalClipCount = totalClipCount - deleted;",
+    "replace": "                finalClipCount = totalClipCount;",
+    "filter": "Maintenance_ReportsTheSameTotalsTheDatabaseWould"
+  },
+  {
+    "id": "maintenance-total-ignores-the-size-purge",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Forgets that the library-size purge also removed rows, so the reported clip count keeps counting clips that no longer exist. Only shows up when both caps are enabled and the size cap is the one that bites.",
+    "find": "                finalStoredBytes = remainingBytes;\n                finalClipCount -= deleted;",
+    "replace": "                finalStoredBytes = remainingBytes;",
+    "filter": "Maintenance_ReportsTheSameTotalsTheDatabaseWould"
+  },
+  {
+    "id": "maintenance-size-total-is-taken-before-the-purge",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Keeps the pre-purge library size, so the storage figure never drops after a size-cap eviction and the user sees a library permanently at its ceiling.",
+    "find": "                finalStoredBytes = remainingBytes;\n                finalClipCount -= deleted;",
+    "replace": "                finalClipCount -= deleted;",
+    "filter": "Maintenance_ReportsTheSameTotalsTheDatabaseWould"
   }
 ]
