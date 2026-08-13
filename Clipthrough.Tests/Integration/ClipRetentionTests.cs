@@ -194,6 +194,77 @@ public sealed class ClipRetentionTests
         Assert.Equal(Scalar(scope, "SELECT COALESCE(SUM(byte_size), 0) FROM clips;"), result.TotalStoredBytes);
     }
 
+    /// <summary>
+    /// A single size-cap purge has to be able to evict more clips than SQLite will
+    /// accept parameters for.
+    ///
+    /// The eviction used to name every doomed clip in a "WHERE id IN (...)" list,
+    /// one SQL parameter each. Past SQLITE_MAX_VARIABLE_NUMBER - 32766 - that
+    /// throws "too many SQL variables", and the purge that trips it is exactly the
+    /// one a real user hits: lowering the size cap on a large library, or importing
+    /// one. Maintenance runs after every capture, so the throw does not cost one
+    /// purge. Retention stops working entirely and sensitive clips stop expiring,
+    /// with nothing on screen to say so.
+    ///
+    /// Seeded through SQL rather than the capture path: 45k captures would take
+    /// minutes, and what is under test is the delete, not the insert.
+    /// </summary>
+    [Fact]
+    public async Task Maintenance_SizeCap_EvictsMoreClipsThanSqliteAllowsParameters()
+    {
+        // 4.5MB against a 1MB cap leaves ~10k clips, so ~35k have to go at once.
+        const int clipCount = 45_000;
+        const int clipBytes = 100;
+
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        SeedClips(scope, clipCount, clipBytes);
+
+        scope.SettingsService.SetCurrent(new AppSettings
+        {
+            EnableNormalClipLifetime = false,
+            EnableSensitiveClipLifetime = false,
+            EnableMaxEntryCount = false,
+            EnableMaxLibrarySize = true,
+            MaxLibrarySizeMegabytes = 1,
+        });
+
+        var result = await scope.ClipStoreService.ApplyMaintenanceAsync();
+
+        Assert.True(
+            result.PurgedClipCount > 32_766,
+            $"the purge has to cross SQLite's parameter limit to test anything; it evicted {result.PurgedClipCount}");
+        Assert.True(result.TotalStoredBytes <= 1024L * 1024L);
+        Assert.Equal(Scalar(scope, "SELECT COUNT(*) FROM clips;"), result.TotalClipCount);
+        Assert.Equal(Scalar(scope, "SELECT COALESCE(SUM(byte_size), 0) FROM clips;"), result.TotalStoredBytes);
+    }
+
+    private static void SeedClips(TemporaryDatabaseScope scope, int count, int byteSize)
+    {
+        using var connection = scope.ConnectionFactory.CreateConnection();
+        connection.Open();
+        using var transaction = connection.BeginTransaction();
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText =
+            "INSERT INTO clips (content, content_type, hash, captured_at, first_copied_at, last_copied_at, byte_size) " +
+            "VALUES ($content, 'text', $hash, $at, $at, $at, $size);";
+        var content = command.Parameters.Add("$content", Microsoft.Data.Sqlite.SqliteType.Text);
+        var hash = command.Parameters.Add("$hash", Microsoft.Data.Sqlite.SqliteType.Text);
+        var at = command.Parameters.Add("$at", Microsoft.Data.Sqlite.SqliteType.Text);
+        command.Parameters.AddWithValue("$size", byteSize);
+
+        for (var i = 0; i < count; i++)
+        {
+            content.Value = "clip " + i.ToString(CultureInfo.InvariantCulture);
+            hash.Value = "hash-" + i.ToString(CultureInfo.InvariantCulture);
+            at.Value = DateTimeOffset.UtcNow.AddMinutes(-i).ToString("O", CultureInfo.InvariantCulture);
+            command.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+    }
+
     private const int SmallClipBytes = 16;
 
     // Six of these is 1.75MB, so a 1MB cap has to evict three of them.

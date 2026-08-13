@@ -1286,5 +1286,21 @@
     "find": "                finalStoredBytes = remainingBytes;\n                finalClipCount -= deleted;",
     "replace": "                finalClipCount -= deleted;",
     "filter": "Maintenance_ReportsTheSameTotalsTheDatabaseWould"
+  },
+  {
+    "id": "size-purge-names-every-evicted-clip",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Goes back to listing every doomed clip as its own SQL parameter. Correct for small purges and fatal past SQLITE_MAX_VARIABLE_NUMBER, which is exactly the purge a user gets after lowering the size cap on a large library.",
+    "find": "        var deletedCount = await DeleteOldestAsync(connection, transaction, evictionCount, cancellationToken);\n        return (deletedCount, totalStoredBytes);",
+    "replace": "        var ids = new List<long>();\n        await using (var idCommand = connection.CreateCommand())\n        {\n            idCommand.Transaction = transaction;\n            idCommand.CommandText = $\"SELECT id FROM clips WHERE NOT {UserKeptClipPredicate} {OldestFirstEvictionOrder} LIMIT {evictionCount};\";\n            await using var idReader = await idCommand.ExecuteReaderAsync(cancellationToken);\n            while (await idReader.ReadAsync(cancellationToken))\n            {\n                ids.Add(idReader.GetInt64(0));\n            }\n        }\n\n        await using var deleteCommand = connection.CreateCommand();\n        deleteCommand.Transaction = transaction;\n        for (var index = 0; index < ids.Count; index++)\n        {\n            deleteCommand.Parameters.AddWithValue($\"$id{index}\", ids[index]);\n        }\n\n        deleteCommand.CommandText = $\"DELETE FROM clips WHERE id IN ({string.Join(\", \", ids.Select((_, index) => $\"$id{index}\"))}); SELECT changes();\";\n        var deletedCount = Convert.ToInt32(await deleteCommand.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);\n        return (deletedCount, totalStoredBytes);",
+    "filter": "Maintenance_SizeCap_EvictsMoreClipsThanSqliteAllowsParameters"
+  },
+  {
+    "id": "size-purge-reads-the-whole-library",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Drops the early exit, so the eviction walks every non-kept clip instead of stopping once the library fits - and evicts all of them rather than the few that were over the cap.",
+    "find": "            while (totalStoredBytes > maxBytes && await reader.ReadAsync(cancellationToken))",
+    "replace": "            while (await reader.ReadAsync(cancellationToken))",
+    "filter": "ClipRetentionTests"
   }
 ]

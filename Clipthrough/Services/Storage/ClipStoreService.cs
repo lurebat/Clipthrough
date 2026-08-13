@@ -1997,6 +1997,14 @@ public sealed class ClipStoreService : IClipStoreService
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
     }
 
+    /// <summary>
+    /// The order both capacity caps evict in. Shared rather than written twice
+    /// because DeleteUntilWithinSizeAsync counts rows in this order and then has
+    /// DeleteOldestAsync delete that many - if the two orders ever diverged it
+    /// would silently delete a different set of clips than the one it measured.
+    /// </summary>
+    private const string OldestFirstEvictionOrder = "ORDER BY COALESCE(last_copied_at, captured_at) ASC, id ASC";
+
     private static async Task<int> DeleteOldestAsync(SqliteConnection connection, SqliteTransaction transaction, int deleteCount, CancellationToken cancellationToken)
     {
         if (deleteCount <= 0)
@@ -2012,7 +2020,7 @@ public sealed class ClipStoreService : IClipStoreService
                 SELECT id
                 FROM clips
                 WHERE NOT {UserKeptClipPredicate}
-                ORDER BY COALESCE(last_copied_at, captured_at) ASC, id ASC
+                {OldestFirstEvictionOrder}
                 LIMIT $limit
             );
             SELECT changes();
@@ -2022,55 +2030,47 @@ public sealed class ClipStoreService : IClipStoreService
     }
 
     /// <summary>
-    /// Returns the rows removed and the library size that is left, so the caller
-    /// does not have to re-run SUM(byte_size) - a full scan - to learn a number
-    /// this loop already computed.
+    /// Evicts oldest-first until the library fits, and returns both how many rows
+    /// went and the size that is left - the caller would otherwise have to re-run
+    /// SUM(byte_size), a full scan, to learn a number this loop already computed.
+    ///
+    /// The reader is walked only as far as the eviction needs, so a library a few
+    /// megabytes over its cap reads a few rows rather than every clip the user has.
+    ///
+    /// The actual delete is delegated to DeleteOldestAsync, which takes a LIMIT
+    /// rather than a list of ids. Naming the ids explicitly meant one SQL parameter
+    /// per evicted clip, and past SQLITE_MAX_VARIABLE_NUMBER (32766) that fails
+    /// with "too many SQL variables" - which happens the moment a user lowers the
+    /// size cap on a large library, or imports one. Maintenance runs after every
+    /// capture, so the throw does not just lose one purge: retention stops working
+    /// altogether, and sensitive clips stop expiring.
     /// </summary>
     private static async Task<(int DeletedCount, long RemainingBytes)> DeleteUntilWithinSizeAsync(SqliteConnection connection, SqliteTransaction transaction, long totalStoredBytes, long maxBytes, CancellationToken cancellationToken)
     {
-        var rows = new List<(long Id, long ByteSize)>();
+        var evictionCount = 0;
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
             command.CommandText = $"""
-                SELECT id, byte_size
+                SELECT byte_size
                 FROM clips
                 WHERE NOT {UserKeptClipPredicate}
-                ORDER BY COALESCE(last_copied_at, captured_at) ASC, id ASC;
+                {OldestFirstEvictionOrder};
                 """;
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
+            while (totalStoredBytes > maxBytes && await reader.ReadAsync(cancellationToken))
             {
-                rows.Add((reader.GetInt64(0), reader.IsDBNull(1) ? 0L : reader.GetInt64(1)));
+                evictionCount++;
+                totalStoredBytes -= Math.Max(0L, reader.IsDBNull(0) ? 0L : reader.GetInt64(0));
             }
         }
 
-        var idsToDelete = new List<long>();
-        foreach (var row in rows)
-        {
-            if (totalStoredBytes <= maxBytes)
-            {
-                break;
-            }
-
-            idsToDelete.Add(row.Id);
-            totalStoredBytes -= Math.Max(0L, row.ByteSize);
-        }
-
-        if (idsToDelete.Count == 0)
+        if (evictionCount == 0)
         {
             return (0, totalStoredBytes);
         }
 
-        await using var deleteCommand = connection.CreateCommand();
-        deleteCommand.Transaction = transaction;
-        for (var index = 0; index < idsToDelete.Count; index++)
-        {
-            deleteCommand.Parameters.AddWithValue($"$id{index}", idsToDelete[index]);
-        }
-
-        deleteCommand.CommandText = $"DELETE FROM clips WHERE id IN ({string.Join(", ", idsToDelete.Select((_, index) => $"$id{index}"))}); SELECT changes();";
-        var deletedCount = Convert.ToInt32(await deleteCommand.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+        var deletedCount = await DeleteOldestAsync(connection, transaction, evictionCount, cancellationToken);
         return (deletedCount, totalStoredBytes);
     }
 
