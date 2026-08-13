@@ -1450,6 +1450,84 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.Equal(2, worker.StartCount);
     }
 
+    // A7: startup is a long chain of awaits and nothing cancels it, so quitting
+    // partway through used to let StartBackgroundServices run after shutdown had
+    // already stopped everything - restarting the clipboard monitor, the OCR
+    // queue and the embedding worker as the process was tearing down, with the
+    // workers writing to a database on its way out.
+    [AvaloniaFact]
+    public async Task StartBackgroundServices_AfterDispose_StartsNothing()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(AppSettings.Default with { EnableSemanticSearch = true });
+
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var worker = new RecordingEmbeddingWorker();
+        var viewModel = CreateViewModel(
+            scope,
+            clipboardMonitor,
+            new TestSystemInteractionService(),
+            new TestSessionLogService(),
+            embeddingWorker: worker);
+        await viewModel.InitializeAsync();
+
+        viewModel.Dispose();
+        viewModel.StartBackgroundServices();
+
+        Assert.False(clipboardMonitor.IsRunning);
+        Assert.False(worker.IsRunning);
+        Assert.Equal(0, worker.StartCount);
+    }
+
+    // The same call on a live view model must still start everything, so the
+    // guard above cannot pass by disabling startup altogether.
+    [AvaloniaFact]
+    public async Task StartBackgroundServices_BeforeDispose_StartsEverything()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(AppSettings.Default with { EnableSemanticSearch = true });
+
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var worker = new RecordingEmbeddingWorker();
+        using var viewModel = CreateViewModel(
+            scope,
+            clipboardMonitor,
+            new TestSystemInteractionService(),
+            new TestSessionLogService(),
+            embeddingWorker: worker);
+        await viewModel.InitializeAsync();
+
+        viewModel.StartBackgroundServices();
+
+        Assert.True(clipboardMonitor.IsRunning);
+        Assert.True(worker.IsRunning);
+        Assert.Equal(1, worker.StartCount);
+    }
+
+    // Dispose runs from Window.Closed and blocks on a settings flush. Letting it
+    // run twice would pay that wait twice on the way out.
+    [AvaloniaFact]
+    public async Task Dispose_IsIdempotent()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        var viewModel = CreateViewModel(
+            scope,
+            new TestClipboardMonitorService(),
+            new TestSystemInteractionService(),
+            new TestSessionLogService());
+        await viewModel.InitializeAsync();
+
+        viewModel.Dispose();
+        var savesAfterFirst = scope.SettingsService.SaveCallCount;
+        viewModel.Dispose();
+
+        Assert.Equal(savesAfterFirst, scope.SettingsService.SaveCallCount);
+    }
+
     private static MainWindowViewModel CreateViewModel(
         TemporaryDatabaseScope scope,
         TestClipboardMonitorService clipboardMonitor,

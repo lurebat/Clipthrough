@@ -966,5 +966,21 @@
     "find": "                s_commandErrorSink = previous;",
     "replace": "                s_commandErrorSink = null;",
     "filter": "DisposingTheSinkRegistration_StopsRoutingToIt"
+  },
+  {
+    "id": "background-services-start-after-disposal",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Startup is uncancellable, so quitting partway through can reach StartBackgroundServices after shutdown stopped everything. Without the disposal check it restarts the clipboard monitor, the OCR queue and the embedding worker as the process tears down.",
+    "find": "        if (_isDisposed || _areBackgroundServicesStarted)",
+    "replace": "        if (_areBackgroundServicesStarted)",
+    "filter": "StartBackgroundServices_AfterDispose_StartsNothing"
+  },
+  {
+    "id": "view-model-dispose-runs-twice",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Dispose runs from Window.Closed and blocks on a settings flush with a timeout. Losing the idempotence guard makes a second call pay that wait again during shutdown.",
+    "find": "        if (_isDisposed)\n        {\n            return;\n        }\n\n        _isDisposed = true;\n        CancelAllPendingDeletes();",
+    "replace": "        _isDisposed = true;\n        CancelAllPendingDeletes();",
+    "filter": "Dispose_IsIdempotent"
   }
 ]

@@ -108,6 +108,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _startupErrorTitle = string.Empty;
     private string _startupErrorMessage = string.Empty;
     private bool _areBackgroundServicesStarted;
+    private bool _isDisposed;
 
     // Serialises embedding-worker start/stop transitions driven by the
     // EnableSemanticSearch setting; see ApplySemanticSearchWorkerState.
@@ -2286,6 +2287,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _isDisposed = true;
         CancelAllPendingDeletes();
         _clipboardMonitorService.Stop();
         _settingsService.SettingsChanged -= OnSettingsChanged;
@@ -6243,7 +6250,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     internal void StartBackgroundServices()
     {
-        if (_areBackgroundServicesStarted)
+        // Startup is a long chain of awaits - database init, prewarm, a settings
+        // load - and nothing cancels it when the user quits partway through. By
+        // the time it got here the window could already be closed, and this would
+        // then start the clipboard monitor, the OCR queue and the embedding
+        // worker that shutdown had just stopped, leaving them writing to the
+        // database as the process tears down.
+        if (_isDisposed || _areBackgroundServicesStarted)
         {
             return;
         }
