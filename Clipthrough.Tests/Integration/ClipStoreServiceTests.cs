@@ -2077,6 +2077,51 @@ public sealed class ClipStoreServiceTests
     }
 
     /// <summary>
+    /// Retention purging runs after every capture and, in the normal case, deletes
+    /// nothing at all - so what it costs when it finds nothing is what it costs.
+    /// Unindexed, both lifetime deletes scan the whole table: maintenance measured
+    /// 110ms per capture at 100k clips with nothing to purge, against 25ms once
+    /// this index existed.
+    ///
+    /// The plan is asserted against the production statement itself. A copy of the
+    /// SQL would keep passing after the predicate stopped matching the index - and
+    /// the failure mode is silent, since the delete still returns the right rows.
+    /// </summary>
+    [Fact]
+    public async Task RetentionPurge_IsServedFromItsOwnIndex()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        await SeedSortableClipsAsync(scope);
+
+        await using var connection = scope.ConnectionFactory.CreateConnection();
+        await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "EXPLAIN QUERY PLAN " + ClipStoreService.RetentionDeleteStatement;
+        command.Parameters.AddWithValue("$isSensitive", 0);
+        command.Parameters.AddWithValue("$cutoff", DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$keepUserKept", 1);
+
+        var text = new StringBuilder();
+        await using (var reader = await command.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync())
+            {
+                text.AppendLine(reader.GetString(3));
+            }
+        }
+
+        var plan = text.ToString();
+
+        // Naming the index is not enough. SQLite reports "SEARCH clips USING INDEX
+        // idx_clips_retention" as soon as the is_sensitive equality prefix is usable,
+        // even when the date range - the part that actually costs - still walks every
+        // row on that side of the index. Only the range term proves otherwise.
+        Assert.Contains("idx_clips_retention (is_sensitive=? AND last_copied_at<?)", plan, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Alphabetical keeps a TEMP B-TREE for the terms that break prefix ties, so
     /// it cannot join the theory above. It still has to be *served* from its own
     /// index: with that index missing SQLite grabs another pinned-prefixed one

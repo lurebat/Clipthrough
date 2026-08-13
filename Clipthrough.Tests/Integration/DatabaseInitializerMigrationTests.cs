@@ -70,12 +70,43 @@ public sealed class DatabaseInitializerMigrationTests
                      "idx_clips_paste_order",
                      "idx_clips_size_order",
                      "idx_clips_alpha_order_ci",
+                     "idx_clips_retention",
                  })
         {
             Assert.Equal(
                 index,
                 ScalarString(scope, $"SELECT name FROM sqlite_master WHERE type = 'index' AND name = '{index}';"));
         }
+    }
+
+    /// <summary>
+    /// Retention filters on a bare last_copied_at, not on the
+    /// COALESCE(last_copied_at, captured_at) the sort clauses use, because only
+    /// the bare form is index-usable. That equivalence rests entirely on this
+    /// migration backfilling the column - a database old enough to predate it has
+    /// nulls, "NULL < cutoff" is NULL, and an expired secret would then sit in the
+    /// history forever with nothing to show for it.
+    /// </summary>
+    [Fact]
+    public async Task InitializeAsync_DatabaseFromBeforeLastCopiedAt_StillExpiresItsClips()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await CreateLegacyDatabase(scope, "clip captured in 2020");
+
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        scope.SettingsService.SetCurrent(new Clipthrough.Models.AppSettings
+        {
+            EnableNormalClipLifetime = true,
+            NormalClipLifetimeDays = 1,
+            EnableSensitiveClipLifetime = false,
+            EnableMaxEntryCount = false,
+            EnableMaxLibrarySize = false,
+        });
+
+        var result = await scope.ClipStoreService.ApplyMaintenanceAsync();
+
+        Assert.Equal(0, result.TotalClipCount);
     }
 
     /// <summary>

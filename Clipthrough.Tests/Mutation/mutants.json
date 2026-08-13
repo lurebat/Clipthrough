@@ -1238,5 +1238,29 @@
     "find": "        var context = $\"{GetType().Name}.{name}\";",
     "replace": "        var context = GetType().Name;",
     "filter": "FullyQualifiedName~ViewModelCommandCoverageTests"
+  },
+  {
+    "id": "retention-index-is-never-created",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Drops the retention index from the DDL batch. The purge still deletes exactly the right rows, so nothing but the index set or the query plan notices - and the cost stays invisible until a user's library is large.",
+    "find": "        CREATE INDEX IF NOT EXISTS idx_clips_retention ON clips(\n            is_sensitive,\n            last_copied_at\n        );",
+    "replace": "        -- index removed",
+    "filter": "RetentionPurge_IsServedFromItsOwnIndex"
+  },
+  {
+    "id": "retention-purge-filters-on-the-coalesce-again",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Restores the COALESCE the sort clauses use. It looks more careful and returns identical rows, but last_copied_at is NOT NULL so SQLite stores the index over the bare column and will not match a COALESCE range term - the delete quietly goes back to walking every non-sensitive row.",
+    "find": "          AND last_copied_at < $cutoff",
+    "replace": "          AND COALESCE(last_copied_at, captured_at) < $cutoff",
+    "filter": "RetentionPurge_IsServedFromItsOwnIndex"
+  },
+  {
+    "id": "legacy-clips-keep-a-null-last-copied-at",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Skips the backfill that populates last_copied_at on databases predating the column. Retention filters on that column directly, and NULL < cutoff is NULL, so every clip from an older install - including expired secrets - would stop being purged.",
+    "find": "UPDATE clips SET last_copied_at = captured_at WHERE last_copied_at IS NULL OR TRIM(last_copied_at) = '';",
+    "replace": "SELECT 1;",
+    "filter": "InitializeAsync_DatabaseFromBeforeLastCopiedAt_StillExpiresItsClips"
   }
 ]

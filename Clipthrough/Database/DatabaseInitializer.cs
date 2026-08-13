@@ -193,6 +193,27 @@ public sealed class DatabaseInitializer
             substr(content, 1, 64) COLLATE NOCASE ASC,
             id ASC
         );
+
+        -- Retention purges, which run after every capture. Both lifetime deletes
+        -- filter on exactly this pair.
+        --
+        -- Deliberately NOT COALESCE(last_copied_at, captured_at), even though that
+        -- is how every sort clause spells the same idea. last_copied_at is NOT NULL
+        -- in this schema, so SQLite simplifies the COALESCE away and stores the
+        -- index over the bare column - but it does not apply the same simplification
+        -- to a WHERE-clause range term, so an index written with COALESCE ends up
+        -- serving only the is_sensitive equality and the date range still scans.
+        -- Spelling both sides as the bare column is the only form that matches in
+        -- both schema shapes (a legacy-migrated database declares the column
+        -- nullable, where the COALESCE would survive as a real expression index).
+        --
+        -- Without a usable range term each delete scans even when nothing has
+        -- expired, which is the normal case: maintenance measured 110ms per capture
+        -- at 100k clips with nothing to purge, and 25ms with this index.
+        CREATE INDEX IF NOT EXISTS idx_clips_retention ON clips(
+            is_sensitive,
+            last_copied_at
+        );
         """;
 
     /// <summary>

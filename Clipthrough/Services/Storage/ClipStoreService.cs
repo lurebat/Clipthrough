@@ -1949,15 +1949,30 @@ public sealed class ClipStoreService : IClipStoreService
     /// </summary>
     private const string UserKeptClipPredicate = "(is_favorite = 1 OR pinned_at IS NOT NULL)";
 
+    /// <summary>
+    /// The lifetime purge, as a single statement so a test can put it through
+    /// EXPLAIN QUERY PLAN verbatim rather than against a copy that can drift.
+    ///
+    /// It runs after every capture and almost always deletes nothing, so it has to
+    /// be servable from <c>idx_clips_retention</c>. Note the bare last_copied_at
+    /// where the sort clauses say COALESCE(last_copied_at, captured_at): the two
+    /// are equivalent because BackfillClipAggregationColumnsAsync fills every null
+    /// and every writer since sets the column, and only the bare form lets SQLite
+    /// use the index for the date range rather than just the is_sensitive prefix.
+    /// </summary>
+    internal static readonly string RetentionDeleteStatement = $"""
+        DELETE FROM clips
+        WHERE is_sensitive = $isSensitive
+          AND last_copied_at < $cutoff
+          AND ($keepUserKept = 0 OR NOT {UserKeptClipPredicate});
+        """;
+
     private static async Task<int> DeleteOlderThanAsync(SqliteConnection connection, SqliteTransaction transaction, bool isSensitive, DateTimeOffset cutoff, bool preserveUserKeptClips, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = $"""
-            DELETE FROM clips
-            WHERE is_sensitive = $isSensitive
-              AND COALESCE(last_copied_at, captured_at) < $cutoff
-              AND ($keepUserKept = 0 OR NOT {UserKeptClipPredicate});
+            {RetentionDeleteStatement}
             SELECT changes();
             """;
         command.Parameters.AddWithValue("$isSensitive", isSensitive ? 1 : 0);
