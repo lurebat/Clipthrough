@@ -6,6 +6,8 @@ using System.Reactive.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
+using Avalonia.Headless.XUnit;
+using Avalonia.Threading;
 using Clipthrough.Models;
 using Clipthrough.ViewModels;
 using ReactiveUI;
@@ -105,7 +107,17 @@ public class ViewModelCommandCoverageTests
             $"MainWindowViewModel should expose 40+ commands; discovery found {mainWindowCommands.Length}.");
     }
 
-    [Fact]
+    /// <summary>
+    /// These two run headless deliberately. ReactiveCommand publishes
+    /// <c>ThrownExceptions</c> on the scheduler captured at construction, which
+    /// once any Avalonia application exists is AvaloniaScheduler - it posts to
+    /// the dispatcher. As plain <c>[Fact]</c>s they had no dispatcher to pump, so
+    /// the report never arrived: whether they worked depended on running before
+    /// the first headless test in the assembly. One failed and the other passed
+    /// vacuously once isolation stopped tearing the application down between
+    /// tests. Running under a dispatcher and draining it makes both deterministic.
+    /// </summary>
+    [AvaloniaFact]
     public async Task AFailingItemCommand_IsReportedToTheInstalledSink()
     {
         var reported = new List<(string Context, Exception Error)>();
@@ -118,14 +130,24 @@ public class ViewModelCommandCoverageTests
         await Assert.ThrowsAsync<InvalidOperationException>(
             async () => await vm.DeleteCommand.Execute());
 
+        Dispatcher.UIThread.RunJobs();
+
         var entry = Assert.Single(reported);
         Assert.Equal("ClipItemViewModel.DeleteCommand", entry.Context);
         Assert.Equal("delete exploded", entry.Error.Message);
     }
 
-    [Fact]
+    /// <inheritdoc cref="AFailingItemCommand_IsReportedToTheInstalledSink"/>
+    [AvaloniaFact]
     public async Task DisposingTheSinkRegistration_StopsRoutingToIt()
     {
+        // An outer sink stays installed throughout. Without it this test would
+        // pass just as happily if command errors stopped being routed anywhere
+        // at all - which is exactly how it passed while the report was being
+        // posted to a dispatcher nothing pumped.
+        var outer = new List<string>();
+        using var _ = ViewModelBase.UseCommandErrorSink((context, _) => outer.Add(context));
+
         var reported = new List<string>();
         var registration = ViewModelBase.UseCommandErrorSink((context, _) => reported.Add(context));
         registration.Dispose();
@@ -137,7 +159,10 @@ public class ViewModelCommandCoverageTests
         await Assert.ThrowsAsync<InvalidOperationException>(
             async () => await vm.DeleteCommand.Execute());
 
+        Dispatcher.UIThread.RunJobs();
+
         Assert.Empty(reported);
+        Assert.Equal(new[] { "ClipItemViewModel.DeleteCommand" }, outer);
     }
 
     private static ClipEntry NewClip() => new()

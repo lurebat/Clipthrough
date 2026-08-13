@@ -950,5 +950,21 @@
     "filter": "SqliteErrorsTests",
     "find": "            : AppText.UnlockDatabaseUnreadable;",
     "replace": "            : AppText.UnlockIncorrectPassword;"
+  },
+  {
+    "id": "command-error-sink-is-not-called",
+    "file": "Clipthrough/ViewModels/ViewModelBase.cs",
+    "why": "A command failure must reach the installed sink. If it does not, a failing button is silent - no status bar, no log - which is the exact regression these tests exist to prevent.",
+    "find": "        sink(context, ex);",
+    "replace": "        _ = sink;",
+    "filter": "AFailingItemCommand_IsReportedToTheInstalledSink"
+  },
+  {
+    "id": "sink-registration-does-not-restore-the-previous-sink",
+    "file": "Clipthrough/ViewModels/ViewModelBase.cs",
+    "why": "Disposing a sink registration must hand reporting back to whoever was listening before, not switch it off. Otherwise a transient sink permanently silences the application.",
+    "find": "                s_commandErrorSink = previous;",
+    "replace": "                s_commandErrorSink = null;",
+    "filter": "DisposingTheSinkRegistration_StopsRoutingToIt"
   }
 ]
