@@ -70,11 +70,36 @@ function Restore-Files([object[]]$Saved) {
     }
 }
 
+function Get-FileHashHex([string]$Path) {
+    if (-not (Test-Path $Path)) { return '' }
+    return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash
+}
+
 # A previous run that was killed mid-mutation leaves production code broken on
 # disk. Recover before doing anything else, so it can never be committed.
+#
+# Only recover files that still hold the mutation, though. A stopped sweep is
+# normally cleaned up by hand with `git checkout -- .`, and the pending file
+# outlives that: restoring it blindly writes a pre-sweep snapshot over whatever
+# the file has become since, which silently reverted a commit made after the
+# sweep was abandoned. If the file has moved on, say so and leave it alone.
 if (Test-Path $PendingFile) {
-    Write-Warning "Found interrupted mutation run - restoring original sources."
-    Restore-Files ([object[]](Get-Content $PendingFile -Raw | ConvertFrom-Json))
+    $pending = [object[]](Get-Content $PendingFile -Raw | ConvertFrom-Json)
+    $stillMutated = @($pending | Where-Object {
+        # No recorded mutation means the run died before mutating, in which case
+        # the file is already original and restoring it changes nothing.
+        -not ($_.PSObject.Properties.Name -contains 'mutatedHash') `
+            -or $_.mutatedHash -eq (Get-FileHashHex $_.path)
+    })
+    $movedOn = @($pending | Where-Object { $stillMutated -notcontains $_ })
+
+    foreach ($m in $movedOn) {
+        Write-Warning "Interrupted run recorded $($m.path), but it no longer holds that mutation - leaving it as it is."
+    }
+    if ($stillMutated.Count -gt 0) {
+        Write-Warning "Found interrupted mutation run - restoring original sources."
+        Restore-Files $stillMutated
+    }
     Remove-Item $PendingFile -Force
 }
 
@@ -205,6 +230,12 @@ foreach ($mutant in $mutants) {
     try {
         Write-Utf8NoBom $target ($text.Replace($mutant.find, $mutant.replace))
         (Get-Item $target).LastWriteTime = Get-Date
+
+        # Now that the mutation is on disk, record what it looks like. A later
+        # recovery uses this to tell "still mutated, restore it" from "somebody
+        # already cleaned this up and has since moved on, keep your hands off".
+        $saved[0] | Add-Member -NotePropertyName mutatedHash -NotePropertyValue (Get-FileHashHex $target)
+        Write-Utf8NoBom $PendingFile ($saved | ConvertTo-Json -Depth 4 -AsArray)
 
         Write-Host "    mutated, running..." -NoNewline
         $r = Invoke-TestFilter $mutant.filter
