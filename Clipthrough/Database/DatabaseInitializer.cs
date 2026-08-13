@@ -248,8 +248,15 @@ public sealed class DatabaseInitializer
         await ExecuteNonQueryAsync(connection, "PRAGMA journal_mode = WAL;", cancellationToken);
         await ExecuteNonQueryAsync(connection, "PRAGMA busy_timeout = 5000;", cancellationToken);
 
-        await VerifyIntegrityAsync(connection, cancellationToken);
-        TraceStep(sw, "integrity-check");
+        // Only when something is about to rewrite pages. See
+        // HasPendingStructuralWorkAsync - the check costs a full read of the
+        // database file, and on an established database there is no migration for
+        // it to protect.
+        if (await HasPendingStructuralWorkAsync(connection, cancellationToken))
+        {
+            await VerifyIntegrityAsync(connection, cancellationToken);
+            TraceStep(sw, "integrity-check");
+        }
 
         await MigrateFtsSchemaIfNeededAsync(connection, cancellationToken);
         TraceStep(sw, "fts-schema-migrate");
@@ -858,13 +865,33 @@ public sealed class DatabaseInitializer
     /// </summary>
     private static async Task MigrateFtsSchemaIfNeededAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
-        // Check if the FTS table exists at all
+        if (!await FtsSchemaNeedsMigrationAsync(connection, cancellationToken))
+        {
+            return;
+        }
+
+        // Drop old triggers and FTS table so they're recreated with the new schema/tokenizer.
+        await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_ai;", cancellationToken);
+        await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_ad;", cancellationToken);
+        await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_au;", cancellationToken);
+        await ExecuteNonQueryAsync(connection, "DROP TABLE IF EXISTS clips_fts;", cancellationToken);
+    }
+
+    /// <summary>
+    /// The decision half of <see cref="MigrateFtsSchemaIfNeededAsync"/>, split out
+    /// because the integrity gate has to ask the same question before any of this
+    /// runs. Two callers, one answer: if they disagreed, the gate would wave through
+    /// a migration that then rewrites pages unchecked.
+    /// </summary>
+    private static async Task<bool> FtsSchemaNeedsMigrationAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        // Nothing to migrate if the FTS table isn't there; the Schema DDL creates it.
         await using var checkCommand = connection.CreateCommand();
         checkCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='clips_fts';";
         var exists = Convert.ToInt64(await checkCommand.ExecuteScalarAsync(cancellationToken)) > 0;
         if (!exists)
         {
-            return;
+            return false;
         }
 
         // Check column count by querying the FTS table's content definition
@@ -892,16 +919,39 @@ public sealed class DatabaseInitializer
 
         // The current schema has 5 content columns and uses the trigram tokenizer.
         // Older versions had 2 or 4 content columns, or used unicode61.
-        if (columnCount >= 5 && hasTrigramTokenizer)
+        return columnCount < 5 || !hasTrigramTokenizer;
+    }
+
+    /// <summary>
+    /// True when this launch is going to rewrite structure - an FTS rebuild, a
+    /// column migration, a backfill, a dedupe. That is the only thing the integrity
+    /// check protects, and it is not free: PRAGMA quick_check reads every page, so
+    /// on a 352MB library it costs ~800ms even with the file already in the OS
+    /// cache, which was 96% of the time this method spent on an established
+    /// database. Every launch paid it so that the launches which migrate would be
+    /// safe.
+    /// </summary>
+    private static async Task<bool> HasPendingStructuralWorkAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        // Read the version straight from sqlite_master's table rather than through
+        // ReadSchemaVersionAsync: this runs before the Schema DDL, so app_metadata
+        // may not exist yet. A database without it has never been stamped and is
+        // about to be migrated in full.
+        await using (var metadataCommand = connection.CreateCommand())
         {
-            return;
+            metadataCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='app_metadata';";
+            if (Convert.ToInt64(await metadataCommand.ExecuteScalarAsync(cancellationToken)) == 0)
+            {
+                return true;
+            }
         }
 
-        // Drop old triggers and FTS table so they're recreated with the new schema/tokenizer.
-        await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_ai;", cancellationToken);
-        await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_ad;", cancellationToken);
-        await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_au;", cancellationToken);
-        await ExecuteNonQueryAsync(connection, "DROP TABLE IF EXISTS clips_fts;", cancellationToken);
+        if (await ReadSchemaVersionAsync(connection, cancellationToken) < CurrentSchemaVersion)
+        {
+            return true;
+        }
+
+        return await FtsSchemaNeedsMigrationAsync(connection, cancellationToken);
     }
 
     private static async Task ExecuteNonQueryAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)
@@ -912,18 +962,22 @@ public sealed class DatabaseInitializer
     }
 
     /// <summary>
-    /// Runs <c>PRAGMA quick_check</c> immediately after the connection opens so we
-    /// detect a structurally corrupt database before any migration step starts
-    /// rewriting pages. <c>quick_check</c> is much faster than
-    /// <c>integrity_check</c> and skips per-row content scans, so the cold-start
-    /// cost is negligible on healthy databases. On a corrupt DB the migration
-    /// would otherwise fail mid-way and leave the file in an even worse state.
+    /// Runs <c>PRAGMA quick_check</c> before any migration step starts rewriting
+    /// pages, so a structurally corrupt file is reported rather than made worse
+    /// by a half-finished migration.
+    ///
+    /// It is not cheap and the cost is not about corruption: quick_check reads
+    /// every page, so it scales with the size of the library. Measured at ~800ms
+    /// on a 352MB database with the file already in the OS cache. That is why
+    /// callers gate it on <see cref="HasPendingStructuralWorkAsync"/> instead of
+    /// running it on every launch.
     /// </summary>
     private static async Task VerifyIntegrityAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
         var problems = new List<string>();
-        await using (var command = connection.CreateCommand())
+        try
         {
+            await using var command = connection.CreateCommand();
             command.CommandText = "PRAGMA quick_check(5);";
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
@@ -934,6 +988,13 @@ public sealed class DatabaseInitializer
                     problems.Add(row);
                 }
             }
+        }
+        catch (SqliteException ex)
+        {
+            // Damage bad enough to break the walk itself aborts the pragma instead
+            // of reporting rows, so without this the user gets a bare "SQLite Error
+            // 11" from the one check whose entire job is to say what to do about it.
+            problems.Add(ex.Message);
         }
 
         if (problems.Count == 0)
