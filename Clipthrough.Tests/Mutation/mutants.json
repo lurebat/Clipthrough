@@ -99,15 +99,15 @@
     "id": "retention-countcap-deletes-user-kept",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "DATA LOSS. The entry-count cap stops exempting pinned and favorited clips.",
-    "find": "WHERE NOT {UserKeptClipPredicate}\n                ORDER BY COALESCE(last_copied_at, captured_at) ASC, id ASC\n                LIMIT $limit",
+    "find": "WHERE NOT {UserKeptClipPredicate}\n                {OldestFirstEvictionOrder}\n                LIMIT $limit",
     "replace": "WHERE 1 = 1\n                ORDER BY COALESCE(last_copied_at, captured_at) ASC, id ASC\n                LIMIT $limit",
     "filter": "ClipRetentionTests"
   },
   {
     "id": "retention-sizecap-deletes-user-kept",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
-    "why": "DATA LOSS. The library size cap stops exempting pinned and favorited clips.",
-    "find": "WHERE NOT {UserKeptClipPredicate}\n                ORDER BY COALESCE(last_copied_at, captured_at) ASC, id ASC;",
+    "why": "The size sweep counts rows the delete will never touch, so it subtracts bytes no eviction can reclaim and stops early - leaving the library over its cap with evictable clips in it.",
+    "find": "WHERE NOT {UserKeptClipPredicate}\n                {OldestFirstEvictionOrder};",
     "replace": "WHERE 1 = 1\n                ORDER BY COALESCE(last_copied_at, captured_at) ASC, id ASC;",
     "filter": "ClipRetentionTests"
   },
@@ -1419,7 +1419,7 @@
     "id": "library-size-ignores-the-icons-it-stores",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "Counting only byte_size under-counted the library by 12.5x, so the size cap bounded nothing near its setting.",
-    "find": "    private const string StoredRowBytes = \"(byte_size + COALESCE(LENGTH(source_app_icon), 0))\";",
+    "find": "    private const string StoredRowBytes = \"stored_bytes\";",
     "replace": "    private const string StoredRowBytes = \"byte_size\";",
     "filter": "FullyQualifiedName~ClipRetentionTests"
   },
@@ -1498,10 +1498,10 @@
   {
     "id": "schema-version-not-bumped-for-index-change",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
-    "why": "The migration gate skips every Ensure* helper when the stored version already matches, so an index change that does not bump the version never reaches an installed database.",
-    "find": "    private const int CurrentSchemaVersion = 7;",
-    "replace": "    private const int CurrentSchemaVersion = 6;",
-    "filter": "FullyQualifiedName~EmbeddingClaimIndexTests"
+    "why": "The migration gate skips every Ensure* helper when the stored version already matches, so a schema change that does not bump the version never reaches an installed database.",
+    "find": "    private const int CurrentSchemaVersion = 8;",
+    "replace": "    private const int CurrentSchemaVersion = 7;",
+    "filter": "FullyQualifiedName~ClipStoredBytesTests"
   },
   {
     "id": "stored-bytes-trigger-ignores-the-late-icon",

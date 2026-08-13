@@ -142,6 +142,51 @@ public sealed class ClipRetentionTests
     }
 
     /// <summary>
+    /// The size sweep decides *how many* clips to evict by walking rows and
+    /// subtracting until the library fits, then hands that count to the delete -
+    /// which drops the oldest non-kept clips. Both halves have to agree on which
+    /// rows are evictable. If the walk counts pinned and favorited rows that the
+    /// delete will never touch, it subtracts bytes no eviction can reclaim and
+    /// stops early, leaving the library over its cap with evictable clips still
+    /// in it.
+    ///
+    /// It only shows when a kept clip is large enough to carry the total past the
+    /// cap on its own: with equal sizes the walk exhausts the non-kept rows either
+    /// way and the miscount is invisible. Hence one 10MB pinned clip against two
+    /// small ordinary ones - counting the pinned row satisfies the cap after a
+    /// single subtraction, so only one of the two gets evicted.
+    /// </summary>
+    [Fact]
+    public async Task Maintenance_LibrarySizeCap_CountsOnlyTheClipsItCanActuallyEvict()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings
+        {
+            MaxClipSizeBytes = 4096,
+            EnableMaxLibrarySize = true,
+            MaxLibrarySizeMegabytes = 1,
+        });
+
+        var pinned = await CaptureAsync(scope, "pinned whale");
+        var older = await CaptureAsync(scope, "older ordinary");
+        var newer = await CaptureAsync(scope, "newer ordinary");
+
+        await scope.ClipStoreService.SetPinnedAsync(pinned.Id, true);
+
+        Execute(scope, $"UPDATE clips SET byte_size = 400000 WHERE id IN ({older.Id}, {newer.Id});");
+        Execute(scope, $"UPDATE clips SET byte_size = 10000000 WHERE id = {pinned.Id};");
+
+        await scope.ClipStoreService.ApplyMaintenanceAsync();
+
+        // The pinned clip alone exceeds the cap, so the library cannot get under
+        // it - but every clip that *could* have been evicted still has to go.
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(pinned.Id));
+        Assert.Null(await scope.ClipStoreService.GetByIdAsync(older.Id));
+        Assert.Null(await scope.ClipStoreService.GetByIdAsync(newer.Id));
+    }
+
+    /// <summary>
     /// The deliberate exception. A pinned secret still expires — pinning must not
     /// become a way to opt out of the sensitive-clip timer.
     /// </summary>
