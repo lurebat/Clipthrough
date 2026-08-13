@@ -1392,6 +1392,7 @@ public sealed class ClipStoreServiceTests
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 DROP INDEX IF EXISTS idx_clips_embedding_status;
+                DROP INDEX IF EXISTS idx_clips_embedding_backlog;
                 DROP TABLE IF EXISTS clip_embeddings;
                 ALTER TABLE clips DROP COLUMN embedding_status;
                 DELETE FROM app_metadata WHERE key = 'schema_version';

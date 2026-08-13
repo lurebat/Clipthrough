@@ -1478,5 +1478,29 @@
     "find": "        using var bitmap = await clipboardData.TryGetBitmapAsync();",
     "replace": "        var bitmap = await clipboardData.TryGetBitmapAsync();",
     "filter": "FullyQualifiedName~ClipboardBitmapDisposalTests"
+  },
+  {
+    "id": "embedding-backlog-index-is-partial",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "A partial IS NOT NULL index cannot serve the claim query's 'embedding_status IS NULL' term, so every claim degrades to a full table scan.",
+    "find": "            \"CREATE INDEX IF NOT EXISTS idx_clips_embedding_backlog ON clips(embedding_status);\",",
+    "replace": "            \"CREATE INDEX IF NOT EXISTS idx_clips_embedding_backlog ON clips(embedding_status) WHERE embedding_status IS NOT NULL;\",",
+    "filter": "FullyQualifiedName~EmbeddingClaimIndexTests"
+  },
+  {
+    "id": "old-embedding-index-is-left-behind",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Upgraded databases would keep the superseded partial index, paying to maintain an index no query can use.",
+    "find": "        await ExecuteNonQueryAsync(connection, \"DROP INDEX IF EXISTS idx_clips_embedding_status;\", cancellationToken);\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~EmbeddingClaimIndexTests"
+  },
+  {
+    "id": "schema-version-not-bumped-for-index-change",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "The migration gate skips every Ensure* helper when the stored version already matches, so an index change that does not bump the version never reaches an installed database.",
+    "find": "    private const int CurrentSchemaVersion = 7;",
+    "replace": "    private const int CurrentSchemaVersion = 6;",
+    "filter": "FullyQualifiedName~EmbeddingClaimIndexTests"
   }
 ]

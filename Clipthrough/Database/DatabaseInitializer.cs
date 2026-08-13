@@ -226,7 +226,7 @@ public sealed class DatabaseInitializer
     /// no-ops on a current database but still pay several SQLite round trips
     /// each, which adds up to ~800ms on a cold OS file cache).
     /// </summary>
-    private const int CurrentSchemaVersion = 6;
+    private const int CurrentSchemaVersion = 7;
 
     private readonly SqliteConnectionFactory _connectionFactory;
     private readonly ISensitivityService _sensitivityService;
@@ -667,9 +667,19 @@ public sealed class DatabaseInitializer
             );
             """, cancellationToken);
 
+        // Deliberately NOT partial. The embedding claim query looks for the backlog,
+        // which includes 'embedding_status IS NULL', and a "WHERE embedding_status IS
+        // NOT NULL" index can never serve that term - so the claim fell back to a full
+        // table scan. Measured at 60k rows: 124 ms per claim with *zero* work to do,
+        // and the claim runs on every capture (the worker is poked per clip) plus
+        // every 30 s idle tick. Indexing every row instead lets SQLite use a
+        // MULTI-INDEX OR over the backlog values: 0.17 ms, same rows returned.
+        // Partial indexes mirroring the disjunction were tried and are never chosen -
+        // SQLite's implication test cannot prove an OR-shaped predicate.
+        await ExecuteNonQueryAsync(connection, "DROP INDEX IF EXISTS idx_clips_embedding_status;", cancellationToken);
         await ExecuteNonQueryAsync(
             connection,
-            "CREATE INDEX IF NOT EXISTS idx_clips_embedding_status ON clips(embedding_status) WHERE embedding_status IS NOT NULL;",
+            "CREATE INDEX IF NOT EXISTS idx_clips_embedding_backlog ON clips(embedding_status);",
             cancellationToken);
 
         // Stale reclaim: any clip marked 'processing' from a prior crashed run goes back to 'pending'.
