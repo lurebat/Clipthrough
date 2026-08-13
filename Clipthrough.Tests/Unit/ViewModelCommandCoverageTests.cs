@@ -290,6 +290,47 @@ public class ViewModelCommandCoverageTests
         Assert.Single(built);
     }
 
+    /// <summary>
+    /// ObserveCommandErrors is what all 60-odd application commands outside the
+    /// clip row still use, but nothing here drives it directly: the two sink tests
+    /// above reach it only through whichever view model happens to call it, and
+    /// that used to be ClipItemViewModel. When the row moved to
+    /// TrackCommandErrors, coverage of the eager path went with it, and a build
+    /// with the report deliberately removed from ObserveCommandErrors passed the
+    /// whole class. Drive it through a view model that exists for that purpose so
+    /// it cannot be orphaned again.
+    /// </summary>
+    [AvaloniaFact]
+    public void AFailingCommandOnAnEagerlyWiredViewModel_IsReportedToTheInstalledSink()
+    {
+        var reported = new List<(string Context, Exception Error)>();
+        using var _ = ViewModelBase.UseCommandErrorSink((context, ex) => reported.Add((context, ex)));
+
+        using var vm = new EagerlyWiredViewModel();
+        ((ICommand)vm.ExplodeCommand).Execute(null);
+        Dispatcher.UIThread.RunJobs();
+
+        var entry = Assert.Single(reported);
+        Assert.Equal("EagerlyWiredViewModel.ExplodeCommand", entry.Context);
+        Assert.Equal("eager exploded", entry.Error.Message);
+    }
+
+    private sealed class EagerlyWiredViewModel : ViewModelBase, IDisposable
+    {
+        private readonly IDisposable _commandErrors;
+
+        public EagerlyWiredViewModel()
+        {
+            ExplodeCommand = ReactiveCommand.CreateFromTask(
+                () => Task.FromException(new InvalidOperationException("eager exploded")));
+            _commandErrors = ObserveCommandErrors();
+        }
+
+        public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> ExplodeCommand { get; }
+
+        public void Dispose() => _commandErrors.Dispose();
+    }
+
     private static ClipEntry NewClip() => new()
     {
         Id = 7,
