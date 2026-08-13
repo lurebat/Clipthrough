@@ -1550,5 +1550,37 @@
     "find": "    private const string StoredRowBytes = \"stored_bytes\";",
     "replace": "    private const string StoredRowBytes = \"(byte_size + COALESCE(LENGTH(source_app_icon), 0))\";",
     "filter": "FullyQualifiedName~ClipStoredBytesTests"
+  },
+  {
+    "id": "broad-search-does-not-force-the-ordered-index",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Without INDEXED BY SQLite reverts to sorting every match, which is the 940ms plan the CTE exists to avoid.",
+    "find": "            (true, true) => $\"FROM clips c INDEXED BY {OrderCoveringIndex(filters.SortOption)} JOIN matches ON matches.rid = c.id\",",
+    "replace": "            (true, true) => \"FROM clips c JOIN matches ON matches.rid = c.id\",",
+    "filter": "FullyQualifiedName~SearchPlanTests"
+  },
+  {
+    "id": "broad-search-never-engages",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "If the broad-search probe always says no, every common-substring search silently keeps the slow sorting plan.",
+    "find": "        var matched = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);\n        return matched >= BroadSearchMatchThreshold;",
+    "replace": "        var matched = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);\n        return matched >= int.MaxValue;",
+    "filter": "FullyQualifiedName~SearchPlanTests"
+  },
+  {
+    "id": "broad-search-repeats-the-match-in-where",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "The MATCH moved into the CTE; repeating it in the WHERE references a table the fast shape no longer joins.",
+    "find": "        var whereClauses = BuildWhereClauses(filters, hasSearch && !useOrderedIndexPlan);",
+    "replace": "        var whereClauses = BuildWhereClauses(filters, hasSearch);",
+    "filter": "FullyQualifiedName~SearchPlanTests"
+  },
+  {
+    "id": "broad-search-treats-every-search-as-broad",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "A term matching a handful of clips would then scan the entire ordered index - 20ms instead of 0.7ms, growing with the library.",
+    "find": "        return matched >= BroadSearchMatchThreshold;",
+    "replace": "        return matched >= 0;",
+    "filter": "FullyQualifiedName~SearchPlanTests"
   }
 ]

@@ -388,27 +388,16 @@ public sealed class ClipStoreService : IClipStoreService
             return await SearchInMemoryAsync(connection, filters, cancellationToken);
         }
 
-        var fromClause = hasSearch
-            ? "FROM clips c JOIN clips_fts ON clips_fts.rowid = c.id"
-            : "FROM clips c";
-        var whereClauses = BuildWhereClauses(filters, hasSearch);
-        var whereClause = whereClauses.Count > 0 ? $"WHERE {string.Join(" AND ", whereClauses)}" : string.Empty;
-        var orderClause = hasSearch && filters.SortOption == ClipSortOption.BestMatching
-            ? $"ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, bm25(clips_fts), COALESCE(c.last_copied_at, c.captured_at) DESC, c.id DESC"
-            : BuildOrderClause(filters.SortOption);
+        var orderIndex = hasSearch ? OrderCoveringIndex(filters.SortOption) : null;
+        var useOrderedIndexPlan = orderIndex is not null
+            && await IsBroadSearchAsync(connection, filters, cancellationToken);
 
         var items = new List<ClipEntry>(filters.Limit);
 
         // Fetch Limit+1 rows so we can detect "there are more" without a separate COUNT query. (U15)
         await using (var queryCommand = connection.CreateCommand())
         {
-            queryCommand.CommandText = $"""
-                SELECT {ClipListSelectColumns}
-                {fromClause}
-                {whereClause}
-                {orderClause}
-                LIMIT $limit OFFSET $offset;
-                """;
+            queryCommand.CommandText = BuildSearchSql(filters, hasSearch, useOrderedIndexPlan);
             // Pass Limit+1 so we can detect whether more results exist.
             AddSearchParametersWithOvercount(queryCommand, filters, hasSearch);
 
@@ -1541,6 +1530,107 @@ public sealed class ClipStoreService : IClipStoreService
 
         return [.. tokens.Select(token => new Regex($@"\b{Regex.Escape(token)}\b", options))];
     }
+
+    /// <summary>
+    /// Composes the paged search query. Internal rather than private so the plan
+    /// tests can EXPLAIN the query the service really runs instead of a copy that
+    /// could drift out of sync.
+    /// </summary>
+    /// <param name="useOrderedIndexPlan">
+    /// When true, the FTS matches become a materialised CTE and the sort's own index
+    /// drives the scan, so a broad search never fetches a row it will not return.
+    /// </param>
+    internal static string BuildSearchSql(ClipSearchFilters filters, bool hasSearch, bool useOrderedIndexPlan)
+    {
+        var withClause = useOrderedIndexPlan
+            ? "WITH matches(rid) AS MATERIALIZED (SELECT rowid FROM clips_fts WHERE clips_fts MATCH $search)"
+            : string.Empty;
+
+        var fromClause = (hasSearch, useOrderedIndexPlan) switch
+        {
+            // INDEXED BY is a requirement here, not a hint: without it SQLite still
+            // chooses to sort the matches, which is the plan this exists to avoid.
+            (true, true) => $"FROM clips c INDEXED BY {OrderCoveringIndex(filters.SortOption)} JOIN matches ON matches.rid = c.id",
+            (true, false) => "FROM clips c JOIN clips_fts ON clips_fts.rowid = c.id",
+            _ => "FROM clips c",
+        };
+
+        // The MATCH moved into the CTE, so it must not also be repeated in the WHERE.
+        var whereClauses = BuildWhereClauses(filters, hasSearch && !useOrderedIndexPlan);
+        var whereClause = whereClauses.Count > 0 ? $"WHERE {string.Join(" AND ", whereClauses)}" : string.Empty;
+        var orderClause = hasSearch && filters.SortOption == ClipSortOption.BestMatching
+            ? "ORDER BY (c.pinned_at IS NULL), c.pinned_at DESC, bm25(clips_fts), COALESCE(c.last_copied_at, c.captured_at) DESC, c.id DESC"
+            : BuildOrderClause(filters.SortOption);
+
+        return $"""
+            {withClause}
+            SELECT {ClipListSelectColumns}
+            {fromClause}
+            {whereClause}
+            {orderClause}
+            LIMIT $limit OFFSET $offset;
+            """;
+    }
+
+    /// <summary>
+    /// The index that fully satisfies each sort's ORDER BY, or null when no single
+    /// index does. Used to force the ordered-index plan for a broad search; see
+    /// <see cref="IsBroadSearchAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// Alphabetical and BestMatching are deliberately absent. Alphabetical's clause
+    /// ends in a full-content tiebreak the index cannot store, and BestMatching orders
+    /// by bm25(), which only exists inside the FTS join.
+    /// </remarks>
+    internal static string? OrderCoveringIndex(ClipSortOption sortOption) => sortOption switch
+    {
+        ClipSortOption.MostRecent => "idx_clips_default_order",
+        ClipSortOption.OldestFirst => "idx_clips_oldest_order",
+        ClipSortOption.MostPasted => "idx_clips_paste_order",
+        ClipSortOption.LargestFirst => "idx_clips_size_order",
+        _ => null,
+    };
+
+    /// <summary>
+    /// A search whose matches are a large share of the library is far cheaper to
+    /// answer by walking the ordered index and testing membership than by sorting
+    /// every match. Deciding which is which needs only to know whether the match
+    /// count is "big", so this counts with a LIMIT and never scans past it.
+    /// </summary>
+    /// <remarks>
+    /// Both shapes return identical rows; only cost differs, and it differs a lot.
+    /// Measured at 60k clips with a trigram term matching every clip: 940 ms sorting
+    /// the matches against 63 ms walking the index. The reverse holds for a term
+    /// matching almost nothing - 0.7 ms against 20 ms - because walking the index
+    /// then reads all of it. Hence the threshold rather than one shape for both.
+    ///
+    /// The probe itself reads only the FTS doclist, never a clips row, and stops at
+    /// the threshold, so it costs a fraction of a millisecond either way.
+    /// </remarks>
+    internal static async Task<bool> IsBroadSearchAsync(
+        SqliteConnection connection,
+        ClipSearchFilters filters,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT COUNT(*) FROM (
+                SELECT rowid FROM clips_fts WHERE clips_fts MATCH $search LIMIT {BroadSearchMatchThreshold}
+            );
+            """;
+        command.Parameters.AddWithValue("$search", BuildFtsExpression(filters.SearchText, filters.UseFuzzy));
+        var matched = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+        return matched >= BroadSearchMatchThreshold;
+    }
+
+    /// <summary>
+    /// Above this many matches, walking the ordered index beats sorting the matches.
+    /// The crossover is where the two per-row costs meet: an index-only membership
+    /// probe is ~0.3 us against ~15 us to fetch a clips row (they carry content and
+    /// the source-app icon inline) and sort it, so a few thousand matches is the
+    /// point at which sorting them all costs more than reading the whole index.
+    /// </summary>
+    private const int BroadSearchMatchThreshold = 2000;
 
     /// <summary>
     /// Builds the SQL WHERE clauses for a filter set. The structural subset
