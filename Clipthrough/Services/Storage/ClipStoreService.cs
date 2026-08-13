@@ -898,7 +898,43 @@ public sealed class ClipStoreService : IClipStoreService
 
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
-        using var transaction = connection.BeginTransaction();
+
+        // Immediate, and it has to stay that way now that the scan reads first.
+        // A deferred transaction would take only a read snapshot until the first
+        // write below, and SQLite refuses to upgrade a stale snapshot: if any other
+        // connection commits during the scan, the upgrade fails with 'database is
+        // locked' and no amount of busy_timeout retries it. One capture landing
+        // mid-scan would abort the entire rebuild. Immediate blocks that capture
+        // for the duration instead, which is what the old write-first ordering
+        // gave for free. (Immediate is already the default here - it is spelled
+        // out because the reordering depends on it.)
+        using var transaction = connection.BeginTransaction(deferred: false);
+
+        // Scan first, and stream it. Buffering every clip's text to scan it after
+        // the reset put the whole library in memory at once - 200MB of strings for
+        // a 50k-clip library, and it grows with the library until it doesn't fit.
+        // Only the clips that actually matched are worth keeping, and there are
+        // few of those. Scanning before the reset is safe because the scan reads
+        // content, which the reset does not touch.
+        //
+        // Scan the same text every other sensitivity path scans. Reading only
+        // `content` skipped image clips entirely, so a rebuild dropped the
+        // sensitivity that OCR had derived from their recognised text.
+        var matched = new List<(long Id, IReadOnlyList<SensitivityMatch> Matches)>();
+        await using (var clipsCommand = connection.CreateCommand())
+        {
+            clipsCommand.Transaction = transaction;
+            clipsCommand.CommandText = $"SELECT id, ({EmbeddingTextExpression}) AS stext FROM clips;";
+            await using var reader = await clipsCommand.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var matches = _sensitivityService.Scan(reader.IsDBNull(1) ? null : reader.GetString(1));
+                if (matches.Count > 0)
+                {
+                    matched.Add((reader.GetInt64(0), matches));
+                }
+            }
+        }
 
         // Sensitivity the rules did not derive must survive a rule change. A clip
         // the user marked by hand carries sensitivity_is_manual, so the blanket
@@ -920,38 +956,18 @@ public sealed class ClipStoreService : IClipStoreService
             await resetSensitiveCommand.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        var clips = new List<(long Id, string Content)>();
-        await using (var clipsCommand = connection.CreateCommand())
+        await using (var updateCommand = connection.CreateCommand())
         {
-            clipsCommand.Transaction = transaction;
-            // Scan the same text every other sensitivity path scans. Reading only
-            // `content` skipped image clips entirely, so a rebuild dropped the
-            // sensitivity that OCR had derived from their recognised text.
-            clipsCommand.CommandText = $"SELECT id, ({EmbeddingTextExpression}) AS stext FROM clips;";
-            await using var reader = await clipsCommand.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                clips.Add((reader.GetInt64(0), reader.IsDBNull(1) ? string.Empty : reader.GetString(1)));
-            }
-        }
+            updateCommand.Transaction = transaction;
+            updateCommand.CommandText = "UPDATE clips SET is_sensitive = 1 WHERE id = $id;";
+            var updateId = updateCommand.Parameters.Add("$id", SqliteType.Integer);
 
-        foreach (var clip in clips)
-        {
-            var matches = _sensitivityService.Scan(clip.Content);
-            if (matches.Count == 0)
+            foreach (var (clipId, matches) in matched)
             {
-                continue;
-            }
-
-            await using (var updateCommand = connection.CreateCommand())
-            {
-                updateCommand.Transaction = transaction;
-                updateCommand.CommandText = "UPDATE clips SET is_sensitive = 1 WHERE id = $id;";
-                updateCommand.Parameters.AddWithValue("$id", clip.Id);
+                updateId.Value = clipId;
                 await updateCommand.ExecuteNonQueryAsync(cancellationToken);
+                await AddSensitivityMatchesAsync(connection, transaction, clipId, matches, cancellationToken);
             }
-
-            await AddSensitivityMatchesAsync(connection, transaction, clip.Id, matches, cancellationToken);
         }
 
         // Reconcile embedding state with the sensitivity verdicts we just rewrote.

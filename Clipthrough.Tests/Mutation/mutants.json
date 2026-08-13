@@ -1302,5 +1302,21 @@
     "find": "            while (totalStoredBytes > maxBytes && await reader.ReadAsync(cancellationToken))",
     "replace": "            while (await reader.ReadAsync(cancellationToken))",
     "filter": "ClipRetentionTests"
+  },
+  {
+    "id": "sensitivity-rebuild-buffers-the-library",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Reads every clip's text into a list before scanning any of it, so the peak cost is the whole library as .NET strings.",
+    "find": "        var matched = new List<(long Id, IReadOnlyList<SensitivityMatch> Matches)>();\n        await using (var clipsCommand = connection.CreateCommand())\n        {\n            clipsCommand.Transaction = transaction;\n            clipsCommand.CommandText = $\"SELECT id, ({EmbeddingTextExpression}) AS stext FROM clips;\";\n            await using var reader = await clipsCommand.ExecuteReaderAsync(cancellationToken);\n            while (await reader.ReadAsync(cancellationToken))\n            {\n                var matches = _sensitivityService.Scan(reader.IsDBNull(1) ? null : reader.GetString(1));\n                if (matches.Count > 0)\n                {\n                    matched.Add((reader.GetInt64(0), matches));\n                }\n            }\n        }",
+    "replace": "        var clips = new List<(long Id, string Content)>();\n        await using (var clipsCommand = connection.CreateCommand())\n        {\n            clipsCommand.Transaction = transaction;\n            clipsCommand.CommandText = $\"SELECT id, ({EmbeddingTextExpression}) AS stext FROM clips;\";\n            await using var reader = await clipsCommand.ExecuteReaderAsync(cancellationToken);\n            while (await reader.ReadAsync(cancellationToken))\n            {\n                clips.Add((reader.GetInt64(0), reader.IsDBNull(1) ? string.Empty : reader.GetString(1)));\n            }\n        }\n\n        var matched = new List<(long Id, IReadOnlyList<SensitivityMatch> Matches)>();\n        foreach (var clip in clips)\n        {\n            var matches = _sensitivityService.Scan(clip.Content);\n            if (matches.Count > 0)\n            {\n                matched.Add((clip.Id, matches));\n            }\n        }",
+    "filter": "SensitivityRebuildTests"
+  },
+  {
+    "id": "sensitivity-rebuild-defers-its-write-lock",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Lets the rebuild scan under a read snapshot and only take the write lock afterwards. SQLite will not upgrade a snapshot another connection has written past, so one capture landing mid-scan aborts the rebuild with 'database is locked'.",
+    "find": "        using var transaction = connection.BeginTransaction(deferred: false);",
+    "replace": "        using var transaction = connection.BeginTransaction(deferred: true);",
+    "filter": "SensitivityRebuildTests"
   }
 ]
