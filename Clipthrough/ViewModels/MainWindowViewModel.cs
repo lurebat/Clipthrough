@@ -6279,7 +6279,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _ = RefreshSemanticCoverageAsync();
         _ = RefreshOcrCoverageAsync();
         _subscriptions.Add(_backgroundOcrQueue.QueueChanged
-            .Throttle(TimeSpan.FromMilliseconds(150), RxSchedulers.TaskpoolScheduler)
+            .RateLimit(TimeSpan.FromMilliseconds(150), RxSchedulers.TaskpoolScheduler)
             .ObserveOn(RxSchedulers.MainThreadScheduler)
             .Subscribe(__ =>
             {
@@ -6290,8 +6290,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _subscriptions.Add(_embeddingWorker.BatchCompleted
                 // Coalesce coverage refreshes: a large backlog fires BatchCompleted
                 // every batch (~32 clips) and each refresh runs a full-table
-                // aggregate. Throttle so the scan runs at most ~twice a second.
-                .Throttle(TimeSpan.FromMilliseconds(500), RxSchedulers.MainThreadScheduler)
+                // aggregate. Rate-limit so the scan runs at most ~twice a second.
+                // Not Throttle: that is a debounce, so a backlog whose batches land
+                // faster than the window would report no progress at all until it
+                // had already finished.
+                .RateLimit(TimeSpan.FromMilliseconds(500), RxSchedulers.MainThreadScheduler)
                 .Subscribe((int count) => { _ = RefreshSemanticCoverageAsync(); }));
         }
     }

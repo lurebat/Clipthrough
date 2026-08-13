@@ -1318,5 +1318,29 @@
     "find": "        using var transaction = connection.BeginTransaction(deferred: false);",
     "replace": "        using var transaction = connection.BeginTransaction(deferred: true);",
     "filter": "SensitivityRebuildTests"
+  },
+  {
+    "id": "progress-rate-limit-is-a-debounce",
+    "file": "Clipthrough/Presentation/ProgressStreams.cs",
+    "why": "Turns the progress rate limiter back into a debounce, so a source that keeps firing - a draining backlog - reports nothing until it has already finished.",
+    "find": "        => source.Sample(interval, scheduler);",
+    "replace": "        => source.Throttle(interval, scheduler);",
+    "filter": "ProgressStreamsTests"
+  },
+  {
+    "id": "ocr-coverage-goes-back-to-debouncing",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "OCR coverage stops updating while the queue is being filled, which is the only time the number moves.",
+    "find": "            .RateLimit(TimeSpan.FromMilliseconds(150), RxSchedulers.TaskpoolScheduler)",
+    "replace": "            .Throttle(TimeSpan.FromMilliseconds(150), RxSchedulers.TaskpoolScheduler)",
+    "filter": "ProgressStreamWiringTests"
+  },
+  {
+    "id": "embedding-coverage-goes-back-to-debouncing",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Semantic coverage stops updating while the embedding backlog drains, which is the only time the number moves.",
+    "find": "                .RateLimit(TimeSpan.FromMilliseconds(500), RxSchedulers.MainThreadScheduler)",
+    "replace": "                .Throttle(TimeSpan.FromMilliseconds(500), RxSchedulers.MainThreadScheduler)",
+    "filter": "ProgressStreamWiringTests"
   }
 ]

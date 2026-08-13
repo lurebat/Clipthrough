@@ -55,7 +55,7 @@ public class ViewModelCommandCoverageTests
         Assert.NotNull(track);
 
         var offenders = ViewModelsExposingCommands()
-            .Where(t => !CallsMethod(t, observe!) && !CallsMethod(t, track!))
+            .Where(t => !IlCallScanner.CallsMethod(t, observe!) && !IlCallScanner.CallsMethod(t, track!))
             .Select(t => t.Name)
             .ToArray();
 
@@ -343,75 +343,4 @@ public class ViewModelCommandCoverageTests
         LastCopiedAt = DateTimeOffset.UtcNow,
         FirstCopiedAt = DateTimeOffset.UtcNow,
     };
-
-    /// <summary>
-    /// Scans <paramref name="owner"/>'s own constructors and methods for a call to
-    /// <paramref name="target"/>.
-    ///
-    /// The token in the IL is compared by resolving it rather than by matching bytes:
-    /// a call to a generic method carries a MethodSpec token for the constructed
-    /// instantiation, not the MethodDef token of the definition, so a byte search for
-    /// the definition's token silently never matches one.
-    /// </summary>
-    private static bool CallsMethod(Type owner, MethodInfo target)
-    {
-        const BindingFlags All = BindingFlags.Instance | BindingFlags.Static
-            | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
-
-        var module = owner.Module;
-        var typeArguments = owner.IsGenericType ? owner.GetGenericArguments() : null;
-
-        var bodies = owner.GetConstructors(All).Cast<MethodBase>()
-            .Concat(owner.GetMethods(All));
-
-        foreach (var body in bodies)
-        {
-            var il = body.GetMethodBody()?.GetILAsByteArray();
-            if (il is null)
-            {
-                continue;
-            }
-
-            var methodArguments = body.IsGenericMethodDefinition ? body.GetGenericArguments() : null;
-
-            for (var i = 0; i + 4 < il.Length; i++)
-            {
-                if (il[i] is not (0x28 or 0x6F))
-                {
-                    continue;
-                }
-
-                var token = BitConverter.ToInt32(il, i + 1);
-
-                // The scan is not opcode-length aware, so most candidates here are
-                // operand bytes that only look like a call. Those fail to resolve.
-                MethodBase? called;
-                try
-                {
-                    called = module.ResolveMethod(token, typeArguments, methodArguments);
-                }
-                catch (Exception)
-                {
-                    continue;
-                }
-
-                if (called is null)
-                {
-                    continue;
-                }
-
-                if (called is MethodInfo info && info.IsGenericMethod && !info.IsGenericMethodDefinition)
-                {
-                    called = info.GetGenericMethodDefinition();
-                }
-
-                if (called.MetadataToken == target.MetadataToken && called.Module == target.Module)
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
 }
