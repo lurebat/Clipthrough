@@ -106,9 +106,10 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         Clip = clip;
         _contentHydrator = contentHydrator;
         _sourceAppIconLoader = sourceAppIconLoader;
-        _title = ClipDisplayFormatter.BuildTitle(clip);
-        _previewSnippet = ClipDisplayFormatter.BuildPreviewSnippet(clip);
-        _singleLinePreview = ClipDisplayFormatter.BuildSingleLinePreview(clip);
+        var display = ClipDisplayFormatter.BuildDisplayStrings(clip);
+        _title = display.Title;
+        _previewSnippet = display.PreviewSnippet;
+        _singleLinePreview = display.SingleLinePreview;
         _metaLine = BuildMetaLine();
         _metaSegments = BuildMetaSegments();
         CopyCommand = ReactiveCommand.CreateFromTask(

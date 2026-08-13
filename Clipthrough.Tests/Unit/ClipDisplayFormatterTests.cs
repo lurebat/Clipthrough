@@ -58,6 +58,57 @@ public sealed class ClipDisplayFormatterTests
         }
     }
 
+    /// <summary>
+    /// A list row needs a title, a preview snippet and a single-line preview, and each of
+    /// the three used to resolve the clip's display text independently. For a rich-text
+    /// clip that means the full HTML/RTF strip - four regex passes over the whole content -
+    /// ran three times per clip, synchronously in the row's constructor, for every row of
+    /// every list build. BuildDisplayStrings resolves it once.
+    ///
+    /// Allocation is the observable: the render allocates an intermediate string per regex
+    /// pass, so doing it three times is ~3x the garbage. Wall-clock would flake, and the
+    /// strings themselves are identical either way, so no result assertion can see it.
+    /// </summary>
+    [Fact]
+    public void BuildDisplayStrings_RendersRichTextOnceNotPerString()
+    {
+        var builder = new StringBuilder("<html><body>");
+        for (var i = 0; i < 2_000; i++)
+        {
+            builder.Append("<DIV>paragraph ").Append(i).Append(" with <B>bold</B> and <I>italic</I> runs</DIV>");
+        }
+
+        var markup = builder.Append("</body></html>").ToString();
+        var clip = new ClipEntry
+        {
+            Id = 1,
+            Content = markup,
+            ContentType = ContentType.RichText,
+            ContentFormat = ClipContentFormat.Html,
+            Hash = "hash",
+        };
+
+        // Warm the generated regexes and the string interning that a first call triggers.
+        _ = ClipDisplayFormatter.BuildDisplayStrings(clip);
+
+        var before = GC.GetTotalAllocatedBytes(precise: true);
+        var display = ClipDisplayFormatter.BuildDisplayStrings(clip);
+        var allocated = GC.GetTotalAllocatedBytes(precise: true) - before;
+
+        // Anti-vacuity: the strip really ran, so a low allocation figure means it ran once
+        // rather than that it was skipped.
+        Assert.Contains("paragraph 0", display.Title, StringComparison.Ordinal);
+        Assert.DoesNotContain("<DIV>", display.PreviewSnippet, StringComparison.OrdinalIgnoreCase);
+        Assert.False(string.IsNullOrWhiteSpace(display.SingleLinePreview));
+
+        // Measured 2.3 MB for one render, so three would be ~7 MB. This budget sits
+        // between them with room for allocator noise.
+        const long budget = 4L * 1024 * 1024;
+        Assert.True(
+            allocated < budget,
+            $"building the three display strings allocated {allocated / 1024.0 / 1024.0:F1} MB, above the {budget / 1024 / 1024} MB budget - the rich-text render is running more than once");
+    }
+
     [Fact]
     public void BuildFileItems_RemovesLabelsQuotesAndDuplicates()
     {

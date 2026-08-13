@@ -10,27 +10,49 @@ using Clipthrough.Models;
 
 namespace Clipthrough.Presentation;
 
+/// <summary>
+/// The three display strings a list row needs, built together.
+/// </summary>
+public readonly record struct ClipDisplayStrings(string Title, string PreviewSnippet, string SingleLinePreview);
+
 public static partial class ClipDisplayFormatter
 {
-    public static string BuildTitle(ClipEntry clip)
+    /// <summary>
+    /// Resolves the clip's display text ONCE and derives all three strings from it.
+    /// Each of the three used to resolve it independently, so a rich-text clip ran the
+    /// whole HTML/RTF strip - four regex passes over the full content - three times per
+    /// clip, synchronously in the row's constructor, for every row of every list build.
+    /// Callers that need more than one string must use this rather than the single
+    /// <see cref="ClipEntry"/> overloads.
+    /// </summary>
+    public static ClipDisplayStrings BuildDisplayStrings(ClipEntry clip)
     {
         if (clip.ContentType == ContentType.Image && TryGetPreferredImageLabel(clip) is { } imageLabel)
         {
-            return BuildTitle(imageLabel, ContentType.Text);
+            return BuildDisplayStrings(imageLabel, ContentType.Text);
         }
 
         if (clip.ContentType == ContentType.Image && TryGetImageDimensionsDisplay(clip) is { } dimensions)
         {
-            return AppText.FormatImageSummary(dimensions);
+            var summary = AppText.FormatImageSummary(dimensions);
+            return new ClipDisplayStrings(summary, summary, summary);
         }
 
         if (clip.ContentType == ContentType.RichText)
         {
-            return BuildTitle(GetDisplayRichText(clip), ContentType.Text);
+            return BuildDisplayStrings(GetDisplayRichText(clip), ContentType.Text);
         }
 
-        return BuildTitle(clip.Content, clip.ContentType);
+        return BuildDisplayStrings(clip.Content, clip.ContentType);
     }
+
+    private static ClipDisplayStrings BuildDisplayStrings(string content, ContentType contentType)
+        => new(
+            BuildTitle(content, contentType),
+            BuildPreviewSnippet(content, contentType),
+            BuildSingleLinePreview(content, contentType));
+
+    public static string BuildTitle(ClipEntry clip) => BuildDisplayStrings(clip).Title;
 
     public static string BuildTitle(string content, ContentType contentType)
     {
@@ -46,25 +68,7 @@ public static partial class ClipDisplayFormatter
         return firstLine.Length <= 90 ? firstLine : $"{firstLine[..87]}...";
     }
 
-    public static string BuildPreviewSnippet(ClipEntry clip)
-    {
-        if (clip.ContentType == ContentType.Image && TryGetPreferredImageLabel(clip) is { } imageLabel)
-        {
-            return BuildPreviewSnippet(imageLabel, ContentType.Text);
-        }
-
-        if (clip.ContentType == ContentType.Image && TryGetImageDimensionsDisplay(clip) is { } dimensions)
-        {
-            return AppText.FormatImageSummary(dimensions);
-        }
-
-        if (clip.ContentType == ContentType.RichText)
-        {
-            return BuildPreviewSnippet(GetDisplayRichText(clip), ContentType.Text);
-        }
-
-        return BuildPreviewSnippet(clip.Content, clip.ContentType);
-    }
+    public static string BuildPreviewSnippet(ClipEntry clip) => BuildDisplayStrings(clip).PreviewSnippet;
 
     public static string BuildPreviewSnippet(string content, ContentType contentType)
     {
@@ -79,25 +83,7 @@ public static partial class ClipDisplayFormatter
             : collapsed.Length <= 140 ? collapsed : $"{collapsed[..137]}...";
     }
 
-    public static string BuildSingleLinePreview(ClipEntry clip)
-    {
-        if (clip.ContentType == ContentType.Image && TryGetPreferredImageLabel(clip) is { } imageLabel)
-        {
-            return BuildSingleLinePreview(imageLabel, ContentType.Text);
-        }
-
-        if (clip.ContentType == ContentType.Image && TryGetImageDimensionsDisplay(clip) is { } dimensions)
-        {
-            return AppText.FormatImageSummary(dimensions);
-        }
-
-        if (clip.ContentType == ContentType.RichText)
-        {
-            return BuildSingleLinePreview(GetDisplayRichText(clip), ContentType.Text);
-        }
-
-        return BuildSingleLinePreview(clip.Content, clip.ContentType);
-    }
+    public static string BuildSingleLinePreview(ClipEntry clip) => BuildDisplayStrings(clip).SingleLinePreview;
 
     public static string BuildSingleLinePreview(string content, ContentType contentType)
     {

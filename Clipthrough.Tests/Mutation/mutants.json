@@ -1054,5 +1054,13 @@
     "find": "            var withListItems = ListItemTagRegex().Replace(withoutScripts, \"• \");\n            var withBreaks = BlockLevelTagRegex().Replace(withListItems, Environment.NewLine);",
     "replace": "            var withListItems = Regex.Replace(withoutScripts, @\"<li[^>]*>\", \"• \", RegexOptions.IgnoreCase);\n            var withBreaks = Regex.Replace(withListItems, @\"</?(br|p|div|section|article|ul|ol|h[1-6]|tr)[^>]*>\", Environment.NewLine, RegexOptions.IgnoreCase);",
     "filter": "RenderRichContent_HandlesUpperCaseMarkup_UnderAnyCulture"
+  },
+  {
+    "id": "display-strings-render-rich-text-per-string",
+    "file": "Clipthrough/Presentation/ClipDisplayFormatter.cs",
+    "why": "Resolving the rich-text display once per string rather than once per clip is the shape this replaced: the whole HTML/RTF strip ran three times in the row constructor, on the UI thread, for every row of every list build.",
+    "find": "        if (clip.ContentType == ContentType.RichText)\n        {\n            return BuildDisplayStrings(GetDisplayRichText(clip), ContentType.Text);\n        }",
+    "replace": "        if (clip.ContentType == ContentType.RichText)\n        {\n            return new ClipDisplayStrings(\n                BuildTitle(GetDisplayRichText(clip), ContentType.Text),\n                BuildPreviewSnippet(GetDisplayRichText(clip), ContentType.Text),\n                BuildSingleLinePreview(GetDisplayRichText(clip), ContentType.Text));\n        }",
+    "filter": "BuildDisplayStrings_RendersRichTextOnceNotPerString"
   }
 ]
