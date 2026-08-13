@@ -1102,5 +1102,53 @@
     "replace": "Source=\"{Binding SelectedClip.PreviewThumbnailImage}\"",
     "why": "The background-decoding property is only worth anything if the pane binds to it. A binding left pointing elsewhere would decode inline again, and no view-model test would notice.",
     "filter": "FullyQualifiedName~SelectedImagePane_BindsToTheBackgroundDecodedImage"
+  },
+  {
+    "id": "session-log-rebuilds-the-list-per-entry",
+    "file": "Clipthrough/ViewModels/SessionLogsViewModel.cs",
+    "find": "            VisibleSessionLogs.Insert(0, item);\n            while (VisibleSessionLogs.Count > SessionLogService.MaxRetainedEntries)\n            {\n                VisibleSessionLogs.RemoveAt(VisibleSessionLogs.Count - 1);\n            }\n\n            this.RaisePropertyChanged(nameof(HasLogs));\n            this.RaisePropertyChanged(nameof(ShowEmptyState));",
+    "replace": "            RefreshVisibleSessionLogs();",
+    "why": "Clearing and refilling the bound collection for every trace line is the shape this replaced: it raised one change notification per surviving row, so a session that logged n lines did O(n^2) work.",
+    "filter": "FullyQualifiedName~AddingAnEntry_WhileOpen_InsertsItRatherThanRebuilding"
+  },
+  {
+    "id": "session-log-updates-the-list-while-closed",
+    "file": "Clipthrough/ViewModels/SessionLogsViewModel.cs",
+    "find": "        if (!IsOpen)\n        {\n            return;\n        }",
+    "replace": "        if (false)\n        {\n            return;\n        }",
+    "why": "This view model is constructed with the main window and subscribed for the whole session, so without the open gate every trace line from every background worker paid for a bound-collection update nobody could see.",
+    "filter": "FullyQualifiedName~AddingEntries_WhileClosed_DoesNotTouchTheBoundCollection"
+  },
+  {
+    "id": "session-log-insert-ignores-the-active-filter",
+    "file": "Clipthrough/ViewModels/SessionLogsViewModel.cs",
+    "find": "        if (MatchesFilter(item))",
+    "replace": "        if (true)",
+    "why": "The incremental insert has to apply the same filter the full rebuild does, or a level or search filter silently stops applying to entries that arrive while the window is open.",
+    "filter": "FullyQualifiedName~AnEntryFilteredOut_IsNotShown_ButStillCounts"
+  },
+  {
+    "id": "session-log-view-model-buffer-is-unbounded",
+    "file": "Clipthrough/ViewModels/SessionLogsViewModel.cs",
+    "find": "        if (_allSessionLogs.Count > SessionLogService.MaxRetainedEntries)\n        {\n            _allSessionLogs.RemoveRange(\n                SessionLogService.MaxRetainedEntries,\n                _allSessionLogs.Count - SessionLogService.MaxRetainedEntries);\n        }",
+    "replace": "",
+    "why": "A trace that repeats every frame grows this list for as long as the app runs; the bound collection would grow with it.",
+    "filter": "FullyQualifiedName~TheInMemoryLog_IsBounded"
+  },
+  {
+    "id": "session-log-service-buffer-is-unbounded",
+    "file": "Clipthrough/Services/System/SessionLogService.cs",
+    "find": "            while (_entries.Count > MaxRetainedEntries)\n            {\n                _entries.Dequeue();\n            }",
+    "replace": "",
+    "why": "The service buffer feeds Snapshot(), so an unbounded buffer leaks for the life of the process and hands the log window an ever-growing seed.",
+    "filter": "FullyQualifiedName~TheServiceBuffer_IsBounded"
+  },
+  {
+    "id": "session-log-service-marshals-every-entry-to-the-ui-thread",
+    "file": "Clipthrough/Services/System/SessionLogService.cs",
+    "find": "            _entriesSubject.OnNext(entry);",
+    "replace": "            Avalonia.Threading.Dispatcher.UIThread.Post(() => _entriesSubject.OnNext(entry));",
+    "why": "Marshalling publication wakes the dispatcher once per trace line, for every line every background worker writes, whether or not anything is listening. The one subscriber already marshals with ObserveOn.",
+    "filter": "FullyQualifiedName~TheService_PublishesOnTheThreadThatLogged"
   }
 ]

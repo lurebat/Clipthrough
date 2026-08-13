@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
-using Avalonia.Threading;
 using Clipthrough.Models;
 
 namespace Clipthrough.Services;
@@ -21,8 +20,16 @@ public sealed class SessionLogService : TraceListener, ISessionLogService
     ];
 
     private readonly object _gate = new();
-    private readonly List<SessionLogEntry> _entries = [];
+    private readonly Queue<SessionLogEntry> _entries = new();
     private readonly Subject<SessionLogEntry> _entriesSubject = new();
+
+    /// <summary>
+    /// How many entries the in-memory session log keeps. Without a bound, a trace that
+    /// repeats every frame - a layout cycle warning, say - grows the buffer for as long as
+    /// the app runs. The log *file* still receives every line; only the in-app viewer's
+    /// scrollback is bounded.
+    /// </summary>
+    public const int MaxRetainedEntries = 5_000;
 
     private SessionLogService()
     {
@@ -30,6 +37,12 @@ public sealed class SessionLogService : TraceListener, ISessionLogService
 
     public static SessionLogService Instance { get; } = new();
 
+    /// <summary>
+    /// Entries as they are logged. Delivered on whichever thread wrote the trace - callers
+    /// that need the UI thread must say so with <c>ObserveOn</c>. Marshalling here instead
+    /// would wake the dispatcher once per trace line, and every trace line from every
+    /// background worker goes through this.
+    /// </summary>
     public IObservable<SessionLogEntry> Entries => _entriesSubject.AsObservable();
 
     public IReadOnlyList<SessionLogEntry> Snapshot()
@@ -106,18 +119,20 @@ public sealed class SessionLogService : TraceListener, ISessionLogService
             Message = message.Trim(),
         };
 
+        // Published under the same lock that appends, so subscribers see entries in the
+        // order they were logged even when several threads trace at once - a Subject may
+        // not have OnNext called concurrently. Subscribers marshal with ObserveOn, so what
+        // runs here is a scheduler post, not their handler.
         lock (_gate)
         {
-            _entries.Add(entry);
-        }
+            _entries.Enqueue(entry);
+            while (_entries.Count > MaxRetainedEntries)
+            {
+                _entries.Dequeue();
+            }
 
-        if (Dispatcher.UIThread.CheckAccess())
-        {
             _entriesSubject.OnNext(entry);
-            return;
         }
-
-        Dispatcher.UIThread.Post(() => _entriesSubject.OnNext(entry));
     }
 
     private static AppNotificationLevel ToLevel(TraceEventType eventType) => eventType switch

@@ -128,19 +128,62 @@ public sealed class SessionLogsViewModel : ViewModelBase, IDisposable
 
     private void AddEntry(SessionLogEntry entry)
     {
-        _allSessionLogs.Insert(0, new SessionLogEntryViewModel(entry));
-        RefreshVisibleSessionLogs();
+        var item = new SessionLogEntryViewModel(entry);
+        _allSessionLogs.Insert(0, item);
+        if (_allSessionLogs.Count > SessionLogService.MaxRetainedEntries)
+        {
+            _allSessionLogs.RemoveRange(
+                SessionLogService.MaxRetainedEntries,
+                _allSessionLogs.Count - SessionLogService.MaxRetainedEntries);
+        }
+
+        // Nothing is bound to VisibleSessionLogs while the window is closed, and Open()
+        // rebuilds it from scratch. This view model is constructed with the main window and
+        // subscribed for the whole session, so without this gate every trace line from every
+        // background worker paid for a bound-collection rebuild that nobody could see.
+        if (!IsOpen)
+        {
+            return;
+        }
+
+        if (MatchesFilter(item))
+        {
+            // Insert, not rebuild. Clearing and refilling the collection raises one
+            // notification per surviving row, so a session that logged n lines did O(n^2)
+            // work and handed the list box O(n^2) change notifications.
+            VisibleSessionLogs.Insert(0, item);
+            while (VisibleSessionLogs.Count > SessionLogService.MaxRetainedEntries)
+            {
+                VisibleSessionLogs.RemoveAt(VisibleSessionLogs.Count - 1);
+            }
+
+            this.RaisePropertyChanged(nameof(HasLogs));
+            this.RaisePropertyChanged(nameof(ShowEmptyState));
+        }
+
+        this.RaisePropertyChanged(nameof(CountText));
+    }
+
+    /// <summary>
+    /// The single definition of "this entry belongs in the visible list". Shared so the
+    /// incremental insert above and the full rebuild below cannot drift apart.
+    /// </summary>
+    private bool MatchesFilter(SessionLogEntryViewModel log)
+    {
+        var selectedLevel = SelectedLogLevelOption.Value;
+        if (selectedLevel is not null && log.Entry.Level != selectedLevel.Value)
+        {
+            return false;
+        }
+
+        var searchText = SearchText.Trim();
+        return searchText.Length == 0
+            || log.Message.Contains(searchText, StringComparison.OrdinalIgnoreCase);
     }
 
     private void RefreshVisibleSessionLogs()
     {
-        var searchText = SearchText.Trim();
-        var selectedLevel = SelectedLogLevelOption.Value;
-
-        var filtered = _allSessionLogs
-            .Where(log => selectedLevel is null || log.Entry.Level == selectedLevel.Value)
-            .Where(log => searchText.Length == 0 || log.Message.Contains(searchText, StringComparison.OrdinalIgnoreCase))
-            .ToArray();
+        var filtered = _allSessionLogs.Where(MatchesFilter).ToArray();
 
         VisibleSessionLogs.Clear();
         foreach (var log in filtered)
