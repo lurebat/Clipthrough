@@ -1430,5 +1430,45 @@
     "find": "                SELECT {StoredRowBytes}\n                FROM clips",
     "replace": "                SELECT byte_size\n                FROM clips",
     "filter": "FullyQualifiedName~ClipRetentionTests"
+  },
+  {
+    "id": "file-availability-probed-from-the-getter",
+    "file": "Clipthrough/ViewModels/ClipFileItemViewModel.cs",
+    "why": "A getter probing the filesystem is re-run by every binding pass on the UI thread; an unreachable UNC path blocks it for 51 seconds.",
+    "find": "        get => _exists;",
+    "replace": "        get => File.Exists(FilePath) || Directory.Exists(FilePath);",
+    "filter": "FullyQualifiedName~ClipFileAvailabilityTests"
+  },
+  {
+    "id": "file-availability-probe-runs-inline",
+    "file": "Clipthrough/ViewModels/ClipFileItemViewModel.cs",
+    "why": "Probing on the calling thread only relocates the freeze from the binding into whoever starts the refresh.",
+    "find": "        var probe = await Task.Run(() =>\n        {\n            // Directory first, so an existing directory costs one probe rather than\n            // a failed File.Exists followed by a second full timeout.\n            var isDirectory = Directory.Exists(path);\n            return (Exists: isDirectory || File.Exists(path), IsDirectory: isDirectory);\n        }).ConfigureAwait(true);",
+    "replace": "        var isDirectoryInline = Directory.Exists(path);\n        var probe = (Exists: isDirectoryInline || File.Exists(path), IsDirectory: isDirectoryInline);\n        await Task.CompletedTask.ConfigureAwait(true);",
+    "filter": "FullyQualifiedName~ClipFileAvailabilityTests"
+  },
+  {
+    "id": "file-availability-batch-is-unbounded",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Without the gate, each selection starts its own probe run and a burst of them blocks that many pool threads.",
+    "find": "                await _fileAvailabilityGate.WaitAsync(cancellationToken).ConfigureAwait(true);",
+    "replace": "                await Task.Yield();",
+    "filter": "FullyQualifiedName~ClipFileAvailabilityTests"
+  },
+  {
+    "id": "file-availability-batch-is-never-superseded",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "An abandoned batch keeps probing paths for a clip the user has already navigated away from.",
+    "find": "        _fileAvailabilityCts?.Cancel();",
+    "replace": "        _ = _fileAvailabilityCts;",
+    "filter": "FullyQualifiedName~ClipFileAvailabilityTests"
+  },
+  {
+    "id": "file-availability-probes-every-clip",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "BuildFileItems splits any clip into lines, so probing without the content-type gate puts disk I/O behind selecting ordinary text.",
+    "find": "        if (SelectedClipFiles.Count > 0 && SelectedClip?.Clip.ContentType == ContentType.Files)",
+    "replace": "        if (SelectedClipFiles.Count > 0)",
+    "filter": "FullyQualifiedName~SelectedClipFiles_AreProbedOnlyForFileClips"
   }
 ]

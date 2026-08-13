@@ -175,6 +175,50 @@ public sealed class MainWindowViewModelHeadlessTests
     }
 
     [AvaloniaFact]
+    public async Task SelectedClipFiles_AreProbedOnlyForFileClips()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var missingPath = Path.Combine(Path.GetTempPath(), "clipthrough-absent-" + Guid.NewGuid().ToString("N"));
+
+        var textClip = await CaptureTextClipAsync(scope.ClipStoreService, missingPath);
+        clipboardMonitor.Emit(textClip);
+        for (var attempt = 0; attempt < 20 && viewModel.SelectedClip?.Id != textClip.Id; attempt++)
+        {
+            await Task.Delay(50);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        await Task.Delay(200);
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(
+            viewModel.SelectedClipFiles.Single().Exists,
+            "a text clip must not be probed, so availability stays at its optimistic default");
+
+        var filesClip = await CaptureFilesClipAsync(scope.ClipStoreService, [missingPath]);
+        clipboardMonitor.Emit(filesClip);
+        for (var attempt = 0; attempt < 40 && viewModel.SelectedClipFiles.FirstOrDefault()?.Exists != false; attempt++)
+        {
+            await Task.Delay(50);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.False(viewModel.SelectedClipFiles.Single().Exists);
+    }
+
+    /// <summary>
+    /// BuildFileItems splits any clip into lines, so a text clip produces "file items"
+    /// that are not paths. Probing those would put a disk hit - and for anything with a
+    /// UNC prefix, a multi-second network timeout - behind selecting a block of text.
+    /// </summary>
+    [AvaloniaFact]
     public async Task FileClip_CanUseTextTransformations()
     {
         using var scope = new TemporaryDatabaseScope();

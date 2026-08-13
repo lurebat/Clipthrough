@@ -4749,6 +4749,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(ShowSelectedImagePlaceholder));
     }
 
+    private readonly SemaphoreSlim _fileAvailabilityGate = new(1, 1);
+    private CancellationTokenSource? _fileAvailabilityCts;
+
     private void ReplaceSelectedClipFiles(IReadOnlyList<string> fileItems)
     {
         SelectedClipFiles.Clear();
@@ -4760,6 +4763,61 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         SelectedFileItem = SelectedClipFiles.FirstOrDefault();
+
+        // Arrowing down the list starts a batch per selection, so the previous one
+        // has to be told to stop or the abandoned probes keep going.
+        _fileAvailabilityCts?.Cancel();
+        _fileAvailabilityCts = null;
+
+        // BuildFileItems splits any clip into lines, so a text clip yields "file items"
+        // that are not paths. Only a file clip surfaces the list, and only a file clip
+        // is worth touching the disk for.
+        if (SelectedClipFiles.Count > 0 && SelectedClip?.Clip.ContentType == ContentType.Files)
+        {
+            var cts = new CancellationTokenSource();
+            _fileAvailabilityCts = cts;
+            _ = RefreshFileAvailabilityAsync(SelectedClipFiles.ToArray(), cts.Token);
+        }
+    }
+
+    /// <summary>
+    /// One probe at a time across the whole application. Each can block a thread for
+    /// as long as an unreachable share takes to time out (measured at 51 s), so a
+    /// fan-out - whether across one clip's files or across a run of selections - would
+    /// tie up that many pool threads. Waiting on the gate costs no thread, and a
+    /// superseded batch drops out at the next item rather than probing stale paths.
+    /// </summary>
+    private async Task RefreshFileAvailabilityAsync(IReadOnlyList<ClipFileItemViewModel> items, CancellationToken cancellationToken)
+    {
+        foreach (var item in items)
+        {
+            try
+            {
+                await _fileAvailabilityGate.WaitAsync(cancellationToken).ConfigureAwait(true);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            try
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                await item.RefreshAvailabilityAsync();
+            }
+            catch (Exception ex)
+            {
+                Trace.TraceWarning($"File availability probe failed for '{item.FilePath}': {ex}");
+            }
+            finally
+            {
+                _fileAvailabilityGate.Release();
+            }
+        }
     }
 
     private void RaiseSelectionStateProperties()

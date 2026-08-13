@@ -13,6 +13,8 @@ public sealed class ClipFileItemViewModel : ViewModelBase
 {
     private readonly ISystemInteractionService _systemInteractionService;
     private readonly Action<string> _statusSink;
+    private bool _exists = true;
+    private bool _isDirectory;
 
     public ClipFileItemViewModel(string filePath, ISystemInteractionService systemInteractionService, Action<string> statusSink)
     {
@@ -30,11 +32,33 @@ public sealed class ClipFileItemViewModel : ViewModelBase
 
     public string FileName => Path.GetFileName(FilePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
 
-    public string DirectoryPath => Directory.Exists(FilePath)
+    public string DirectoryPath => _isDirectory
         ? FilePath
         : Path.GetDirectoryName(FilePath) ?? string.Empty;
 
-    public bool Exists => File.Exists(FilePath) || Directory.Exists(FilePath);
+    /// <summary>
+    /// Starts out optimistic and is corrected by <see cref="RefreshAvailabilityAsync"/>.
+    ///
+    /// This used to be a getter calling File.Exists, which a binding re-evaluates on
+    /// the UI thread. Measured: File.Exists on a UNC path whose host does not answer
+    /// blocks for 51 seconds - and the getter called it twice, with DirectoryPath
+    /// adding a third probe. Copying a file from a share and then losing the VPN was
+    /// enough to freeze the window for minutes every time the clip was selected.
+    /// </summary>
+    public bool Exists
+    {
+        get => _exists;
+        private set
+        {
+            if (_exists == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _exists, value);
+            this.RaisePropertyChanged(nameof(AvailabilityText));
+        }
+    }
 
     public string AvailabilityText => Exists ? AppText.AvailabilityAvailable : AppText.AvailabilityMissing;
 
@@ -49,6 +73,31 @@ public sealed class ClipFileItemViewModel : ViewModelBase
     public ReactiveCommand<Unit, Unit> OpenCommand { get; }
 
     public ReactiveCommand<Unit, Unit> OpenContainingFolderCommand { get; }
+
+    /// <summary>
+    /// Probes the filesystem off the calling thread. Callers must not await this in a
+    /// loop-per-item on the thread pool: an unreachable share blocks a whole thread
+    /// for its timeout, so the probes are run one at a time.
+    /// </summary>
+    public async Task RefreshAvailabilityAsync()
+    {
+        var path = FilePath;
+        var probe = await Task.Run(() =>
+        {
+            // Directory first, so an existing directory costs one probe rather than
+            // a failed File.Exists followed by a second full timeout.
+            var isDirectory = Directory.Exists(path);
+            return (Exists: isDirectory || File.Exists(path), IsDirectory: isDirectory);
+        }).ConfigureAwait(true);
+
+        if (_isDirectory != probe.IsDirectory)
+        {
+            _isDirectory = probe.IsDirectory;
+            this.RaisePropertyChanged(nameof(DirectoryPath));
+        }
+
+        Exists = probe.Exists;
+    }
 
     private async Task CopyPathAsync()
     {
