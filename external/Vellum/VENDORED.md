@@ -10,7 +10,7 @@ Native Avalonia rich text editor. Replaces the WebView-based rich text viewer
 |---|---|
 | Upstream | `G:\fun\Vellum` (local-only; no git remote yet) |
 | Branch | `user/asafmahlev/increment-0-spike` |
-| Commit | `5cfb0eb5f5a52e83aade520b2018f90ddd5fa007` |
+| Commit | `fcaa6eca0e9bdab1c00ae0479f0bb3602aabde47` |
 | Vendored | 2026-08-16 |
 | Licence | MIT (see `LICENSE`) |
 
