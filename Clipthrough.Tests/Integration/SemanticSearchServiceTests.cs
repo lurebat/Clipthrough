@@ -729,6 +729,131 @@ public sealed class SemanticSearchServiceTests
     }
 
     /// <summary>
+    /// Re-embedding an already-cached clip must not enlarge the cache. Any batch holding an
+    /// update is barred from the in-place append path (an update would rewrite a vector a
+    /// reader is scoring), so it takes the copy branch - and when that branch grew capacity
+    /// unconditionally, each one multiplied it by 1.25 with nothing bounding it but the 2 GB
+    /// single-array ceiling. OCR re-embedding image clips reached that ceiling in 31 batches
+    /// on a real 1,579-clip history: a 2,147,483,136-byte vector array for 1,579 vectors.
+    ///
+    /// Capacity is the only observable that shows this. The count stays right, every query
+    /// returns the right answers, and the wasted slots are simply unreachable memory - which
+    /// is exactly why it ran unnoticed to 4.9 GB of process memory.
+    /// </summary>
+    [Fact]
+    public async Task AppendEmbeddingsAsync_RepeatedReembedding_DoesNotGrowTheCache()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        const int dims = 16;
+        var emb = new DeterministicEmbeddingService(dims);
+        var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
+
+        var seed = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "seed",
+            ContentBytes = Encoding.UTF8.GetBytes("seed"),
+            IncrementExistingCopyCount = true,
+        });
+        await scope.ClipStoreService.SaveEmbeddingBatchAsync(
+            new[] { new ClipEmbeddingRecord(seed!.Id, emb.VectorFor("seed")) }, "test");
+        await semantic.RefreshCacheAsync();
+
+        // A small settled library, appended so capacity carries whatever headroom the
+        // append path leaves behind.
+        const int cached = 200;
+        var ids = new List<long>(cached);
+        var nextId = 5_000_000L;
+        for (var i = 0; i < cached; i += 32)
+        {
+            var batch = new List<ClipEmbeddingRecord>(32);
+            for (var j = 0; j < 32 && ids.Count < cached; j++)
+            {
+                var id = nextId++;
+                ids.Add(id);
+                batch.Add(new ClipEmbeddingRecord(id, emb.VectorFor($"clip-{id}")));
+            }
+            await semantic.AppendEmbeddingsAsync(batch);
+        }
+        Assert.Equal(cached + 1, semantic.CachedCount);
+
+        var settledCapacity = semantic.CachedCapacity;
+
+        // Re-embed clips that are already cached, over and over, adding nothing. 40 rounds
+        // is past the ~31 that took the real cache to the ceiling.
+        const int rounds = 40;
+        for (var round = 0; round < rounds; round++)
+        {
+            await semantic.AppendEmbeddingsAsync(new[]
+            {
+                new ClipEmbeddingRecord(ids[round % ids.Count], emb.VectorFor($"revised-{round}")),
+            });
+        }
+
+        Assert.Equal(cached + 1, semantic.CachedCount);
+        Assert.Equal(settledCapacity, semantic.CachedCapacity);
+
+        // Anti-vacuity: the updates were really applied, not skipped into a no-op that
+        // would trivially leave capacity alone.
+        var lastRound = rounds - 1;
+        var revisedId = ids[lastRound % ids.Count];
+        var revisedHits = await semantic.QueryAsync($"revised-{lastRound}", topK: 1);
+        Assert.Equal(revisedId, revisedHits[0].ClipId);
+        Assert.True(revisedHits[0].Score > 0.9f, $"expected near-1.0 cosine, got {revisedHits[0].Score}");
+    }
+
+    /// <summary>
+    /// The converse of the test above: capacity must still grow when the cache genuinely
+    /// runs out of room, or a fix for the runaway growth would simply reallocate to an exact
+    /// fit on every batch and restore the quadratic backfill.
+    /// </summary>
+    [Fact]
+    public async Task AppendEmbeddingsAsync_WhenCapacityRunsOut_StillGrowsWithHeadroom()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        const int dims = 16;
+        var emb = new DeterministicEmbeddingService(dims);
+        var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
+
+        var seed = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "seed",
+            ContentBytes = Encoding.UTF8.GetBytes("seed"),
+            IncrementExistingCopyCount = true,
+        });
+        await scope.ClipStoreService.SaveEmbeddingBatchAsync(
+            new[] { new ClipEmbeddingRecord(seed!.Id, emb.VectorFor("seed")) }, "test");
+        await semantic.RefreshCacheAsync();
+
+        // A full reload sizes the arrays to an exact fit, so the very next append has to grow.
+        Assert.Equal(1, semantic.CachedCapacity);
+
+        var nextId = 6_000_000L;
+        var batch = new List<ClipEmbeddingRecord>(32);
+        for (var j = 0; j < 32; j++)
+        {
+            var id = nextId++;
+            batch.Add(new ClipEmbeddingRecord(id, emb.VectorFor($"grow-{id}")));
+        }
+        await semantic.AppendEmbeddingsAsync(batch);
+
+        Assert.Equal(33, semantic.CachedCount);
+        Assert.True(
+            semantic.CachedCapacity > semantic.CachedCount,
+            $"capacity {semantic.CachedCapacity} left no headroom over {semantic.CachedCount} " +
+            "entries, so every subsequent batch will reallocate.");
+    }
+
+    /// <summary>
     /// Scoring is the whole cost of a semantic query - one pass over every cached embedding,
     /// on every throttled keystroke - so it is worth widening to SIMD and worth keeping only
     /// the best few rather than sorting them all. Both of those are easy to get subtly wrong,

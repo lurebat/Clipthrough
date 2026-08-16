@@ -84,6 +84,14 @@ public sealed class SemanticSearchService : ISemanticSearchService
 
     public int CachedCount => Volatile.Read(ref _cache).Count;
 
+    /// <summary>
+    /// Slots the cache has allocated, as opposed to the <see cref="CachedCount"/> it holds.
+    /// Exposed so a test can prove capacity tracks the data instead of compounding on every
+    /// reallocation - a defect invisible from any other observable, because the extra
+    /// capacity is unreachable memory that changes no search result.
+    /// </summary>
+    internal int CachedCapacity => Volatile.Read(ref _cache).Ids.Length;
+
     public async Task RefreshCacheAsync(CancellationToken cancellationToken = default)
     {
         await _refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -500,9 +508,22 @@ public sealed class SemanticSearchService : ISemanticSearchService
     /// of memcpy into under a gigabyte, while wasting at most 25% of the cache - which for
     /// a 154 MB embedding cache matters as much as the copying does. Doubling would trade
     /// another 0.2% of that copying for a further 150 MB of resident memory.
+    ///
+    /// Growth is conditional on actually needing room, which is the whole contract.
+    /// Reallocation is forced by any batch containing an in-place *update*, not only by one
+    /// that appends - and an update needs no more capacity than the cache already has. When
+    /// this grew unconditionally, every such batch multiplied capacity by 1.25 with nothing
+    /// bounding it but the 2 GB single-array ceiling: OCR re-embedding image clips reached
+    /// it in 31 batches on a 1,579-clip history, for a 2,147,483,136-byte vector array
+    /// holding 1,579 vectors, and roughly 4.9 GB of process memory.
     /// </remarks>
     private static int GrowCapacity(int currentCapacity, int required, int dim)
     {
+        if (required <= currentCapacity)
+        {
+            return currentCapacity;
+        }
+
         var ceiling = MaxVectorFloats / dim;
         if (required >= ceiling)
         {

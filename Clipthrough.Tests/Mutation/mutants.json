@@ -2054,5 +2054,21 @@
     "find": "                await _settingsService.UpdateAsync(current => settings.WithSessionStateFrom(current))\n                    .ConfigureAwait(false);",
     "replace": "                await _settingsService.UpdateAsync(_ => settings).ConfigureAwait(false);",
     "filter": "FullyQualifiedName~SettingsLostUpdateHeadlessTests"
+  },
+  {
+    "id": "embedding-cache-grows-on-every-reallocation",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "why": "Any batch containing a re-embedding is barred from the in-place append path, so it reallocates; growing 25% every time it reallocates is unbounded and reached the 2 GB array ceiling for a 1,579-clip history.",
+    "find": "        if (required <= currentCapacity)\n        {\n            return currentCapacity;\n        }\n\n        var ceiling = MaxVectorFloats / dim;",
+    "replace": "        var ceiling = MaxVectorFloats / dim;",
+    "filter": "FullyQualifiedName~SemanticSearchServiceTests"
+  },
+  {
+    "id": "embedding-cache-grows-to-an-exact-fit",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "why": "Growing to exactly what the batch needs reallocates and copies the whole cache once per batch, which is the quadratic backfill the headroom exists to avoid.",
+    "find": "        var headroom = Math.Max(64, currentCapacity / 4);",
+    "replace": "        var headroom = Math.Min(64, currentCapacity / 4);",
+    "filter": "FullyQualifiedName~SemanticSearchServiceTests"
   }
 ]
