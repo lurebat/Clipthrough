@@ -189,6 +189,17 @@ public partial class App : Application
 
     private static ServiceProvider ConfigureServices()
     {
+        return CreateServiceCollection().BuildServiceProvider();
+    }
+
+    /// <summary>
+    /// Split out from <see cref="ConfigureServices"/> so the registrations can be validated
+    /// without being built and run. A missing or unsatisfiable registration compiles fine and
+    /// only fails when the container first resolves it - which, for a desktop app, is a crash
+    /// on launch that no unit test would otherwise see.
+    /// </summary>
+    internal static ServiceCollection CreateServiceCollection()
+    {
         var services = new ServiceCollection();
 
         // Platform-specific services
@@ -232,7 +243,7 @@ public partial class App : Application
         services.AddSingleton<Clipthrough.Services.Search.ISemanticIndexCoordinator, Clipthrough.Services.Search.SemanticIndexCoordinator>();
         services.AddSingleton<MainWindowViewModel>();
 
-        return services.BuildServiceProvider();
+        return services;
     }
 
     private void OnMainWindowOpened(object? sender, EventArgs e)

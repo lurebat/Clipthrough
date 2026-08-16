@@ -1702,5 +1702,21 @@
     "find": "                Buffer.BlockCopy(existing.Vectors, i * dim * sizeof(float), newVectors, next * dim * sizeof(float), dim * sizeof(float));",
     "replace": "                Buffer.BlockCopy(existing.Vectors, next * dim * sizeof(float), newVectors, next * dim * sizeof(float), dim * sizeof(float));",
     "filter": "FullyQualifiedName~SemanticSearchServiceTests"
+  },
+  {
+    "id": "di-registration-dropped",
+    "file": "Clipthrough/App.axaml.cs",
+    "why": "A service the view model constructor needs is left unregistered. This compiles cleanly and only fails when the container resolves it at launch, so nothing but a container test catches it.",
+    "find": "        services.AddSingleton<IDragDropService, DragDropService>();\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~ServiceRegistrationTests"
+  },
+  {
+    "id": "di-registration-wrong-interface",
+    "file": "Clipthrough/App.axaml.cs",
+    "why": "A service is registered under a concrete type rather than the interface its consumers ask for, so the registration exists but does not satisfy anyone.",
+    "find": "        services.AddSingleton<IClipExportService, ClipExportService>();",
+    "replace": "        services.AddSingleton<ClipExportService>();",
+    "filter": "FullyQualifiedName~ServiceRegistrationTests"
   }
 ]
