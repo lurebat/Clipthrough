@@ -33,11 +33,20 @@ public sealed class DocumentTextMap
 {
     private readonly ImmutableArray<Span> _spans;
 
-    private DocumentTextMap(string text, ImmutableArray<Span> spans)
+    private DocumentTextMap(string text, ImmutableArray<Span> spans, int contentSize)
     {
         Text = text;
         _spans = spans;
+        ContentSize = contentSize;
     }
+
+    /// <summary>The size of the document this was built from.</summary>
+    /// <remarks>
+    /// Kept so that a position from somewhere else is refused rather than clamped. A map held
+    /// across an edit is the mistake this type is most likely to be involved in, and a position
+    /// past the end is the cheapest evidence of it.
+    /// </remarks>
+    public int ContentSize { get; }
 
     /// <summary>The document's text, with one <see cref="InlineContent.Placeholder"/> per embed.</summary>
     /// <remarks>
@@ -60,7 +69,7 @@ public sealed class DocumentTextMap
         // start `position + 1` rather than `position`.
         Walk(doc.Blocks, start: 0, builder, spans);
 
-        return new DocumentTextMap(builder.ToString(), spans.ToImmutable());
+        return new DocumentTextMap(builder.ToString(), spans.ToImmutable(), doc.ContentSize);
     }
 
     private static void Walk(
@@ -100,6 +109,7 @@ public sealed class DocumentTextMap
     public int ToOffset(int position)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(position);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(position, ContentSize);
 
         if (_spans.IsEmpty)
         {
