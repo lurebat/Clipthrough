@@ -93,12 +93,10 @@ public static class ClipboardMarkupDecoder
             return html[(markerStart + startFragmentMarker.Length)..markerEnd].Trim();
         }
 
-        var offsets = s_cfHtmlHeaderRegex.Matches(html);
-        var startHtml = GetHeaderOffset(offsets, "StartHTML");
-        var endHtml = GetHeaderOffset(offsets, "EndHTML");
-        if (startHtml is >= 0 && endHtml > startHtml && endHtml <= html.Length)
+        var documentRegion = GetHeaderRegion(html, "StartHTML", "EndHTML");
+        if (!string.IsNullOrWhiteSpace(documentRegion))
         {
-            return html[startHtml.Value..endHtml.Value].Trim();
+            return documentRegion.Trim();
         }
 
         var htmlIndex = html.IndexOf('<', StringComparison.Ordinal);
@@ -158,12 +156,65 @@ public static class ClipboardMarkupDecoder
         var offsets = s_cfHtmlHeaderRegex.Matches(html);
         var startOffset = GetHeaderOffset(offsets, startHeaderName);
         var endOffset = GetHeaderOffset(offsets, endHeaderName);
-        if (startOffset is >= 0 && endOffset > startOffset && endOffset <= html.Length)
+        if (startOffset is null || endOffset is null || startOffset < 0 || endOffset <= startOffset)
         {
-            return html[startOffset.Value..endOffset.Value];
+            return null;
         }
 
-        return null;
+        // CF_HTML header values are byte positions into the UTF-8 payload, not indexes
+        // into the decoded UTF-16 string. They only coincide while the clip is pure
+        // ASCII; any accented, Hebrew, CJK or emoji content shifts every later offset.
+        var start = ByteOffsetToCharIndex(html, startOffset.Value);
+        var end = ByteOffsetToCharIndex(html, endOffset.Value);
+        if (start is null || end is null || end <= start)
+        {
+            return null;
+        }
+
+        return html[start.Value..end.Value];
+    }
+
+    /// <summary>
+    /// Maps a UTF-8 byte offset onto the equivalent index in the decoded UTF-16 string,
+    /// returning <c>null</c> when the offset runs past the end or lands mid-character.
+    /// </summary>
+    private static int? ByteOffsetToCharIndex(string value, int byteOffset)
+    {
+        if (byteOffset < 0)
+        {
+            return null;
+        }
+
+        var byteCount = 0;
+        var index = 0;
+        while (true)
+        {
+            if (byteCount == byteOffset)
+            {
+                return index;
+            }
+
+            if (byteCount > byteOffset || index >= value.Length)
+            {
+                return null;
+            }
+
+            var current = value[index];
+            if (char.IsHighSurrogate(current) && index + 1 < value.Length && char.IsLowSurrogate(value[index + 1]))
+            {
+                byteCount += 4;
+                index += 2;
+                continue;
+            }
+
+            byteCount += current switch
+            {
+                < '\u0080' => 1,
+                < '\u0800' => 2,
+                _ => 3,
+            };
+            index++;
+        }
     }
 
     private static bool LooksLikeClipboardHtml(string? value)

@@ -35,6 +35,47 @@ public sealed class ClipboardMarkupDecoderTests
     }
 
     [Fact]
+    public void ExtractHtmlFragment_HonoursByteOffsetsWhenDocumentHasNonAsciiText()
+    {
+        // "shalom olam" in Hebrew: 9 chars, 17 UTF-8 bytes. Every offset after it is
+        // shifted by 8, which is exactly what a char-indexed slice gets wrong.
+        const string prefix = "<p>\u05E9\u05DC\u05D5\u05DD \u05E2\u05D5\u05DC\u05DD</p>";
+        const string fragment = "<p>Fragment</p>";
+        const string document = "<html><body>" + prefix + "<!--StartFragment-->" + fragment + "<!--EndFragment--></body></html>";
+        var html = CreateClipboardHtml(document, fragment);
+
+        var extracted = ClipboardMarkupDecoder.ExtractHtmlFragment(html);
+
+        Assert.Equal(fragment, extracted);
+    }
+
+    [Fact]
+    public void ExtractHtmlFragment_HonoursByteOffsetsAcrossSurrogatePairs()
+    {
+        // U+1F600 is a surrogate pair: 2 chars, 4 UTF-8 bytes.
+        const string prefix = "<p>\U0001F600\U0001F600</p>";
+        const string fragment = "<p>Fragment</p>";
+        const string document = "<html><body>" + prefix + "<!--StartFragment-->" + fragment + "<!--EndFragment--></body></html>";
+        var html = CreateClipboardHtml(document, fragment);
+
+        var extracted = ClipboardMarkupDecoder.ExtractHtmlFragment(html);
+
+        Assert.Equal(fragment, extracted);
+    }
+
+    [Fact]
+    public void ExtractHtmlDocument_HonoursByteOffsetsWhenDocumentHasNonAsciiText()
+    {
+        const string fragment = "<p>Fragment</p>";
+        const string document = "<html><body><p>\u05E9\u05DC\u05D5\u05DD</p><!--StartFragment-->" + fragment + "<!--EndFragment--></body></html>";
+        var html = CreateClipboardHtml(document, fragment);
+
+        var extracted = ClipboardMarkupDecoder.ExtractHtmlDocument(html);
+
+        Assert.Equal(document, extracted);
+    }
+
+    [Fact]
     public void DecodeMarkupBytes_DecodesUtf16Markup()
     {
         var bytes = Encoding.Unicode.GetBytes(@"{\rtf1\ansi Hello}");
@@ -90,11 +131,14 @@ public sealed class ClipboardMarkupDecoderTests
     private static string CreateClipboardHtml(string document, string fragment)
     {
         const string headerTemplate = "Format:HTML Format\r\nVersion:1.0\r\nStartHTML:0000000000\r\nEndHTML:0000000000\r\nStartFragment:0000000000\r\nEndFragment:0000000000\r\n";
+
+        // CF_HTML offsets are byte positions into the UTF-8 payload. The header itself is
+        // pure ASCII, so its byte length equals its char length, but the document is not.
         var startHtml = headerTemplate.Length;
-        var fragmentOffset = document.IndexOf(fragment, StringComparison.Ordinal);
-        var startFragment = startHtml + fragmentOffset;
-        var endFragment = startFragment + fragment.Length;
-        var endHtml = startHtml + document.Length;
+        var fragmentCharOffset = document.IndexOf(fragment, StringComparison.Ordinal);
+        var startFragment = startHtml + Encoding.UTF8.GetByteCount(document[..fragmentCharOffset]);
+        var endFragment = startFragment + Encoding.UTF8.GetByteCount(fragment);
+        var endHtml = startHtml + Encoding.UTF8.GetByteCount(document);
 
         return $"Format:HTML Format\r\nVersion:1.0\r\nStartHTML:{startHtml:D10}\r\nEndHTML:{endHtml:D10}\r\nStartFragment:{startFragment:D10}\r\nEndFragment:{endFragment:D10}\r\n{document}";
     }

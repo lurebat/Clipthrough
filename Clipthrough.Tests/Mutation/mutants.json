@@ -1718,5 +1718,21 @@
     "find": "        services.AddSingleton<IClipExportService, ClipExportService>();",
     "replace": "        services.AddSingleton<ClipExportService>();",
     "filter": "FullyQualifiedName~ServiceRegistrationTests"
+  },
+  {
+    "id": "cfhtml-offsets-as-char-indexes",
+    "file": "Clipthrough/Presentation/ClipboardMarkupDecoder.cs",
+    "why": "CF_HTML header values are UTF-8 byte offsets. Treating them as UTF-16 indexes silently truncates every clip containing non-ASCII text, and only a non-ASCII fixture catches it - an ASCII fixture is byte-identical either way.",
+    "find": "        var start = ByteOffsetToCharIndex(html, startOffset.Value);\n        var end = ByteOffsetToCharIndex(html, endOffset.Value);",
+    "replace": "        var start = startOffset.Value <= html.Length ? startOffset : null;\n        var end = endOffset.Value <= html.Length ? endOffset : null;",
+    "filter": "FullyQualifiedName~ClipboardMarkupDecoderTests"
+  },
+  {
+    "id": "cfhtml-surrogate-pair-byte-width",
+    "file": "Clipthrough/Presentation/ClipboardMarkupDecoder.cs",
+    "why": "A surrogate pair is 2 chars but 4 UTF-8 bytes. Counting it as 2 desynchronises every later offset, which only an emoji fixture exposes.",
+    "find": "                byteCount += 4;\n                index += 2;",
+    "replace": "                byteCount += 2;\n                index += 2;",
+    "filter": "FullyQualifiedName~ClipboardMarkupDecoderTests"
   }
 ]
