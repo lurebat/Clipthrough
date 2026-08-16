@@ -14,7 +14,7 @@ shortcuts, and pluggable source attribution.
 - `Clipthrough/` — application project
   - `Views/` — AXAML windows and controls (MainWindow, SettingsWindow, SessionLogsWindow, HelpWindow, AboutWindow)
   - `ViewModels/` — ReactiveUI-based VMs (MainWindowViewModel is the largest)
-  - `Services/` — behavior abstractions organised into subfolders (`Ai/`, `Capture/`, `Imaging/`, `Ocr/`, `Platform/`, `Remote/`, `Search/`, `Security/`, `Storage/`, `System/`). Every service has an `I<Name>Service` interface. All files keep the flat `Clipthrough.Services` namespace except `Platform/` which uses `Clipthrough.Services.Platform` for OS-specific concrete implementations.
+  - `Services/` — behavior abstractions organised into subfolders (`Ai/`, `Background/`, `Capture/`, `Imaging/`, `Ocr/`, `Platform/`, `Search/`, `Security/`, `Storage/`, `System/`). Every service has an `I<Name>Service` interface. All files keep the flat `Clipthrough.Services` namespace except `Platform/` (`Clipthrough.Services.Platform`, OS-specific concrete implementations) and `Search/` (`Clipthrough.Services.Search`).
   - `Models/` — POCOs for persisted state, settings, and transient records.
   - `Converters/` — `IValueConverter` implementations used in AXAML bindings.
   - `Styles/` — `ModernTheme.axaml` + class-based selectors.
@@ -53,6 +53,21 @@ Before committing any non-doc change:
 dotnet build .\Clipthrough\Clipthrough.csproj
 dotnet test .\Clipthrough.Tests\Clipthrough.Tests.csproj --filter "FullyQualifiedName!~HeadlessTests"
 ```
+
+The build is expected to be **0 warnings, 0 errors**, and a small set of
+analyzer rules is enforced at `error` so a violation breaks the build rather
+than joining a backlog nobody reads. The set and — just as importantly — the
+rules deliberately *not* enforced and why are documented inline in
+`.editorconfig`. Read that before adding a `#pragma warning disable`: several
+rules were already evaluated and turned off on purpose, and two (CA1001,
+CA2213) were enforced and then withdrawn because the analyzer's advice would
+have reintroduced a fixed shutdown crash.
+
+The enforced set is scoped to shipping code; `Clipthrough.Tests/**` exempts
+the rules that only produce noise there (xUnit's own `Assert.Contains`
+overloads, and `CA2201` where raising a reserved exception type *is* the
+behaviour under test). `external/.editorconfig` is a `root = true` shield so
+none of this fires on vendored code.
 
 The headless filter is there because a few Avalonia headless tests still fail
 intermittently — a couple of percent of runs — with a `[Test Case Cleanup
