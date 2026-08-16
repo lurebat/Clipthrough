@@ -299,6 +299,18 @@ public sealed class ClipAngelImportService : IClipAngelImportService
         };
     }
 
+    /// <summary>
+    /// ClipAngel writes <c>DateTime.Now</c> into <c>Clips.Created</c> - local
+    /// wall-clock with no offset recorded - and displays it back unconverted
+    /// (<c>Main.cs:3099</c> and <c>:1268</c> in tormozit/ClipAngel). So the
+    /// value has to be read as local, not UTC.
+    ///
+    /// Reading it as UTC "for stability" looks tidier and is wrong: it shifts
+    /// every imported clip by the importing machine's offset in the normal case,
+    /// which is importing your own history on your own machine. Nothing is
+    /// lossless when the source timezone was never recorded; local is right
+    /// whenever the machine has not moved, and no worse than UTC when it has.
+    /// </summary>
     private static DateTimeOffset? TryParseClipAngelDate(object? value)
     {
         if (value is null || value is DBNull)
