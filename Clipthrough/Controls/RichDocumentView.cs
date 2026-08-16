@@ -47,6 +47,44 @@ public sealed class RichDocumentView : UserControl
 
     private static readonly TimeSpan ImportTimeout = TimeSpan.FromSeconds(3);
 
+    // Avalonia's line breaking is quadratic in the length of a run that offers no break
+    // opportunity, because the cost is characters x lines and an unbreakable run wraps
+    // once per line-width. Measured upstream at width 400: 20,000 chars 217 ms, 40,000
+    // chars 801 ms, 80,000 chars 3,047 ms - a 3.86x rise per doubling. The same 80,000
+    // characters as ordinary words cost 97 ms.
+    //
+    // This is not hypothetical for a clipboard manager: a copied base64 blob, a minified
+    // script or a long URL is exactly one enormous unbreakable run, and at a few hundred
+    // thousand characters that curve reaches minutes of frozen UI. The size cap above
+    // does not catch it, because such a clip is comfortably under it.
+    //
+    // So a document is only built when the content actually has break opportunities;
+    // otherwise it takes the same bounded plain-text path as an oversized clip. 10,000
+    // chars sits an order of magnitude below where the curve turns painful.
+    private const int MaxUnbrokenRunChars = 10_000;
+
+    private static int LongestUnbrokenRun(string content)
+    {
+        var longest = 0;
+        var current = 0;
+        foreach (var c in content)
+        {
+            if (char.IsWhiteSpace(c))
+            {
+                current = 0;
+                continue;
+            }
+
+            current++;
+            if (current > longest)
+            {
+                longest = current;
+            }
+        }
+
+        return longest;
+    }
+
     private readonly RichTextViewer _viewer;
     private readonly TextBlock _emptyState;
     private readonly TextBlock _fallbackContent;
@@ -139,6 +177,14 @@ public sealed class RichDocumentView : UserControl
             return;
         }
 
+        if (LongestUnbrokenRun(content) > MaxUnbrokenRunChars)
+        {
+            Trace.TraceWarning(
+                "Rich content contains a very long run with no break opportunity; falling back to plain text.");
+            ShowFallback(content);
+            return;
+        }
+
         DocumentNode document;
         try
         {
@@ -205,7 +251,13 @@ public sealed class RichDocumentView : UserControl
     // past the first screen of. Measured at over four minutes for a 600 KB clip. The
     // control this replaced had the same shape, but only on platforms with no WebView,
     // so it never showed up on Windows.
-    private const int MaxFallbackChars = 16 * 1024;
+    //
+    // The bound is 8 KB rather than something roomier because this is also where an
+    // unbreakable run lands (see MaxUnbrokenRunChars), and that is the quadratic case:
+    // 8,000 characters of base64 costs tens of milliseconds, where 16,000 would already
+    // be over a tenth of a second on every arrow-key move onto such a clip.
+    private const int MaxFallbackChars = 8 * 1024;
+
 
     private static string BuildFallbackText(string content)
     {

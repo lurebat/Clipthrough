@@ -2086,5 +2086,13 @@
     "find": "    private const int MaxFallbackChars = 16 * 1024;",
     "replace": "    private const int MaxFallbackChars = int.MaxValue;",
     "filter": "FullyQualifiedName~RichDocumentView"
+  },
+  {
+    "id": "rich-preview-renders-unbreakable-runs-as-a-document",
+    "file": "Clipthrough/Controls/RichDocumentView.cs",
+    "why": "Avalonia line breaking is quadratic in the length of a run with no break opportunity - 80,000 chars took 3s where the same size as words took 97ms - so a copied base64 blob or minified script rendered as a document freezes the UI for minutes.",
+    "find": "    private const int MaxUnbrokenRunChars = 10_000;",
+    "replace": "    private const int MaxUnbrokenRunChars = int.MaxValue;",
+    "filter": "FullyQualifiedName~RichDocumentView"
   }
 ]

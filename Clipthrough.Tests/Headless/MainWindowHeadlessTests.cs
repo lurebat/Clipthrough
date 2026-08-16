@@ -139,6 +139,51 @@ public sealed class MainWindowHeadlessTests
             $"fallback text was {view.FallbackText.Text?.Length ?? 0} chars; it must be bounded");
     }
 
+    /// <summary>
+    /// A clip that is one enormous run with no break opportunity - a copied base64 blob, a
+    /// minified script, a long URL - must not be rendered as a document.
+    ///
+    /// Avalonia's line breaking is quadratic in the length of such a run, because the cost
+    /// is characters x lines: measured upstream at width 400, 20,000 chars took 217 ms,
+    /// 40,000 took 801 ms and 80,000 took 3,047 ms, while the same 80,000 characters as
+    /// ordinary words took 97 ms. A few hundred thousand characters is therefore minutes of
+    /// frozen UI, and the size cap does not catch it because such a clip is well under it.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RichDocumentView_WithOneEnormousUnbreakableRun_DoesNotBuildADocument()
+    {
+        // Comfortably under the size cap, so only the unbreakable-run guard can catch it.
+        var base64ish = new string('A', 120 * 1024);
+        var view = new RichDocumentView
+        {
+            ContentFormat = ClipContentFormat.Html,
+            Markup = "<p>needle " + base64ish + "</p>",
+        };
+
+        await view.PendingRender;
+
+        Assert.True(view.FallbackText.IsVisible, "an unbreakable run must take the bounded text path");
+        Assert.False(view.Viewer.IsVisible);
+        Assert.True(
+            (view.FallbackText.Text?.Length ?? 0) < 32 * 1024,
+            $"fallback text was {view.FallbackText.Text?.Length ?? 0} chars; it must be bounded");
+
+        // Anti-vacuity: the same payload broken into ordinary words is well within budget
+        // and must still render as a document, so this is pinning the *unbreakable* case
+        // rather than just "large content falls back".
+        var words = string.Join(' ', Enumerable.Repeat("AAAAAAAA", (120 * 1024) / 9));
+        var breakable = new RichDocumentView
+        {
+            ContentFormat = ClipContentFormat.Html,
+            Markup = "<p>needle " + words + "</p>",
+        };
+
+        await breakable.PendingRender;
+
+        Assert.True(breakable.Viewer.IsVisible, "breakable content of the same size should still render as a document");
+        Assert.False(breakable.FallbackText.IsVisible);
+    }
+
     [AvaloniaFact]
     public async Task RestoreOwnedWindowsForCurrentState_ReshowsHiddenSettingsWindow()
     {
