@@ -34,7 +34,7 @@
         <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
         <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" />
         <PackageReference Include="Microsoft.ML.Tokenizers" Version="2.0.0" />
-        <PackageReference Include="ReactiveUI.Avalonia" Version="11.4.12" />
+        <PackageReference Include="ReactiveUI.Avalonia" Version="12.0.3" />
         <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.11" />
         <PackageReference Include="SQLitePCLRaw.bundle_e_sqlcipher" Version="2.1.11" />
         <PackageReference Include="RtfPipe" Version="2.0.7677.4303" />
