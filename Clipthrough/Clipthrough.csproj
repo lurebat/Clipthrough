@@ -41,14 +41,14 @@
         <PackageReference Include="System.Drawing.Common" Version="10.0.11" />
         <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.2" />
         <PackageReference Include="Velopack" Version="0.0.1298" />
+    <PackageReference Include="Vellum.Core" Version="0.2.0" />
+    <PackageReference Include="Vellum.Avalonia" Version="0.2.0" />
+    <PackageReference Include="Vellum.Interop.Html" Version="0.2.0" />
+    <PackageReference Include="Vellum.Interop.Rtf" Version="0.2.0" />
+    <PackageReference Include="Vellum.Interop.Json" Version="0.2.0" />
     </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\external\ShareX.ImageEditor\ShareX.ImageEditor.csproj" />
-    <ProjectReference Include="..\external\Vellum\src\Vellum.Core\Vellum.Core.csproj" />
-    <ProjectReference Include="..\external\Vellum\src\Vellum.Avalonia\Vellum.Avalonia.csproj" />
-    <ProjectReference Include="..\external\Vellum\src\Vellum.Interop.Html\Vellum.Interop.Html.csproj" />
-    <ProjectReference Include="..\external\Vellum\src\Vellum.Interop.Rtf\Vellum.Interop.Rtf.csproj" />
-    <ProjectReference Include="..\external\Vellum\src\Vellum.Interop.Json\Vellum.Interop.Json.csproj" />
     </ItemGroup>
 </Project>
