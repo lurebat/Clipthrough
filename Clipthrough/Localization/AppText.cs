@@ -170,7 +170,7 @@ public static class AppText
         [nameof(BuiltInShortcutClearFilter)] = "clear the filter or close the window",
         [nameof(BuiltInShortcutOpenSettings)] = "open settings",
         [nameof(BuiltInShortcutMoveThroughClips)] = "move through the clip list",
-        [nameof(BuiltInShortcutCopyClipByPosition)] = "copy the clip at that position",
+        [nameof(BuiltInShortcutCopyClipByPosition)] = "paste the clip at that position",
         [nameof(BuiltInShortcutSelectClipByPosition)] = "select the clip at that position",
         [nameof(SettingsInvalidClipSize)] = "Enter a clip size between 0.25 KB and 32768 KB.",
         [nameof(SettingsInvalidDatabasePath)] = "Enter a valid absolute database path.",

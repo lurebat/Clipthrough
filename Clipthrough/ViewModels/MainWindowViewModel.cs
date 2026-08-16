@@ -3974,26 +3974,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await ExportSelectedAsync();
     }
 
-    public async Task<bool> CopyClipByIndexAsync(int oneBasedIndex)
+    public bool SelectClipByIndex(int oneBasedIndex)
     {
         if (oneBasedIndex < 1 || oneBasedIndex > Clips.Count)
         {
             return false;
         }
 
-        var clip = Clips[oneBasedIndex - 1];
-        await CopyClipAsync(clip);
-        return true;
-    }
-
-    public void SelectClipByIndex(int oneBasedIndex)
-    {
-        if (oneBasedIndex < 1 || oneBasedIndex > Clips.Count)
-        {
-            return;
-        }
-
         SelectedClip = Clips[oneBasedIndex - 1];
+        return true;
     }
 
     private async Task ToggleFavoriteClipAsync(ClipItemViewModel clip)

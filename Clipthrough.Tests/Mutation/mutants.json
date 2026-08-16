@@ -1750,5 +1750,21 @@
     "find": "        var pending = Interlocked.Exchange(ref _pending, 0);",
     "replace": "        var pending = Interlocked.Decrement(ref _pending) + 1;",
     "filter": "FullyQualifiedName~ClipboardSuppressionGateTests"
+  },
+  {
+    "id": "ctrl-digit-copies-without-pasting",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "Ctrl+digit exists to save the user the Ctrl+V. Selecting and copying without driving the paste sequence is the old behaviour and looks identical in every view-model assertion.",
+    "find": "            ExecutePasteSelectedAndHide(viewModel);\n            return true;\n        }\n\n        // Alt+digit doesn't conflict with menu access keys (which use Alt+letter).",
+    "replace": "            return true;\n        }\n\n        // Alt+digit doesn't conflict with menu access keys (which use Alt+letter).",
+    "filter": "FullyQualifiedName~ClipIndexShortcutHeadlessTests"
+  },
+  {
+    "id": "ctrl-digit-ignores-list-bounds",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "Ignoring the range result makes Ctrl+9 on a 2-clip list paste whatever happened to be selected, which is a wrong clip pasted into the user's document.",
+    "find": "            if (!viewModel.SelectClipByIndex(index))\n            {\n                return false;\n            }\n",
+    "replace": "            viewModel.SelectClipByIndex(index);\n",
+    "filter": "FullyQualifiedName~ClipIndexShortcutHeadlessTests"
   }
 ]

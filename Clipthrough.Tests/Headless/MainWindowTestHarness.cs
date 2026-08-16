@@ -20,16 +20,23 @@ internal sealed class MainWindowTestHarness : IDisposable
 {
     private readonly TemporaryDatabaseScope _scope;
 
-    private MainWindowTestHarness(TemporaryDatabaseScope scope, MainWindowViewModel viewModel, MainWindow window)
+    private MainWindowTestHarness(TemporaryDatabaseScope scope, MainWindowViewModel viewModel, MainWindow window, TestSystemInteractionService systemInteraction)
     {
         _scope = scope;
         ViewModel = viewModel;
         Window = window;
+        SystemInteraction = systemInteraction;
     }
 
     public MainWindowViewModel ViewModel { get; }
 
     public MainWindow Window { get; }
+
+    /// <summary>
+    /// The same instance the window holds, so tests can assert on the paste
+    /// sequence the view drives rather than only on view-model state.
+    /// </summary>
+    public TestSystemInteractionService SystemInteraction { get; }
 
     public TextBox SearchBox => Window.FindControl<TextBox>("SearchTextBox")!;
 
@@ -48,12 +55,14 @@ internal sealed class MainWindowTestHarness : IDisposable
         Task.Run(() => scope.DatabaseInitializer.InitializeAsync()).GetAwaiter().GetResult();
         scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
 
+        var systemInteraction = new TestSystemInteractionService();
+
         var viewModel = new MainWindowViewModel(
             scope.ClipStoreService,
             new TestClipboardMonitorService(),
             new TestClipSampleDataService(),
             scope.SettingsService,
-            new TestSystemInteractionService(),
+            systemInteraction,
             scope.StorageOptionsService,
             scope.SensitivityService,
             scope.NotificationService,
@@ -67,11 +76,11 @@ internal sealed class MainWindowTestHarness : IDisposable
             new BackgroundJobIndicator(),
             scope.DatabaseInitializer);
 
-        var window = new MainWindow { DataContext = viewModel };
+        var window = new MainWindow(systemInteraction) { DataContext = viewModel };
         window.Show();
         Dispatcher.UIThread.RunJobs();
 
-        return new MainWindowTestHarness(scope, viewModel, window);
+        return new MainWindowTestHarness(scope, viewModel, window, systemInteraction);
     }
 
     /// <summary>

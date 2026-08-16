@@ -1304,9 +1304,16 @@ public partial class MainWindow : Window
 
         if (modifiers == KeyModifiers.Control)
         {
-            _ = viewModel.CopyClipByIndexAsync(index).ContinueWith(
-                _ => Dispatcher.UIThread.Post(() => MinimizeWindow()),
-                System.Threading.Tasks.TaskScheduler.Default);
+            // Select first, then run the same sequence Enter uses: restore the target's
+            // foreground while we still hold the input lock, copy, hide, then send Ctrl+V.
+            // Copying without pasting would leave the user to press Ctrl+V themselves,
+            // which is the whole thing the shortcut is meant to save.
+            if (!viewModel.SelectClipByIndex(index))
+            {
+                return false;
+            }
+
+            ExecutePasteSelectedAndHide(viewModel);
             return true;
         }
 
@@ -1318,18 +1325,6 @@ public partial class MainWindow : Window
         }
 
         return false;
-    }
-
-    private void MinimizeWindow()
-    {
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (DataContext is MainWindowViewModel viewModel)
-            {
-                _ = viewModel.ClearSearchFilterAsync(forceRefresh: false);
-            }
-            Hide();
-        });
     }
 
     private void OnTopMenuGotFocus(object? sender, RoutedEventArgs e)
