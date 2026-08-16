@@ -566,13 +566,10 @@ public partial class App : Application
 
     private async void CopyAndFavorite()
     {
-        if (_clipStoreService is null) return;
+        if (_clipStoreService is null || _clipboardMonitorService is null) return;
         try
         {
-            // Give the clipboard monitor a moment to capture the latest clip, then
-            // mark the newest one as favorite.
-            await Task.Delay(150);
-            var clip = await Task.Run(() => _clipStoreService.GetClipAtOffsetAsync(0));
+            var clip = await ResolveJustCopiedClipAsync();
             if (clip is not null)
             {
                 await Task.Run(() => _clipStoreService.SetFavoriteAsync(clip.Id, true));
@@ -583,11 +580,10 @@ public partial class App : Application
 
     private async void CopyAndSensitive()
     {
-        if (_clipStoreService is null) return;
+        if (_clipStoreService is null || _clipboardMonitorService is null) return;
         try
         {
-            await Task.Delay(150);
-            var clip = await Task.Run(() => _clipStoreService.GetClipAtOffsetAsync(0));
+            var clip = await ResolveJustCopiedClipAsync();
             if (clip is not null)
             {
                 await Task.Run(() => _clipStoreService.SetSensitiveAsync(clip.Id, true));
@@ -595,6 +591,17 @@ public partial class App : Application
         }
         catch (Exception ex) { Trace.TraceWarning($"CopyAndSensitive failed: {ex.Message}"); }
     }
+
+    /// <summary>
+    /// The clip the user just copied, for hotkeys that mark it. Waits on what
+    /// the monitor reports rather than guessing at a fixed delay - see
+    /// <see cref="RecentCaptureResolver"/> for why marking the wrong clip
+    /// sensitive is the failure that matters.
+    /// </summary>
+    private Task<ClipEntry?> ResolveJustCopiedClipAsync()
+        => RecentCaptureResolver.ResolveJustCopiedClipAsync(
+            _clipboardMonitorService!,
+            () => Task.Run(() => _clipStoreService!.GetClipAtOffsetAsync(0)));
 
     private void CopyWithoutSaving()
     {
@@ -681,12 +688,16 @@ public partial class App : Application
                 return;
             }
 
-            // Use the selected clip from the UI when the window is open,
-            // falling back to the most recent clip for global hotkeys.
+            // Use the selected clip only while the window is actually on screen.
+            // A global hotkey pressed against a hidden window used to transform
+            // whatever happened to be selected the last time the user had the
+            // list open - a clip they may have copied hours ago - instead of
+            // what they just copied.
             ClipEntry? clip;
-            if (_mainWindow?.DataContext is MainWindowViewModel mvm && mvm.SelectedClip is { } selectedVm)
+            if (_mainWindow?.DataContext is MainWindowViewModel mvm
+                && mvm.HotkeyTargetClip is { } selected)
             {
-                clip = selectedVm.Clip;
+                clip = selected;
             }
             else
             {

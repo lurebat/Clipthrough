@@ -2661,6 +2661,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// The clip a global hotkey should act on when the list is on screen, or
+    /// null when it is not. A hotkey fired against a hidden window must act on
+    /// what the user just copied, not on a selection left over from the last
+    /// time the list was open - hiding the window deliberately keeps
+    /// <see cref="SelectedClip"/> intact, so callers cannot read it directly.
+    /// </summary>
+    public ClipEntry? HotkeyTargetClip => _isMainWindowVisible ? SelectedClip?.Clip : null;
+
+    /// <summary>
     /// Called by the application shell whenever the main window's visibility
     /// changes. While hidden, optimistic clip-list mutations and the throttled
     /// refresh are bypassed; on transition back to visible we trigger one

@@ -167,6 +167,9 @@ internal sealed class TestClipboardMonitorService : IClipboardMonitorService
     public void Emit(ClipEntry clip) => _capturedClips.OnNext(clip);
 
     public void EmitUpdate(ClipEntry clip) => _updatedClips.OnNext(clip);
+
+    /// <summary>Drives the busy flag the way a real capture would.</summary>
+    public void SetCaptureBusy(bool isBusy) => _captureBusy.OnNext(isBusy);
 }
 
 internal sealed class TestClipSampleDataService : IClipSampleDataService

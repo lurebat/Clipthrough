@@ -1950,5 +1950,37 @@
     "find": "                .RateLimit(TimeSpan.FromMilliseconds(500), RxSchedulers.TaskpoolScheduler)\n                .ObserveOn(RxSchedulers.MainThreadScheduler)\n                .Subscribe((int count) => { _ = RefreshSemanticCoverageAsync(); }));",
     "replace": "                .RateLimit(TimeSpan.FromMilliseconds(500), RxSchedulers.MainThreadScheduler)\n                .Subscribe((int count) => { _ = RefreshSemanticCoverageAsync(); }));",
     "filter": "FullyQualifiedName~SemanticCoverageProgressHeadlessTests"
+  },
+  {
+    "id": "resolver-ignores-the-captured-clip",
+    "file": "Clipthrough/Services/Capture/RecentCaptureResolver.cs",
+    "why": "Falling through to the newest stored clip discards the clip the monitor actually reported, which is the whole point of waiting for it.",
+    "find": "            if (ReferenceEquals(completed, captured.Task))\n            {\n                return await captured.Task.ConfigureAwait(false);\n            }",
+    "replace": "            if (ReferenceEquals(completed, captured.Task))\n            {\n                break;\n            }",
+    "filter": "FullyQualifiedName~RecentCaptureResolverTests"
+  },
+  {
+    "id": "resolver-does-not-wait-for-an-in-flight-capture",
+    "file": "Clipthrough/Services/Capture/RecentCaptureResolver.cs",
+    "why": "Treating the busy flag as always clear restores the old fixed-deadline race: a slow capture lands after the resolver has already picked the previous clip, so the hotkey marks the wrong one.",
+    "find": "            if (Volatile.Read(ref busy) == 0 || waited >= maxWait)",
+    "replace": "            if (Volatile.Read(ref busy) >= 0 || waited >= maxWait)",
+    "filter": "FullyQualifiedName~RecentCaptureResolverTests"
+  },
+  {
+    "id": "resolver-overshoots-its-wait-bound",
+    "file": "Clipthrough/Services/Capture/RecentCaptureResolver.cs",
+    "why": "An off-by-one on the bound lets a wedged capture hold the hotkey past the limit the bound is supposed to guarantee.",
+    "find": "            if (Volatile.Read(ref busy) == 0 || waited >= maxWait)",
+    "replace": "            if (Volatile.Read(ref busy) == 0 || waited > maxWait)",
+    "filter": "FullyQualifiedName~RecentCaptureResolverTests"
+  },
+  {
+    "id": "hotkey-targets-the-selection-while-hidden",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Hiding the popup deliberately keeps the selection, so a hotkey that still reads it transforms a clip the user last touched hours ago instead of the one they just copied.",
+    "find": "    public ClipEntry? HotkeyTargetClip => _isMainWindowVisible ? SelectedClip?.Clip : null;",
+    "replace": "    public ClipEntry? HotkeyTargetClip => SelectedClip?.Clip;",
+    "filter": "FullyQualifiedName~HotkeyTargetClipHeadlessTests"
   }
 ]
