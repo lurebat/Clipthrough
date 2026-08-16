@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Clipthrough.Models;
 using Clipthrough.Services;
@@ -37,6 +38,26 @@ public class SensitivityServiceTests
 
         Assert.Equal("Tokens", match.RuleName);
         Assert.Equal("critical", match.Severity);
+    }
+
+    /// <summary>
+    /// The match has to carry the rule's regex, not just its name. When a scan runs
+    /// against rules that were never persisted - the fallback path taken when the
+    /// rules table cannot be read - the store provisions the missing rule from the
+    /// match alone, and the pattern is the only part it cannot reconstruct.
+    /// </summary>
+    [Fact]
+    public async Task Scan_CarriesThePatternSoAMissingRuleCanBeProvisioned()
+    {
+        var service = await WithRulesAsync(Rule("Tokens", "secret-[0-9]+"));
+
+        var match = Assert.Single(service.Scan("here is secret-4242 for you"));
+
+        // Behavioural, not a string comparison: whatever is reported has to still
+        // work as the detector it claims to be. A rule name is itself a valid
+        // regex, so only running it reveals a pattern that detects nothing.
+        Assert.Matches(new Regex(match.Pattern), "here is secret-4242 for you");
+        Assert.Equal("secret-[0-9]+", match.Pattern);
     }
 
     [Fact]

@@ -213,6 +213,7 @@ public sealed class SensitivityService : ISensitivityService
             {
                 RuleId = rule.Rule.Id,
                 RuleName = rule.Rule.Name,
+                Pattern = rule.Rule.Pattern,
                 Severity = rule.Rule.Severity,
             });
         }

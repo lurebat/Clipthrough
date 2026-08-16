@@ -1582,5 +1582,29 @@
     "find": "        return matched >= BroadSearchMatchThreshold;",
     "replace": "        return matched >= 0;",
     "filter": "FullyQualifiedName~SearchPlanTests"
+  },
+  {
+    "id": "provisioned-rule-stores-its-name-as-its-pattern",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "PRIVACY. A rule provisioned from a fallback scan detects only its own name as literal text, so 'Credit Card' stops detecting card numbers permanently - and the ON CONFLICT(name) upsert never replaces the row.",
+    "find": "            insertCommand.Parameters.AddWithValue(\"$pattern\", match.Pattern);",
+    "replace": "            insertCommand.Parameters.AddWithValue(\"$pattern\", match.RuleName);",
+    "filter": "FullyQualifiedName~SensitivityRuleProvisioningTests"
+  },
+  {
+    "id": "provisioning-overwrites-a-user-edited-pattern",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "A fallback scan would reinstate the built-in regex over a pattern the user customised, silently undoing their edit.",
+    "find": "                ON CONFLICT(name) DO UPDATE SET severity = excluded.severity;",
+    "replace": "                ON CONFLICT(name) DO UPDATE SET severity = excluded.severity, pattern = excluded.pattern;",
+    "filter": "FullyQualifiedName~SensitivityRuleProvisioningTests"
+  },
+  {
+    "id": "scan-drops-the-pattern-off-the-match",
+    "file": "Clipthrough/Services/Security/SensitivityService.cs",
+    "why": "Without the pattern on the match the store has nothing real to provision from, which is what made it write the rule name into the pattern column.",
+    "find": "                Pattern = rule.Rule.Pattern,",
+    "replace": "                Pattern = string.Empty,",
+    "filter": "FullyQualifiedName~SensitivityServiceTests|FullyQualifiedName~SensitivityRuleProvisioningTests"
   }
 ]

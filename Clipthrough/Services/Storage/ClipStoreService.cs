@@ -1923,6 +1923,13 @@ public sealed class ClipStoreService : IClipStoreService
         foreach (var match in matches)
         {
             var ruleId = await EnsureRuleAsync(connection, transaction, match, cancellationToken);
+            if (ruleId <= 0)
+            {
+                // No rule to point at. Recording the match anyway would leave a row
+                // referencing a rule id that does not exist, which reads back as a
+                // join that silently drops the match.
+                continue;
+            }
 
             await using var matchCommand = connection.CreateCommand();
             matchCommand.Transaction = transaction;
@@ -2296,11 +2303,35 @@ public sealed class ClipStoreService : IClipStoreService
            (!string.IsNullOrWhiteSpace(row.SourceUrl) && regex.IsMatch(row.SourceUrl)) ||
            (!string.IsNullOrWhiteSpace(row.OcrText) && regex.IsMatch(row.OcrText));
 
+    /// <summary>
+    /// Returns the id of the rule a match points at, provisioning the row when the
+    /// scan reported a rule the database does not hold. That happens whenever
+    /// <c>SensitivityService</c> falls back to its in-memory defaults - a rules
+    /// table that could not be read carries no ids - and the match row needs a
+    /// foreign key to point at.
+    ///
+    /// The provisioned row has to carry the rule's real regex. Writing the display
+    /// name into the pattern column produces a rule that looks correct in Settings
+    /// while matching only its own name as literal text, and since the row then
+    /// exists, the <c>ON CONFLICT(name)</c> upsert never replaces it: "Credit Card"
+    /// silently stops detecting card numbers for the life of the database.
+    ///
+    /// A match with no pattern at all is not provisioned. An empty pattern is a
+    /// regex that matches every string, so installing one would mark the entire
+    /// library sensitive on the next rebuild - a worse failure than the missing
+    /// rule, and just as silent.
+    /// </summary>
     private static async Task<long> EnsureRuleAsync(SqliteConnection connection, SqliteTransaction transaction, SensitivityMatch match, CancellationToken cancellationToken)
     {
         if (match.RuleId > 0)
         {
             return match.RuleId;
+        }
+
+        if (string.IsNullOrEmpty(match.Pattern))
+        {
+            Trace.TraceWarning($"Sensitivity rule '{match.RuleName}' matched but carries no pattern; not provisioning it.");
+            return 0;
         }
 
         await using (var insertCommand = connection.CreateCommand())
@@ -2312,7 +2343,7 @@ public sealed class ClipStoreService : IClipStoreService
                 ON CONFLICT(name) DO UPDATE SET severity = excluded.severity;
                 """;
             insertCommand.Parameters.AddWithValue("$name", match.RuleName);
-            insertCommand.Parameters.AddWithValue("$pattern", match.RuleName);
+            insertCommand.Parameters.AddWithValue("$pattern", match.Pattern);
             insertCommand.Parameters.AddWithValue("$severity", match.Severity);
             await insertCommand.ExecuteNonQueryAsync(cancellationToken);
         }
