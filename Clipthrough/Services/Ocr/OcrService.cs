@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.Versioning;
@@ -19,6 +20,12 @@ namespace Clipthrough.Services;
 public sealed class OcrService : IOcrService
 {
     private readonly ISettingsService _settingsService;
+
+    // Building an engine loads a language model, which dwarfs the per-image
+    // recognition cost. ExtractTextAsync is driven by BackgroundOcrQueue's
+    // single sequential consumer loop, so before this a backlog of images
+    // reloaded the same model once per clip.
+    private readonly OcrEngineCache<OcrEngine> _engineCache = new();
 
     public OcrService(ISettingsService settingsService)
     {
@@ -63,12 +70,30 @@ public sealed class OcrService : IOcrService
         }
     }
 
-    private OcrEngine? BuildEngine(string languages)
+    private OcrEngine? BuildEngine(string languages) => BuildEngine(languages, CreateEngine);
+
+    /// <summary>
+    /// Resolves the effective language key and hands it to the cache. Split out
+    /// from the Windows-only engine construction so a test can prove this path
+    /// really routes through the cache instead of rebuilding per call.
+    /// </summary>
+    internal OcrEngine? BuildEngine(string languages, Func<string, OcrEngineCreation<OcrEngine>> create)
     {
         var requested = string.IsNullOrWhiteSpace(languages) ? _settingsService.Current.OcrLanguages : languages;
+        var key = requested?.Trim() ?? string.Empty;
+        return _engineCache.GetOrCreate(key, create);
+    }
+
+    /// <summary>Engines built so far. Test-only window onto the cache.</summary>
+    internal int EngineBuildCount => _engineCache.CreateCount;
+
+    private static OcrEngineCreation<OcrEngine> CreateEngine(string requested)
+    {
         if (string.IsNullOrWhiteSpace(requested))
         {
-            return OcrEngine.TryCreateFromUserProfileLanguages();
+            // Nothing was asked for, so the profile engine is the match rather
+            // than a fallback, and is safe to cache against the empty key.
+            return new OcrEngineCreation<OcrEngine>(OcrEngine.TryCreateFromUserProfileLanguages(), MatchedRequestedLanguage: true);
         }
 
         foreach (var tag in requested.Split(LanguageTagSeparators, StringSplitOptions.RemoveEmptyEntries))
@@ -81,17 +106,20 @@ public sealed class OcrService : IOcrService
                     var engine = OcrEngine.TryCreateFromLanguage(lang);
                     if (engine is not null)
                     {
-                        return engine;
+                        return new OcrEngineCreation<OcrEngine>(engine, MatchedRequestedLanguage: true);
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // unsupported tag — try the next one
+                // A malformed tag throws ArgumentException, but engine creation
+                // is WinRT and can fail in other ways too. Either way the point
+                // is to try the next tag - just not silently.
+                Trace.TraceWarning($"OCR: could not build an engine for language tag '{tag}': {ex}");
             }
         }
 
-        return OcrEngine.TryCreateFromUserProfileLanguages();
+        return new OcrEngineCreation<OcrEngine>(OcrEngine.TryCreateFromUserProfileLanguages(), MatchedRequestedLanguage: false);
     }
 }
 

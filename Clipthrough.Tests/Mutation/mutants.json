@@ -1878,5 +1878,69 @@
     "find": "        catch (Exception ex)\n        {\n            Trace.TraceWarning($\"Failed to close the {name} window during teardown: {ex}\");\n        }",
     "replace": "        catch (Exception)\n        {\n        }",
     "filter": "FullyQualifiedName~CloseChildWindowHeadlessTests"
+  },
+  {
+    "id": "ocr-service-rebuilds-the-engine-on-every-image",
+    "file": "Clipthrough/Services/Ocr/OcrService.cs",
+    "why": "Building an OCR engine loads a language model; doing it per image made an import backlog reload the same model once per clip.",
+    "find": "        return _engineCache.GetOrCreate(key, create);",
+    "replace": "        return create(key).Engine;",
+    "filter": "FullyQualifiedName~OcrServiceEngineCachingTests"
+  },
+  {
+    "id": "ocr-service-ignores-the-configured-languages",
+    "file": "Clipthrough/Services/Ocr/OcrService.cs",
+    "why": "A blank request must fall back to AppSettings.OcrLanguages, otherwise the background queue silently OCRs in the wrong language.",
+    "find": "        var requested = string.IsNullOrWhiteSpace(languages) ? _settingsService.Current.OcrLanguages : languages;\n        var key = requested?.Trim() ?? string.Empty;",
+    "replace": "        var requested = languages;\n        var key = requested?.Trim() ?? string.Empty;",
+    "filter": "FullyQualifiedName~OcrServiceEngineCachingTests"
+  },
+  {
+    "id": "ocr-service-does-not-trim-the-language-key",
+    "file": "Clipthrough/Services/Ocr/OcrService.cs",
+    "why": "An untrimmed key makes ' en ' and 'en' different cache entries, so a padded settings value never hits the cache.",
+    "find": "        var key = requested?.Trim() ?? string.Empty;",
+    "replace": "        var key = requested ?? string.Empty;",
+    "filter": "FullyQualifiedName~OcrServiceEngineCachingTests"
+  },
+  {
+    "id": "ocr-cache-never-returns-a-cached-engine",
+    "file": "Clipthrough/Services/Ocr/OcrEngineCache.cs",
+    "why": "The cache exists solely to avoid reloading the language model; a lookup that never hits makes it dead weight.",
+    "find": "            if (_engine is not null && string.Equals(_key, key, StringComparison.OrdinalIgnoreCase))\n            {\n                return _engine;\n            }",
+    "replace": "            if (_engine is not null && false)\n            {\n                return _engine;\n            }",
+    "filter": "FullyQualifiedName~OcrEngineCacheTests|FullyQualifiedName~OcrServiceEngineCachingTests"
+  },
+  {
+    "id": "ocr-cache-ignores-the-language-key",
+    "file": "Clipthrough/Services/Ocr/OcrEngineCache.cs",
+    "why": "Serving the cached engine regardless of key would OCR Hebrew clips with the English recognizer after one English clip warmed the cache.",
+    "find": "            if (_engine is not null && string.Equals(_key, key, StringComparison.OrdinalIgnoreCase))",
+    "replace": "            if (_engine is not null)",
+    "filter": "FullyQualifiedName~OcrEngineCacheTests|FullyQualifiedName~OcrServiceEngineCachingTests"
+  },
+  {
+    "id": "ocr-cache-compares-language-keys-case-sensitively",
+    "file": "Clipthrough/Services/Ocr/OcrEngineCache.cs",
+    "why": "BCP-47 tags are case-insensitive, so 'en-US' and 'en-us' must not each pay for their own model load.",
+    "find": "string.Equals(_key, key, StringComparison.OrdinalIgnoreCase)",
+    "replace": "string.Equals(_key, key, StringComparison.Ordinal)",
+    "filter": "FullyQualifiedName~OcrEngineCacheTests"
+  },
+  {
+    "id": "ocr-cache-remembers-a-failed-build",
+    "file": "Clipthrough/Services/Ocr/OcrEngineCache.cs",
+    "why": "A miss means the language pack is absent; remembering it would keep OCR broken until restart even after the user installs the pack. The cache has no field that can hold a miss today, so this mutant adds the negative caching a future refactor might.",
+    "find": "    private readonly object _gate = new();\n    private string? _key;\n    private T? _engine;\n\n    /// <summary>Number of times <paramref name=\"create\"/> was actually invoked.</summary>\n    public int CreateCount { get; private set; }\n\n    public T? GetOrCreate(string key, Func<string, OcrEngineCreation<T>> create)\n    {\n        ArgumentNullException.ThrowIfNull(create);\n\n        lock (_gate)\n        {\n            if (_engine is not null && string.Equals(_key, key, StringComparison.OrdinalIgnoreCase))\n            {\n                return _engine;\n            }\n        }\n\n        var creation = create(key);\n\n        lock (_gate)\n        {\n            CreateCount++;\n        }\n\n        if (creation.Engine is null)\n        {\n            return null;\n        }\n\n        if (key.Length > 0 && !creation.MatchedRequestedLanguage)\n        {\n            return creation.Engine;\n        }\n\n        lock (_gate)\n        {\n            _key = key;\n            _engine = creation.Engine;\n        }\n\n        return creation.Engine;\n    }\n",
+    "replace": "    private readonly object _gate = new();\n    private readonly System.Collections.Generic.HashSet<string> _misses = new(StringComparer.OrdinalIgnoreCase);\n    private string? _key;\n    private T? _engine;\n\n    /// <summary>Number of times <paramref name=\"create\"/> was actually invoked.</summary>\n    public int CreateCount { get; private set; }\n\n    public T? GetOrCreate(string key, Func<string, OcrEngineCreation<T>> create)\n    {\n        ArgumentNullException.ThrowIfNull(create);\n\n        lock (_gate)\n        {\n            if (_misses.Contains(key))\n            {\n                return null;\n            }\n\n            if (_engine is not null && string.Equals(_key, key, StringComparison.OrdinalIgnoreCase))\n            {\n                return _engine;\n            }\n        }\n\n        var creation = create(key);\n\n        lock (_gate)\n        {\n            CreateCount++;\n        }\n\n        if (creation.Engine is null)\n        {\n            lock (_gate)\n            {\n                _misses.Add(key);\n            }\n\n            return null;\n        }\n\n        if (key.Length > 0 && !creation.MatchedRequestedLanguage)\n        {\n            return creation.Engine;\n        }\n\n        lock (_gate)\n        {\n            _key = key;\n            _engine = creation.Engine;\n        }\n\n        return creation.Engine;\n    }\n",
+    "filter": "FullyQualifiedName~OcrEngineCacheTests"
+  },
+  {
+    "id": "ocr-cache-remembers-a-user-profile-fallback",
+    "file": "Clipthrough/Services/Ocr/OcrEngineCache.cs",
+    "why": "The fallback means the requested pack is not installed yet; caching it under that key keeps serving the wrong language after the user installs it.",
+    "find": "        if (key.Length > 0 && !creation.MatchedRequestedLanguage)\n        {\n            return creation.Engine;\n        }\n\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~OcrEngineCacheTests"
   }
 ]
