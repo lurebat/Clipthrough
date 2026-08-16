@@ -136,6 +136,20 @@ These four patterns produced the vacuous tests. Avoid them by construction:
   nothing. Subscribe to `CollectionChanged` (or equivalent) and assert across
   the sequence.
 
+- **Where two sources of truth should agree, write a test where they
+  disagree.** When a value can be derived two ways - a CF_HTML fragment from
+  the header offsets or from the `<!--StartFragment-->` comments, a length from
+  a count or from a walk - the natural fixture is one where both give the same
+  answer, so *every* such test passes whichever source the code consults. Ten
+  tests over `ExtractHtmlFragment` had full line coverage and not one could tell
+  the two orderings apart; the bug was which source was preferred. Build the
+  fixture so the sources disagree, assert the right one wins, and assert the
+  wrong one would have produced something else. That last assertion is what
+  stops the fixture quietly becoming an agreeing one again. Confirmed against a
+  second codebase: Vellum flipped the same ordering deliberately and its suite
+  did fail - but through one fixture whose offsets happened to be wrong, so an
+  author who computed honest offsets would have had the bug and the coverage.
+
 One measurement trap is worth knowing, because it makes manual verification lie:
 restoring a file with `Copy-Item` or `Move-Item` restores its old timestamp, so
 MSBuild thinks the assembly is current and silently runs the *previous* build.
