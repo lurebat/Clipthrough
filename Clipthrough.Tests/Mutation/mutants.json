@@ -1606,5 +1606,45 @@
     "find": "                Pattern = rule.Rule.Pattern,",
     "replace": "                Pattern = string.Empty,",
     "filter": "FullyQualifiedName~SensitivityServiceTests|FullyQualifiedName~SensitivityRuleProvisioningTests"
+  },
+  {
+    "id": "capture-no-longer-wakes-the-embedding-worker",
+    "file": "Clipthrough/Services/Search/SemanticIndexCoordinator.cs",
+    "why": "Newly captured clips wait for the worker's idle poll instead of being embedded promptly, so semantic search cannot find anything recent.",
+    "find": "                .Subscribe(_ => _embeddingWorker.Poke());",
+    "replace": "                .Subscribe(_ => { });",
+    "filter": "FullyQualifiedName~SemanticIndexCoordinatorTests"
+  },
+  {
+    "id": "edited-clips-never-get-re-embedded",
+    "file": "Clipthrough/Services/Search/SemanticIndexCoordinator.cs",
+    "why": "Dropping the UpdatedClips half leaves an edited clip matched by the vector of its old text - semantic search answers with content the clip no longer has.",
+    "find": "                .Merge(_clipboardMonitor.CapturedClips, _clipboardMonitor.UpdatedClips)",
+    "replace": "                .Merge(_clipboardMonitor.CapturedClips, System.Reactive.Linq.Observable.Empty<Clipthrough.Models.ClipEntry>())",
+    "filter": "FullyQualifiedName~SemanticIndexCoordinatorTests"
+  },
+  {
+    "id": "finished-batches-never-reach-the-semantic-cache",
+    "file": "Clipthrough/Services/Search/SemanticIndexCoordinator.cs",
+    "why": "The in-memory cache then only grows on a full reload, so every clip captured since the last refresh is invisible to semantic search.",
+    "find": "                .Subscribe(records => _ = AppendAsync(records));",
+    "replace": "                .Subscribe(records => { });",
+    "filter": "FullyQualifiedName~SemanticIndexCoordinatorTests"
+  },
+  {
+    "id": "a-failing-cache-append-is-swallowed-silently",
+    "file": "Clipthrough/Services/Search/SemanticIndexCoordinator.cs",
+    "why": "An async Task that throws faults its task, and since nobody awaits the detached append the failure vanishes. Search degrades with no record of why.",
+    "find": "            await _semanticSearch.AppendEmbeddingsAsync(records);\n        }\n        catch (Exception ex)\n        {\n            Trace.TraceError($\"Appending {records.Count} embedding(s) to the semantic cache failed: {ex}\");\n        }",
+    "replace": "            await _semanticSearch.AppendEmbeddingsAsync(records);\n        }\n        finally\n        {\n        }",
+    "filter": "FullyQualifiedName~SemanticIndexCoordinatorTests"
+  },
+  {
+    "id": "coordinator-double-subscribes-on-a-second-start",
+    "file": "Clipthrough/Services/Search/SemanticIndexCoordinator.cs",
+    "why": "A second Start() leaks the first pair of subscriptions and pokes the worker twice per clip, and Dispose only unhooks the last pair.",
+    "find": "            if (_isDisposed || _captureSubscription is not null)",
+    "replace": "            if (_isDisposed)",
+    "filter": "FullyQualifiedName~SemanticIndexCoordinatorTests"
   }
 ]
