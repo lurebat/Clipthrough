@@ -306,6 +306,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         _settingsService.SettingsChanged += OnSettingsChanged;
 
+        // Seed from the current value so an app start with the feature already on
+        // is not mistaken for the user just enabling it, which would silently
+        // re-tick a search toggle they deliberately turned off.
+        _wasSemanticSearchEnabled = _settingsService.Current.EnableSemanticSearch;
+
         ApplyPersistedFilters(_settingsService.Current, notify: false);
 
         // Persist filter toggles on change (debounced)
@@ -1960,6 +1965,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private bool _useSemanticClipSearch = AppSettings.Default.UseSemanticClipSearch;
 
+    // Previous EnableSemanticSearch value, so OnSettingsChanged can tell the
+    // off->on edge from a save that left it on.
+    private bool _wasSemanticSearchEnabled;
+
     public bool UseSemanticClipSearch
     {
         get => _useSemanticClipSearch;
@@ -2763,7 +2772,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             return FusedSearchResult.FromQuery(ftsResult);
         }
-        if (!_semanticSearchService.IsReady)
+        if (!_semanticSearchService.IsAvailable)
         {
             return FusedSearchResult.FromQuery(ftsResult);
         }
@@ -6139,6 +6148,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             LoadSettingsDraft(settings);
         }
+
+        // Turning the feature on in Settings starts a full embedding pass with a
+        // visible progress chip - and used to change nothing, because the search
+        // box carries its own "Semantic" toggle that defaults off. The user paid
+        // for the indexing and got identical results until they happened to find
+        // a second checkbox. Opt the search box in on the transition; the
+        // checkbox and Ctrl+J still let them turn it back off, and because this
+        // only fires on the off->on edge it never overrides that choice.
+        if (settings.EnableSemanticSearch && !_wasSemanticSearchEnabled)
+        {
+            UseSemanticClipSearch = true;
+        }
+        _wasSemanticSearchEnabled = settings.EnableSemanticSearch;
 
         SyncAiPresets(settings);
         RebuildCustomHotkeyTargetSuggestions();

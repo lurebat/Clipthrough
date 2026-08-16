@@ -46,7 +46,7 @@ public sealed class SemanticSearchServiceTests
 
         var semantic = new SemanticSearchService(scope.ClipStoreService, embedding);
         await semantic.RefreshCacheAsync();
-        Assert.True(semantic.IsReady);
+        Assert.True(semantic.IsAvailable);
         Assert.Equal(3, semantic.CachedCount);
 
         // Querying with the same text as one of the stored clips should rank that clip first.
@@ -66,13 +66,139 @@ public sealed class SemanticSearchServiceTests
         var semantic = new SemanticSearchService(scope.ClipStoreService, embedding);
         await semantic.RefreshCacheAsync();
 
-        Assert.True(semantic.IsReady);
+        Assert.True(semantic.IsAvailable);
         Assert.Equal(0, semantic.CachedCount);
 
         var hits = await semantic.QueryAsync("anything", topK: 5);
         Assert.Empty(hits);
     }
 
+
+    // ======== Cold start: the model loads lazily, so the query path must load it ========
+
+    /// <summary>
+    /// The user's report: semantic search returns nothing on a history that is
+    /// already fully embedded.
+    ///
+    /// The ONNX model is loaded lazily, by embedding something. With the backlog
+    /// already drained the worker never embeds, so the model stays unloaded for
+    /// the whole session - and the query path refused to run while it was
+    /// unloaded, which meant nothing ever loaded it. Semantic search was dead
+    /// from launch, silently, on every start after the backlog finished.
+    /// </summary>
+    [Fact]
+    public async Task QueryAsync_WithAnUnloadedModel_LoadsItAndStillRanks()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        var phrases = new[] { "red apple fruit", "blue ocean water", "green forest tree" };
+        foreach (var phrase in phrases)
+        {
+            await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = phrase,
+                ContentBytes = Encoding.UTF8.GetBytes(phrase),
+                SourceApp = "Test",
+            });
+        }
+
+        // A previous session embedded everything and exited.
+        var previousSession = new DeterministicEmbeddingService(dims: 16);
+        var indicator = new Clipthrough.Services.BackgroundJobIndicator();
+        var worker = new EmbeddingWorker(scope.ClipStoreService, previousSession, indicator);
+        worker.Start();
+        await WaitForBatchAsync(worker);
+        await worker.StopAsync();
+
+        // This session starts cold: same vectors, but nothing has loaded the model.
+        var embedding = new DeterministicEmbeddingService(dims: 16, startCold: true);
+        var semantic = new SemanticSearchService(scope.ClipStoreService, embedding);
+        Assert.False(embedding.IsReady);
+
+        var ranked = await semantic.QueryAsync("red apple fruit", topK: 3);
+
+        Assert.Equal(3, ranked.Count);
+        var appleId = await FindClipIdByText(scope, "red apple fruit");
+        Assert.Equal(appleId, ranked[0].ClipId);
+        Assert.True(embedding.IsReady, "the query path must load the model, because nothing else will");
+    }
+
+    /// <summary>
+    /// The caller-facing gate must not be "the model happens to be loaded", or
+    /// callers skip the query that would have loaded it. It only goes false once
+    /// the model has proven unusable.
+    /// </summary>
+    [Fact]
+    public async Task IsAvailable_IsTrueBeforeAnythingHasLoadedTheModel()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        var embedding = new DeterministicEmbeddingService(dims: 8, startCold: true);
+        var semantic = new SemanticSearchService(scope.ClipStoreService, embedding);
+
+        Assert.False(embedding.IsReady);
+        Assert.True(semantic.IsAvailable);
+    }
+
+    /// <summary>
+    /// A genuinely missing model must be latched, not retried on every keystroke:
+    /// the query path runs per search, and a failed 22 MB load per character
+    /// would be a far worse bug than the one it replaced.
+    /// </summary>
+    [Fact]
+    public async Task QueryAsync_WhenTheModelIsMissing_LatchesUnavailableInsteadOfRetrying()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "red apple fruit",
+            ContentBytes = Encoding.UTF8.GetBytes("red apple fruit"),
+            SourceApp = "Test",
+        });
+
+        var seeded = new DeterministicEmbeddingService(dims: 16);
+        var indicator = new Clipthrough.Services.BackgroundJobIndicator();
+        var worker = new EmbeddingWorker(scope.ClipStoreService, seeded, indicator);
+        worker.Start();
+        await WaitForBatchAsync(worker);
+        await worker.StopAsync();
+
+        var missing = new MissingModelEmbeddingService();
+        var semantic = new SemanticSearchService(scope.ClipStoreService, missing);
+
+        Assert.Empty(await semantic.QueryAsync("apple", topK: 5));
+        Assert.False(semantic.IsAvailable);
+
+        Assert.Empty(await semantic.QueryAsync("apple", topK: 5));
+        Assert.Equal(1, missing.Attempts);
+    }
+
+    private sealed class MissingModelEmbeddingService : IEmbeddingService
+    {
+        public int Attempts;
+
+        public int Dimensions => 16;
+        public bool IsReady => false;
+
+        public Task<float[]> EmbedAsync(string text, CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref Attempts);
+            throw new System.IO.FileNotFoundException("Semantic model ONNX file not found.", "model.onnx");
+        }
+
+        public Task<IReadOnlyList<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken ct = default)
+            => throw new System.IO.FileNotFoundException("Semantic model ONNX file not found.", "model.onnx");
+    }
 
     // ======== U14: QueryAsync is race-free under concurrent RefreshCacheAsync ========
 
@@ -759,17 +885,44 @@ public sealed class SemanticSearchServiceTests
     private sealed class DeterministicEmbeddingService : IEmbeddingService
     {
         private readonly int _dims;
-        public DeterministicEmbeddingService(int dims) { _dims = dims; }
+        private int _loaded;
+
+        /// <param name="startCold">
+        /// Mirror the real service, which reports <see cref="IsReady"/> false until
+        /// something actually embeds and loads the ONNX model. A fake that is always
+        /// ready hides every cold-start bug on the query path.
+        /// </param>
+        public DeterministicEmbeddingService(int dims, bool startCold = false)
+        {
+            _dims = dims;
+            _loaded = startCold ? 0 : 1;
+        }
+
         public int Dimensions => _dims;
-        public bool IsReady => true;
+        public bool IsReady => Volatile.Read(ref _loaded) == 1;
+
+        /// <summary>How many times the model was asked to embed - i.e. load attempts.</summary>
+        public int EmbedCalls;
 
         public Task<float[]> EmbedAsync(string text, System.Threading.CancellationToken ct = default)
-            => Task.FromResult(Vector(text));
+        {
+            Load();
+            return Task.FromResult(Vector(text));
+        }
 
         public Task<System.Collections.Generic.IReadOnlyList<float[]>> EmbedBatchAsync(
             System.Collections.Generic.IReadOnlyList<string> texts,
             System.Threading.CancellationToken ct = default)
-            => Task.FromResult<System.Collections.Generic.IReadOnlyList<float[]>>(texts.Select(Vector).ToArray());
+        {
+            Load();
+            return Task.FromResult<System.Collections.Generic.IReadOnlyList<float[]>>(texts.Select(Vector).ToArray());
+        }
+
+        private void Load()
+        {
+            Interlocked.Increment(ref EmbedCalls);
+            Volatile.Write(ref _loaded, 1);
+        }
 
         private float[] Vector(string s)
         {

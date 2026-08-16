@@ -222,7 +222,7 @@ public class SemanticIndexCoordinatorTests
 
         public bool ThrowOnAppend { get; set; }
 
-        public bool IsReady => true;
+        public bool IsAvailable => true;
 
         public int CachedCount => 0;
 

@@ -1773,7 +1773,7 @@ public sealed class MainWindowViewModelHeadlessTests
         private int _queryCount;
         private int _refreshCount;
 
-        public bool IsReady => true;
+        public bool IsAvailable => true;
 
         public int CachedCount => clipIds.Length;
 

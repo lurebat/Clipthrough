@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Diagnostics;
+using System.IO;
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
@@ -66,13 +68,19 @@ public sealed class SemanticSearchService : ISemanticSearchService
     private Dictionary<long, int> _slotById = new();
     private bool _hasLoaded;
 
+    // Latched once the model proves unloadable. QueryAsync runs per search, so
+    // without this a missing model would retry a failing 22 MB load on every
+    // keystroke.
+    private bool _modelUnavailable;
+
     public SemanticSearchService(IClipStoreService clipStore, IEmbeddingService embeddings)
     {
         _clipStore = clipStore ?? throw new ArgumentNullException(nameof(clipStore));
         _embeddings = embeddings ?? throw new ArgumentNullException(nameof(embeddings));
     }
 
-    public bool IsReady => _hasLoaded && _embeddings.IsReady;
+    /// <inheritdoc />
+    public bool IsAvailable => !Volatile.Read(ref _modelUnavailable);
 
     public int CachedCount => Volatile.Read(ref _cache).Count;
 
@@ -296,7 +304,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
         {
             return Array.Empty<(long, float)>();
         }
-        if (!_embeddings.IsReady)
+        if (Volatile.Read(ref _modelUnavailable))
         {
             return Array.Empty<(long, float)>();
         }
@@ -313,7 +321,23 @@ public sealed class SemanticSearchService : ISemanticSearchService
             return Array.Empty<(long, float)>();
         }
 
-        var query = await _embeddings.EmbedAsync(text, cancellationToken).ConfigureAwait(false);
+        // Embedding the query is also what loads the model, so this must run even
+        // though _embeddings.IsReady is still false. Gating on that flag here is
+        // what made semantic search dead on every launch with a drained backlog.
+        float[] query;
+        try
+        {
+            query = await _embeddings.EmbedAsync(text, cancellationToken).ConfigureAwait(false);
+        }
+        catch (FileNotFoundException ex)
+        {
+            // The model files are genuinely absent - not a transient failure, so
+            // stop asking rather than repeating the load on every search.
+            Volatile.Write(ref _modelUnavailable, true);
+            Trace.TraceWarning($"Semantic search disabled for this session; the embedding model is missing: {ex.Message}");
+            return Array.Empty<(long, float)>();
+        }
+
         if (query is null || query.Length != snapshot.Dim)
         {
             return Array.Empty<(long, float)>();

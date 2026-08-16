@@ -38,11 +38,17 @@ internal sealed class MainWindowTestHarness : IDisposable
     /// </summary>
     public TestSystemInteractionService SystemInteraction { get; }
 
+    /// <summary>
+    /// The same settings service the view model observes, so tests can drive a
+    /// real settings change and assert on how the view model reacts.
+    /// </summary>
+    public TestSettingsService Settings => _scope.SettingsService;
+
     public TextBox SearchBox => Window.FindControl<TextBox>("SearchTextBox")!;
 
     public ListBox ClipList => Window.FindControl<ListBox>("ClipsListBox")!;
 
-    public static MainWindowTestHarness Create()
+    public static MainWindowTestHarness Create(Func<AppSettings, AppSettings>? configureSettings = null)
     {
         var scope = new TemporaryDatabaseScope();
 
@@ -53,7 +59,12 @@ internal sealed class MainWindowTestHarness : IDisposable
         // thread, and `new MainWindow()` would then throw a thread-affinity
         // error during teardown -- intermittently, depending on scheduling.
         Task.Run(() => scope.DatabaseInitializer.InitializeAsync()).GetAwaiter().GetResult();
-        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
+
+        // Applied before the view model is constructed, so tests can exercise
+        // what it does with settings that were already in place at startup - a
+        // different path from changing them afterwards.
+        var settings = new AppSettings { MaxClipSizeBytes = 4096 };
+        scope.SettingsService.SetCurrent(configureSettings?.Invoke(settings) ?? settings);
 
         var systemInteraction = new TestSystemInteractionService();
 

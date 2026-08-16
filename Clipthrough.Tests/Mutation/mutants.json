@@ -1982,5 +1982,45 @@
     "find": "    public ClipEntry? HotkeyTargetClip => _isMainWindowVisible ? SelectedClip?.Clip : null;",
     "replace": "    public ClipEntry? HotkeyTargetClip => SelectedClip?.Clip;",
     "filter": "FullyQualifiedName~HotkeyTargetClipHeadlessTests"
+  },
+  {
+    "id": "semantic-query-refuses-to-load-the-model",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "why": "The model loads lazily and only the query path or the backlog worker loads it. Gating the query on it being already loaded means a fully-embedded history never loads it, so semantic search is dead from launch.",
+    "find": "        if (Volatile.Read(ref _modelUnavailable))\n        {\n            return Array.Empty<(long, float)>();\n        }",
+    "replace": "        if (Volatile.Read(ref _modelUnavailable) || !_embeddings.IsReady)\n        {\n            return Array.Empty<(long, float)>();\n        }",
+    "filter": "FullyQualifiedName~SemanticSearchServiceTests"
+  },
+  {
+    "id": "semantic-availability-reports-lazy-load-state",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "why": "Reporting 'the model happens to be loaded' as availability makes callers skip the very query that would have loaded it.",
+    "find": "    public bool IsAvailable => !Volatile.Read(ref _modelUnavailable);",
+    "replace": "    public bool IsAvailable => _hasLoaded && _embeddings.IsReady;",
+    "filter": "FullyQualifiedName~SemanticSearchServiceTests"
+  },
+  {
+    "id": "semantic-retries-a-missing-model-every-search",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "why": "QueryAsync runs per search, so failing to latch a genuinely missing model retries a failing load on every keystroke.",
+    "find": "            Volatile.Write(ref _modelUnavailable, true);",
+    "replace": "            Volatile.Write(ref _modelUnavailable, false);",
+    "filter": "FullyQualifiedName~SemanticSearchServiceTests"
+  },
+  {
+    "id": "enabling-semantic-does-not-opt-the-search-box-in",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Enabling the feature runs a full embedding pass and then changes nothing, because the search bar has a second toggle that defaults off.",
+    "find": "        if (settings.EnableSemanticSearch && !_wasSemanticSearchEnabled)\n        {\n            UseSemanticClipSearch = true;\n        }",
+    "replace": "",
+    "filter": "FullyQualifiedName~SemanticSearchOptInHeadlessTests"
+  },
+  {
+    "id": "semantic-opt-in-fires-on-every-save",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Opting in on every save, not just the off->on edge, silently undoes a user who unticked the search-bar checkbox.",
+    "find": "        if (settings.EnableSemanticSearch && !_wasSemanticSearchEnabled)",
+    "replace": "        if (settings.EnableSemanticSearch)",
+    "filter": "FullyQualifiedName~SemanticSearchOptInHeadlessTests"
   }
 ]

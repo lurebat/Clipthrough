@@ -12,8 +12,17 @@ namespace Clipthrough.Services.Search;
 /// </summary>
 public interface ISemanticSearchService
 {
-    /// <summary>True once the cache has been populated at least once and the embedding model is ready.</summary>
-    bool IsReady { get; }
+    /// <summary>
+    /// True unless the embedding model has proven unusable.
+    ///
+    /// Deliberately NOT "the model is loaded". The model loads lazily, and the
+    /// only things that load it are the backlog worker and <see cref="QueryAsync"/>
+    /// itself - so a caller that skipped the query while the model was unloaded
+    /// would guarantee it stayed unloaded forever. On a history that is already
+    /// fully embedded the worker never runs, which made semantic search silently
+    /// dead from launch.
+    /// </summary>
+    bool IsAvailable { get; }
 
     /// <summary>Number of embeddings currently cached in memory.</summary>
     int CachedCount { get; }
