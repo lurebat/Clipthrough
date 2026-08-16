@@ -24,7 +24,6 @@
         <PackageReference Include="Avalonia" Version="12.1.1" />
         <PackageReference Include="Avalonia.AvaloniaEdit" Version="12.0.0" />
         <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.1.2" />
-        <PackageReference Include="Avalonia.Controls.WebView" Version="12.0.1" />
         <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
         <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
         <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.1" />
@@ -37,7 +36,6 @@
         <PackageReference Include="ReactiveUI.Avalonia" Version="12.0.3" />
         <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.11" />
         <PackageReference Include="SQLitePCLRaw.bundle_e_sqlcipher" Version="2.1.11" />
-        <PackageReference Include="RtfPipe" Version="2.0.7677.4303" />
         <PackageReference Include="System.Drawing.Common" Version="10.0.11" />
         <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.2" />
         <PackageReference Include="Velopack" Version="0.0.1298" />

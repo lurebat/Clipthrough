@@ -1495,10 +1495,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         || (SelectedClip?.Clip.ContentType is ContentType.RichText
             && _contentDisplayMode is ContentDisplayMode.Textual or ContentDisplayMode.Raw);
 
-    public bool CanEditSelectedRichTextInRenderedMode =>
-        SelectedClip?.Clip.ContentType == ContentType.RichText
-        && SelectedClip?.Clip.ContentFormat == ClipContentFormat.Html
-        && _contentDisplayMode == ContentDisplayMode.Rendered;
+    /// <summary>
+    /// Rendered rich text is read-only. It was editable while it rendered in a WebView,
+    /// through <c>contenteditable</c> with edits posted back over a message channel; the
+    /// native renderer that replaced it shows a document rather than hosting an editor.
+    /// </summary>
+    /// <remarks>
+    /// This is a deliberate, temporary loss of WYSIWYG editing for HTML clips, taken to
+    /// close a privacy defect: the WebView fetched remote images, styles and fonts named
+    /// by the clip, so previewing an HTML clip told its sender when you looked at it (see
+    /// <see cref="Controls.RichDocumentView"/>). Editing HTML is still available through
+    /// the Textual and Raw panes, which are unchanged, and WYSIWYG editing returns once
+    /// the native editor is wired up.
+    /// </remarks>
+    public bool CanEditSelectedRichTextInRenderedMode => false;
 
     public bool SelectedClipTextIsReadOnly => !IsSelectedClipTextEditable;
 

@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using Avalonia.Controls;
@@ -6,6 +7,7 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Clipthrough.Database;
 using Clipthrough.Controls;
 using Clipthrough.Models;
@@ -13,6 +15,8 @@ using Clipthrough.Services;
 using Clipthrough.ViewModels;
 using Clipthrough.Views;
 using System.Reactive.Threading.Tasks;
+using Vellum;
+using Vellum.Avalonia;
 using Xunit;
 
 namespace Clipthrough.Tests.Headless;
@@ -60,48 +64,79 @@ public sealed class MainWindowHeadlessTests
         Assert.NotNull(window.FindControl<TextBox>("WelcomeDatabasePasswordTextBox"));
     }
 
+    /// <summary>
+    /// The rich preview renders natively now. These assert the text actually reaches a
+    /// document, because "the control loaded" passed just as happily against the WebView
+    /// that showed nothing.
+    /// </summary>
     [AvaloniaFact]
-    public void RichWebContentView_LoadsInsideHeadlessWindow()
+    public async Task RichDocumentView_RendersHtmlIntoADocument()
     {
-        var view = new RichWebContentView
+        var view = new RichDocumentView
         {
             ContentFormat = ClipContentFormat.Html,
             Markup = "<p>Hello <strong>headless</strong> world</p>",
         };
-        var window = new Window
-        {
-            Content = view,
-        };
+        var window = new Window { Content = view };
 
         window.Show();
         Dispatcher.UIThread.RunJobs();
+        await view.PendingRender;
 
-        Assert.NotNull(view.Content);
+        var text = DocumentText.Of(view.Viewer.Document);
+        Assert.Contains("Hello", text, StringComparison.Ordinal);
+        Assert.Contains("headless", text, StringComparison.Ordinal);
     }
 
     [AvaloniaFact]
-    public void RichWebContentView_ConvertsRtfBeforeRendering()
+    public async Task RichDocumentView_RendersRtfIntoADocument()
     {
-        var rtf = @"{\rtf1\ansi{\colortbl ;\red255\green0\blue0;}\cf1 hello}";
-
-        // Verify the RTF-to-HTML conversion produces output with the text
-        var html = Clipthrough.Presentation.RtfToHtmlConverter.Convert(rtf);
-        Assert.Contains("hello", html);
-
-        var view = new RichWebContentView
+        var view = new RichDocumentView
         {
             ContentFormat = ClipContentFormat.Rtf,
-            Markup = rtf,
+            Markup = @"{\rtf1\ansi{\colortbl ;\red255\green0\blue0;}\cf1 hello}",
         };
-        var window = new Window
-        {
-            Content = view,
-        };
+        var window = new Window { Content = view };
 
         window.Show();
         Dispatcher.UIThread.RunJobs();
+        await view.PendingRender;
 
-        Assert.NotNull(view.Content);
+        Assert.Contains("hello", DocumentText.Of(view.Viewer.Document), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Oversized payloads degrade to bounded text rather than blanking the preview.
+    ///
+    /// Deliberately no Window: the contract is what the control puts in the fallback, and
+    /// showing a window drags in text layout, which is the very thing being guarded
+    /// against. An earlier version of this test did show one and took over four minutes
+    /// on a 600 KB single-word payload - the bug it now pins.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RichDocumentView_WithAnOversizedPayload_FallsBackToBoundedText()
+    {
+        // The marker goes first: the fallback is deliberately bounded, so a marker at the
+        // end would be truncated away and the test would be asserting the wrong thing.
+        var huge = "<p>needle " + new string('x', 600 * 1024) + "</p>";
+        var view = new RichDocumentView
+        {
+            ContentFormat = ClipContentFormat.Html,
+            Markup = huge,
+        };
+
+        await view.PendingRender;
+
+        Assert.True(view.FallbackText.IsVisible, "an oversized payload should degrade to text, not blank the preview");
+        Assert.False(view.Viewer.IsVisible);
+        Assert.Contains("needle", view.FallbackText.Text ?? string.Empty, StringComparison.Ordinal);
+
+        // The bound is the point. Handing an unbounded string to a wrapping TextBlock costs
+        // minutes of shaping on the UI thread, and the payload here is one 600,000-character
+        // word, which is the worst case for finding break opportunities.
+        Assert.True(
+            (view.FallbackText.Text?.Length ?? 0) < 32 * 1024,
+            $"fallback text was {view.FallbackText.Text?.Length ?? 0} chars; it must be bounded");
     }
 
     [AvaloniaFact]

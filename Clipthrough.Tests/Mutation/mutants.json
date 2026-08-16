@@ -2078,5 +2078,13 @@
     "find": "        const string startFragmentMarker = \"<!--StartFragment-->\";\n        const string endFragmentMarker = \"<!--EndFragment-->\";\n        var markerStart = html.IndexOf(startFragmentMarker, StringComparison.OrdinalIgnoreCase);\n        var markerEnd = html.IndexOf(endFragmentMarker, StringComparison.OrdinalIgnoreCase);\n        if (markerStart >= 0 && markerEnd > markerStart)\n        {\n            return html[(markerStart + startFragmentMarker.Length)..markerEnd].Trim();\n        }\n\n        // No comments: the offsets are all there is. They are byte positions into the\n        // UTF-8 payload, which GetHeaderRegion accounts for.\n        var headerFragment = GetHeaderRegion(html, \"StartFragment\", \"EndFragment\");\n        if (!string.IsNullOrWhiteSpace(headerFragment))\n        {\n            return headerFragment.Trim();\n        }\n",
     "replace": "        var headerFragment = GetHeaderRegion(html, \"StartFragment\", \"EndFragment\");\n        if (!string.IsNullOrWhiteSpace(headerFragment))\n        {\n            return headerFragment.Trim();\n        }\n\n        const string startFragmentMarker = \"<!--StartFragment-->\";\n        const string endFragmentMarker = \"<!--EndFragment-->\";\n        var markerStart = html.IndexOf(startFragmentMarker, StringComparison.OrdinalIgnoreCase);\n        var markerEnd = html.IndexOf(endFragmentMarker, StringComparison.OrdinalIgnoreCase);\n        if (markerStart >= 0 && markerEnd > markerStart)\n        {\n            return html[(markerStart + startFragmentMarker.Length)..markerEnd].Trim();\n        }\n",
     "filter": "FullyQualifiedName~ClipboardMarkupDecoderTests"
+  },
+  {
+    "id": "rich-preview-fallback-is-unbounded",
+    "file": "Clipthrough/Controls/RichDocumentView.cs",
+    "why": "Handing an unbounded string to a wrapping TextBlock costs minutes of shaping on the UI thread; a 600 KB single-word clip took over four minutes before the bound existed. Raising the cap keeps every symbol referenced so the mutant still compiles.",
+    "find": "    private const int MaxFallbackChars = 16 * 1024;",
+    "replace": "    private const int MaxFallbackChars = int.MaxValue;",
+    "filter": "FullyQualifiedName~RichDocumentView"
   }
 ]

@@ -214,6 +214,7 @@ public static class AppText
         [nameof(PreviewEmptyImageData)] = "This image clip does not include previewable image data.",
         [nameof(PreviewEmptyFilesData)] = "This file clip does not include any stored paths.",
         [nameof(PreviewEmptyRichTextData)] = "This rich text clip is empty.",
+        [nameof(PreviewTruncatedSuffix)] = "\n\n... preview truncated. Use Raw or Textual view to see the whole clip.",
         [nameof(PreviewEmptyClip)] = "This clip is empty.",
         [nameof(PreviewTextUnavailable)] = "This clip does not contain previewable text.",
         [nameof(EmptyClip)] = "Empty clip",
@@ -544,6 +545,8 @@ public static class AppText
     public static string PreviewEmptyImageData => Text(nameof(PreviewEmptyImageData));
     public static string PreviewEmptyFilesData => Text(nameof(PreviewEmptyFilesData));
     public static string PreviewEmptyRichTextData => Text(nameof(PreviewEmptyRichTextData));
+
+    public static string PreviewTruncatedSuffix => Text(nameof(PreviewTruncatedSuffix));
     public static string PreviewEmptyClip => Text(nameof(PreviewEmptyClip));
     public static string PreviewTextUnavailable => Text(nameof(PreviewTextUnavailable));
     public static string EmptyClip => Text(nameof(EmptyClip));

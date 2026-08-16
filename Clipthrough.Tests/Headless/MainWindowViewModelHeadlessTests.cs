@@ -399,8 +399,14 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.True(viewModel.ShowCopyEditedClipButton);
     }
 
+    /// <summary>
+    /// Rendered rich text is read-only for HTML too, now that it renders natively rather
+    /// than in a WebView. This test asserted the opposite while the WebView hosted a
+    /// contenteditable surface; it is inverted rather than deleted, because the change is
+    /// deliberate and the old behaviour must not creep back unnoticed.
+    /// </summary>
     [AvaloniaFact]
-    public async Task RichContent_RenderedMode_IsEditableForHtml()
+    public async Task RichContent_RenderedMode_IsReadOnlyForHtml()
     {
         using var scope = new TemporaryDatabaseScope();
         await PrepareInitializedScopeAsync(scope);
@@ -419,8 +425,8 @@ public sealed class MainWindowViewModelHeadlessTests
 
         Assert.True(viewModel.ShowSelectedRichTextRenderer);
         Assert.False(viewModel.IsSelectedClipTextEditable);
-        Assert.True(viewModel.CanEditSelectedRichTextInRenderedMode);
-        Assert.True(viewModel.ShowCopyEditedClipButton);
+        Assert.False(viewModel.CanEditSelectedRichTextInRenderedMode);
+        Assert.False(viewModel.ShowCopyEditedClipButton);
     }
 
     [AvaloniaFact]
@@ -446,8 +452,14 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.False(viewModel.ShowCopyEditedClipButton);
     }
 
+    /// <summary>
+    /// The rendered pane no longer offers "copy as new" for HTML, because it no longer
+    /// hosts an editor. Editing HTML is still reachable through the Textual and Raw panes,
+    /// which are unchanged, so this asserts the button is absent rather than that editing
+    /// is impossible.
+    /// </summary>
     [AvaloniaFact]
-    public async Task HtmlRichContent_RenderedMode_EnablesCopyAsNewEditing()
+    public async Task HtmlRichContent_RenderedMode_DoesNotOfferCopyAsNewEditing()
     {
         using var scope = new TemporaryDatabaseScope();
         await PrepareInitializedScopeAsync(scope);
@@ -465,17 +477,16 @@ public sealed class MainWindowViewModelHeadlessTests
         Dispatcher.UIThread.RunJobs();
 
         viewModel.SelectedContentDisplayMode = ContentDisplayMode.Rendered;
-        viewModel.EditedClipText = "<p><em>edited</em></p>";
 
         Assert.True(viewModel.ShowSelectedRichTextRenderer);
-        Assert.True(viewModel.CanEditSelectedRichTextInRenderedMode);
+        Assert.False(viewModel.CanEditSelectedRichTextInRenderedMode);
+        Assert.False(viewModel.ShowCopyEditedClipButton);
+
+        // Anti-vacuity: the same clip is still editable through the textual pane, so this
+        // is asserting that the *rendered* pane declines, not that the clip is read-only.
+        viewModel.SelectedContentDisplayMode = ContentDisplayMode.Textual;
+        Assert.True(viewModel.IsSelectedClipTextEditable);
         Assert.True(viewModel.ShowCopyEditedClipButton);
-
-        await viewModel.CopyEditedClipCommand.Execute().ToTask();
-
-        Assert.Equal("<p><em>edited</em></p>", systemInteraction.LastCopiedRichContent);
-        Assert.Equal(ClipContentFormat.Html, systemInteraction.LastCopiedRichContentFormat);
-        Assert.Equal(AppText.EditedClipCopiedStatus, viewModel.StatusText);
     }
 
     [AvaloniaFact]
