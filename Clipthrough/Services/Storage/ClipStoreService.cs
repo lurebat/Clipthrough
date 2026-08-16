@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reactive.Linq;
+using System.Reactive.Subjects;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -119,6 +121,34 @@ public sealed class ClipStoreService : IClipStoreService
     private DateTimeOffset? _cachedLastCapturedAt;
     private long _statsVersion;
     private long _cachedStatsSnapshotVersion = -1;
+
+    private readonly Subject<IReadOnlyList<long>> _clipsRemoved = new();
+
+    /// <inheritdoc />
+    public IObservable<IReadOnlyList<long>> ClipsRemoved => _clipsRemoved.AsObservable();
+
+    /// <summary>
+    /// Announces a committed deletion. Faults in a subscriber are contained here:
+    /// an exception escaping <c>OnNext</c> would propagate back into whichever
+    /// delete raised it, and maintenance runs after every capture - so one bad
+    /// subscriber would take retention down with it.
+    /// </summary>
+    private void PublishClipsRemoved(IReadOnlyList<long> clipIds)
+    {
+        if (clipIds.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            _clipsRemoved.OnNext(clipIds);
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceError($"Publishing {clipIds.Count} removed clip id(s) failed: {ex}");
+        }
+    }
 
     public ClipStoreService(SqliteConnectionFactory connectionFactory, ISensitivityService sensitivityService, ISettingsService settingsService, IAppNotificationService notificationService)
     {
@@ -486,8 +516,13 @@ public sealed class ClipStoreService : IClipStoreService
         await using var command = connection.CreateCommand();
         command.CommandText = "DELETE FROM clips WHERE id = $id;";
         command.Parameters.AddWithValue("$id", clipId);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        var deleted = await command.ExecuteNonQueryAsync(cancellationToken);
         InvalidateStatsCache();
+
+        if (deleted > 0)
+        {
+            PublishClipsRemoved([clipId]);
+        }
     }
 
     public async Task ClearSensitivityAsync(long clipId, CancellationToken cancellationToken = default)
@@ -777,7 +812,7 @@ public sealed class ClipStoreService : IClipStoreService
         await connection.OpenAsync(cancellationToken);
 
         using var transaction = connection.BeginTransaction();
-        var purgedClipCount = 0;
+        var removedClipIds = new List<long>();
         var settings = _settingsService.Current;
         var now = DateTimeOffset.UtcNow;
 
@@ -794,12 +829,12 @@ public sealed class ClipStoreService : IClipStoreService
         {
             // Deliberately not preserving pinned/favorite clips: an expiring secret
             // outranks the user's intent to keep it around.
-            purgedClipCount += await DeleteOlderThanAsync(connection, transaction, isSensitive: true, now.AddMinutes(-settings.SensitiveClipLifetimeMinutes), preserveUserKeptClips: false, cancellationToken);
+            removedClipIds.AddRange(await DeleteOlderThanAsync(connection, transaction, isSensitive: true, now.AddMinutes(-settings.SensitiveClipLifetimeMinutes), preserveUserKeptClips: false, cancellationToken));
         }
 
         if (settings.EnableNormalClipLifetime)
         {
-            purgedClipCount += await DeleteOlderThanAsync(connection, transaction, isSensitive: false, now.AddDays(-settings.NormalClipLifetimeDays), preserveUserKeptClips: true, cancellationToken);
+            removedClipIds.AddRange(await DeleteOlderThanAsync(connection, transaction, isSensitive: false, now.AddDays(-settings.NormalClipLifetimeDays), preserveUserKeptClips: true, cancellationToken));
         }
 
         if (settings.EnableMaxEntryCount)
@@ -810,8 +845,8 @@ public sealed class ClipStoreService : IClipStoreService
             if (overflowCount > 0)
             {
                 var deleted = await DeleteOldestAsync(connection, transaction, overflowCount, cancellationToken);
-                purgedClipCount += deleted;
-                finalClipCount = totalClipCount - deleted;
+                removedClipIds.AddRange(deleted);
+                finalClipCount = totalClipCount - deleted.Count;
             }
         }
 
@@ -823,20 +858,25 @@ public sealed class ClipStoreService : IClipStoreService
             if (totalStoredBytes > maxBytes)
             {
                 var (deleted, remainingBytes) = await DeleteUntilWithinSizeAsync(connection, transaction, totalStoredBytes, maxBytes, cancellationToken);
-                purgedClipCount += deleted;
+                removedClipIds.AddRange(deleted);
                 finalStoredBytes = remainingBytes;
-                finalClipCount -= deleted;
+                finalClipCount -= deleted.Count;
             }
         }
 
         await transaction.CommitAsync(cancellationToken);
         InvalidateStatsCache();
 
+        // After the commit, never before: a subscriber that dropped a clip from
+        // its cache and then saw the transaction roll back would have evicted a
+        // row that is still there.
+        PublishClipsRemoved(removedClipIds);
+
         SweepDragTempFiles();
 
         return new ClipMaintenanceResult
         {
-            PurgedClipCount = purgedClipCount,
+            PurgedClipCount = removedClipIds.Count,
             TotalClipCount = finalClipCount ?? await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips;", cancellationToken),
             TotalStoredBytes = finalStoredBytes ?? await ExecuteScalarLongAsync(connection, $"SELECT COALESCE(SUM({StoredRowBytes}), 0) FROM clips;", cancellationToken),
         };
@@ -2093,21 +2133,42 @@ public sealed class ClipStoreService : IClipStoreService
         DELETE FROM clips
         WHERE is_sensitive = $isSensitive
           AND last_copied_at < $cutoff
-          AND ($keepUserKept = 0 OR NOT {UserKeptClipPredicate});
+          AND ($keepUserKept = 0 OR NOT {UserKeptClipPredicate})
+        RETURNING id;
         """;
 
-    private static async Task<int> DeleteOlderThanAsync(SqliteConnection connection, SqliteTransaction transaction, bool isSensitive, DateTimeOffset cutoff, bool preserveUserKeptClips, CancellationToken cancellationToken)
+    private static async Task<List<long>> DeleteOlderThanAsync(SqliteConnection connection, SqliteTransaction transaction, bool isSensitive, DateTimeOffset cutoff, bool preserveUserKeptClips, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = $"""
             {RetentionDeleteStatement}
-            SELECT changes();
             """;
         command.Parameters.AddWithValue("$isSensitive", isSensitive ? 1 : 0);
         command.Parameters.AddWithValue("$cutoff", cutoff.ToString("O", CultureInfo.InvariantCulture));
         command.Parameters.AddWithValue("$keepUserKept", preserveUserKeptClips ? 1 : 0);
-        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+        return await ReadDeletedIdsAsync(command, cancellationToken);
+    }
+
+    /// <summary>
+    /// Drains a <c>DELETE ... RETURNING id</c> and hands back what it removed.
+    ///
+    /// The drain is not optional bookkeeping: a RETURNING statement deletes rows
+    /// as the reader steps over them, so abandoning the reader early leaves part
+    /// of the sweep undone. Reading to the end is what makes the delete complete,
+    /// and the row count it yields is the same number <c>changes()</c> used to
+    /// report.
+    /// </summary>
+    private static async Task<List<long>> ReadDeletedIdsAsync(SqliteCommand command, CancellationToken cancellationToken)
+    {
+        var ids = new List<long>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            ids.Add(reader.GetInt64(0));
+        }
+
+        return ids;
     }
 
     /// <summary>
@@ -2138,11 +2199,11 @@ public sealed class ClipStoreService : IClipStoreService
     /// </summary>
     private const string StoredRowBytes = "stored_bytes";
 
-    private static async Task<int> DeleteOldestAsync(SqliteConnection connection, SqliteTransaction transaction, int deleteCount, CancellationToken cancellationToken)
+    private static async Task<List<long>> DeleteOldestAsync(SqliteConnection connection, SqliteTransaction transaction, int deleteCount, CancellationToken cancellationToken)
     {
         if (deleteCount <= 0)
         {
-            return 0;
+            return [];
         }
 
         await using var command = connection.CreateCommand();
@@ -2155,11 +2216,11 @@ public sealed class ClipStoreService : IClipStoreService
                 WHERE NOT {UserKeptClipPredicate}
                 {OldestFirstEvictionOrder}
                 LIMIT $limit
-            );
-            SELECT changes();
+            )
+            RETURNING id;
             """;
         command.Parameters.AddWithValue("$limit", deleteCount);
-        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+        return await ReadDeletedIdsAsync(command, cancellationToken);
     }
 
     /// <summary>
@@ -2178,7 +2239,7 @@ public sealed class ClipStoreService : IClipStoreService
     /// capture, so the throw does not just lose one purge: retention stops working
     /// altogether, and sensitive clips stop expiring.
     /// </summary>
-    private static async Task<(int DeletedCount, long RemainingBytes)> DeleteUntilWithinSizeAsync(SqliteConnection connection, SqliteTransaction transaction, long totalStoredBytes, long maxBytes, CancellationToken cancellationToken)
+    private static async Task<(List<long> DeletedIds, long RemainingBytes)> DeleteUntilWithinSizeAsync(SqliteConnection connection, SqliteTransaction transaction, long totalStoredBytes, long maxBytes, CancellationToken cancellationToken)
     {
         var evictionCount = 0;
         await using (var command = connection.CreateCommand())
@@ -2200,11 +2261,11 @@ public sealed class ClipStoreService : IClipStoreService
 
         if (evictionCount == 0)
         {
-            return (0, totalStoredBytes);
+            return ([], totalStoredBytes);
         }
 
-        var deletedCount = await DeleteOldestAsync(connection, transaction, evictionCount, cancellationToken);
-        return (deletedCount, totalStoredBytes);
+        var deletedIds = await DeleteOldestAsync(connection, transaction, evictionCount, cancellationToken);
+        return (deletedIds, totalStoredBytes);
     }
 
     private static void AddUpsertParameters(

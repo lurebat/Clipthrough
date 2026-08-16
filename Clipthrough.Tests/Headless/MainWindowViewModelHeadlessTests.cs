@@ -1735,6 +1735,9 @@ public sealed class MainWindowViewModelHeadlessTests
     /// </summary>
     private sealed class StubSemanticSearchService(params long[] clipIds) : Clipthrough.Services.Search.ISemanticSearchService
     {
+        public System.Threading.Tasks.Task RemoveEmbeddingsAsync(System.Collections.Generic.IReadOnlyList<long> ids, System.Threading.CancellationToken cancellationToken = default)
+            => System.Threading.Tasks.Task.CompletedTask;
+
         private int _queryCount;
         private int _refreshCount;
 
@@ -1799,6 +1802,8 @@ public sealed class MainWindowViewModelHeadlessTests
 
     private sealed class SlowSearchClipStore : IClipStoreService
     {
+        public System.IObservable<System.Collections.Generic.IReadOnlyList<long>> ClipsRemoved => System.Reactive.Linq.Observable.Never<System.Collections.Generic.IReadOnlyList<long>>();
+
         private readonly object _sync = new();
         private readonly List<ClipEntry> _items = [];
         private int _activeSearches;
@@ -1911,6 +1916,8 @@ public sealed class MainWindowViewModelHeadlessTests
     /// </summary>
     private sealed class IconCountingClipStore(IClipStoreService inner) : IClipStoreService
     {
+        public System.IObservable<System.Collections.Generic.IReadOnlyList<long>> ClipsRemoved => System.Reactive.Linq.Observable.Never<System.Collections.Generic.IReadOnlyList<long>>();
+
         private int _iconReads;
         private int _fullRowReads;
 
@@ -1969,6 +1976,8 @@ public sealed class MainWindowViewModelHeadlessTests
 
     private sealed class GatedSearchClipStore(IClipStoreService inner) : IClipStoreService
     {
+        public System.IObservable<System.Collections.Generic.IReadOnlyList<long>> ClipsRemoved => System.Reactive.Linq.Observable.Never<System.Collections.Generic.IReadOnlyList<long>>();
+
         private TaskCompletionSource? _armed;
         private TaskCompletionSource? _parked;
         private volatile bool _isParked;
@@ -2407,6 +2416,8 @@ public sealed class MainWindowViewModelHeadlessTests
     /// </summary>
     private sealed class FlakySearchClipStore(IClipStoreService inner) : IClipStoreService
     {
+        public System.IObservable<System.Collections.Generic.IReadOnlyList<long>> ClipsRemoved => System.Reactive.Linq.Observable.Never<System.Collections.Generic.IReadOnlyList<long>>();
+
         private volatile bool _shouldFail;
         private int _searchCount;
         private int _failedSearchCount;
@@ -2472,6 +2483,8 @@ public sealed class MainWindowViewModelHeadlessTests
 
     private sealed class PagedSearchClipStore(IClipStoreService inner, int pageSize) : IClipStoreService
     {
+        public System.IObservable<System.Collections.Generic.IReadOnlyList<long>> ClipsRemoved => System.Reactive.Linq.Observable.Never<System.Collections.Generic.IReadOnlyList<long>>();
+
         public List<int> RequestedOffsets { get; } = [];
 
         public async Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default)
@@ -2535,6 +2548,8 @@ public sealed class MainWindowViewModelHeadlessTests
     /// </summary>
     private sealed class BlockingWriteClipStore(IClipStoreService inner) : IClipStoreService
     {
+        public System.IObservable<System.Collections.Generic.IReadOnlyList<long>> ClipsRemoved => System.Reactive.Linq.Observable.Never<System.Collections.Generic.IReadOnlyList<long>>();
+
         private readonly List<string> m_searches = [];
         private readonly object m_gate = new();
         private TaskCompletionSource m_release = new(TaskCreationOptions.RunContinuationsAsynchronously);

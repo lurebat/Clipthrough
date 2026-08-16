@@ -289,6 +289,8 @@ public sealed class EmbeddingWorkerTests
 
     private sealed class InferenceFailureClipStore : IClipStoreService
     {
+        public System.IObservable<System.Collections.Generic.IReadOnlyList<long>> ClipsRemoved => System.Reactive.Linq.Observable.Never<System.Collections.Generic.IReadOnlyList<long>>();
+
         private int _claimCallCount;
         private int _setFailureCallCount;
         private int _resetCallCount;
@@ -469,6 +471,8 @@ public sealed class EmbeddingWorkerTests
 
     private sealed class PersistFailureClipStore : IClipStoreService
     {
+        public System.IObservable<System.Collections.Generic.IReadOnlyList<long>> ClipsRemoved => System.Reactive.Linq.Observable.Never<System.Collections.Generic.IReadOnlyList<long>>();
+
         private int _claimCallCount;
         private int _saveCallCount;
         private int _setFailureCallCount;

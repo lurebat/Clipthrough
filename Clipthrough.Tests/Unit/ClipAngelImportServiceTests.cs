@@ -113,6 +113,8 @@ public sealed class ClipAngelImportServiceTests
 
     private sealed class ThrowingClipStore : IClipStoreService
     {
+        public System.IObservable<System.Collections.Generic.IReadOnlyList<long>> ClipsRemoved => System.Reactive.Linq.Observable.Never<System.Collections.Generic.IReadOnlyList<long>>();
+
         public Task<ClipEntry?> CaptureAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<ClipEntry?> CaptureFastAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<ClipEntry?> UpdateDeferredContentAsync(long clipId, ClipCaptureRequest request, CancellationToken cancellationToken = default) => throw new NotImplementedException();

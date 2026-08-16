@@ -189,6 +189,219 @@ public sealed class SemanticSearchServiceTests
         Assert.Equal(ids[2], hits[0].ClipId);
     }
 
+    /// <summary>
+    /// Removal has to survive its own hardest case: dropping a middle entry
+    /// moves every later vector down a slot, and a slot map left pointing at the
+    /// old positions would match one clip's id against another clip's vector -
+    /// a wrong answer rather than a missing one. The assertion is therefore on
+    /// what each surviving clip still ranks for, not just on the count.
+    /// </summary>
+    [Fact]
+    public async Task RemoveEmbeddingsAsync_DropsTheClipAndKeepsTheRestAddressable()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        var phrases = new[] { "alpha beta gamma", "delta epsilon", "zeta eta theta" };
+        var ids = new List<long>();
+        foreach (var p in phrases)
+        {
+            var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = p,
+                ContentBytes = Encoding.UTF8.GetBytes(p),
+                IncrementExistingCopyCount = true,
+            });
+            ids.Add(clip!.Id);
+        }
+
+        var emb = new DeterministicEmbeddingService(dims: 8);
+        var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
+        await scope.ClipStoreService.SaveEmbeddingBatchAsync(
+            [.. ids.Select((id, i) => new ClipEmbeddingRecord(id, emb.VectorFor(phrases[i])))],
+            "test");
+        await semantic.RefreshCacheAsync();
+        Assert.Equal(3, semantic.CachedCount);
+
+        // The middle one, so the last entry has to shift down over it.
+        await semantic.RemoveEmbeddingsAsync([ids[1]]);
+
+        Assert.Equal(2, semantic.CachedCount);
+
+        var all = await semantic.QueryAsync(phrases[1], topK: 10);
+        Assert.DoesNotContain(ids[1], all.Select(h => h.ClipId));
+
+        // Each survivor must still rank first for its own text. If compaction
+        // paired the ids with the wrong vectors, the shifted clip would answer to
+        // the wrong phrase and this would fail rather than merely returning fewer
+        // hits. Note this proves the published snapshot only — QueryAsync never
+        // reads the slot map, so the tests below are what defend that.
+        Assert.Equal(ids[0], (await semantic.QueryAsync(phrases[0], topK: 1))[0].ClipId);
+        Assert.Equal(ids[2], (await semantic.QueryAsync(phrases[2], topK: 1))[0].ClipId);
+    }
+
+    /// <summary>
+    /// Removal has to rebuild the id-to-slot map, not just the vectors. The map is
+    /// invisible to <c>QueryAsync</c>, which reads the published snapshot, so a
+    /// stale map costs nothing until the *next* append — at which point a
+    /// re-embedded survivor is written to the index it occupied before compaction,
+    /// which now belongs to a different clip. The victim then answers to text it
+    /// never contained, and the clip that was actually re-embedded keeps its old
+    /// vector. Four clips with the hole in the middle are the minimum that tells
+    /// the shifted slot apart from the correct one.
+    /// </summary>
+    [Fact]
+    public async Task RemoveEmbeddingsAsync_ThenReembeddingASurvivor_UpdatesTheRightClip()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        var phrases = new[] { "alpha beta gamma", "delta epsilon", "zeta eta theta", "iota kappa lambda" };
+        var ids = new List<long>();
+        foreach (var p in phrases)
+        {
+            var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = p,
+                ContentBytes = Encoding.UTF8.GetBytes(p),
+                IncrementExistingCopyCount = true,
+            });
+            ids.Add(clip!.Id);
+        }
+
+        var emb = new DeterministicEmbeddingService(dims: 8);
+        var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
+        await scope.ClipStoreService.SaveEmbeddingBatchAsync(
+            [.. ids.Select((id, i) => new ClipEmbeddingRecord(id, emb.VectorFor(phrases[i])))],
+            "test");
+        await semantic.RefreshCacheAsync();
+        Assert.Equal(4, semantic.CachedCount);
+
+        // Drop index 1, so index 2 shifts to 1 and index 3 shifts to 2.
+        await semantic.RemoveEmbeddingsAsync([ids[1]]);
+        Assert.Equal(3, semantic.CachedCount);
+
+        // Re-embed the clip that moved from slot 2 to slot 1. Against a stale map
+        // this lands on slot 2 — the clip that moved from 3 — so "omega" would come
+        // back as ids[3].
+        await semantic.AppendEmbeddingsAsync([new ClipEmbeddingRecord(ids[2], emb.VectorFor("omega"))]);
+
+        Assert.Equal(3, semantic.CachedCount);
+        var omega = await semantic.QueryAsync("omega", topK: 1);
+        Assert.NotEmpty(omega);
+        Assert.Equal(ids[2], omega[0].ClipId);
+        Assert.True(omega[0].Score > 0.9f, $"expected near-1.0 cosine, got {omega[0].Score}");
+
+        // And the innocent neighbour still answers to its own text.
+        Assert.Equal(ids[3], (await semantic.QueryAsync(phrases[3], topK: 1))[0].ClipId);
+    }
+
+    /// <summary>
+    /// The same id arriving twice must be a no-op. It is reachable in practice —
+    /// a retention sweep and an explicit delete can both name a clip — and if the
+    /// slot map still holds the first removal's entry, the second call counts a
+    /// clip that is no longer in the cache, under-sizes the survivor arrays and
+    /// throws while compacting.
+    /// </summary>
+    [Fact]
+    public async Task RemoveEmbeddingsAsync_SameIdTwice_IsANoOp()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        var phrases = new[] { "alpha beta gamma", "delta epsilon", "zeta eta theta" };
+        var ids = new List<long>();
+        foreach (var p in phrases)
+        {
+            var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = p,
+                ContentBytes = Encoding.UTF8.GetBytes(p),
+                IncrementExistingCopyCount = true,
+            });
+            ids.Add(clip!.Id);
+        }
+
+        var emb = new DeterministicEmbeddingService(dims: 8);
+        var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
+        await scope.ClipStoreService.SaveEmbeddingBatchAsync(
+            [.. ids.Select((id, i) => new ClipEmbeddingRecord(id, emb.VectorFor(phrases[i])))],
+            "test");
+        await semantic.RefreshCacheAsync();
+
+        await semantic.RemoveEmbeddingsAsync([ids[0]]);
+        await semantic.RemoveEmbeddingsAsync([ids[0]]);
+
+        Assert.Equal(2, semantic.CachedCount);
+        Assert.Equal(ids[1], (await semantic.QueryAsync(phrases[1], topK: 1))[0].ClipId);
+        Assert.Equal(ids[2], (await semantic.QueryAsync(phrases[2], topK: 1))[0].ClipId);
+    }
+
+    [Fact]
+    public async Task RemoveEmbeddingsAsync_UnknownId_LeavesTheCacheAlone()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "alpha beta gamma",
+            ContentBytes = Encoding.UTF8.GetBytes("alpha beta gamma"),
+        });
+
+        var emb = new DeterministicEmbeddingService(dims: 8);
+        var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
+        await scope.ClipStoreService.SaveEmbeddingBatchAsync([new ClipEmbeddingRecord(clip!.Id, emb.VectorFor("alpha beta gamma"))], "test");
+        await semantic.RefreshCacheAsync();
+
+        await semantic.RemoveEmbeddingsAsync([clip.Id + 9999]);
+
+        Assert.Equal(1, semantic.CachedCount);
+        Assert.Equal(clip.Id, (await semantic.QueryAsync("alpha beta gamma", topK: 1))[0].ClipId);
+    }
+
+    /// <summary>
+    /// Emptying the cache must leave it usable rather than in a state a later
+    /// append or query trips over.
+    /// </summary>
+    [Fact]
+    public async Task RemoveEmbeddingsAsync_RemovingEverything_LeavesAWorkingEmptyCache()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "alpha beta gamma",
+            ContentBytes = Encoding.UTF8.GetBytes("alpha beta gamma"),
+        });
+
+        var emb = new DeterministicEmbeddingService(dims: 8);
+        var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
+        await scope.ClipStoreService.SaveEmbeddingBatchAsync([new ClipEmbeddingRecord(clip!.Id, emb.VectorFor("alpha beta gamma"))], "test");
+        await semantic.RefreshCacheAsync();
+
+        await semantic.RemoveEmbeddingsAsync([clip.Id]);
+
+        Assert.Equal(0, semantic.CachedCount);
+        Assert.Empty(await semantic.QueryAsync("alpha beta gamma", topK: 5));
+    }
+
     [Fact]
     public async Task AppendEmbeddingsAsync_DuplicateId_NotAddedTwice()
     {

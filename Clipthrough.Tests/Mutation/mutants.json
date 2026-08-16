@@ -91,8 +91,8 @@
     "id": "retention-lifetime-deletes-user-kept",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "DATA LOSS. Age-based retention stops exempting pinned and favorited clips.",
-    "find": "AND ($keepUserKept = 0 OR NOT {UserKeptClipPredicate});",
-    "replace": "AND ($keepUserKept = 0 OR 1 = 1);",
+    "find": "AND ($keepUserKept = 0 OR NOT {UserKeptClipPredicate})\n        RETURNING id;",
+    "replace": "AND ($keepUserKept = 0 OR 1 = 1)\n        RETURNING id;",
     "filter": "ClipRetentionTests"
   },
   {
@@ -1267,7 +1267,7 @@
     "id": "maintenance-total-ignores-the-count-purge",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "Reports the clip count from before the entry-count purge. The purge itself still happens, so only the number the status bar shows is wrong - and it is wrong in the direction that looks plausible.",
-    "find": "                finalClipCount = totalClipCount - deleted;",
+    "find": "                finalClipCount = totalClipCount - deleted.Count;",
     "replace": "                finalClipCount = totalClipCount;",
     "filter": "Maintenance_ReportsTheSameTotalsTheDatabaseWould"
   },
@@ -1275,7 +1275,7 @@
     "id": "maintenance-total-ignores-the-size-purge",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "Forgets that the library-size purge also removed rows, so the reported clip count keeps counting clips that no longer exist. Only shows up when both caps are enabled and the size cap is the one that bites.",
-    "find": "                finalStoredBytes = remainingBytes;\n                finalClipCount -= deleted;",
+    "find": "                finalStoredBytes = remainingBytes;\n                finalClipCount -= deleted.Count;",
     "replace": "                finalStoredBytes = remainingBytes;",
     "filter": "Maintenance_ReportsTheSameTotalsTheDatabaseWould"
   },
@@ -1283,16 +1283,16 @@
     "id": "maintenance-size-total-is-taken-before-the-purge",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "Keeps the pre-purge library size, so the storage figure never drops after a size-cap eviction and the user sees a library permanently at its ceiling.",
-    "find": "                finalStoredBytes = remainingBytes;\n                finalClipCount -= deleted;",
-    "replace": "                finalClipCount -= deleted;",
+    "find": "                finalStoredBytes = remainingBytes;\n                finalClipCount -= deleted.Count;",
+    "replace": "                finalClipCount -= deleted.Count;",
     "filter": "Maintenance_ReportsTheSameTotalsTheDatabaseWould"
   },
   {
     "id": "size-purge-names-every-evicted-clip",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "Goes back to listing every doomed clip as its own SQL parameter. Correct for small purges and fatal past SQLITE_MAX_VARIABLE_NUMBER, which is exactly the purge a user gets after lowering the size cap on a large library.",
-    "find": "        var deletedCount = await DeleteOldestAsync(connection, transaction, evictionCount, cancellationToken);\n        return (deletedCount, totalStoredBytes);",
-    "replace": "        var ids = new List<long>();\n        await using (var idCommand = connection.CreateCommand())\n        {\n            idCommand.Transaction = transaction;\n            idCommand.CommandText = $\"SELECT id FROM clips WHERE NOT {UserKeptClipPredicate} {OldestFirstEvictionOrder} LIMIT {evictionCount};\";\n            await using var idReader = await idCommand.ExecuteReaderAsync(cancellationToken);\n            while (await idReader.ReadAsync(cancellationToken))\n            {\n                ids.Add(idReader.GetInt64(0));\n            }\n        }\n\n        await using var deleteCommand = connection.CreateCommand();\n        deleteCommand.Transaction = transaction;\n        for (var index = 0; index < ids.Count; index++)\n        {\n            deleteCommand.Parameters.AddWithValue($\"$id{index}\", ids[index]);\n        }\n\n        deleteCommand.CommandText = $\"DELETE FROM clips WHERE id IN ({string.Join(\", \", ids.Select((_, index) => $\"$id{index}\"))}); SELECT changes();\";\n        var deletedCount = Convert.ToInt32(await deleteCommand.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);\n        return (deletedCount, totalStoredBytes);",
+    "find": "        var deletedIds = await DeleteOldestAsync(connection, transaction, evictionCount, cancellationToken);\n        return (deletedIds, totalStoredBytes);",
+    "replace": "        var ids = new List<long>();\n        await using (var idCommand = connection.CreateCommand())\n        {\n            idCommand.Transaction = transaction;\n            idCommand.CommandText = $\"SELECT id FROM clips WHERE NOT {UserKeptClipPredicate} {OldestFirstEvictionOrder} LIMIT {evictionCount};\";\n            await using var idReader = await idCommand.ExecuteReaderAsync(cancellationToken);\n            while (await idReader.ReadAsync(cancellationToken))\n            {\n                ids.Add(idReader.GetInt64(0));\n            }\n        }\n\n        await using var deleteCommand = connection.CreateCommand();\n        deleteCommand.Transaction = transaction;\n        for (var index = 0; index < ids.Count; index++)\n        {\n            deleteCommand.Parameters.AddWithValue($\"$id{index}\", ids[index]);\n        }\n\n        deleteCommand.CommandText = $\"DELETE FROM clips WHERE id IN ({string.Join(\", \", ids.Select((_, index) => $\"$id{index}\"))}) RETURNING id;\";\n        var deletedIds = await ReadDeletedIdsAsync(deleteCommand, cancellationToken);\n        return (deletedIds, totalStoredBytes);",
     "filter": "Maintenance_SizeCap_EvictsMoreClipsThanSqliteAllowsParameters"
   },
   {
@@ -1646,5 +1646,61 @@
     "find": "            if (_isDisposed || _captureSubscription is not null)",
     "replace": "            if (_isDisposed)",
     "filter": "FullyQualifiedName~SemanticIndexCoordinatorTests"
+  },
+  {
+    "id": "deleted-clips-are-never-announced",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Nothing outside the database learns a clip is gone, so the in-memory semantic cache keeps a deleted clip searchable for the rest of the session.",
+    "find": "            _clipsRemoved.OnNext(clipIds);",
+    "replace": "            _ = clipIds;",
+    "filter": "FullyQualifiedName~ClipRemovalSignalTests|FullyQualifiedName~SemanticIndexCoordinatorTests"
+  },
+  {
+    "id": "retention-sweep-hides-what-it-deleted",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "The sweep and both capacity caps delete silently and are the only routes the user never sees, so a cache told nothing about them never sheds those clips.",
+    "find": "        PublishClipsRemoved(removedClipIds);",
+    "replace": "        _ = removedClipIds;",
+    "filter": "FullyQualifiedName~ClipRemovalSignalTests"
+  },
+  {
+    "id": "removal-signal-fires-before-the-commit",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "A subscriber would evict clips a rolled-back transaction leaves in place, so the cache would lose rows that still exist.",
+    "find": "        await transaction.CommitAsync(cancellationToken);\n        InvalidateStatsCache();\n\n        // After the commit, never before",
+    "replace": "        PublishClipsRemoved(removedClipIds);\n        await transaction.CommitAsync(cancellationToken);\n        InvalidateStatsCache();\n\n        // After the commit, never before",
+    "filter": "FullyQualifiedName~ClipRemovalSignalTests"
+  },
+  {
+    "id": "deleting-a-missing-clip-still-announces-it",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "A no-op delete would tell subscribers to drop a clip that was never there, and a shared id space makes that a live eviction of the wrong entry.",
+    "find": "        if (deleted > 0)\n        {\n            PublishClipsRemoved([clipId]);\n        }",
+    "replace": "        PublishClipsRemoved([clipId]);",
+    "filter": "FullyQualifiedName~ClipRemovalSignalTests"
+  },
+  {
+    "id": "removed-clips-never-leave-the-semantic-cache",
+    "file": "Clipthrough/Services/Search/SemanticIndexCoordinator.cs",
+    "why": "The store announces the deletion but nothing acts on it, which is exactly the state this coordinator exists to prevent.",
+    "find": "                .Subscribe(ids => _ = RemoveAsync(ids));",
+    "replace": "                .Subscribe(ids => { });",
+    "filter": "FullyQualifiedName~SemanticIndexCoordinatorTests"
+  },
+  {
+    "id": "cache-removal-leaves-a-stale-slot-map",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "why": "Compacting the vectors without rebuilding the slot map points each shifted id at another clip's vector - search then answers with the wrong clip rather than merely losing one.",
+    "find": "            _slotById = slots;\n            Volatile.Write(ref _cache, new CacheSnapshot(newIds, newVectors, survivors, dim));",
+    "replace": "            Volatile.Write(ref _cache, new CacheSnapshot(newIds, newVectors, survivors, dim));",
+    "filter": "FullyQualifiedName~SemanticSearchServiceTests"
+  },
+  {
+    "id": "cache-removal-drops-the-wrong-vectors",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "why": "Copying each survivor from its new position instead of its old one shifts every vector after the hole, so surviving clips answer to each other's text.",
+    "find": "                Buffer.BlockCopy(existing.Vectors, i * dim * sizeof(float), newVectors, next * dim * sizeof(float), dim * sizeof(float));",
+    "replace": "                Buffer.BlockCopy(existing.Vectors, next * dim * sizeof(float), newVectors, next * dim * sizeof(float), dim * sizeof(float));",
+    "filter": "FullyQualifiedName~SemanticSearchServiceTests"
   }
 ]

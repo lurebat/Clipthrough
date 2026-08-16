@@ -32,8 +32,9 @@ public class SemanticIndexCoordinatorTests
     {
         var monitor = new TestClipboardMonitorService();
         var worker = new RecordingEmbeddingWorker();
+        var store = new RemovalSignalClipStore();
         var search = new RecordingSemanticSearchService();
-        using var coordinator = new SemanticIndexCoordinator(monitor, worker, search);
+        using var coordinator = new SemanticIndexCoordinator(monitor, worker, search, store);
         coordinator.Start();
 
         monitor.Emit(new ClipEntry { Id = 1 });
@@ -50,8 +51,9 @@ public class SemanticIndexCoordinatorTests
     {
         var monitor = new TestClipboardMonitorService();
         var worker = new RecordingEmbeddingWorker();
+        var store = new RemovalSignalClipStore();
         var search = new RecordingSemanticSearchService();
-        using var coordinator = new SemanticIndexCoordinator(monitor, worker, search);
+        using var coordinator = new SemanticIndexCoordinator(monitor, worker, search, store);
         coordinator.Start();
 
         monitor.EmitUpdate(new ClipEntry { Id = 1 });
@@ -64,8 +66,9 @@ public class SemanticIndexCoordinatorTests
     {
         var monitor = new TestClipboardMonitorService();
         var worker = new RecordingEmbeddingWorker();
+        var store = new RemovalSignalClipStore();
         var search = new RecordingSemanticSearchService();
-        using var coordinator = new SemanticIndexCoordinator(monitor, worker, search);
+        using var coordinator = new SemanticIndexCoordinator(monitor, worker, search, store);
         coordinator.Start();
 
         var records = new List<ClipEmbeddingRecord> { new(7, [0.5f, 0.5f]) };
@@ -93,8 +96,9 @@ public class SemanticIndexCoordinatorTests
         {
             var monitor = new TestClipboardMonitorService();
             var worker = new RecordingEmbeddingWorker();
-            var search = new RecordingSemanticSearchService { ThrowOnAppend = true };
-            using var coordinator = new SemanticIndexCoordinator(monitor, worker, search);
+            var store = new RemovalSignalClipStore();
+        var search = new RecordingSemanticSearchService { ThrowOnAppend = true };
+            using var coordinator = new SemanticIndexCoordinator(monitor, worker, search, store);
             coordinator.Start();
 
             worker.EmitBatch([new ClipEmbeddingRecord(1, [1f])]);
@@ -113,6 +117,29 @@ public class SemanticIndexCoordinatorTests
         }
     }
 
+    /// <summary>
+    /// The database sheds a deleted clip's vector by cascade, but this cache is
+    /// a snapshot that is otherwise only rebuilt when the sensitivity rules
+    /// change. Without this relay a deleted clip stays semantically searchable
+    /// for the rest of the session.
+    /// </summary>
+    [Fact]
+    public async Task RemovedClips_AreDroppedFromTheSemanticCache()
+    {
+        var monitor = new TestClipboardMonitorService();
+        var worker = new RecordingEmbeddingWorker();
+        var store = new RemovalSignalClipStore();
+        var search = new RecordingSemanticSearchService();
+        using var coordinator = new SemanticIndexCoordinator(monitor, worker, search, store);
+        coordinator.Start();
+
+        store.EmitRemoved(3, 9);
+
+        var relayed = await WaitForAsync(() => search.Removed.Count == 2);
+        Assert.True(relayed, $"expected ids 3 and 9 to reach the cache; saw [{string.Join(", ", search.Removed)}]");
+        Assert.Equal([3L, 9L], search.Removed);
+    }
+
     private static async Task<bool> WaitForAsync(Func<bool> condition)
     {
         for (var i = 0; i < 100 && !condition(); i++)
@@ -128,8 +155,9 @@ public class SemanticIndexCoordinatorTests
     {
         var monitor = new TestClipboardMonitorService();
         var worker = new RecordingEmbeddingWorker();
+        var store = new RemovalSignalClipStore();
         var search = new RecordingSemanticSearchService();
-        using var coordinator = new SemanticIndexCoordinator(monitor, worker, search);
+        using var coordinator = new SemanticIndexCoordinator(monitor, worker, search, store);
         coordinator.Start();
         coordinator.Start();
 
@@ -143,8 +171,9 @@ public class SemanticIndexCoordinatorTests
     {
         var monitor = new TestClipboardMonitorService();
         var worker = new RecordingEmbeddingWorker();
+        var store = new RemovalSignalClipStore();
         var search = new RecordingSemanticSearchService();
-        var coordinator = new SemanticIndexCoordinator(monitor, worker, search);
+        var coordinator = new SemanticIndexCoordinator(monitor, worker, search, store);
         coordinator.Start();
         coordinator.Dispose();
 
@@ -189,6 +218,8 @@ public class SemanticIndexCoordinatorTests
     {
         public List<IReadOnlyList<ClipEmbeddingRecord>> Appended { get; } = [];
 
+        public List<long> Removed { get; } = [];
+
         public bool ThrowOnAppend { get; set; }
 
         public bool IsReady => true;
@@ -210,6 +241,12 @@ public class SemanticIndexCoordinatorTests
 
         public Task<IReadOnlyList<(long ClipId, float Score)>> QueryAsync(string text, int topK, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<(long, float)>>([]);
+
+        public Task RemoveEmbeddingsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default)
+        {
+            Removed.AddRange(clipIds);
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class TraceCaptureListener(ConcurrentQueue<string> sink) : TraceListener
@@ -229,5 +266,57 @@ public class SemanticIndexCoordinatorTests
                 sink.Enqueue(message);
             }
         }
+    }
+    /// <summary>
+    /// Carries only the removal signal; every other member is unreachable in
+    /// these tests and says so rather than pretending to be a store.
+    /// </summary>
+    private sealed class RemovalSignalClipStore : IClipStoreService
+    {
+        private readonly Subject<IReadOnlyList<long>> _removed = new();
+
+        public IObservable<IReadOnlyList<long>> ClipsRemoved => _removed;
+
+        public void EmitRemoved(params long[] ids) => _removed.OnNext(ids);
+
+        private static T No<T>() => throw new NotSupportedException("not reachable from the coordinator");
+
+        public Task<ClipEntry?> CaptureAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default) => No<Task<ClipEntry?>>();
+        public Task<ClipEntry?> CaptureFastAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default) => No<Task<ClipEntry?>>();
+        public Task<ClipEntry?> UpdateDeferredContentAsync(long clipId, ClipCaptureRequest request, CancellationToken cancellationToken = default) => No<Task<ClipEntry?>>();
+        public Task<ClipEntry?> UpdateSourceAppIconAsync(long clipId, byte[] iconBytes, CancellationToken cancellationToken = default) => No<Task<ClipEntry?>>();
+        public Task<ClipEntry?> ApplySensitivityAsync(long clipId, CancellationToken cancellationToken = default) => No<Task<ClipEntry?>>();
+        public Task<int> ApplyPendingSensitivityAsync(CancellationToken cancellationToken = default) => No<Task<int>>();
+        public Task<BulkCaptureResult> CaptureBatchAsync(IReadOnlyList<ClipCaptureRequest> requests, CancellationToken cancellationToken = default) => No<Task<BulkCaptureResult>>();
+        public Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default) => No<Task<ClipSearchResult>>();
+        public Task SetFavoriteAsync(long clipId, bool isFavorite, CancellationToken cancellationToken = default) => No<Task>();
+        public Task SetPinnedAsync(long clipId, bool isPinned, CancellationToken cancellationToken = default) => No<Task>();
+        public Task DeleteAsync(long clipId, CancellationToken cancellationToken = default) => No<Task>();
+        public Task ClearSensitivityAsync(long clipId, CancellationToken cancellationToken = default) => No<Task>();
+        public Task SetSensitiveAsync(long clipId, bool isSensitive, CancellationToken cancellationToken = default) => No<Task>();
+        public Task MarkPastedAsync(long clipId, CancellationToken cancellationToken = default) => No<Task>();
+        public Task<bool> TryClaimForOcrAsync(long clipId, CancellationToken cancellationToken = default) => No<Task<bool>>();
+        public Task<bool> SetOcrResultAsync(long clipId, string ocrText, CancellationToken cancellationToken = default) => No<Task<bool>>();
+        public Task<bool> SetOcrFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => No<Task<bool>>();
+        public Task<IReadOnlyList<long>> GetPendingOcrClipIdsAsync(CancellationToken cancellationToken = default) => No<Task<IReadOnlyList<long>>>();
+        public Task<int> ResetStalledOcrClaimsAsync(CancellationToken cancellationToken = default) => No<Task<int>>();
+        public Task<bool> MarkOcrForRerunAsync(long clipId, CancellationToken cancellationToken = default) => No<Task<bool>>();
+        public Task<IReadOnlyList<long>> MarkAllSucceededForRerunAsync(CancellationToken cancellationToken = default) => No<Task<IReadOnlyList<long>>>();
+        public Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default) => No<Task<OcrCoverage>>();
+        public Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default) => No<Task<ClipMaintenanceResult>>();
+        public Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default) => No<Task>();
+        public Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default) => No<Task<ClipEntry?>>();
+        public Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default) => No<Task<ClipEntry?>>();
+        public Task<byte[]?> GetSourceAppIconAsync(long clipId, CancellationToken cancellationToken = default) => No<Task<byte[]?>>();
+        public Task<IReadOnlyList<ClipEntry>> GetByIdsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default) => No<Task<IReadOnlyList<ClipEntry>>>();
+        public Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default) => No<Task<IReadOnlyList<ClipEmbeddingCandidate>>>();
+        public Task<int> ResetStalledEmbeddingClaimsAsync(CancellationToken cancellationToken = default) => No<Task<int>>();
+        public Task ReleaseEmbeddingClaimsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default) => No<Task>();
+        public Task SaveEmbeddingBatchAsync(IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion, CancellationToken cancellationToken = default) => No<Task>();
+        public Task<bool> SetEmbeddingFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default) => No<Task<bool>>();
+        public Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default) => No<Task<IReadOnlyList<long>>>();
+        public Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default) => No<Task<EmbeddingCoverage>>();
+        public Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default) => No<Task<IReadOnlyList<ClipEmbedding>>>();
+        public Task PrewarmAsync(CancellationToken cancellationToken = default) => No<Task>();
     }
 }

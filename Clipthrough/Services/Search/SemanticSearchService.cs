@@ -219,6 +219,74 @@ public sealed class SemanticSearchService : ISemanticSearchService
         }
     }
 
+    /// <inheritdoc />
+    public async Task RemoveEmbeddingsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default)
+    {
+        if (clipIds is null || clipIds.Count == 0) return;
+
+        // Same gate as the reload and the append: this is a read-modify-write of
+        // _cache, and losing the race with either would resurrect the very rows
+        // it is removing.
+        await _refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var existing = Volatile.Read(ref _cache);
+            if (existing.Count == 0)
+            {
+                return;
+            }
+
+            var doomed = new HashSet<long>();
+            foreach (var id in clipIds)
+            {
+                if (_slotById.ContainsKey(id))
+                {
+                    doomed.Add(id);
+                }
+            }
+
+            if (doomed.Count == 0)
+            {
+                return;
+            }
+
+            // Fresh arrays rather than compaction in place. The append path may
+            // write into the existing arrays because it only ever adds past the
+            // published Count, so a concurrent query never looks there. Removal
+            // moves surviving entries down over slots a query is reading right
+            // now, which would hand it one clip's id against another's vector.
+            var dim = existing.Dim;
+            var survivors = existing.Count - doomed.Count;
+            var newIds = new long[survivors];
+            // survivors * dim cannot overflow: it is bounded by the existing
+            // vector array's length, which is already a valid int.
+            var newVectors = new float[survivors * dim];
+            var slots = new Dictionary<long, int>(survivors);
+
+            var next = 0;
+            for (var i = 0; i < existing.Count; i++)
+            {
+                var id = existing.Ids[i];
+                if (doomed.Contains(id))
+                {
+                    continue;
+                }
+
+                newIds[next] = id;
+                Buffer.BlockCopy(existing.Vectors, i * dim * sizeof(float), newVectors, next * dim * sizeof(float), dim * sizeof(float));
+                slots[id] = next;
+                next++;
+            }
+
+            _slotById = slots;
+            Volatile.Write(ref _cache, new CacheSnapshot(newIds, newVectors, survivors, dim));
+        }
+        finally
+        {
+            _refreshGate.Release();
+        }
+    }
+
     public async Task<IReadOnlyList<(long ClipId, float Score)>> QueryAsync(
         string text,
         int topK,

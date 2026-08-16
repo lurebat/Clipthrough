@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Clipthrough.Models;
@@ -7,6 +8,17 @@ namespace Clipthrough.Services;
 
 public interface IClipStoreService
 {
+    /// <summary>
+    /// The ids of clips that have just left the database, batched per operation
+    /// and published only after the deleting transaction has committed.
+    ///
+    /// Deletion is not only user-initiated: the retention sweep runs after every
+    /// capture and both capacity caps evict silently. Anything holding clip state
+    /// outside the database - the in-memory semantic cache above all - has no
+    /// other way to learn that rows disappeared.
+    /// </summary>
+    IObservable<IReadOnlyList<long>> ClipsRemoved { get; }
+
     Task<ClipEntry?> CaptureAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default);
 
     Task<ClipEntry?> CaptureFastAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default);

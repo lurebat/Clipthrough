@@ -29,6 +29,18 @@ public interface ISemanticSearchService
     Task AppendEmbeddingsAsync(IReadOnlyList<ClipEmbeddingRecord> records, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Drop the cached vectors for clips that no longer exist.
+    ///
+    /// The database sheds them on its own - <c>clip_embeddings.clip_id</c> cascades
+    /// from <c>clips</c> - but this cache is an in-memory snapshot that is only
+    /// otherwise rebuilt when the sensitivity rules change. Without this, a deleted
+    /// clip stays semantically searchable for the rest of the session and keeps
+    /// occupying a slot in every top-K it scores well in, displacing a result the
+    /// user can actually open.
+    /// </summary>
+    Task RemoveEmbeddingsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Rank cached clips by semantic similarity to <paramref name="text"/>.
     /// Returns clip ids paired with a cosine score in [-1, 1], sorted descending.
     /// </summary>

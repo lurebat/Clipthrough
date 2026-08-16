@@ -33,20 +33,24 @@ public sealed class SemanticIndexCoordinator : ISemanticIndexCoordinator
     private readonly IClipboardMonitorService _clipboardMonitor;
     private readonly IEmbeddingWorker _embeddingWorker;
     private readonly ISemanticSearchService _semanticSearch;
+    private readonly IClipStoreService _clipStore;
     private readonly object _gate = new();
 
     private IDisposable? _captureSubscription;
     private IDisposable? _batchSubscription;
+    private IDisposable? _removalSubscription;
     private bool _isDisposed;
 
     public SemanticIndexCoordinator(
         IClipboardMonitorService clipboardMonitor,
         IEmbeddingWorker embeddingWorker,
-        ISemanticSearchService semanticSearch)
+        ISemanticSearchService semanticSearch,
+        IClipStoreService clipStore)
     {
         _clipboardMonitor = clipboardMonitor;
         _embeddingWorker = embeddingWorker;
         _semanticSearch = semanticSearch;
+        _clipStore = clipStore;
     }
 
     public void Start()
@@ -64,6 +68,9 @@ public sealed class SemanticIndexCoordinator : ISemanticIndexCoordinator
 
             _batchSubscription = _embeddingWorker.BatchRecordsCompleted
                 .Subscribe(records => _ = AppendAsync(records));
+
+            _removalSubscription = _clipStore.ClipsRemoved
+                .Subscribe(ids => _ = RemoveAsync(ids));
         }
     }
 
@@ -83,6 +90,24 @@ public sealed class SemanticIndexCoordinator : ISemanticIndexCoordinator
         }
     }
 
+    /// <summary>
+    /// Drops deleted clips from the in-memory cache. The database has already
+    /// shed their vectors by cascade; this cache is otherwise only rebuilt when
+    /// the sensitivity rules change, so without this a deleted clip stays
+    /// semantically searchable for the rest of the session.
+    /// </summary>
+    private async Task RemoveAsync(IReadOnlyList<long> clipIds)
+    {
+        try
+        {
+            await _semanticSearch.RemoveEmbeddingsAsync(clipIds);
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceError($"Removing {clipIds.Count} clip(s) from the semantic cache failed: {ex}");
+        }
+    }
+
     public void Dispose()
     {
         lock (_gate)
@@ -92,6 +117,8 @@ public sealed class SemanticIndexCoordinator : ISemanticIndexCoordinator
             _captureSubscription = null;
             _batchSubscription?.Dispose();
             _batchSubscription = null;
+            _removalSubscription?.Dispose();
+            _removalSubscription = null;
         }
     }
 }
