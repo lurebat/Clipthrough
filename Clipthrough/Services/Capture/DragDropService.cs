@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Avalonia.Input;
+using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Clipthrough.Models;
 using Clipthrough.Services.Platform;
@@ -379,7 +380,7 @@ public sealed class DragDropService : IDragDropService
         try
         {
             using var stream = new MemoryStream();
-            bitmap.Save(stream);
+            bitmap.Save(stream, PngBitmapEncoderOptions.Default);
             return new ClipCaptureRequest
             {
                 ContentType = ContentType.Image,

@@ -643,7 +643,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
         var bytes = await Task.Run(() =>
         {
             using var bitmapStream = new MemoryStream();
-            bitmap.Save(bitmapStream);
+            bitmap.Save(bitmapStream, PngBitmapEncoderOptions.Default);
             return bitmapStream.ToArray();
         }).ConfigureAwait(false);
         return new ClipCaptureRequest

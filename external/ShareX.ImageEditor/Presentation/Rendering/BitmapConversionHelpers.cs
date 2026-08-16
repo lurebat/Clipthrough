@@ -94,7 +94,7 @@ namespace ShareX.ImageEditor.Presentation.Rendering
             // However, we can use a temporary WriteableBitmap to draw it, then use the fast path?
             // Actually, stream is likely safer/easier for generic Bitmap type if we don't want to rely on WriteableBitmap internals.
             using var memoryStream = new MemoryStream();
-            avaloniaBitmap.Save(memoryStream);
+            avaloniaBitmap.Save(memoryStream, PngBitmapEncoderOptions.Default);
             memoryStream.Position = 0;
 
             return SKBitmap.Decode(memoryStream);

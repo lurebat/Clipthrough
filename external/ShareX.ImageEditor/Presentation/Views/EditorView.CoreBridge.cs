@@ -135,7 +135,7 @@ namespace ShareX.ImageEditor.Presentation.Views
 
                 // Convert Avalonia RenderTargetBitmap → SKBitmap
                 using var stream = new System.IO.MemoryStream();
-                rtb.Save(stream);
+                rtb.Save(stream, PngBitmapEncoderOptions.Default);
                 stream.Position = 0;
                 var skBitmap = SkiaSharp.SKBitmap.Decode(stream);
 

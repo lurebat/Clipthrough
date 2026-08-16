@@ -21,13 +21,13 @@
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="Avalonia" Version="12.0.1" />
+        <PackageReference Include="Avalonia" Version="12.1.1" />
         <PackageReference Include="Avalonia.AvaloniaEdit" Version="12.0.0" />
-        <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.0.0" />
-        <PackageReference Include="Avalonia.Controls.WebView" Version="12.0.0" />
-        <PackageReference Include="Avalonia.Desktop" Version="12.0.1" />
-        <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.1" />
-        <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.1" />
+        <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.1.2" />
+        <PackageReference Include="Avalonia.Controls.WebView" Version="12.0.1" />
+        <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
+        <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
+        <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.1" />
         <PackageReference Include="AvaloniaEdit.TextMate" Version="12.0.0" />
         <PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.1" />
         <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.0" />
@@ -39,7 +39,7 @@
         <PackageReference Include="SQLitePCLRaw.bundle_e_sqlcipher" Version="2.1.10" />
         <PackageReference Include="RtfPipe" Version="2.0.7677.4303" />
         <PackageReference Include="System.Drawing.Common" Version="10.0.0" />
-        <PackageReference Include="Tmds.DBus.Protocol" Version="0.92.0" />
+        <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.2" />
         <PackageReference Include="Velopack" Version="0.0.1298" />
     </ItemGroup>
 

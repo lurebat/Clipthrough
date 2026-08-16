@@ -840,7 +840,7 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         try
         {
             using var pngStream = new MemoryStream();
-            bitmap.Save(pngStream);
+            bitmap.Save(pngStream, PngBitmapEncoderOptions.Default);
             var pngBytes = pngStream.ToArray();
 
             using var drawingStream = new MemoryStream(pngBytes, writable: false);
