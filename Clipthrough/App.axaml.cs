@@ -653,7 +653,7 @@ public partial class App : Application
         try
         {
             var target = binding.Target ?? string.Empty;
-            var colon = target.IndexOf(':');
+            var colon = target.IndexOf(':', StringComparison.Ordinal);
             if (colon <= 0)
             {
                 Trace.TraceWarning($"Custom hotkey '{binding.Gesture}': invalid target format '{target}' (missing ':')");
@@ -789,7 +789,7 @@ public partial class App : Application
 
         // Spec format: "<kind>[|<prefill text>]" where kind is one of
         // text, image-to-text, image-to-image, auto (default).
-        var bar = spec.IndexOf('|');
+        var bar = spec.IndexOf('|', StringComparison.Ordinal);
         var kindRaw = (bar < 0 ? spec : spec.Substring(0, bar)).Trim();
         var prefill = bar < 0 ? null : spec.Substring(bar + 1);
 

@@ -182,9 +182,16 @@ public static partial class ClipDisplayFormatter
 
         if (hasPreview)
         {
+            // CA1863 wants a cached CompositeFormat, but AppText.PreviewImageResolution
+            // is a localizable entry that a language switch is meant to replace at
+            // runtime. Parsing it once into a static would freeze the string chosen at
+            // first use, which is the exact bug A19 (runtime language switching) exists
+            // to avoid. One Format call per preview render is not worth that.
+#pragma warning disable CA1863
             return TryGetImageDimensionsDisplay(clip) is { } dimensions
                 ? string.Format(AppText.CurrentCulture, AppText.PreviewImageResolution, dimensions)
                 : AppText.PreviewImageLoaded;
+#pragma warning restore CA1863
         }
 
         if (clip.ContentBytes is null || clip.ContentBytes.Length == 0)
@@ -330,7 +337,7 @@ public static partial class ClipDisplayFormatter
             var withTabs = RtfTabRegex().Replace(withParagraphs, "\t");
             var withHexDecoded = RtfHexEscapeRegex().Replace(withTabs, static match => DecodeRtfHex(match.Value));
             var withoutControlWords = RtfControlWordRegex().Replace(withHexDecoded, string.Empty);
-            var withoutGroups = withoutControlWords.Replace("{", string.Empty).Replace("}", string.Empty, StringComparison.Ordinal);
+            var withoutGroups = withoutControlWords.Replace("{", string.Empty, StringComparison.Ordinal).Replace("}", string.Empty, StringComparison.Ordinal);
             return NormalizePreviewText(withoutGroups);
         }
 

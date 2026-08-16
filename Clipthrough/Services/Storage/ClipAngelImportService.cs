@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -56,7 +57,7 @@ public sealed class ClipAngelImportService : IClipAngelImportService
             await using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = "SELECT COUNT(*) FROM Clips;";
-                total = Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) ?? 0);
+                total = Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) ?? 0, CultureInfo.InvariantCulture);
             }
 
             var byType = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -125,7 +126,7 @@ public sealed class ClipAngelImportService : IClipAngelImportService
             await using (var count = conn.CreateCommand())
             {
                 count.CommandText = "SELECT COUNT(*) FROM Clips;";
-                total = Convert.ToInt32(await count.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) ?? 0);
+                total = Convert.ToInt32(await count.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) ?? 0, CultureInfo.InvariantCulture);
             }
 
             await using var cmd = conn.CreateCommand();
@@ -210,7 +211,7 @@ public sealed class ClipAngelImportService : IClipAngelImportService
         string? richText = reader.IsDBNull(7) ? null : reader.GetString(7);
         string? htmlText = reader.IsDBNull(8) ? null : reader.GetString(8);
         string? url = reader.IsDBNull(9) ? null : reader.GetString(9);
-        bool favorite = !reader.IsDBNull(10) && Convert.ToInt64(reader.GetValue(10)) != 0;
+        bool favorite = !reader.IsDBNull(10) && Convert.ToInt64(reader.GetValue(10), CultureInfo.InvariantCulture) != 0;
         string? appPath = reader.IsDBNull(11) ? null : reader.GetString(11);
 
         var window_ = string.IsNullOrWhiteSpace(window) ? title : window;

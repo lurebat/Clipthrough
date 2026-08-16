@@ -1628,7 +1628,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 return $"From clip #{sourceId}";
             }
-            var pretty = kind.Contains(':') ? kind.Split(':', 2)[1] : kind;
+            var pretty = kind.Contains(':', StringComparison.Ordinal) ? kind.Split(':', 2)[1] : kind;
             // "script:" clips predate the removal of user scripting; keep the
             // label so their provenance still reads correctly.
             var prefix = kind.StartsWith("ai:", StringComparison.Ordinal) ? "AI"
@@ -2067,18 +2067,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     // Keywords searched by SettingsFilter. When filter is empty the section shows.
     // When non-empty, the section shows only if its keyword blob contains the filter.
-    private static readonly string _behaviorKeywords = "theme dark light tray minimize close start windows startup behavior appearance";
-    private static readonly string _localHotkeyKeywords = "hotkey shortcut local regex favorite sensitive case wildcard whole word pasted toggle";
-    private static readonly string _globalHotkeyKeywords = "hotkey shortcut global toggle window show hide incremental decremental paste";
-    private static readonly string _storageKeywords = "storage database path password encryption sqlite file location clipangel import legacy migration";
-    private static readonly string _toolsKeywords = "tools external editor diff winmerge beyond compare vscode meld kdiff";
-    private static readonly string _retentionKeywords = "retention lifetime expiry expire clips days normal sensitive minutes age";
-    private static readonly string _capacityKeywords = "capacity size library entries count limit max megabytes clip kb kilobytes";
-    private static readonly string _sensitivityKeywords = "sensitivity rules pattern regex severity warn block name enabled";
-    private static readonly string _aiKeywords = "ai openai chatgpt gpt model api key base url prompt transform";
-    private static readonly string _updatesKeywords = "update updates auto-update velopack feed url release version";
-    private static readonly string _ocrKeywords = "ocr image text extract recognition language bcp-47 windows.media.ocr";
-    private static readonly string _semanticKeywords = "semantic embedding embeddings similarity vector search meaning ai ml rerun reembed sort relevance date proximity";
+    private const string _behaviorKeywords = "theme dark light tray minimize close start windows startup behavior appearance";
+    private const string _localHotkeyKeywords = "hotkey shortcut local regex favorite sensitive case wildcard whole word pasted toggle";
+    private const string _globalHotkeyKeywords = "hotkey shortcut global toggle window show hide incremental decremental paste";
+    private const string _storageKeywords = "storage database path password encryption sqlite file location clipangel import legacy migration";
+    private const string _toolsKeywords = "tools external editor diff winmerge beyond compare vscode meld kdiff";
+    private const string _retentionKeywords = "retention lifetime expiry expire clips days normal sensitive minutes age";
+    private const string _capacityKeywords = "capacity size library entries count limit max megabytes clip kb kilobytes";
+    private const string _sensitivityKeywords = "sensitivity rules pattern regex severity warn block name enabled";
+    private const string _aiKeywords = "ai openai chatgpt gpt model api key base url prompt transform";
+    private const string _updatesKeywords = "update updates auto-update velopack feed url release version";
+    private const string _ocrKeywords = "ocr image text extract recognition language bcp-47 windows.media.ocr";
+    private const string _semanticKeywords = "semantic embedding embeddings similarity vector search meaning ai ml rerun reembed sort relevance date proximity";
 
     private bool MatchesFilter(string keywords)
     {
@@ -3136,7 +3136,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var end = trimmed.IndexOf('"', 1);
             return end > 0 ? trimmed.Substring(1, end - 1) : trimmed.Substring(1);
         }
-        var space = trimmed.IndexOf(' ');
+        var space = trimmed.IndexOf(' ', StringComparison.Ordinal);
         return space > 0 ? trimmed.Substring(0, space) : trimmed;
     }
 
@@ -3681,9 +3681,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     continue;
                 }
                 source = full;
-                result = full.Substring(0, EditedClipSelectionStart)
-                    + transformedSlice
-                    + full.Substring(EditedClipSelectionStart + EditedClipSelectionLength);
+                result = string.Concat(
+                    full.AsSpan(0, EditedClipSelectionStart),
+                    transformedSlice,
+                    full.AsSpan(EditedClipSelectionStart + EditedClipSelectionLength));
             }
             else
             {
@@ -5386,9 +5387,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                             continue;
                         }
                         source = fullEditedText;
-                        result = fullEditedText.Substring(0, sliceStart)
-                            + transformedSlice
-                            + fullEditedText.Substring(sliceStart + sliceLength);
+                        result = string.Concat(
+                            fullEditedText.AsSpan(0, sliceStart),
+                            transformedSlice,
+                            fullEditedText.AsSpan(sliceStart + sliceLength));
                     }
                     else
                     {
@@ -5569,7 +5571,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             return value ?? string.Empty;
         }
-        return value.Substring(0, max) + "…";
+        return string.Concat(value.AsSpan(0, max), "…");
     }
 
     private void CloseSettings()
@@ -7378,7 +7380,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (trimmed.StartsWith("data:image", StringComparison.OrdinalIgnoreCase))
             {
-                var commaIndex = trimmed.IndexOf(',');
+                var commaIndex = trimmed.IndexOf(',', StringComparison.Ordinal);
                 if (commaIndex > -1 && commaIndex < trimmed.Length - 1)
                 {
                     if (maxClipSizeBytes is { } limit && Encoding.UTF8.GetByteCount(trimmed) > limit)

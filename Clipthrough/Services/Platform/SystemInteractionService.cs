@@ -26,7 +26,6 @@ namespace Clipthrough.Services.Platform;
 
 public sealed class SystemInteractionService : ISystemInteractionService, IDisposable
 {
-    private const uint CfBitmap = 2;
     private const uint CfDib = 8;
     private const uint CfUnicodeText = 13;
     private const uint GmemMoveable = 0x0002;
@@ -937,7 +936,10 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         var handle = GlobalAlloc(GmemMoveable | GmemZeroinit, (nuint)payload.Length);
         if (handle == IntPtr.Zero)
         {
-            throw new OutOfMemoryException("Failed to allocate clipboard memory.");
+            // Not OutOfMemoryException: that type is reserved for the runtime, and
+            // a caller that catches it to shed memory would be reacting to a failed
+            // GlobalAlloc of a few KB rather than to actual memory pressure.
+            throw new InvalidOperationException("Failed to allocate clipboard memory.");
         }
 
         var address = GlobalLock(handle);
@@ -965,7 +967,7 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         var handle = GlobalAlloc(GmemMoveable | GmemZeroinit, (nuint)bytes.Length);
         if (handle == IntPtr.Zero)
         {
-            throw new OutOfMemoryException("Failed to allocate clipboard memory.");
+            throw new InvalidOperationException("Failed to allocate clipboard memory.");
         }
 
         var address = GlobalLock(handle);
@@ -1039,9 +1041,6 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         private const uint NiifInfo = 0x00000001;
         private const uint NiifWarning = 0x00000002;
         private const uint NiifError = 0x00000003;
-        private const int IdiApplication = 32512;
-        private const int IdiError = 32513;
-        private const int IdiWarning = 32515;
         private const int IdiInformation = 32516;
         private static readonly nint HwndMessage = new(-3);
 

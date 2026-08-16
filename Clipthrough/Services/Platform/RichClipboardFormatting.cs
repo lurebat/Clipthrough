@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -15,6 +16,13 @@ internal static partial class RichClipboardFormatting
     private const string StartFragmentMarker = "<!--StartFragment-->";
     private const string EndFragmentMarker = "<!--EndFragment-->";
     private const string HeaderTemplate = "Version:0.9\r\nStartHTML:{0:D10}\r\nEndHTML:{1:D10}\r\nStartFragment:{2:D10}\r\nEndFragment:{3:D10}\r\n";
+
+    /// <summary>
+    /// Parsed once. The offsets are a wire format read by the receiving
+    /// application, so they are formatted invariantly rather than with whatever
+    /// culture the user happens to be running.
+    /// </summary>
+    private static readonly CompositeFormat HeaderFormat = CompositeFormat.Parse(HeaderTemplate);
 
     /// <summary>
     /// Returns true when <paramref name="content"/> already carries the CF_HTML
@@ -75,13 +83,13 @@ internal static partial class RichClipboardFormatting
         }
 
         var document = $"<html><body>{StartFragmentMarker}{fragment}{EndFragmentMarker}</body></html>";
-        var header = string.Format(HeaderTemplate, 0, 0, 0, 0);
+        var header = string.Format(CultureInfo.InvariantCulture, HeaderFormat, 0, 0, 0, 0);
         var startHtml = Encoding.UTF8.GetByteCount(header);
         var startFragment = startHtml + Encoding.UTF8.GetByteCount("<html><body>");
         var endFragment = startFragment + Encoding.UTF8.GetByteCount(StartFragmentMarker) + Encoding.UTF8.GetByteCount(fragment);
         var endHtml = startHtml + Encoding.UTF8.GetByteCount(document);
 
-        header = string.Format(HeaderTemplate, startHtml, endHtml, startFragment + Encoding.UTF8.GetByteCount(StartFragmentMarker), endFragment);
+        header = string.Format(CultureInfo.InvariantCulture, HeaderFormat, startHtml, endHtml, startFragment + Encoding.UTF8.GetByteCount(StartFragmentMarker), endFragment);
         return header + document;
     }
 

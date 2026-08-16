@@ -229,7 +229,7 @@ public sealed class EmbeddingService : IEmbeddingService, IDisposable
                 var dims = meta.Dimensions;
                 if (dims.Length >= 2 && dims[^1] == EmbeddingDim) { outputName = name; break; }
             }
-            outputName ??= session.OutputNames.First();
+            outputName ??= session.OutputNames[0];
 
             _tokenizer = tokenizer;
             _session = session;

@@ -155,10 +155,12 @@ public static class FuzzyMatcher
         return Ratio(haystack, query) >= threshold;
     }
 
+    private static readonly char[] TokenSeparators = [' ', '\t', '\n', '\r', ',', '.', ';', ':', '/', '-', '_'];
+
     private static IEnumerable<string> Tokenise(string text)
     {
         return text.Split(
-            new[] { ' ', '\t', '\n', '\r', ',', '.', ';', ':', '/', '-', '_' },
+            TokenSeparators,
             StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.OrdinalIgnoreCase);
     }
 

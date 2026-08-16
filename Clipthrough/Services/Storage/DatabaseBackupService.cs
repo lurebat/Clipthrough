@@ -60,7 +60,11 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         }
 
         var backupDir = Path.Combine(Path.GetDirectoryName(dbPath)!, "backups");
-        var stamp = DateTime.UtcNow.ToString("yyyyMMdd");
+        // Invariant: the stamp is part of the filename and backup retention orders
+        // by it. A non-Gregorian calendar culture (th-TH, ar-SA) would emit a
+        // Buddhist or Hijri year here, so stamps written under different locales
+        // would not sort against each other.
+        var stamp = DateTime.UtcNow.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
         var todayPath = Path.Combine(backupDir, $"{BackupNamePrefix}{stamp}{BackupNameSuffix}");
 
         if (File.Exists(todayPath))
@@ -252,7 +256,7 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         var dir = Path.GetDirectoryName(dbPath)!;
         Directory.CreateDirectory(dir);
 
-        var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+        var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
         var stashed = new System.Collections.Generic.List<(string Live, string Stashed)>();
 
         try

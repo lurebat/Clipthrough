@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Linq;
 using System.Reactive;
 using System.Reactive.Disposables;
@@ -69,7 +70,7 @@ public sealed class SessionLogsViewModel : ViewModelBase, IDisposable
             foreach (var log in VisibleSessionLogs)
             {
                 var message = log.Message.Replace("\r\n", " ", StringComparison.Ordinal).Replace("\n", " ", StringComparison.Ordinal);
-                sb.AppendLine($"{log.DateText} {log.TimestampText}\t{log.LevelText}\t{message}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"{log.DateText} {log.TimestampText}\t{log.LevelText}\t{message}");
             }
 
             return sb.ToString();

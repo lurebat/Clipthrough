@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Threading.Tasks;
 using Clipthrough.Services;
@@ -126,7 +127,7 @@ public static class TraceConfiguration
             // Render once so we can inspect the final text before dropping.
             var rendered = format is null
                 ? null
-                : args is { Length: > 0 } ? string.Format(format, args) : format;
+                : args is { Length: > 0 } ? string.Format(CultureInfo.CurrentCulture, format, args) : format;
             if (ShouldDrop(rendered)) return;
             base.TraceEvent(eventCache, source ?? string.Empty, eventType, id, rendered);
         }

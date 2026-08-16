@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using Clipthrough.Models;
@@ -95,8 +96,10 @@ public sealed class SessionLogService : TraceListener, ISessionLogService
             return;
         }
 
+        // CurrentCulture, not invariant: these messages are rendered into the
+        // session-log window the user reads.
         var message = args is { Length: > 0 }
-            ? string.Format(format, args)
+            ? string.Format(CultureInfo.CurrentCulture, format, args)
             : format;
 
         if (!string.IsNullOrWhiteSpace(message) && !ShouldIgnoreMessage(message))

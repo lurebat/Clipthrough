@@ -1,0 +1,174 @@
+# Clipthrough — editor and static-analysis configuration.
+#
+# The review found the build reported zero warnings because nothing was
+# enforcing anything, not because the code was clean: turning the full
+# analyzer set on produces ~1,470 first-party diagnostics.
+#
+# A wall of warnings nobody reads is not a safety net, so the rules below are
+# a deliberately small enforced set, each at `error`, each chosen because it
+# catches a defect class this codebase has actually shipped. Everything else
+# stays off rather than warning, so that a clean build means something.
+# Rules considered and deliberately left off are listed at the bottom with the
+# reason, so the next person does not have to re-derive the decision.
+#
+# Vendored code under external/ is insulated by external/.editorconfig
+# (`root = true`), which severs inheritance from this file.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{cs,axaml,xaml}]
+indent_size = 4
+
+[*.{json,yml,yaml,csproj,props,targets,slnx,editorconfig}]
+indent_size = 2
+
+[*.md]
+# Trailing double-space is a hard line break in Markdown.
+trim_trailing_whitespace = false
+
+[*.cs]
+
+# ---------------------------------------------------------------------------
+# Enforced: resource ownership
+# ---------------------------------------------------------------------------
+dotnet_diagnostic.CA1816.severity = error  # Dispose should call GC.SuppressFinalize
+
+# ---------------------------------------------------------------------------
+# Enforced: globalization
+# ---------------------------------------------------------------------------
+# This is the highest-value rule group here. Culture-sensitive string and
+# number handling has already produced shipped bugs twice (Turkish-I corruption
+# in the case transforms, a "sort alphabetically" that was not alphabetical),
+# and it hides a live one: DateTime.ToString("yyyyMMdd") with no culture emits
+# a Hijri or Buddhist year under ar-SA / th-TH, which would silently defeat the
+# backup retention that orders by the date stamp in the filename.
+dotnet_diagnostic.CA1304.severity = error  # specify CultureInfo
+dotnet_diagnostic.CA1305.severity = error  # specify IFormatProvider
+dotnet_diagnostic.CA1307.severity = error  # specify StringComparison for clarity
+dotnet_diagnostic.CA1309.severity = error  # use ordinal StringComparison
+dotnet_diagnostic.CA1310.severity = error  # specify StringComparison for correctness
+
+# ---------------------------------------------------------------------------
+# Enforced: correctness and dead code
+# ---------------------------------------------------------------------------
+dotnet_diagnostic.CA2201.severity = error  # do not raise reserved exception types
+dotnet_diagnostic.CA1823.severity = error  # unused private fields
+dotnet_diagnostic.CA2200.severity = error  # rethrow to preserve the stack trace
+
+# ---------------------------------------------------------------------------
+# Enforced: cheap, mechanical performance
+# ---------------------------------------------------------------------------
+dotnet_diagnostic.CA1802.severity = error  # const rather than static readonly
+dotnet_diagnostic.CA1826.severity = error  # use the property, not the LINQ method
+dotnet_diagnostic.CA1845.severity = error  # span-based string concat
+dotnet_diagnostic.CA1861.severity = error  # do not rebuild constant arrays per call
+dotnet_diagnostic.CA1863.severity = error  # cache CompositeFormat
+
+# ---------------------------------------------------------------------------
+# Considered and deliberately NOT enforced
+# ---------------------------------------------------------------------------
+# Each of these is off on purpose. Left as `none` rather than `warning` so a
+# clean build stays meaningful; revisit individually, not as a group.
+#
+# CA2007  (769) ConfigureAwait(false). This is a desktop app whose services are
+#               routinely called from and must resume on the UI thread.
+#               Blanket-applying it would be a correctness regression, not a fix.
+# CA1515  (151) Make types internal. Pure design churn against a public surface
+#               the test project already reaches via InternalsVisibleTo.
+# CA1031  (131) Catch a specific exception. The real defect is the *empty*
+#               catch block (7 -> 11 of them now), not the broad filter; that
+#               needs judgement per site, not a blanket rule.
+# CA1822  (130) Mark members static. Churn with no defect behind it.
+# CA5392  ( 48) DefaultDllImportSearchPaths. 48 interop sites, none loading from
+#               a writable directory.
+# CA1062  ( 31) Validate arguments of public methods. Nullable reference types
+#               are already enabled project-wide; this duplicates that contract.
+# CA1849  ( 23) Sync call in an async method. Genuinely valuable here given the
+#               UI-freeze bugs found, but most sites are SQLite APIs whose async
+#               overloads are synchronous anyway. Needs a real pass, not a flag.
+# CA2100  ( 21) SQL built from a string. Every site interpolates a compile-time
+#               constant (column and table names for sort/filter selection);
+#               values are parameterised throughout. Worth an audit, not a gate.
+# CA2000  ( 20) Dispose before losing scope. High false-positive rate wherever
+#               ownership is transferred, which is most of the bitmap paths.
+# CA1308  ( 13) Normalize to uppercase. Flipping ToLowerInvariant to
+#               ToUpperInvariant is a behaviour change against lowercase
+#               comparands, not a fix.
+#
+# CA1001  (  6) Types owning disposable fields should be disposable, and
+# CA2213  (  7) disposable fields should be disposed.
+#               These two were enforced first and then deliberately withdrawn,
+#               because on inspection the analyzer is wrong about this codebase
+#               in both directions:
+#
+#               - Every CA2213 site is a documented decision, not an oversight.
+#                 ClipboardMonitorService.Dispose carries ~20 lines explaining
+#                 why it calls OnCompleted() on its subjects and does NOT
+#                 dispose them: the remaining writers are an in-flight
+#                 `async void` capture and its fire-and-forget enrichment, whose
+#                 continuations run after Dispose returns with no catch above
+#                 them, so disposing would turn shutdown back into the
+#                 ObjectDisposedException crash that 7e9fb2c fixed. The
+#                 MainWindowViewModel CancellationTokenSource is cancelled while
+#                 its token is still in use by a running probe, so it cannot be
+#                 disposed at that point either.
+#
+#               - Every CA1001 site is a DI singleton, and the container is
+#                 never disposed (App.ConfigureServices builds a ServiceProvider
+#                 that shutdown never tears down - architecture finding A17).
+#                 Implementing IDisposable on them would satisfy the analyzer
+#                 while changing nothing at runtime.
+#
+#               Enable these together with a real deterministic-shutdown pass
+#               (A17), not before it. Doing them under a blanket rule produces
+#               either a shutdown regression or ceremony.
+dotnet_diagnostic.CA2007.severity = none
+dotnet_diagnostic.CA1515.severity = none
+dotnet_diagnostic.CA1031.severity = none
+dotnet_diagnostic.CA1822.severity = none
+dotnet_diagnostic.CA5392.severity = none
+dotnet_diagnostic.CA1062.severity = none
+dotnet_diagnostic.CA1849.severity = none
+dotnet_diagnostic.CA2100.severity = none
+dotnet_diagnostic.CA2000.severity = none
+dotnet_diagnostic.CA1308.severity = none
+dotnet_diagnostic.CA1001.severity = none
+dotnet_diagnostic.CA2213.severity = none
+
+# ---------------------------------------------------------------------------
+# Test code
+# ---------------------------------------------------------------------------
+# The enforced set exists to stop defects reaching users, and none of these
+# rules mean the same thing inside a test:
+#
+#   - CA1307/CA1305 fire overwhelmingly on xUnit's own Assert.Contains and on
+#     Convert.ToInt64 of a SQLite scalar. A test asserting against an ASCII
+#     literal it wrote itself has no locale exposure.
+#   - CA2201 is actively wrong here: DispatcherExceptionHandlingTests throws
+#     OutOfMemoryException, AccessViolationException and SEHException on
+#     purpose, because handling those exact reserved types IS the behaviour
+#     under test.
+#   - The performance rules describe hot paths. Test setup is not one.
+#
+# Leaving them on would mean ~40 suppressions in test code and a standing
+# incentive to reach for the suppression rather than read the diagnostic,
+# which is how an enforced set stops being read at all.
+[Clipthrough.Tests/**.cs]
+dotnet_diagnostic.CA1304.severity = none
+dotnet_diagnostic.CA1305.severity = none
+dotnet_diagnostic.CA1307.severity = none
+dotnet_diagnostic.CA1309.severity = none
+dotnet_diagnostic.CA1310.severity = none
+dotnet_diagnostic.CA2201.severity = none
+dotnet_diagnostic.CA1802.severity = none
+dotnet_diagnostic.CA1826.severity = none
+dotnet_diagnostic.CA1845.severity = none
+dotnet_diagnostic.CA1861.severity = none
+dotnet_diagnostic.CA1863.severity = none

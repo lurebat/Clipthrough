@@ -1,6 +1,7 @@
 using System;
 using System.Data;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -265,7 +266,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
             // If the destination already exists, keep a timestamped safety copy.
             if (File.Exists(newPath))
             {
-                var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+                var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
                 var safeguard = newPath + ".before-move-" + stamp;
                 File.Copy(newPath, safeguard, overwrite: false);
                 Trace.TraceInformation($"Existing target '{newPath}' backed up to '{safeguard}'.");

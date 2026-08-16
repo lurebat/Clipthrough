@@ -1,0 +1,14 @@
+# Vendored third-party code. `root = true` severs inheritance from the
+# repository .editorconfig above, so the analyzer rules we enforce on our own
+# code never fire on sources we do not own and will not edit.
+#
+# external/ShareX/ has its own root .editorconfig and its own
+# Directory.build.props, so it was already insulated. external/ShareX.ImageEditor/
+# had neither and is the project actually referenced by Clipthrough.csproj —
+# this file is what covers it.
+root = true
+
+[*]
+indent_style = space
+trim_trailing_whitespace = false
+insert_final_newline = false

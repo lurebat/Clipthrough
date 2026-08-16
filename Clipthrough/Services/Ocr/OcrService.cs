@@ -25,6 +25,8 @@ public sealed class OcrService : IOcrService
         _settingsService = settingsService;
     }
 
+    private static readonly char[] LanguageTagSeparators = ['+', ',', ';', ' '];
+
     public bool IsAvailable => OcrEngine.AvailableRecognizerLanguages?.Count > 0;
 
     public async Task<OcrResult> ExtractTextAsync(byte[] imageBytes, string languages, CancellationToken cancellationToken = default)
@@ -69,7 +71,7 @@ public sealed class OcrService : IOcrService
             return OcrEngine.TryCreateFromUserProfileLanguages();
         }
 
-        foreach (var tag in requested.Split(new[] { '+', ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries))
+        foreach (var tag in requested.Split(LanguageTagSeparators, StringSplitOptions.RemoveEmptyEntries))
         {
             try
             {

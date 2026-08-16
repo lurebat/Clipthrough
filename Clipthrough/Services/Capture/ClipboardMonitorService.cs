@@ -723,7 +723,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
 
     private static string? GetRelatedImageLabel(IReadOnlyList<string> relatedFilePaths, string? sourceUrl, string? plainText, string? windowTitle)
     {
-        if (TryGetFileLabel(relatedFilePaths.FirstOrDefault()) is { } fileLabel)
+        if (TryGetFileLabel(relatedFilePaths.Count > 0 ? relatedFilePaths[0] : null) is { } fileLabel)
         {
             return fileLabel;
         }

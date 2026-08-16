@@ -2129,7 +2129,7 @@ public sealed class ClipStoreService : IClipStoreService
     /// and every writer since sets the column, and only the bare form lets SQLite
     /// use the index for the date range rather than just the is_sensitive prefix.
     /// </summary>
-    internal static readonly string RetentionDeleteStatement = $"""
+    internal const string RetentionDeleteStatement = $"""
         DELETE FROM clips
         WHERE is_sensitive = $isSensitive
           AND last_copied_at < $cutoff

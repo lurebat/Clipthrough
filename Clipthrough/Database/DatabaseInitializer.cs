@@ -991,7 +991,7 @@ public sealed class DatabaseInitializer
         // Nothing to migrate if the FTS table isn't there; the Schema DDL creates it.
         await using var checkCommand = connection.CreateCommand();
         checkCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='clips_fts';";
-        var exists = Convert.ToInt64(await checkCommand.ExecuteScalarAsync(cancellationToken)) > 0;
+        var exists = Convert.ToInt64(await checkCommand.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) > 0;
         if (!exists)
         {
             return false;
@@ -1043,7 +1043,7 @@ public sealed class DatabaseInitializer
         await using (var metadataCommand = connection.CreateCommand())
         {
             metadataCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='app_metadata';";
-            if (Convert.ToInt64(await metadataCommand.ExecuteScalarAsync(cancellationToken)) == 0)
+            if (Convert.ToInt64(await metadataCommand.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 0)
             {
                 return true;
             }

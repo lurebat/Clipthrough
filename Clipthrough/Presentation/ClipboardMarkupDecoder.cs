@@ -101,7 +101,7 @@ public static class ClipboardMarkupDecoder
             return html[startHtml.Value..endHtml.Value].Trim();
         }
 
-        var htmlIndex = html.IndexOf('<');
+        var htmlIndex = html.IndexOf('<', StringComparison.Ordinal);
         return htmlIndex >= 0 ? html[htmlIndex..].Trim() : html;
     }
 
@@ -118,7 +118,7 @@ public static class ClipboardMarkupDecoder
             return document.Trim();
         }
 
-        var htmlIndex = html.IndexOf('<');
+        var htmlIndex = html.IndexOf('<', StringComparison.Ordinal);
         return htmlIndex >= 0 ? html[htmlIndex..].Trim() : html;
     }
 
