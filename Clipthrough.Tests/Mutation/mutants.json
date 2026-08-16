@@ -2022,5 +2022,37 @@
     "find": "        if (settings.EnableSemanticSearch && !_wasSemanticSearchEnabled)",
     "replace": "        if (settings.EnableSemanticSearch)",
     "filter": "FullyQualifiedName~SemanticSearchOptInHeadlessTests"
+  },
+  {
+    "id": "settings-update-reads-outside-the-gate",
+    "file": "Clipthrough/Services/Storage/SettingsService.cs",
+    "why": "Reading Current outside the write gate is the lost update: a writer queued behind another composes its record from what it saw before that writer published.",
+    "find": "        await _gate.WaitAsync(cancellationToken);\n        try\n        {\n            // Read inside the gate. A caller that composed its change from an\n            // older snapshot must still be applied on top of whatever landed in\n            // the meantime, or that other save is silently rolled back.\n            normalized = mutate(_current).Normalize();\n",
+    "replace": "        normalized = mutate(_current).Normalize();\n        await _gate.WaitAsync(cancellationToken);\n        try\n        {\n",
+    "filter": "FullyQualifiedName~SettingsServiceUpdateTests"
+  },
+  {
+    "id": "filter-save-carries-a-stale-settings-record",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "The debounced filter save composing a whole record from a snapshot reverts every setting saved since - the original lost-update bug.",
+    "find": "        return current => current with\n        {\n            LastShowFavoritesOnly = showFavoritesOnly,",
+    "replace": "        var stale = _settingsService.Current;\n        return _ => stale with\n        {\n            LastShowFavoritesOnly = showFavoritesOnly,",
+    "filter": "FullyQualifiedName~SettingsLostUpdateHeadlessTests"
+  },
+  {
+    "id": "view-mode-save-carries-a-stale-settings-record",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Persisting the content display mode by rewriting the whole snapshot reverts any filter toggle saved since it was read.",
+    "find": "            await _settingsService.UpdateAsync(current => current with { LastContentDisplayMode = mode });",
+    "replace": "            var stale = _settingsService.Current;\n            await _settingsService.UpdateAsync(_ => stale with { LastContentDisplayMode = mode });",
+    "filter": "FullyQualifiedName~SettingsLostUpdateHeadlessTests"
+  },
+  {
+    "id": "settings-dialog-writes-back-its-stale-session-state",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "The dialog snapshots the filter and view-mode state when it opens; writing that copy back reverts everything the user toggled while it was up.",
+    "find": "                await _settingsService.UpdateAsync(current => settings.WithSessionStateFrom(current))\n                    .ConfigureAwait(false);",
+    "replace": "                await _settingsService.UpdateAsync(_ => settings).ConfigureAwait(false);",
+    "filter": "FullyQualifiedName~SettingsLostUpdateHeadlessTests"
   }
 ]

@@ -165,6 +165,36 @@ public sealed record AppSettings
     /// </summary>
     public System.Collections.Generic.IReadOnlyList<ContentType> LastContentTypeFilters { get; init; } = System.Array.Empty<ContentType>();
 
+    /// <summary>
+    /// Takes the session state — every <c>Last*</c> field above — from
+    /// <paramref name="other"/>, leaving configuration untouched.
+    ///
+    /// The settings dialog composes a record from a snapshot it read when it
+    /// opened, but it owns none of these: they are written continuously by the
+    /// search filters and the content/image view mode while the dialog is up. A
+    /// dialog save that carried its own stale copy of them would revert every
+    /// filter toggle the user made in the meantime.
+    ///
+    /// Kept next to the fields deliberately — adding a <c>Last*</c> setting and
+    /// forgetting this method reintroduces exactly that bug.
+    /// </summary>
+    public AppSettings WithSessionStateFrom(AppSettings other) => this with
+    {
+        LastContentDisplayMode = other.LastContentDisplayMode,
+        LastImageViewMode = other.LastImageViewMode,
+        LastShowFavoritesOnly = other.LastShowFavoritesOnly,
+        LastShowSensitiveOnly = other.LastShowSensitiveOnly,
+        LastShowPastedOnly = other.LastShowPastedOnly,
+        LastUseRegexSearch = other.LastUseRegexSearch,
+        LastCaseSensitiveSearch = other.LastCaseSensitiveSearch,
+        LastUseWildcardSearch = other.LastUseWildcardSearch,
+        LastWholeWordSearch = other.LastWholeWordSearch,
+        LastUseFuzzyClipSearch = other.LastUseFuzzyClipSearch,
+        LastUseSemanticClipSearch = other.LastUseSemanticClipSearch,
+        LastContentTypeFilter = other.LastContentTypeFilter,
+        LastContentTypeFilters = other.LastContentTypeFilters,
+    };
+
     public bool EnableAi { get; init; }
 
     public AiProvider AiProvider { get; init; }

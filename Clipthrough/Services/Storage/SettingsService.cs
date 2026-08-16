@@ -85,15 +85,26 @@ public sealed class SettingsService : ISettingsService
         }
     }
 
-    public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
+    public Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
+        => UpdateAsync(_ => settings, cancellationToken);
+
+    public async Task<AppSettings> UpdateAsync(
+        Func<AppSettings, AppSettings> mutate,
+        CancellationToken cancellationToken = default)
     {
-        var normalized = settings.Normalize();
+        ArgumentNullException.ThrowIfNull(mutate);
 
         SecretPersistenceException? secretFailure = null;
+        AppSettings normalized;
 
         await _gate.WaitAsync(cancellationToken);
         try
         {
+            // Read inside the gate. A caller that composed its change from an
+            // older snapshot must still be applied on top of whatever landed in
+            // the meantime, or that other save is silently rolled back.
+            normalized = mutate(_current).Normalize();
+
             try
             {
                 await SaveToDiskAsync(normalized, cancellationToken);
@@ -121,6 +132,8 @@ public sealed class SettingsService : ISettingsService
         {
             throw secretFailure;
         }
+
+        return normalized;
     }
 
     /// <summary>

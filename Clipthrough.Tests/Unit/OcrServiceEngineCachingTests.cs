@@ -138,9 +138,12 @@ public sealed class OcrServiceEngineCachingTests
         public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
         public Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
+            => UpdateAsync(_ => settings, cancellationToken);
+
+        public Task<AppSettings> UpdateAsync(Func<AppSettings, AppSettings> mutate, CancellationToken cancellationToken = default)
         {
-            Current = settings;
-            return Task.CompletedTask;
+            Current = mutate(Current);
+            return Task.FromResult(Current);
         }
 
         public void Replace(AppSettings settings) => Current = settings;

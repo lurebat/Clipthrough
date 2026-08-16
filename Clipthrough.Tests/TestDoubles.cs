@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media.Imaging;
+using Avalonia.Threading;
 using Clipthrough.Database;
 using Clipthrough.Models;
 using Clipthrough.Services;
@@ -107,18 +108,79 @@ internal sealed class TestSettingsService : ISettingsService
         return Task.CompletedTask;
     }
 
-    public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
+    public Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
+        => UpdateAsync(_ => settings, cancellationToken);
+
+    /// <summary>
+    /// Mirrors the real service by applying the mutation *after* the delay, so a
+    /// test that interleaves saves sees the same read-modify-write ordering the
+    /// production gate gives. A fake that captured the argument up front would
+    /// hide exactly the lost-update bug this contract exists to prevent.
+    /// </summary>
+    public async Task<AppSettings> UpdateAsync(
+        Func<AppSettings, AppSettings> mutate,
+        CancellationToken cancellationToken = default)
     {
+        LastMutation = mutate;
+
+        var hold = HoldNextSave;
+        HoldNextSave = null;
+        if (hold is not null)
+        {
+            await hold.Task;
+        }
+
         if (SaveDelay > TimeSpan.Zero)
         {
             await Task.Delay(SaveDelay, cancellationToken);
         }
 
-        Current = settings.Normalize();
+        Current = mutate(Current).Normalize();
         HasSavedSettings = true;
         SaveCallCount++;
-        SettingsChanged?.Invoke(this, Current);
+        RaiseSettingsChanged();
+        return Current;
     }
+
+    /// <summary>
+    /// Mirrors <c>SettingsService.RaiseSettingsChanged</c>: subscribers touch
+    /// the UI, and saves run inside <c>Task.Run</c>, so the event has to be
+    /// marshalled rather than raised on whatever thread saved. A fake that
+    /// raised it inline turned a real thread-affinity violation into a passing
+    /// test - the handler chain reaches <c>MainWindow.OnAiEntriesChanged</c>,
+    /// which reads <c>DataContext</c> and throws off the UI thread.
+    /// </summary>
+    private void RaiseSettingsChanged()
+    {
+        if (SettingsChanged is null)
+        {
+            return;
+        }
+
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            SettingsChanged.Invoke(this, Current);
+            return;
+        }
+
+        var snapshot = Current;
+        Dispatcher.UIThread.Post(() => SettingsChanged?.Invoke(this, snapshot));
+    }
+
+    /// <summary>
+    /// The most recent mutation, so a test can apply it to a settings value the
+    /// caller never saw and assert it left the unrelated fields alone.
+    /// </summary>
+    public Func<AppSettings, AppSettings>? LastMutation { get; private set; }
+
+    /// <summary>
+    /// Holds the *next* save inside the service until the test releases it, so a
+    /// test can land an unrelated change while a save is in flight. That is the
+    /// interleaving the real write gate allows and the one that used to lose
+    /// updates. One-shot deliberately: the test's own update must not block on
+    /// the gate it is holding.
+    /// </summary>
+    public TaskCompletionSource? HoldNextSave { get; set; }
 
     public void SetCurrent(AppSettings settings)
     {

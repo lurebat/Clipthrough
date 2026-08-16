@@ -95,9 +95,12 @@ public class AiTransformServiceTests
         public event EventHandler<AppSettings>? SettingsChanged { add { } remove { } }
         public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
+            => UpdateAsync(_ => settings, cancellationToken);
+
+        public Task<AppSettings> UpdateAsync(Func<AppSettings, AppSettings> mutate, CancellationToken cancellationToken = default)
         {
-            Current = settings;
-            return Task.CompletedTask;
+            Current = mutate(Current);
+            return Task.FromResult(Current);
         }
     }
 

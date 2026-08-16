@@ -4969,24 +4969,48 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaiseContentTypeToggleProperties();
     }
 
-    private AppSettings BuildPersistedFilterSettings()
-        => _settingsService.Current with
+    /// <summary>
+    /// Captures the filter state on the calling (UI) thread and returns a
+    /// mutation that applies only those fields.
+    ///
+    /// It has to be a mutation rather than a finished record: filter saves are
+    /// debounced and overlap the settings dialog and the view-mode saves, and a
+    /// record built from <c>Current</c> here would carry a stale copy of
+    /// everything else and revert it. The values are snapshotted eagerly because
+    /// the mutation runs inside the settings service's write gate, on a thread
+    /// pool thread, where view-model state must not be read.
+    /// </summary>
+    private Func<AppSettings, AppSettings> BuildPersistedFilterMutation()
+    {
+        var showFavoritesOnly = ShowFavoritesOnly;
+        var showSensitiveOnly = ShowSensitiveOnly;
+        var showPastedOnly = ShowPastedOnly;
+        var useRegexSearch = UseRegexSearch;
+        var caseSensitiveSearch = CaseSensitiveSearch;
+        var useWildcardSearch = UseWildcardSearch;
+        var wholeWordSearch = WholeWordSearch;
+        var useFuzzyClipSearch = UseFuzzyClipSearch;
+        var useSemanticClipSearch = UseSemanticClipSearch;
+        var contentTypes = _selectedContentTypes.ToArray();
+
+        return current => current with
         {
-            LastShowFavoritesOnly = ShowFavoritesOnly,
-            LastShowSensitiveOnly = ShowSensitiveOnly,
-            LastShowPastedOnly = ShowPastedOnly,
-            LastUseRegexSearch = UseRegexSearch,
-            LastCaseSensitiveSearch = CaseSensitiveSearch,
-            LastUseWildcardSearch = UseWildcardSearch,
-            LastWholeWordSearch = WholeWordSearch,
-            LastUseFuzzyClipSearch = UseFuzzyClipSearch,
-            LastUseSemanticClipSearch = UseSemanticClipSearch,
+            LastShowFavoritesOnly = showFavoritesOnly,
+            LastShowSensitiveOnly = showSensitiveOnly,
+            LastShowPastedOnly = showPastedOnly,
+            LastUseRegexSearch = useRegexSearch,
+            LastCaseSensitiveSearch = caseSensitiveSearch,
+            LastUseWildcardSearch = useWildcardSearch,
+            LastWholeWordSearch = wholeWordSearch,
+            LastUseFuzzyClipSearch = useFuzzyClipSearch,
+            LastUseSemanticClipSearch = useSemanticClipSearch,
             LastContentTypeFilter = null,
-            LastContentTypeFilters = _selectedContentTypes.ToArray(),
+            LastContentTypeFilters = contentTypes,
         };
+    }
 
     private Task PersistCurrentFilterStateAsync()
-        => _settingsService.SaveAsync(BuildPersistedFilterSettings());
+        => _settingsService.UpdateAsync(BuildPersistedFilterMutation());
 
     /// <summary>
     /// Filter toggles are normally persisted by a 500 ms debounce, so this
@@ -5007,11 +5031,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void FlushCurrentFilterState()
     {
-        var settings = BuildPersistedFilterSettings();
+        var mutation = BuildPersistedFilterMutation();
 
         try
         {
-            if (!Task.Run(() => _settingsService.SaveAsync(settings)).Wait(FilterFlushTimeout))
+            if (!Task.Run(() => _settingsService.UpdateAsync(mutation)).Wait(FilterFlushTimeout))
             {
                 Trace.TraceWarning("Filter state flush timed out; the last filter change may not have been saved.");
             }
@@ -5982,7 +6006,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             await _storageOptionsService.SaveAsync(storageOptions).ConfigureAwait(false);
             try
             {
-                await _settingsService.SaveAsync(settings).ConfigureAwait(false);
+                // The dialog owns configuration, never session state: the filter
+                // toggles and view modes keep saving while it is open, and its
+                // snapshot of them is already stale. Re-read them under the gate.
+                await _settingsService.UpdateAsync(current => settings.WithSessionStateFrom(current))
+                    .ConfigureAwait(false);
             }
             catch (SecretPersistenceException ex)
             {
@@ -6431,42 +6459,47 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         try
         {
-            var current = _settingsService.Current;
-            AppSettings next = current;
-            bool changed = false;
-
-            if (current.AiPresets?.Count == 0)
+            if (!NeedsDefaultAiPresets(_settingsService.Current))
             {
-                var presets = new List<AiPreset>
-                {
-                    new() { Name = "Fix grammar & spelling", Prompt = "Fix any grammar or spelling mistakes in the text. Preserve the original tone, formatting, and meaning. Return only the corrected text." },
-                    new() { Name = "Rewrite formally", Prompt = "Rewrite the following text in a formal, professional tone suitable for business communication. Keep the meaning unchanged." },
-                    new() { Name = "Summarize", Prompt = "Summarize the following text into 2-4 concise bullet points that capture the main ideas." },
-                    new() { Name = "Explain simply", Prompt = "Explain the following text in plain language a non-expert could understand, without losing key details." },
-                    new() { Name = "Translate to English", Prompt = "Translate the following text to natural, fluent English. Preserve meaning, tone, and formatting. If already in English, return it unchanged." },
-                    new() { Name = "Format JSON", Prompt = "If the input contains JSON, return it pretty-printed with 2-space indentation and stable key ordering. Otherwise return it unchanged." },
-                };
-                presets.AddRange(GetDefaultImagePresets());
-                next = next with { AiPresets = presets };
-                changed = true;
-            }
-            else if (current.AiPresets is { Count: > 0 } existing
-                     && !existing.Any(p => p.Kind != AiPresetKind.TextToText))
-            {
-                var merged = existing.Concat(GetDefaultImagePresets()).ToList();
-                next = next with { AiPresets = merged };
-                changed = true;
+                return;
             }
 
-            if (changed)
-            {
-                await _settingsService.SaveAsync(next);
-            }
+            await _settingsService.UpdateAsync(current =>
+                NeedsDefaultAiPresets(current) ? SeedDefaultAiPresets(current) : current);
         }
         catch (Exception ex)
         {
             Trace.TraceWarning($"Failed to seed defaults: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// True while the presets contain nothing but text-to-text entries, which
+    /// covers both a fresh profile and one saved before image presets existed.
+    /// Checked again inside the update so a concurrent save that seeded them
+    /// first is not duplicated.
+    /// </summary>
+    private static bool NeedsDefaultAiPresets(AppSettings settings)
+        => !settings.AiPresets.Any(p => p.Kind != AiPresetKind.TextToText);
+
+    private static AppSettings SeedDefaultAiPresets(AppSettings settings)
+    {
+        if (settings.AiPresets.Count > 0)
+        {
+            return settings with { AiPresets = settings.AiPresets.Concat(GetDefaultImagePresets()).ToList() };
+        }
+
+        var presets = new List<AiPreset>
+        {
+            new() { Name = "Fix grammar & spelling", Prompt = "Fix any grammar or spelling mistakes in the text. Preserve the original tone, formatting, and meaning. Return only the corrected text." },
+            new() { Name = "Rewrite formally", Prompt = "Rewrite the following text in a formal, professional tone suitable for business communication. Keep the meaning unchanged." },
+            new() { Name = "Summarize", Prompt = "Summarize the following text into 2-4 concise bullet points that capture the main ideas." },
+            new() { Name = "Explain simply", Prompt = "Explain the following text in plain language a non-expert could understand, without losing key details." },
+            new() { Name = "Translate to English", Prompt = "Translate the following text to natural, fluent English. Preserve meaning, tone, and formatting. If already in English, return it unchanged." },
+            new() { Name = "Format JSON", Prompt = "If the input contains JSON, return it pretty-printed with 2-space indentation and stable key ordering. Otherwise return it unchanged." },
+        };
+        presets.AddRange(GetDefaultImagePresets());
+        return settings with { AiPresets = presets };
     }
 
     private static IEnumerable<AiPreset> GetDefaultImagePresets() => new[]
@@ -7012,7 +7045,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 return;
             }
 
-            await _settingsService.SaveAsync(_settingsService.Current with { LastContentDisplayMode = mode });
+            await _settingsService.UpdateAsync(current => current with { LastContentDisplayMode = mode });
         }
         catch (Exception ex)
         {
@@ -7034,7 +7067,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 return;
             }
 
-            await _settingsService.SaveAsync(_settingsService.Current with { LastImageViewMode = mode });
+            await _settingsService.UpdateAsync(current => current with { LastImageViewMode = mode });
         }
         catch (Exception ex)
         {
