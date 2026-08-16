@@ -46,13 +46,13 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     private readonly Subject<ClipEntry> _updatedClips = new();
     private readonly BehaviorSubject<bool> _captureBusy = new(false);
     private readonly SemaphoreSlim _captureGate = new(1, 1);
+    private readonly ClipboardSuppressionGate _suppressionGate = new();
     private static readonly TimeSpan CoalesceDelay = TimeSpan.FromMilliseconds(60);
 
     private Window? _window;
     private bool _isStarted;
     private bool _isHookAttached;
     private bool _isDisposed;
-    private int _suppressCount;
     private DispatcherTimer? _coalesceTimer;
     private int _pendingCaptureRequests;
 
@@ -69,7 +69,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
 
     public IObservable<bool> CaptureBusy => _captureBusy.AsObservable();
 
-    public void SuppressNext() => Interlocked.Increment(ref _suppressCount);
+    public void SuppressNext() => _suppressionGate.Arm();
 
     public bool IsRunning => _isStarted;
 
@@ -183,7 +183,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
             return;
         }
 
-        if (Interlocked.Exchange(ref _suppressCount, 0) > 0)
+        if (_suppressionGate.ShouldSuppress())
         {
             return;
         }

@@ -1734,5 +1734,21 @@
     "find": "                byteCount += 4;\n                index += 2;",
     "replace": "                byteCount += 2;\n                index += 2;",
     "filter": "FullyQualifiedName~ClipboardMarkupDecoderTests"
+  },
+  {
+    "id": "suppression-never-expires",
+    "file": "Clipthrough/Services/Capture/ClipboardSuppressionGate.cs",
+    "why": "Without the deadline a suppression armed for a write that raised no clipboard notification stays armed forever and silently swallows the user's next real copy.",
+    "find": "        return _clock() <= Interlocked.Read(ref _expiresAt);",
+    "replace": "        return true;",
+    "filter": "FullyQualifiedName~ClipboardSuppressionGateTests"
+  },
+  {
+    "id": "suppression-drains-one-at-a-time",
+    "file": "Clipthrough/Services/Capture/ClipboardSuppressionGate.cs",
+    "why": "The monitor coalesces rapid writes into one notification, so pending suppressions must drain as a batch. Decrementing leaves a residue that eats a genuine copy.",
+    "find": "        var pending = Interlocked.Exchange(ref _pending, 0);",
+    "replace": "        var pending = Interlocked.Decrement(ref _pending) + 1;",
+    "filter": "FullyQualifiedName~ClipboardSuppressionGateTests"
   }
 ]
