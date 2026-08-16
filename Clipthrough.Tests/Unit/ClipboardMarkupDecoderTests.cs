@@ -1,5 +1,7 @@
 using System;
+using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using Clipthrough.Models;
 using Clipthrough.Presentation;
 using Xunit;
@@ -128,7 +130,61 @@ public sealed class ClipboardMarkupDecoderTests
         Assert.Null(ex);
     }
 
-    private static string CreateClipboardHtml(string document, string fragment)
+    /// <summary>
+    /// The header offsets are a claim about where the fragment is; the
+    /// <c>&lt;!--StartFragment--&gt;</c> comments are the boundary itself. Several widely
+    /// used applications emit offsets a few bytes out, and trusting them over the comments
+    /// truncates the clip or drags in surrounding markup.
+    ///
+    /// Every other test here builds a payload where both agree, so none of them can tell
+    /// the two orderings apart. This one deliberately skews the offsets by three bytes -
+    /// enough to slice into the middle of a tag - and asserts the comments win.
+    /// </summary>
+    [Fact]
+    public void ExtractHtmlFragment_WhenTheHeaderOffsetsAreWrong_PrefersTheFragmentComments()
+    {
+        const string fragment = "<p>Fragment</p>";
+        const string document = "<html><body><p>before</p><!--StartFragment-->" + fragment + "<!--EndFragment--></body></html>";
+        var html = CreateClipboardHtml(document, fragment, startFragmentSkew: -3, endFragmentSkew: -3);
+
+        var extracted = ClipboardMarkupDecoder.ExtractHtmlFragment(html);
+
+        Assert.Equal(fragment, extracted);
+
+        // Anti-vacuity: the skewed offsets really do select something else, so this test
+        // fails if the offsets are consulted first rather than passing by coincidence.
+        var skewed = ExtractUsingHeaderOffsetsOnly(html);
+        Assert.NotEqual(fragment, skewed);
+    }
+
+    /// <summary>
+    /// With no comments to fall back on, the offsets are all there is and must still work.
+    /// Without this, "prefer the comments" could be implemented as "ignore the offsets".
+    /// </summary>
+    [Fact]
+    public void ExtractHtmlFragment_WithNoFragmentComments_StillUsesTheHeaderOffsets()
+    {
+        const string prefix = "<p>\u05E9\u05DC\u05D5\u05DD</p>";
+        const string fragment = "<p>Fragment</p>";
+        const string document = "<html><body>" + prefix + fragment + "</body></html>";
+        var html = CreateClipboardHtml(document, fragment);
+
+        var extracted = ClipboardMarkupDecoder.ExtractHtmlFragment(html);
+
+        Assert.Equal(fragment, extracted);
+    }
+
+    // Slices the payload the way the header offsets alone would, to prove a skew changes
+    // the answer. Mirrors GetHeaderRegion's byte-to-char conversion.
+    private static string ExtractUsingHeaderOffsetsOnly(string html)
+    {
+        var start = int.Parse(Regex.Match(html, @"StartFragment:(\d{10})").Groups[1].Value, CultureInfo.InvariantCulture);
+        var end = int.Parse(Regex.Match(html, @"EndFragment:(\d{10})").Groups[1].Value, CultureInfo.InvariantCulture);
+        var bytes = Encoding.UTF8.GetBytes(html);
+        return Encoding.UTF8.GetString(bytes, start, end - start).Trim();
+    }
+
+    private static string CreateClipboardHtml(string document, string fragment, int startFragmentSkew = 0, int endFragmentSkew = 0)
     {
         const string headerTemplate = "Format:HTML Format\r\nVersion:1.0\r\nStartHTML:0000000000\r\nEndHTML:0000000000\r\nStartFragment:0000000000\r\nEndFragment:0000000000\r\n";
 
@@ -136,8 +192,8 @@ public sealed class ClipboardMarkupDecoderTests
         // pure ASCII, so its byte length equals its char length, but the document is not.
         var startHtml = headerTemplate.Length;
         var fragmentCharOffset = document.IndexOf(fragment, StringComparison.Ordinal);
-        var startFragment = startHtml + Encoding.UTF8.GetByteCount(document[..fragmentCharOffset]);
-        var endFragment = startFragment + Encoding.UTF8.GetByteCount(fragment);
+        var startFragment = startHtml + Encoding.UTF8.GetByteCount(document[..fragmentCharOffset]) + startFragmentSkew;
+        var endFragment = startFragment + Encoding.UTF8.GetByteCount(fragment) + endFragmentSkew;
         var endHtml = startHtml + Encoding.UTF8.GetByteCount(document);
 
         return $"Format:HTML Format\r\nVersion:1.0\r\nStartHTML:{startHtml:D10}\r\nEndHTML:{endHtml:D10}\r\nStartFragment:{startFragment:D10}\r\nEndFragment:{endFragment:D10}\r\n{document}";

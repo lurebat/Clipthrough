@@ -78,12 +78,12 @@ public static class ClipboardMarkupDecoder
             return html;
         }
 
-        var headerFragment = GetHeaderRegion(html, "StartFragment", "EndFragment");
-        if (!string.IsNullOrWhiteSpace(headerFragment))
-        {
-            return headerFragment.Trim();
-        }
-
+        // The <!--StartFragment--> comments are preferred over the header offsets, even
+        // though the offsets are the format's own mechanism. The offsets are a claim
+        // *about* where the fragment is and several widely used applications emit them a
+        // few bytes out; the comments *are* the boundary being pointed at, so they cannot
+        // disagree with themselves. When both are present and the offsets are wrong,
+        // trusting the offsets truncates the clip or drags in surrounding markup.
         const string startFragmentMarker = "<!--StartFragment-->";
         const string endFragmentMarker = "<!--EndFragment-->";
         var markerStart = html.IndexOf(startFragmentMarker, StringComparison.OrdinalIgnoreCase);
@@ -91,6 +91,14 @@ public static class ClipboardMarkupDecoder
         if (markerStart >= 0 && markerEnd > markerStart)
         {
             return html[(markerStart + startFragmentMarker.Length)..markerEnd].Trim();
+        }
+
+        // No comments: the offsets are all there is. They are byte positions into the
+        // UTF-8 payload, which GetHeaderRegion accounts for.
+        var headerFragment = GetHeaderRegion(html, "StartFragment", "EndFragment");
+        if (!string.IsNullOrWhiteSpace(headerFragment))
+        {
+            return headerFragment.Trim();
         }
 
         var documentRegion = GetHeaderRegion(html, "StartHTML", "EndHTML");

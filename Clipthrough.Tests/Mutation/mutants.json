@@ -2070,5 +2070,13 @@
     "find": "        var headroom = Math.Max(64, currentCapacity / 4);",
     "replace": "        var headroom = Math.Min(64, currentCapacity / 4);",
     "filter": "FullyQualifiedName~SemanticSearchServiceTests"
+  },
+  {
+    "id": "cf-html-trusts-header-offsets-over-fragment-comments",
+    "file": "Clipthrough/Presentation/ClipboardMarkupDecoder.cs",
+    "why": "The header offsets are a claim about where the fragment is and real applications emit them a few bytes out; the StartFragment comments are the boundary itself. Consulting the offsets first truncates the clip or drags in surrounding markup.",
+    "find": "        const string startFragmentMarker = \"<!--StartFragment-->\";\n        const string endFragmentMarker = \"<!--EndFragment-->\";\n        var markerStart = html.IndexOf(startFragmentMarker, StringComparison.OrdinalIgnoreCase);\n        var markerEnd = html.IndexOf(endFragmentMarker, StringComparison.OrdinalIgnoreCase);\n        if (markerStart >= 0 && markerEnd > markerStart)\n        {\n            return html[(markerStart + startFragmentMarker.Length)..markerEnd].Trim();\n        }\n\n        // No comments: the offsets are all there is. They are byte positions into the\n        // UTF-8 payload, which GetHeaderRegion accounts for.\n        var headerFragment = GetHeaderRegion(html, \"StartFragment\", \"EndFragment\");\n        if (!string.IsNullOrWhiteSpace(headerFragment))\n        {\n            return headerFragment.Trim();\n        }\n",
+    "replace": "        var headerFragment = GetHeaderRegion(html, \"StartFragment\", \"EndFragment\");\n        if (!string.IsNullOrWhiteSpace(headerFragment))\n        {\n            return headerFragment.Trim();\n        }\n\n        const string startFragmentMarker = \"<!--StartFragment-->\";\n        const string endFragmentMarker = \"<!--EndFragment-->\";\n        var markerStart = html.IndexOf(startFragmentMarker, StringComparison.OrdinalIgnoreCase);\n        var markerEnd = html.IndexOf(endFragmentMarker, StringComparison.OrdinalIgnoreCase);\n        if (markerStart >= 0 && markerEnd > markerStart)\n        {\n            return html[(markerStart + startFragmentMarker.Length)..markerEnd].Trim();\n        }\n",
+    "filter": "FullyQualifiedName~ClipboardMarkupDecoderTests"
   }
 ]
