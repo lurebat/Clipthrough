@@ -75,7 +75,7 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
         if (!_started) return;
         _started = false;
         _cts.Cancel();
-        try { if (_wake.CurrentCount == 0) _wake.Release(); } catch { }
+        SignalWake();
         try
         {
             if (_loop is not null) await _loop.ConfigureAwait(false);
@@ -87,7 +87,36 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
     public void Poke()
     {
         if (_disposed) return;
-        try { if (_wake.CurrentCount == 0) _wake.Release(); } catch { }
+        SignalWake();
+    }
+
+    /// <summary>
+    /// Releases the wake semaphore so the loop runs another pass.
+    /// </summary>
+    /// <remarks>
+    /// The <see cref="SemaphoreSlim.CurrentCount"/> check is a check-then-act
+    /// race by construction: two callers can both observe 0 and both release,
+    /// and the second gets <see cref="SemaphoreFullException"/>. That is the
+    /// outcome we wanted anyway - the loop is already scheduled to run - so it
+    /// is swallowed. <see cref="ObjectDisposedException"/> means the worker was
+    /// torn down underneath us, which is equally harmless. Anything else is a
+    /// real defect and is deliberately left to propagate.
+    /// </remarks>
+    private void SignalWake()
+    {
+        try
+        {
+            if (_wake.CurrentCount == 0)
+            {
+                _wake.Release();
+            }
+        }
+        catch (SemaphoreFullException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
     }
 
     public Task<EmbeddingCoverage> GetCoverageAsync(CancellationToken cancellationToken = default)
@@ -303,7 +332,22 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        try { _cts.Cancel(); } catch { }
+        try
+        {
+            _cts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Start() reassigns _cts, so a dispose racing a restart can see a
+            // token source that was already disposed. Nothing left to cancel.
+        }
+        catch (AggregateException ex)
+        {
+            // A registered cancellation callback threw. Cancellation still
+            // happened, so teardown continues, but the callback is a real bug.
+            Trace.TraceError($"An embedding worker cancellation callback threw during dispose: {ex}");
+        }
+
         _cts.Dispose();
         _wake.Dispose();
         _batchCompleted.Dispose();

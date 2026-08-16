@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Linq;
 using System.Reactive.Linq;
 using System.Threading.Tasks;
@@ -35,6 +36,14 @@ public partial class MainWindow : Window
     private PointerPressedEventArgs? m_dragPressedArgs;
     private bool m_dragInProgress;
     private const double DragThreshold = 4.0;
+
+    /// <summary>
+    /// Parsed once from a literal rather than per menu rebuild inside a
+    /// swallow-everything try/catch. A gesture literal either parses on every
+    /// run or on none, so a failure here is a coding error that should be loud
+    /// at startup, not a menu that silently loses its shortcut hint.
+    /// </summary>
+    private static readonly KeyGesture s_aiTransformGesture = KeyGesture.Parse("Ctrl+I");
 
     public MainWindow() : this(null) { }
 
@@ -133,7 +142,7 @@ public partial class MainWindow : Window
         if (m_sessionLogsWindow is not null)
         {
             m_sessionLogsWindow.Closing -= OnSessionLogsWindowClosing;
-            try { m_sessionLogsWindow.Close(); } catch { }
+            CloseChildWindow(m_sessionLogsWindow, "session logs");
             m_sessionLogsWindow = null;
         }
 
@@ -149,14 +158,14 @@ public partial class MainWindow : Window
         if (m_settingsWindow is not null)
         {
             m_settingsWindow.Closing -= OnSettingsWindowClosing;
-            try { m_settingsWindow.Close(); } catch { }
+            CloseChildWindow(m_settingsWindow, "settings");
             m_settingsWindow = null;
         }
 
         if (m_aiPromptWindow is not null)
         {
             m_aiPromptWindow.Closing -= OnAiPromptWindowClosing;
-            try { m_aiPromptWindow.Close(); } catch { }
+            CloseChildWindow(m_aiPromptWindow, "AI prompt");
             m_aiPromptWindow = null;
         }
 
@@ -184,6 +193,25 @@ public partial class MainWindow : Window
 
         RemoveHandler(DragDrop.DragOverEvent, OnPopupDragOver);
         RemoveHandler(DragDrop.DropEvent, OnPopupDrop);
+    }
+
+    /// <summary>
+    /// Closes a child window during teardown without letting its failure abort
+    /// the rest of the teardown, which would strand the remaining child windows
+    /// and their event subscriptions. The catch stays broad because a window
+    /// close runs arbitrary <c>Closing</c> handlers and renderer shutdown, but
+    /// the failure is traced so it reaches the session log instead of vanishing.
+    /// </summary>
+    internal static void CloseChildWindow(Window window, string name)
+    {
+        try
+        {
+            window.Close();
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Failed to close the {name} window during teardown: {ex}");
+        }
     }
 
     private void OnClipListScrollChanged(object? sender, ScrollChangedEventArgs e)
@@ -1206,7 +1234,7 @@ public partial class MainWindow : Window
             var aiRoot = new MenuItem { Header = includeAccessKeys ? "_AI" : "AI" };
             if (includeAccessKeys)
             {
-                try { aiRoot.InputGesture = KeyGesture.Parse("Ctrl+I"); } catch { }
+                aiRoot.InputGesture = s_aiTransformGesture;
             }
             m_aiRoots.Add(aiRoot);
             controls.Add(aiRoot);
@@ -1570,7 +1598,7 @@ public partial class MainWindow : Window
             var window = m_settingsWindow;
             m_settingsWindow = null;
             window.Closing -= OnSettingsWindowClosing;
-            try { window.Close(); } catch { }
+            CloseChildWindow(window, "settings");
         }
     }
 
@@ -1612,7 +1640,7 @@ public partial class MainWindow : Window
             var window = m_aiPromptWindow;
             m_aiPromptWindow = null;
             window.Closing -= OnAiPromptWindowClosing;
-            try { window.Close(); } catch { }
+            CloseChildWindow(window, "AI prompt");
             FocusInitialPopupTarget();
         }
     }
@@ -1665,7 +1693,7 @@ public partial class MainWindow : Window
             var window = m_sessionLogsWindow;
             m_sessionLogsWindow = null;
             window.Closing -= OnSessionLogsWindowClosing;
-            try { window.Close(); } catch { }
+            CloseChildWindow(window, "session logs");
         }
     }
 

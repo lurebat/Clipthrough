@@ -1846,5 +1846,37 @@
     "find": "        var sourceInfo = _sourceApplicationResolver.TryResolve(includeIcon: false);\n        isExcluded = CaptureExclusionPolicy.IsExcluded",
     "replace": "        var sourceInfo = _sourceApplicationResolver.TryResolve(includeIcon: true);\n        isExcluded = CaptureExclusionPolicy.IsExcluded",
     "filter": "FullyQualifiedName~CaptureExclusionPolicyTests"
+  },
+  {
+    "id": "wake-signal-does-not-tolerate-a-full-semaphore",
+    "file": "Clipthrough/Services/Search/EmbeddingWorker.cs",
+    "why": "CurrentCount == 0 followed by Release is a check-then-act race; concurrent pokes both see 0 and the loser gets SemaphoreFullException.",
+    "find": "        catch (SemaphoreFullException)\n        {\n        }\n        catch (ObjectDisposedException)",
+    "replace": "        catch (ObjectDisposedException)",
+    "filter": "FullyQualifiedName~EmbeddingWorkerWakeTests"
+  },
+  {
+    "id": "wake-signal-does-not-tolerate-a-disposed-semaphore",
+    "file": "Clipthrough/Services/Search/EmbeddingWorker.cs",
+    "why": "A queued embedding request can poke a worker whose semaphore was already disposed during shutdown.",
+    "find": "        catch (ObjectDisposedException)\n        {\n        }\n    }\n\n    public Task<EmbeddingCoverage> GetCoverageAsync",
+    "replace": "    }\n\n    public Task<EmbeddingCoverage> GetCoverageAsync",
+    "filter": "FullyQualifiedName~EmbeddingWorkerWakeTests"
+  },
+  {
+    "id": "close-child-window-lets-a-failing-close-abort-teardown",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "A child window whose Closing handler throws would abort the rest of MainWindow teardown and strand the remaining windows.",
+    "find": "            Trace.TraceWarning($\"Failed to close the {name} window during teardown: {ex}\");",
+    "replace": "            Trace.TraceWarning($\"Failed to close the {name} window during teardown: {ex}\");\n            throw;",
+    "filter": "FullyQualifiedName~CloseChildWindowHeadlessTests"
+  },
+  {
+    "id": "close-child-window-discards-the-failure",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "Swallowing the close failure silently is the original empty-catch bug: the session log never learns which teardown step failed.",
+    "find": "        catch (Exception ex)\n        {\n            Trace.TraceWarning($\"Failed to close the {name} window during teardown: {ex}\");\n        }",
+    "replace": "        catch (Exception)\n        {\n        }",
+    "filter": "FullyQualifiedName~CloseChildWindowHeadlessTests"
   }
 ]
