@@ -975,6 +975,38 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.False(scope.SettingsService.HasSavedSettings);
     }
 
+    /// <summary>
+    /// The exclusion list is edited as free text and stored as a list, so both
+    /// halves of that translation have to be wired up. A save that dropped the
+    /// text on the floor would leave the user believing an app is excluded
+    /// while every one of its copies is still captured.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task SaveSettings_PersistsTheCaptureExclusionList()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+
+        await viewModel.InitializeAsync();
+
+        viewModel.Settings.ExcludedCaptureAppsText = "1Password\n\n  *keepass*  \n";
+        await viewModel.SaveSettingsCommand.Execute().ToTask();
+
+        Assert.Equal(new[] { "1Password", "*keepass*" }, scope.SettingsService.Current.ExcludedCaptureApps);
+
+        // And the round trip back into the form. CloseSettings reloads the
+        // draft from the saved settings, so a missing load would leave the box
+        // empty and the next save would silently wipe the list.
+        viewModel.Settings.ExcludedCaptureAppsText = "scratched out";
+        viewModel.CloseSettingsCommand.Execute().Subscribe();
+        Assert.Equal(
+            new[] { "1Password", "*keepass*" },
+            Clipthrough.Services.CaptureExclusionPolicy.ParsePatterns(viewModel.Settings.ExcludedCaptureAppsText));
+    }
+
     [AvaloniaFact]
     public async Task SaveSettings_FromWelcome_ClosesWelcomeAndStartsApp()
     {

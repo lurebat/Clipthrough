@@ -42,6 +42,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     private readonly IClipStoreService _clipStoreService;
     private readonly ISourceApplicationResolver _sourceApplicationResolver;
     private readonly IAppNotificationService _notificationService;
+    private readonly ISettingsService _settingsService;
     private readonly Subject<ClipEntry> _capturedClips = new();
     private readonly Subject<ClipEntry> _updatedClips = new();
     private readonly BehaviorSubject<bool> _captureBusy = new(false);
@@ -56,11 +57,12 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     private DispatcherTimer? _coalesceTimer;
     private int _pendingCaptureRequests;
 
-    public ClipboardMonitorService(IClipStoreService clipStoreService, ISourceApplicationResolver sourceApplicationResolver, IAppNotificationService notificationService)
+    public ClipboardMonitorService(IClipStoreService clipStoreService, ISourceApplicationResolver sourceApplicationResolver, IAppNotificationService notificationService, ISettingsService settingsService)
     {
         _clipStoreService = clipStoreService;
         _sourceApplicationResolver = sourceApplicationResolver;
         _notificationService = notificationService;
+        _settingsService = settingsService;
     }
 
     public IObservable<ClipEntry> CapturedClips => _capturedClips.AsObservable();
@@ -275,6 +277,17 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
         {
             try
             {
+                // Resolve the owning application before touching the payload.
+                // For an excluded app (a password manager, say) the secret must
+                // never enter this process at all, so the check has to happen
+                // ahead of the clipboard read rather than at persist time.
+                var sourceInfo = ResolveCaptureSource(out var isExcluded);
+                if (isExcluded)
+                {
+                    Trace.TraceInformation($"Clipboard change ignored because the source application '{sourceInfo?.Name ?? sourceInfo?.Path}' is on the capture exclusion list.");
+                    return null;
+                }
+
                 using var clipboardData = await clipboard.TryGetDataAsync();
                 if (clipboardData is null)
                 {
@@ -300,7 +313,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                     return null;
                 }
 
-                var captureRequest = await BuildCaptureRequestAsync(clipboardData);
+                var captureRequest = await BuildCaptureRequestAsync(clipboardData, sourceInfo);
                 if (captureRequest is null)
                 {
                     Trace.TraceInformation($"Clipboard change ignored because no supported payload was found. Formats: {availableFormats}");
@@ -334,9 +347,24 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
         }
     }
 
-    private async Task<ClipCaptureRequest?> BuildCaptureRequestAsync(IAsyncDataTransfer clipboardData)
+    /// <summary>
+    /// Resolves the application that owns the current clipboard contents and
+    /// reports whether the user has excluded it from capture.
+    /// </summary>
+    /// <remarks>
+    /// Internal rather than inlined so the wiring between the saved exclusion
+    /// list and <see cref="CaptureExclusionPolicy"/> can be tested without a
+    /// live clipboard: everything that reaches it needs a real window.
+    /// </remarks>
+    internal ClipboardSourceApplicationInfo? ResolveCaptureSource(out bool isExcluded)
     {
         var sourceInfo = _sourceApplicationResolver.TryResolve(includeIcon: false);
+        isExcluded = CaptureExclusionPolicy.IsExcluded(sourceInfo, _settingsService.Current.ExcludedCaptureApps);
+        return sourceInfo;
+    }
+
+    private async Task<ClipCaptureRequest?> BuildCaptureRequestAsync(IAsyncDataTransfer clipboardData, ClipboardSourceApplicationInfo? sourceInfo)
+    {
         var plainText = await clipboardData.TryGetTextAsync();
         var relatedSourceUrl = await TryGetPlatformStringAsync(clipboardData, SourceUrlFormats);
 

@@ -504,6 +504,27 @@
                     </ItemsControl>
                 </Expander>
 
+                <!-- Excluded applications -->
+                <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionExcludedAppsVisible}"
+                          IsExpanded="{Binding IsSettingsSectionExcludedAppsExpanded, Mode=TwoWay}">
+                    <Expander.Header>
+                        <TextBlock Text="{Binding SettingsExcludedAppsTitle}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold" />
+                    </Expander.Header>
+                    <StackPanel Spacing="8" Margin="8,10,0,0">
+                        <TextBlock Classes="body-muted" TextWrapping="Wrap"
+                                   Text="{Binding SettingsExcludedAppsDescription}" />
+                        <TextBox AcceptsReturn="True"
+                                 MinHeight="110"
+                                 TextWrapping="NoWrap"
+                                 PlaceholderText="{Binding SettingsExcludedAppsWatermark}"
+                                 Text="{Binding Settings.ExcludedCaptureAppsText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Classes="body-muted" TextWrapping="Wrap"
+                                   Text="{Binding SettingsExcludedAppsCaveat}" />
+                    </StackPanel>
+                </Expander>
+
                 <!-- Tools -->
                 <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionToolsVisible}"
                           IsExpanded="{Binding IsSettingsSectionToolsExpanded, Mode=TwoWay}">

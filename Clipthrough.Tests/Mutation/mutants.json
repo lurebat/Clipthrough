@@ -1766,5 +1766,85 @@
     "find": "            if (!viewModel.SelectClipByIndex(index))\n            {\n                return false;\n            }\n",
     "replace": "            viewModel.SelectClipByIndex(index);\n",
     "filter": "FullyQualifiedName~ClipIndexShortcutHeadlessTests"
+  },
+  {
+    "id": "exclusion-checks-only-first-pattern",
+    "file": "Clipthrough/Services/Capture/CaptureExclusionPolicy.cs",
+    "why": "Returning on the first non-blank pattern means only the top line of the exclusion list works; every app listed below it is still captured, silently.",
+    "find": "            if (Matches(pattern, friendlyName)\n                || Matches(pattern, fileName)\n                || Matches(pattern, bareName)\n                || Matches(pattern, path))\n            {\n                return true;\n            }",
+    "replace": "            return Matches(pattern, friendlyName)\n                || Matches(pattern, fileName)\n                || Matches(pattern, bareName)\n                || Matches(pattern, path);",
+    "filter": "FullyQualifiedName~CaptureExclusionPolicyTests"
+  },
+  {
+    "id": "exclusion-matches-substrings",
+    "file": "Clipthrough/Services/Capture/CaptureExclusionPolicy.cs",
+    "why": "Substring matching turns 'Code' into a pattern that also excludes every app whose name merely contains it, silently killing capture the user never asked to lose.",
+    "find": "            return string.Equals(pattern, candidate, StringComparison.OrdinalIgnoreCase);",
+    "replace": "            return candidate.Contains(pattern, StringComparison.OrdinalIgnoreCase);",
+    "filter": "FullyQualifiedName~CaptureExclusionPolicyTests"
+  },
+  {
+    "id": "exclusion-glob-via-simple-expression",
+    "file": "Clipthrough/Services/Capture/CaptureExclusionPolicy.cs",
+    "why": "This is what FileSystemName.MatchesSimpleExpression does: it treats backslash as an escape, so a directory pattern like C:\\Tools\\* never matches a Windows path and the app is captured anyway.",
+    "find": "        \"^\" + Regex.Escape(pattern).Replace(\"\\\\*\", \".*\", StringComparison.Ordinal).Replace(\"\\\\?\", \".\", StringComparison.Ordinal) + \"$\";",
+    "replace": "        \"^\" + Regex.Escape(pattern.Replace(\"\\\\\", string.Empty, StringComparison.Ordinal)).Replace(\"\\\\*\", \".*\", StringComparison.Ordinal).Replace(\"\\\\?\", \".\", StringComparison.Ordinal) + \"$\";",
+    "filter": "FullyQualifiedName~CaptureExclusionPolicyTests"
+  },
+  {
+    "id": "exclusion-anchors-dropped-from-glob",
+    "file": "Clipthrough/Services/Capture/CaptureExclusionPolicy.cs",
+    "why": "An unanchored glob matches anywhere in the candidate, so 'KeePass?.exe' would also match a path that merely contains it - the same over-exclusion the substring mutant causes.",
+    "find": "        \"^\" + Regex.Escape(pattern).Replace(\"\\\\*\", \".*\", StringComparison.Ordinal).Replace(\"\\\\?\", \".\", StringComparison.Ordinal) + \"$\";",
+    "replace": "        Regex.Escape(pattern).Replace(\"\\\\*\", \".*\", StringComparison.Ordinal).Replace(\"\\\\?\", \".\", StringComparison.Ordinal);",
+    "filter": "FullyQualifiedName~CaptureExclusionPolicyTests"
+  },
+  {
+    "id": "settings-save-drops-exclusion-list",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Dropping the parsed list on save leaves the user believing an app is excluded while every one of its copies is still captured.",
+    "find": "            ExcludedCaptureApps = Services.CaptureExclusionPolicy.ParsePatterns(Settings.ExcludedCaptureAppsText),",
+    "replace": "            ExcludedCaptureApps = System.Array.Empty<string>(),",
+    "filter": "FullyQualifiedName~SaveSettings_PersistsTheCaptureExclusionList"
+  },
+  {
+    "id": "settings-load-drops-exclusion-list",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Not loading the saved list back into the form shows an empty box, and the next save then wipes the exclusions the user had configured.",
+    "find": "        Settings.ExcludedCaptureAppsText = Services.CaptureExclusionPolicy.FormatPatterns(settings.ExcludedCaptureApps);",
+    "replace": "        Settings.ExcludedCaptureAppsText = string.Empty;",
+    "filter": "FullyQualifiedName~SaveSettings_PersistsTheCaptureExclusionList"
+  },
+  {
+    "id": "exclusion-list-treated-as-view-state",
+    "file": "Clipthrough/Models/AppSettings.cs",
+    "why": "Record equality compares the list by reference, so without the structural comparison OnlyViewStateChanged can never see an exclusion-list change and system state is not re-applied.",
+    "find": "            && previous.ExcludedCaptureApps.SequenceEqual(current.ExcludedCaptureApps, System.StringComparer.OrdinalIgnoreCase);",
+    "replace": ";",
+    "filter": "FullyQualifiedName~CaptureExclusionPolicyTests"
+  },
+  {
+    "id": "exclusion-blank-line-stops-the-scan",
+    "file": "Clipthrough/Services/Capture/CaptureExclusionPolicy.cs",
+    "why": "A blank line is routine in a multi-line text box. Stopping the scan there silently disables every exclusion listed below it.",
+    "find": "            if (string.IsNullOrWhiteSpace(raw))\n            {\n                continue;\n            }",
+    "replace": "            if (string.IsNullOrWhiteSpace(raw))\n            {\n                return false;\n            }",
+    "filter": "FullyQualifiedName~CaptureExclusionPolicyTests"
+  },
+  {
+    "id": "monitor-never-consults-exclusion-list",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "why": "The setting saves and displays fine but decides nothing, so the user believes their password manager is excluded while every copy from it is still captured.",
+    "find": "        isExcluded = CaptureExclusionPolicy.IsExcluded(sourceInfo, _settingsService.Current.ExcludedCaptureApps);",
+    "replace": "        isExcluded = false;",
+    "filter": "FullyQualifiedName~CaptureExclusionPolicyTests"
+  },
+  {
+    "id": "monitor-resolves-source-icon-on-every-copy",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "why": "Loading and encoding the process icon on every clipboard change costs a shell round-trip before we even know the clip is wanted.",
+    "find": "        var sourceInfo = _sourceApplicationResolver.TryResolve(includeIcon: false);\n        isExcluded = CaptureExclusionPolicy.IsExcluded",
+    "replace": "        var sourceInfo = _sourceApplicationResolver.TryResolve(includeIcon: true);\n        isExcluded = CaptureExclusionPolicy.IsExcluded",
+    "filter": "FullyQualifiedName~CaptureExclusionPolicyTests"
   }
 ]

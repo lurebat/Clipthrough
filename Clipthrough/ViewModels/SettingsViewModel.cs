@@ -144,7 +144,19 @@ public sealed class SettingsViewModel : ViewModelBase
         set => this.RaiseAndSetIfChanged(ref _databasePath, value);
     }
 
+    private string _excludedCaptureAppsText = string.Empty;
+    /// <summary>
+    /// Newline-separated exclusion patterns, edited as free text and parsed by
+    /// <see cref="Services.CaptureExclusionPolicy.ParsePatterns"/> on save.
+    /// </summary>
+    public string ExcludedCaptureAppsText
+    {
+        get => _excludedCaptureAppsText;
+        set => this.RaiseAndSetIfChanged(ref _excludedCaptureAppsText, value);
+    }
+
     private string _externalEditorPath = AppSettings.Default.ExternalEditorPath;
+
     public string ExternalEditorPath
     {
         get => _externalEditorPath;

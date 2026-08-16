@@ -1186,6 +1186,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string SettingsCapacityTitle => AppText.SettingsCapacityTitle;
 
     public string SettingsSensitivityTitle => AppText.SettingsSensitivityTitle;
+    public string SettingsExcludedAppsTitle => AppText.SettingsExcludedAppsTitle;
+    public string SettingsExcludedAppsDescription => AppText.SettingsExcludedAppsDescription;
+    public string SettingsExcludedAppsWatermark => AppText.SettingsExcludedAppsWatermark;
+    public string SettingsExcludedAppsCaveat => AppText.SettingsExcludedAppsCaveat;
 
     public string SettingsClipLimitLabel => AppText.SettingsClipLimitLabel;
 
@@ -1988,6 +1992,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isSettingsSectionRetentionExpanded = true;
     private bool _isSettingsSectionCapacityExpanded = true;
     private bool _isSettingsSectionSensitivityExpanded = true;
+    private bool _isSettingsSectionExcludedAppsExpanded;
     private bool _isSettingsSectionAiExpanded;
     private bool _isSettingsSectionUpdatesExpanded;
     private bool _isSettingsSectionOcrExpanded;
@@ -2041,6 +2046,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => this.RaiseAndSetIfChanged(ref _isSettingsSectionSensitivityExpanded, value);
     }
 
+    public bool IsSettingsSectionExcludedAppsExpanded
+    {
+        get => _isSettingsSectionExcludedAppsExpanded;
+        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionExcludedAppsExpanded, value);
+    }
+
     public bool IsSettingsSectionAiExpanded
     {
         get => _isSettingsSectionAiExpanded;
@@ -2075,6 +2086,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private const string _retentionKeywords = "retention lifetime expiry expire clips days normal sensitive minutes age";
     private const string _capacityKeywords = "capacity size library entries count limit max megabytes clip kb kilobytes";
     private const string _sensitivityKeywords = "sensitivity rules pattern regex severity warn block name enabled";
+    private const string _excludedAppsKeywords = "excluded exclude exclusion ignore app apps application blocklist blacklist password manager keepass 1password bitwarden privacy capture source process never";
     private const string _aiKeywords = "ai openai chatgpt gpt model api key base url prompt transform";
     private const string _updatesKeywords = "update updates auto-update velopack feed url release version";
     private const string _ocrKeywords = "ocr image text extract recognition language bcp-47 windows.media.ocr";
@@ -2104,6 +2116,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsSettingsSectionRetentionVisible => MatchesFilter(_retentionKeywords);
     public bool IsSettingsSectionCapacityVisible => MatchesFilter(_capacityKeywords);
     public bool IsSettingsSectionSensitivityVisible => MatchesFilter(_sensitivityKeywords);
+    public bool IsSettingsSectionExcludedAppsVisible => MatchesFilter(_excludedAppsKeywords);
     public bool IsSettingsSectionAiVisible => MatchesFilter(_aiKeywords);
     public bool IsSettingsSectionUpdatesVisible => MatchesFilter(_updatesKeywords);
     public bool IsSettingsSectionOcrVisible => MatchesFilter(_ocrKeywords);
@@ -2119,6 +2132,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(IsSettingsSectionRetentionVisible));
         this.RaisePropertyChanged(nameof(IsSettingsSectionCapacityVisible));
         this.RaisePropertyChanged(nameof(IsSettingsSectionSensitivityVisible));
+        this.RaisePropertyChanged(nameof(IsSettingsSectionExcludedAppsVisible));
         this.RaisePropertyChanged(nameof(IsSettingsSectionAiVisible));
         this.RaisePropertyChanged(nameof(IsSettingsSectionUpdatesVisible));
         this.RaisePropertyChanged(nameof(IsSettingsSectionOcrVisible));
@@ -2135,6 +2149,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             IsSettingsSectionRetentionExpanded = IsSettingsSectionRetentionVisible;
             IsSettingsSectionCapacityExpanded = IsSettingsSectionCapacityVisible;
             IsSettingsSectionSensitivityExpanded = IsSettingsSectionSensitivityVisible;
+            IsSettingsSectionExcludedAppsExpanded = IsSettingsSectionExcludedAppsVisible;
             IsSettingsSectionAiExpanded = IsSettingsSectionAiVisible;
             IsSettingsSectionUpdatesExpanded = IsSettingsSectionUpdatesVisible;
             IsSettingsSectionOcrExpanded = IsSettingsSectionOcrVisible;
@@ -5904,6 +5919,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             PasteAndFavoriteHotkey = normalizedExtended["paste-and-favorite"],
             EnablePasteAsPlainTextHotkey = Settings.EnablePasteAsPlainTextHotkey,
             PasteAsPlainTextHotkey = normalizedExtended["paste-as-plain-text"],
+            ExcludedCaptureApps = Services.CaptureExclusionPolicy.ParsePatterns(Settings.ExcludedCaptureAppsText),
             ExternalEditorPath = Settings.ExternalEditorPath.Trim(),
             ExternalImageEditorPath = Settings.ExternalImageEditorPath.Trim(),
             ExternalDiffToolPath = Settings.ExternalDiffToolPath.Trim(),
@@ -6078,6 +6094,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.PasteAndFavoriteHotkey = settings.PasteAndFavoriteHotkey;
         Settings.EnablePasteAsPlainTextHotkey = settings.EnablePasteAsPlainTextHotkey;
         Settings.PasteAsPlainTextHotkey = settings.PasteAsPlainTextHotkey;
+        Settings.ExcludedCaptureAppsText = Services.CaptureExclusionPolicy.FormatPatterns(settings.ExcludedCaptureApps);
         Settings.ExternalEditorPath = settings.ExternalEditorPath;
         Settings.ExternalImageEditorPath = settings.ExternalImageEditorPath;
         Settings.ExternalDiffToolPath = settings.ExternalDiffToolPath;

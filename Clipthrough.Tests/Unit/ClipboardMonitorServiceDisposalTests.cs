@@ -152,7 +152,7 @@ public sealed class ClipboardMonitorServiceDisposalTests
     // The disposal path touches none of the dependencies - it only stops the
     // window hook (never attached here) and completes its own subjects.
     private static ClipboardMonitorService CreateService()
-        => new(null!, null!, null!);
+        => new(null!, null!, null!, null!);
 
     private static ClipEntry SampleClip() => new()
     {

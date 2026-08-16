@@ -200,6 +200,14 @@ public sealed record AppSettings
 
     public bool AutoOcrImageClips { get; init; } = true;
 
+    /// <summary>
+    /// Applications whose clipboard writes are never captured. Each entry is a
+    /// process name, executable file name, full path, or a <c>*</c>/<c>?</c>
+    /// wildcard pattern; see <see cref="Services.CaptureExclusionPolicy"/> for
+    /// the matching rules and the deliberate fail-open behaviour.
+    /// </summary>
+    public System.Collections.Generic.IReadOnlyList<string> ExcludedCaptureApps { get; init; } = System.Array.Empty<string>();
+
     public static AppSettings Default { get; } = new();
 
     /// <summary>
@@ -224,21 +232,22 @@ public sealed record AppSettings
 
         return WithoutViewState(previous) == WithoutViewState(current)
             && previous.AiPresets.SequenceEqual(current.AiPresets)
-            && previous.CustomHotkeys.SequenceEqual(current.CustomHotkeys);
+            && previous.CustomHotkeys.SequenceEqual(current.CustomHotkeys)
+            && previous.ExcludedCaptureApps.SequenceEqual(current.ExcludedCaptureApps, System.StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
     /// Blanks the view-state fields so the record's synthesized equality can
     /// answer "is everything else the same?".
     ///
-    /// The three list properties need care. Record equality compares them by
-    /// *reference*, and <see cref="Normalize"/> rebuilds AiPresets and
-    /// CustomHotkeys into fresh lists on every single save - so comparing two
-    /// saved instances directly always reports a difference and any gate built
-    /// on it would never fire. Pinning both sides to
-    /// <see cref="System.Array.Empty{T}"/>, which returns one cached instance,
-    /// makes that comparison meaningful; the contents are then compared
-    /// structurally by the caller.
+    /// The four list properties need care. Record equality compares them by
+    /// *reference*, and <see cref="Normalize"/> rebuilds AiPresets,
+    /// CustomHotkeys and ExcludedCaptureApps into fresh lists on every single
+    /// save - so comparing two saved instances directly always reports a
+    /// difference and any gate built on it would never fire. Pinning both sides
+    /// to <see cref="System.Array.Empty{T}"/>, which returns one cached
+    /// instance, makes that comparison meaningful; the contents are then
+    /// compared structurally by the caller.
     /// </summary>
     private static AppSettings WithoutViewState(AppSettings settings) => settings with
     {
@@ -257,6 +266,7 @@ public sealed record AppSettings
         LastContentTypeFilters = System.Array.Empty<ContentType>(),
         AiPresets = System.Array.Empty<AiPreset>(),
         CustomHotkeys = System.Array.Empty<CustomHotkeyBinding>(),
+        ExcludedCaptureApps = System.Array.Empty<string>(),
     };
 
     public AppSettings Normalize() => this with
@@ -351,6 +361,11 @@ public sealed record AppSettings
         AutoApplyUpdatesOnStartup = AutoApplyUpdatesOnStartup,
         OcrLanguages = string.IsNullOrWhiteSpace(OcrLanguages) ? "en" : OcrLanguages.Trim(),
         AutoOcrImageClips = AutoOcrImageClips,
+        ExcludedCaptureApps = (ExcludedCaptureApps ?? System.Array.Empty<string>())
+            .Where(static p => !string.IsNullOrWhiteSpace(p))
+            .Select(static p => p.Trim())
+            .Distinct(System.StringComparer.OrdinalIgnoreCase)
+            .ToList(),
     };
 
     private static string NormalizeHotkey(string? value, string fallback)
