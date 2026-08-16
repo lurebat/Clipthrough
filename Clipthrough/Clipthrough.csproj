@@ -45,5 +45,10 @@
 
     <ItemGroup>
         <ProjectReference Include="..\external\ShareX.ImageEditor\ShareX.ImageEditor.csproj" />
+    <ProjectReference Include="..\external\Vellum\src\Vellum.Core\Vellum.Core.csproj" />
+    <ProjectReference Include="..\external\Vellum\src\Vellum.Avalonia\Vellum.Avalonia.csproj" />
+    <ProjectReference Include="..\external\Vellum\src\Vellum.Interop.Html\Vellum.Interop.Html.csproj" />
+    <ProjectReference Include="..\external\Vellum\src\Vellum.Interop.Rtf\Vellum.Interop.Rtf.csproj" />
+    <ProjectReference Include="..\external\Vellum\src\Vellum.Interop.Json\Vellum.Interop.Json.csproj" />
     </ItemGroup>
 </Project>

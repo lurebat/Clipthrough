@@ -1,0 +1,260 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:Vellum;assembly=Vellum.Core"
+        xmlns:v="clr-namespace:Vellum.Avalonia">
+
+  <!--
+    Vellum's default look. Add it to Application.Styles:
+
+        <StyleInclude Source="avares://Vellum.Avalonia/Themes/Vellum.axaml" />
+
+    Every colour is a theme resource an application can redefine at any level above the control,
+    which is the cheap half of restyling. The expensive half — a different arrangement of buttons
+    entirely — is a replacement ControlTheme against the same properties and commands.
+  -->
+
+  <Styles.Resources>
+    <ResourceDictionary>
+
+      <ResourceDictionary.ThemeDictionaries>
+
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="VellumToolbarBackground" Color="#F6F6F8" />
+          <SolidColorBrush x:Key="VellumToolbarForeground" Color="#1B1B1F" />
+          <SolidColorBrush x:Key="VellumToolbarBorderBrush" Color="#1F000000" />
+          <SolidColorBrush x:Key="VellumToolbarHover" Color="#14000000" />
+          <SolidColorBrush x:Key="VellumToolbarAccent" Color="#2D6BE4" />
+          <SolidColorBrush x:Key="VellumToolbarAccentForeground" Color="#FFFFFF" />
+        </ResourceDictionary>
+
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="VellumToolbarBackground" Color="#1C1C1F" />
+          <SolidColorBrush x:Key="VellumToolbarForeground" Color="#EDEDF2" />
+          <SolidColorBrush x:Key="VellumToolbarBorderBrush" Color="#1AFFFFFF" />
+          <SolidColorBrush x:Key="VellumToolbarHover" Color="#18FFFFFF" />
+          <SolidColorBrush x:Key="VellumToolbarAccent" Color="#4C86F0" />
+          <SolidColorBrush x:Key="VellumToolbarAccentForeground" Color="#0E0E10" />
+        </ResourceDictionary>
+
+      </ResourceDictionary.ThemeDictionaries>
+
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://Vellum.Avalonia/Themes/RichTextToolbar.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+
+    </ResourceDictionary>
+  </Styles.Resources>
+
+
+  <!--
+    The look of the bar's parts. These sit outside the ControlTheme because a control theme may
+    not hold a descendant selector, and every one of these is about a control inside the template
+    rather than the toolbar itself. Rooting them at v|RichTextToolbar keeps them from leaking on
+    to anything else that happens to carry the same class.
+  -->
+  <!--
+    One height, one radius, one hover for everything in the bar, so the row reads as a single
+    instrument rather than a collection of buttons that happen to be adjacent.
+  -->
+  <Style Selector="v|RichTextToolbar :is(Button).vellum-tool">
+    <Setter Property="Height" Value="30" />
+    <Setter Property="MinWidth" Value="30" />
+    <Setter Property="Padding" Value="9,0" />
+    <Setter Property="Margin" Value="0,0,2,0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Foreground" Value="{DynamicResource VellumToolbarForeground}" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <!--
+      A toolbar button must not take the keyboard. Focus belongs to the text: clicking Bold and
+      then finding that the next keystroke went to a button, not the document, is the single most
+      irritating thing a formatting bar can do.
+    -->
+    <Setter Property="Focusable" Value="False" />
+  </Style>
+  <Style Selector="v|RichTextToolbar :is(Button).vellum-tool:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource VellumToolbarHover}" />
+    <Setter Property="TextBlock.Foreground" Value="{DynamicResource VellumToolbarForeground}" />
+  </Style>
+  <Style Selector="v|RichTextToolbar :is(Button).vellum-tool:disabled">
+    <Setter Property="Opacity" Value="0.35" />
+  </Style>
+  <Style Selector="v|RichTextToolbar :is(Button).vellum-tool:disabled /template/ ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="TextBlock.Foreground" Value="{DynamicResource VellumToolbarForeground}" />
+  </Style>
+  <Style Selector="v|RichTextToolbar ToggleButton.vellum-tool:checked /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource VellumToolbarAccent}" />
+    <Setter Property="TextBlock.Foreground" Value="{DynamicResource VellumToolbarAccentForeground}" />
+  </Style>
+  <Style Selector="v|RichTextToolbar ToggleButton.vellum-tool:checked:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource VellumToolbarAccent}" />
+    <Setter Property="TextBlock.Foreground" Value="{DynamicResource VellumToolbarAccentForeground}" />
+  </Style>
+
+  <!-- The two buttons whose label has to demonstrate what it does. -->
+  <Style Selector="v|RichTextToolbar ToggleButton.vellum-underline /template/ ContentPresenter">
+    <Setter Property="TextBlock.TextDecorations" Value="Underline" />
+  </Style>
+  <Style Selector="v|RichTextToolbar ToggleButton.vellum-strike /template/ ContentPresenter">
+    <Setter Property="TextBlock.TextDecorations" Value="Strikethrough" />
+  </Style>
+
+  <Style Selector="v|RichTextToolbar ToggleButton.vellum-tool:checked Path.vellum-icon">
+    <Setter Property="Fill" Value="{DynamicResource VellumToolbarAccentForeground}" />
+  </Style>
+
+  <Style Selector="v|RichTextToolbar Path.vellum-icon">
+    <Setter Property="Width" Value="16" />
+    <Setter Property="Height" Value="16" />
+    <Setter Property="Stretch" Value="Uniform" />
+    <Setter Property="Fill" Value="{DynamicResource VellumToolbarForeground}" />
+  </Style>
+
+  <!-- A hairline, not a labelled group. The gap does the grouping; the rule confirms it. -->
+  <Style Selector="v|RichTextToolbar Border.vellum-divider">
+    <Setter Property="Width" Value="1" />
+    <Setter Property="Height" Value="18" />
+    <Setter Property="Margin" Value="7,0,9,0" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Background" Value="{DynamicResource VellumToolbarBorderBrush}" />
+  </Style>
+
+  <Style Selector="v|RichTextToolbar Border.vellum-swatch">
+    <Setter Property="Width" Value="14" />
+    <Setter Property="Height" Value="14" />
+    <Setter Property="Margin" Value="0,0,5,0" />
+    <Setter Property="CornerRadius" Value="3" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="{DynamicResource VellumToolbarBorderBrush}" />
+  </Style>
+
+  <Style Selector="v|RichTextToolbar TextBox.vellum-field">
+    <Setter Property="Height" Value="30" />
+    <Setter Property="MinHeight" Value="30" />
+    <Setter Property="Margin" Value="0,0,4,0" />
+    <Setter Property="Padding" Value="8,0" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <!--
+    The colour palette. Not rooted at the toolbar, because a flyout's content lives in a popup and
+    a popup is not a visual descendant of the control that opened it. The vellum- prefix on the
+    class is what keeps these from reaching anything else.
+  -->
+  <Style Selector="ItemsControl.vellum-palette">
+    <Setter Property="ItemsPanel">
+      <ItemsPanelTemplate>
+        <WrapPanel />
+      </ItemsPanelTemplate>
+    </Setter>
+    <Setter Property="ItemTemplate">
+      <DataTemplate>
+        <Button Width="40" Height="28" Margin="1" Padding="0"
+                CornerRadius="4"
+                BorderThickness="1"
+                BorderBrush="{DynamicResource VellumToolbarBorderBrush}"
+                Background="{Binding}"
+                ToolTip.Tip="{Binding}"
+                CommandParameter="{Binding}"
+                Command="{Binding $parent[ItemsControl].Tag}" />
+      </DataTemplate>
+    </Setter>
+  </Style>
+
+  <Style Selector="Button.vellum-clear-colour">
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="Height" Value="28" />
+    <Setter Property="CornerRadius" Value="4" />
+  </Style>
+
+  <!--
+    The bar that floats beside a selection. A Style rather than a second ControlTheme, because a
+    style setter outranks a control theme setter and so replaces the Template the full bar gets
+    from its type theme, on exactly the toolbars that carry this class.
+
+    Nine buttons, not twenty-eight. It is offered over the text a moment after a selection is
+    made, so it has to be readable at a glance and small enough not to bury the paragraph: the
+    four character styles, the two headings worth reaching for mid-sentence, and the two things
+    one does to a phrase — link it, or strip it back. Anything rarer is a trip to the real bar.
+  -->
+  <Style Selector="v|RichTextToolbar.vellum-selection">
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="5,4" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="{TemplateBinding CornerRadius}"
+                Padding="{TemplateBinding Padding}"
+                BoxShadow="0 4 16 0 #40000000">
+          <StackPanel Orientation="Horizontal">
+
+            <ToggleButton Classes="vellum-tool" Content="B" FontWeight="Bold" FontSize="15"
+                          ToolTip.Tip="Bold (Ctrl+B)"
+                          Command="{Binding ToggleStyleCommand, RelativeSource={RelativeSource TemplatedParent}}"
+                          CommandParameter="{x:Static c:TextStyle.Bold}"
+                          IsChecked="{Binding IsBold, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}" />
+            <ToggleButton Classes="vellum-tool" Content="I" FontStyle="Italic" FontSize="15"
+                          FontFamily="Georgia,Times New Roman,serif"
+                          ToolTip.Tip="Italic (Ctrl+I)"
+                          Command="{Binding ToggleStyleCommand, RelativeSource={RelativeSource TemplatedParent}}"
+                          CommandParameter="{x:Static c:TextStyle.Italic}"
+                          IsChecked="{Binding IsItalic, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}" />
+            <ToggleButton Classes="vellum-tool vellum-underline" Content="U"
+                          ToolTip.Tip="Underline (Ctrl+U)"
+                          Command="{Binding ToggleStyleCommand, RelativeSource={RelativeSource TemplatedParent}}"
+                          CommandParameter="{x:Static c:TextStyle.Underline}"
+                          IsChecked="{Binding IsUnderline, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}" />
+            <ToggleButton Classes="vellum-tool vellum-strike" Content="S"
+                          ToolTip.Tip="Strikethrough"
+                          Command="{Binding ToggleStyleCommand, RelativeSource={RelativeSource TemplatedParent}}"
+                          CommandParameter="{x:Static c:TextStyle.Strikethrough}"
+                          IsChecked="{Binding IsStrikethrough, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}" />
+
+            <Border Classes="vellum-divider" />
+
+            <ToggleButton Classes="vellum-tool" Content="H1" ToolTip.Tip="Heading 1"
+                          Command="{Binding ToggleParagraphKindCommand, RelativeSource={RelativeSource TemplatedParent}}"
+                          CommandParameter="{x:Static c:ParagraphKind.Heading1}"
+                          IsChecked="{Binding ParagraphKind, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay, Converter={x:Static v:ToolbarConverters.Is}, ConverterParameter=Heading1}" />
+            <ToggleButton Classes="vellum-tool" Content="H2" ToolTip.Tip="Heading 2"
+                          Command="{Binding ToggleParagraphKindCommand, RelativeSource={RelativeSource TemplatedParent}}"
+                          CommandParameter="{x:Static c:ParagraphKind.Heading2}"
+                          IsChecked="{Binding ParagraphKind, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay, Converter={x:Static v:ToolbarConverters.Is}, ConverterParameter=Heading2}" />
+            <ToggleButton Classes="vellum-tool" Content="Quote" ToolTip.Tip="Block quote"
+                          Command="{Binding ToggleParagraphKindCommand, RelativeSource={RelativeSource TemplatedParent}}"
+                          CommandParameter="{x:Static c:ParagraphKind.Quote}"
+                          IsChecked="{Binding ParagraphKind, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay, Converter={x:Static v:ToolbarConverters.Is}, ConverterParameter=Quote}" />
+
+            <Border Classes="vellum-divider" />
+
+            <ToggleButton Classes="vellum-tool" ToolTip.Tip="Link"
+                          Command="{Binding SetLinkCommand, RelativeSource={RelativeSource TemplatedParent}}"
+                          IsChecked="{Binding IsLink, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}">
+              <Path Classes="vellum-icon" Data="{StaticResource VellumLinkIcon}" />
+            </ToggleButton>
+            <ToggleButton Classes="vellum-tool" ToolTip.Tip="Strip character formatting (Ctrl+Space)"
+                          Command="{Binding ClearFormattingCommand, RelativeSource={RelativeSource TemplatedParent}}">
+              <Path Classes="vellum-icon" Data="{StaticResource VellumClearIcon}" />
+            </ToggleButton>
+
+          </StackPanel>
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+
+  <!-- The last button in the floating bar has nothing after it to be spaced from. -->
+  <Style Selector="v|RichTextToolbar.vellum-selection StackPanel > :is(Button).vellum-tool:nth-last-child(1)">
+    <Setter Property="Margin" Value="0" />
+  </Style>
+
+</Styles>

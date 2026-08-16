@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Vellum.Interop.Rtf</RootNamespace>
+    <Description>RTF import for the Vellum document model, by way of its HTML importer.</Description>
+    <PackageTags>$(PackageTags);rtf;clipboard;import</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="RtfPipe" Version="2.0.7677.4303" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Vellum.Interop.Html\Vellum.Interop.Html.csproj" />
+  </ItemGroup>
+
+</Project>
