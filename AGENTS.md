@@ -150,6 +150,22 @@ These four patterns produced the vacuous tests. Avoid them by construction:
   did fail - but through one fixture whose offsets happened to be wrong, so an
   author who computed honest offsets would have had the bug and the coverage.
 
+- **Change one thing between the control and the subject.** Three separate
+  wrong answers in one day came from a comparison where the difference that
+  mattered was not the one under examination:
+
+  - a regression test that showed a `Window`, so a four-minute run read as "the
+    test is slow" rather than "the product hangs";
+  - a baseline `TextLayout` measurement taken with `TextWrapping` left at its
+    default - one line, no break search - which made a quadratic control look
+    linear and produced a confident 29x attribution to the wrong layer;
+  - the agreeing-fixtures case above.
+
+  Before trusting a comparison, state what differs between the two sides and
+  check it is exactly the thing being measured. When timing something, that
+  usually means removing the rendering, the window, or the I/O rather than
+  leaving them in as "realistic" - they are the confound, not the realism.
+
 One measurement trap is worth knowing, because it makes manual verification lie:
 restoring a file with `Copy-Item` or `Move-Item` restores its old timestamp, so
 MSBuild thinks the assembly is current and silently runs the *previous* build.
