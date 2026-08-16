@@ -6359,7 +6359,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 // Not Throttle: that is a debounce, so a backlog whose batches land
                 // faster than the window would report no progress at all until it
                 // had already finished.
-                .RateLimit(TimeSpan.FromMilliseconds(500), RxSchedulers.MainThreadScheduler)
+                //
+                // Sample on the task pool, then hop to the UI thread - never sample
+                // directly on the dispatcher scheduler. StartBackgroundServices runs
+                // on a thread-pool thread (StartDatabaseInBackgroundAsync awaits with
+                // ConfigureAwait(false) before calling it), and a dispatcher-bound
+                // periodic timer set up from off the UI thread never ticks. It does
+                // not throw either, so the symptom was silent: the coverage chip sat
+                // frozen at its startup reading for the whole drain while the backlog
+                // actually completed, which looks exactly like "semantic is enabled
+                // and nothing is happening".
+                .RateLimit(TimeSpan.FromMilliseconds(500), RxSchedulers.TaskpoolScheduler)
+                .ObserveOn(RxSchedulers.MainThreadScheduler)
                 .Subscribe((int count) => { _ = RefreshSemanticCoverageAsync(); }));
         }
     }

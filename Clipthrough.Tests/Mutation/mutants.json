@@ -1942,5 +1942,13 @@
     "find": "        if (key.Length > 0 && !creation.MatchedRequestedLanguage)\n        {\n            return creation.Engine;\n        }\n\n",
     "replace": "",
     "filter": "FullyQualifiedName~OcrEngineCacheTests"
+  },
+  {
+    "id": "semantic-coverage-samples-on-the-dispatcher",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "StartBackgroundServices runs on a thread-pool thread, so a dispatcher-bound periodic timer never ticks and the coverage chip freezes at its startup reading for the whole backlog drain.",
+    "find": "                .RateLimit(TimeSpan.FromMilliseconds(500), RxSchedulers.TaskpoolScheduler)\n                .ObserveOn(RxSchedulers.MainThreadScheduler)\n                .Subscribe((int count) => { _ = RefreshSemanticCoverageAsync(); }));",
+    "replace": "                .RateLimit(TimeSpan.FromMilliseconds(500), RxSchedulers.MainThreadScheduler)\n                .Subscribe((int count) => { _ = RefreshSemanticCoverageAsync(); }));",
+    "filter": "FullyQualifiedName~SemanticCoverageProgressHeadlessTests"
   }
 ]
