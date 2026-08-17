@@ -473,11 +473,25 @@ public partial class MainWindow : Window
             return true;
         }
 
-        // Plain Up from the search box also walks back through recent searches
-        // (Down keeps moving focus into the clip list to preserve discoverability).
+        // Plain Up from the search box reaches the recent searches: into the suggestion
+        // dropdown while it is showing, and otherwise cycling history straight into the
+        // box as it always has. Up is the right key because it already meant "recent
+        // searches" before the dropdown existed - the dropdown is just the visible form
+        // of what this did blindly.
+        //
+        // Down is deliberately NOT shared with the dropdown. Down belongs to the clip
+        // list, which is the live result of what is being typed, and the dropdown opens
+        // whenever the query substring-matches any past search - which is most of the
+        // time, because people search for similar things repeatedly. Sharing Down made
+        // the common move, looking at the results, unreachable exactly when the query
+        // resembled an old one, and Escape was no way out because it clears the box.
         if (isSearchFocused && modifiers == KeyModifiers.None && e.Key == Key.Up)
         {
-            _ = viewModel.NavigateSearchHistoryAsync(-1);
+            if (!viewModel.IsSearchSuggestionsOpen || !FocusSearchSuggestion(0))
+            {
+                _ = viewModel.NavigateSearchHistoryAsync(-1);
+            }
+
             return true;
         }
 
@@ -493,18 +507,6 @@ public partial class MainWindow : Window
         // controls reachable only by mouse. Tab now walks the window in visual
         // order like any other app; Down from the search box (below) is still
         // the one-key path into the list.
-
-        // Down from the search box moves into the recent-search suggestions while they
-        // are showing, which is the only way to reach them without a mouse. It sits
-        // above the Clips.Count guard below deliberately: a search matching no clips is
-        // exactly when picking a different recent search is most useful, and that guard
-        // would otherwise swallow the key.
-        if (isSearchFocused && modifiers == KeyModifiers.None && e.Key == Key.Down
-            && viewModel.IsSearchSuggestionsOpen
-            && FocusSearchSuggestion(0))
-        {
-            return true;
-        }
 
         if (viewModel.Clips.Count == 0)
         {

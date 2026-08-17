@@ -2086,5 +2086,13 @@
     "find": "        if (suggestions?.IsKeyboardFocusWithin == true && modifiers == KeyModifiers.None)",
     "replace": "        if (false && suggestions?.IsKeyboardFocusWithin == true && modifiers == KeyModifiers.None)",
     "filter": "FullyQualifiedName~SearchSuggestionHeadlessTests"
+  },
+  {
+    "id": "search-suggestions-steal-down-from-the-clip-list",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "Down belongs to the clip list, which is the live result of the query. The dropdown opens whenever the query substring-matches a past search - most of the time - so sharing Down makes looking at the results unreachable exactly when the query resembles an old one.",
+    "find": "        if (isSearchFocused && modifiers == KeyModifiers.None && e.Key == Key.Up)\n        {\n            if (!viewModel.IsSearchSuggestionsOpen || !FocusSearchSuggestion(0))",
+    "replace": "        if (isSearchFocused && modifiers == KeyModifiers.None && (e.Key == Key.Up || e.Key == Key.Down))\n        {\n            if (!viewModel.IsSearchSuggestionsOpen || !FocusSearchSuggestion(0))",
+    "filter": "FullyQualifiedName~SearchSuggestionHeadlessTests"
   }
 ]
