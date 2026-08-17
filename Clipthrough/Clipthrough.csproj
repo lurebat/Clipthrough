@@ -38,7 +38,7 @@
         <PackageReference Include="SQLitePCLRaw.bundle_e_sqlcipher" Version="2.1.11" />
         <PackageReference Include="System.Drawing.Common" Version="10.0.11" />
         <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.2" />
-        <PackageReference Include="Velopack" Version="0.0.1298" />
+        <PackageReference Include="Velopack" Version="1.2.0" />
     <PackageReference Include="Vellum.Core" Version="0.3.0" />
     <PackageReference Include="Vellum.Avalonia" Version="0.3.0" />
     <PackageReference Include="Vellum.Interop.Html" Version="0.3.0" />
