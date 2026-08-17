@@ -2152,4 +2152,13 @@
     "replace": "        return Services.FuzzyMatcher.SettingsMatch(keywords, filter);",
     "filter": "FullyQualifiedName~SettingsSectionFilterTests"
   }
+,
+  {
+    "id": "binding-failures-are-no-longer-routed-to-trace",
+    "file": "Clipthrough.Tests/AvaloniaHeadlessSetup.cs",
+    "why": "The binding-error tests assert an empty collection, which is also what a listener that never receives anything produces. If the app builder stops routing binding failures to Trace they would all keep passing while watching nothing at all.",
+    "find": ".LogToTrace(LogEventLevel.Warning, LogArea.Binding)",
+    "replace": ".LogToTrace(LogEventLevel.Warning, LogArea.Layout)",
+    "filter": "FullyQualifiedName~BindingErrorHeadlessTests"
+  }
 ]

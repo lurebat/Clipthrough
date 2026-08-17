@@ -48,7 +48,14 @@ internal sealed class MainWindowTestHarness : IDisposable
 
     public ListBox ClipList => Window.FindControl<ListBox>("ClipsListBox")!;
 
-    public static MainWindowTestHarness Create(Func<AppSettings, AppSettings>? configureSettings = null)
+    /// <param name="aiConfigured">
+    /// Whether the AI transform service reports itself configured. The clip
+    /// context menu hides its AI submenu otherwise, so a test that needs the
+    /// submenu's items to actually exist has to turn this on.
+    /// </param>
+    public static MainWindowTestHarness Create(
+        Func<AppSettings, AppSettings>? configureSettings = null,
+        bool aiConfigured = false)
     {
         var scope = new TemporaryDatabaseScope();
 
@@ -81,7 +88,7 @@ internal sealed class MainWindowTestHarness : IDisposable
             scope.ClipExportService,
             new TestImageEditorService(),
             scope.SearchHistoryService,
-            new TestAiTransformService(),
+            new TestAiTransformService(aiConfigured),
             new TestOcrService(),
             new NoOpBackgroundOcrQueue(),
             new BackgroundJobIndicator(),

@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
+using Avalonia.Logging;
 using ReactiveUI.Avalonia;
 
 [assembly: AvaloniaTestApplication(typeof(Clipthrough.Tests.TestAppBuilder))]
@@ -21,8 +22,12 @@ namespace Clipthrough.Tests;
 
 public static class TestAppBuilder
 {
+    // Binding failures are logged, never thrown, so a binding that resolves to
+    // nothing is invisible to an assertion on view-model state. Routing them to
+    // Trace is what lets BindingErrorHeadlessTests see them.
     public static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<Clipthrough.App>()
             .UseHeadless(new AvaloniaHeadlessPlatformOptions())
+            .LogToTrace(LogEventLevel.Warning, LogArea.Binding)
             .UseReactiveUI(_ => { });
 }

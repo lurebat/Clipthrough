@@ -3,6 +3,7 @@
         xmlns:vm="using:Clipthrough.ViewModels"
         x:Class="Clipthrough.Views.SessionLogsWindow"
         x:DataType="vm:SessionLogsViewModel"
+        x:CompileBindings="True"
         Title="{Binding TitleText}"
         Width="1080"
         Height="680"

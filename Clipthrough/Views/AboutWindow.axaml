@@ -5,6 +5,7 @@
         xmlns:vm="using:Clipthrough.ViewModels"
         x:Class="Clipthrough.Views.AboutWindow"
         x:DataType="vm:MainWindowViewModel"
+        x:CompileBindings="True"
         Title="{x:Static loc:AppText.AboutWindowTitle}"
         Width="460"
         Height="320"
