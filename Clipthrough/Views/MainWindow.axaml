@@ -103,7 +103,7 @@
                                 MaxHeight="220">
                             <ListBox x:Name="SearchSuggestionsList"
                                      ItemsSource="{Binding FilteredRecentSearches}"
-                                     SelectionChanged="OnSearchSuggestionSelected" />
+                                     Tapped="OnSearchSuggestionTapped" />
                         </Border>
                     </primitives:Popup>
                 </Grid>

@@ -2094,5 +2094,21 @@
     "find": "    private const int MaxUnbrokenRunChars = 10_000;",
     "replace": "    private const int MaxUnbrokenRunChars = int.MaxValue;",
     "filter": "FullyQualifiedName~RichDocumentView"
+  },
+  {
+    "id": "search-suggestions-focus-the-list-not-the-item",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "An Avalonia ListBox is not focusable, so focusing the list instead of its container silently does nothing and the dropdown becomes mouse-only.",
+    "find": "        return suggestions.ContainerFromIndex(index) is ListBoxItem item && item.Focus();",
+    "replace": "        return suggestions.Focus();",
+    "filter": "FullyQualifiedName~SearchSuggestionHeadlessTests"
+  },
+  {
+    "id": "search-suggestion-keys-fall-through-to-the-window",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "The window key handler tunnels, so without claiming Enter/Escape while the dropdown has focus, Escape clears the whole search box instead of closing the dropdown.",
+    "find": "        if (suggestions?.IsKeyboardFocusWithin == true && modifiers == KeyModifiers.None)",
+    "replace": "        if (false && suggestions?.IsKeyboardFocusWithin == true && modifiers == KeyModifiers.None)",
+    "filter": "FullyQualifiedName~SearchSuggestionHeadlessTests"
   }
 ]
