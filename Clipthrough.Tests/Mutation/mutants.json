@@ -2161,4 +2161,21 @@
     "replace": ".LogToTrace(LogEventLevel.Warning, LogArea.Layout)",
     "filter": "FullyQualifiedName~BindingErrorHeadlessTests"
   }
+,
+  {
+    "id": "a-transform-is-dropped-from-the-code-built-menus",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "The Edit menu, the toolbar flyout and the clip context menu list the same transforms from two places that are kept in step by hand. A menu quietly missing an entry looks exactly like a menu that never had one.",
+    "find": "        (\"Case\", \"Sentence case\", TextTransformation.SentenceCase),\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~TransformMenuParityHeadlessTests"
+  },
+  {
+    "id": "a-transform-is-relabelled-in-only-one-menu",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "Relabelling a transform in the code-built menus but not the hand-written context menu presents one feature under two names, which reads as two features to anyone who meets both.",
+    "find": "        (\"Case\", \"Title Case\", TextTransformation.TitleCase),",
+    "replace": "        (\"Case\", \"Capitalise Each Word\", TextTransformation.TitleCase),",
+    "filter": "FullyQualifiedName~TransformMenuParityHeadlessTests"
+  }
 ]

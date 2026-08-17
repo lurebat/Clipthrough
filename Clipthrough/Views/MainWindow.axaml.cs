@@ -1170,7 +1170,15 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private static readonly (string Group, string Header, TextTransformation Kind)[] s_transformMenuEntries =
+    /// <summary>
+    /// The transform menus built in code: the Edit menu and the toolbar flyout.
+    /// The clip context menu in MainWindow.axaml lists the same transforms
+    /// separately, because it applies them to the clip that was right-clicked
+    /// rather than to the current selection, so it cannot share these items.
+    /// It can share the expectation though - see
+    /// <c>TransformMenuParityHeadlessTests</c>, which fails when the two drift.
+    /// </summary>
+    internal static readonly (string Group, string Header, TextTransformation Kind)[] s_transformMenuEntries =
     {
         ("Case", "UPPERCASE", TextTransformation.UpperCase),
         ("Case", "lowercase", TextTransformation.LowerCase),
