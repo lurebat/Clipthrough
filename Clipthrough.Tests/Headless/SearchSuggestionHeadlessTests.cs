@@ -62,24 +62,47 @@ public sealed class SearchSuggestionHeadlessTests
     }
 
     /// <summary>
-    /// Down from the search box is the only keyboard route into the dropdown.
+    /// Up from the search box is the keyboard route into the dropdown. Up already meant
+    /// "recent searches" before the dropdown existed, so the dropdown is the visible form
+    /// of what it did blindly - it is not a new convention.
     /// </summary>
     [AvaloniaFact]
-    public void DownFromTheSearchBox_MovesIntoTheSuggestions()
+    public void UpFromTheSearchBox_MovesIntoTheSuggestions()
     {
         using var harness = MainWindowTestHarness.Create();
         harness.SeedClips(3);
         var suggestions = SeedSuggestions(harness, "alpha query", "beta query");
 
-        harness.Window.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, null);
+        harness.Window.KeyPress(Key.Up, RawInputModifiers.None, PhysicalKey.ArrowUp, null);
         Dispatcher.UIThread.RunJobs();
 
         Assert.True(suggestions.IsKeyboardFocusWithin);
         Assert.Equal(0, suggestions.SelectedIndex);
-
-        // Anti-vacuity: Down must still reach the clip list when no suggestions are
-        // showing, or this would have been "Down stopped working".
         Assert.False(harness.ClipList.IsKeyboardFocusWithin);
+    }
+
+    /// <summary>
+    /// The reported regression. Down belongs to the clip list, which is the live result
+    /// of what is being typed, and it has to keep working while the dropdown is open -
+    /// which is most of the time, because the dropdown opens whenever the query
+    /// substring-matches a past search. Sharing Down with the dropdown made the common
+    /// move unreachable exactly when the query resembled an old one, and Escape was no
+    /// way out because it clears the box.
+    /// </summary>
+    [AvaloniaFact]
+    public void DownFromTheSearchBox_WithSuggestionsOpen_StillReachesTheClipList()
+    {
+        using var harness = MainWindowTestHarness.Create();
+        harness.SeedClips(3);
+        var suggestions = SeedSuggestions(harness, "alpha query", "beta query");
+
+        Assert.True(harness.ViewModel.IsSearchSuggestionsOpen);
+
+        harness.Window.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, null);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(harness.ClipList.IsKeyboardFocusWithin);
+        Assert.False(suggestions.IsKeyboardFocusWithin);
     }
 
     [AvaloniaFact]
@@ -100,18 +123,18 @@ public sealed class SearchSuggestionHeadlessTests
 
     /// <summary>
     /// A search matching no clips is exactly when reaching for a different recent search
-    /// is most useful, and the clip-list guard used to swallow the key before the
-    /// suggestion branch could run.
+    /// is most useful, and the clip-list guard sits below this branch so it cannot
+    /// swallow the key.
     /// </summary>
     [AvaloniaFact]
-    public void DownFromTheSearchBox_ReachesSuggestionsEvenWhenNoClipsMatch()
+    public void UpFromTheSearchBox_ReachesSuggestionsEvenWhenNoClipsMatch()
     {
         using var harness = MainWindowTestHarness.Create();
         var suggestions = SeedSuggestions(harness, "alpha query");
 
         Assert.Empty(harness.ViewModel.Clips);
 
-        harness.Window.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, null);
+        harness.Window.KeyPress(Key.Up, RawInputModifiers.None, PhysicalKey.ArrowUp, null);
         Dispatcher.UIThread.RunJobs();
 
         Assert.True(suggestions.IsKeyboardFocusWithin);
@@ -151,11 +174,11 @@ public sealed class SearchSuggestionHeadlessTests
         Assert.True(harness.SearchBox.IsKeyboardFocusWithin);
     }
 
-    // Down from the search box is the real route in, and the only one: an Avalonia
-    // ListBox is not focusable, so calling Focus() on the list does nothing at all.
+    // Up from the search box is the real route in, and the only one: an Avalonia ListBox
+    // is not focusable, so calling Focus() on the list does nothing at all.
     private static void EnterSuggestions(MainWindowTestHarness harness)
     {
-        harness.Window.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, null);
+        harness.Window.KeyPress(Key.Up, RawInputModifiers.None, PhysicalKey.ArrowUp, null);
         Dispatcher.UIThread.RunJobs();
     }
 
