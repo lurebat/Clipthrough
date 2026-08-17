@@ -9,10 +9,10 @@ using Avalonia.Media;
 using Clipthrough.Localization;
 using Clipthrough.Models;
 using Clipthrough.Presentation;
-using Vellum;
-using Vellum.Avalonia;
-using Vellum.Interop.Html;
-using Vellum.Interop.Rtf;
+using VellumText;
+using VellumText.Avalonia;
+using VellumText.Interop.Html;
+using VellumText.Interop.Rtf;
 
 namespace Clipthrough.Controls;
 
@@ -28,7 +28,7 @@ namespace Clipthrough.Controls;
 /// you copied. <c>file:</c> was permitted too, so a crafted clip could make the preview
 /// read a local path.
 ///
-/// Vellum resolves only pixels carried inside the document (<c>data:</c> URLs) and has no
+/// VellumText resolves only pixels carried inside the document (<c>data:</c> URLs) and has no
 /// setting that turns network fetching on at all, so the leak is closed by construction
 /// rather than by policy.
 /// </remarks>

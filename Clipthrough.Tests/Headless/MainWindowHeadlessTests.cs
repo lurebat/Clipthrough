@@ -15,8 +15,8 @@ using Clipthrough.Services;
 using Clipthrough.ViewModels;
 using Clipthrough.Views;
 using System.Reactive.Threading.Tasks;
-using Vellum;
-using Vellum.Avalonia;
+using VellumText;
+using VellumText.Avalonia;
 using Xunit;
 
 namespace Clipthrough.Tests.Headless;
