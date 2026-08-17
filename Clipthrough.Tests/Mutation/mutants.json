@@ -2178,4 +2178,13 @@
     "replace": "        (\"Case\", \"Capitalise Each Word\", TextTransformation.TitleCase),",
     "filter": "FullyQualifiedName~TransformMenuParityHeadlessTests"
   }
+,
+  {
+    "id": "a-brush-is-defined-for-dark-but-not-light",
+    "file": "Clipthrough/Styles/ModernTheme.axaml",
+    "why": "A brush present under one theme variant and missing under the other resolves fine for whoever shares that variant and comes out unstyled for everyone else - so it is invisible to a developer running dark mode, which is all of them.",
+    "find": "    <SolidColorBrush x:Key=\"SurfaceHeroBrush\" Color=\"#FFFFFF\" />\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~ThemeVariantParityHeadlessTests"
+  }
 ]
