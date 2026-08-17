@@ -115,6 +115,27 @@ this — add the mutant to `mutants.json` and run
 cannot substitute: every vacuous test found here fully executed the code it
 failed to defend.
 
+A mutant's `find` anchor names a literal fragment of source, so it rots the
+moment someone renames, rewords or renumbers that line - and a rotted mutant
+still reads as coverage while testing nothing. Five had rotted before anyone
+noticed, one of them within the same session that added it, because the full
+sweep takes hours and is therefore rarely run. `-ValidateOnly` checks every
+anchor without building anything and takes about two seconds:
+
+```
+pwsh Clipthrough.Tests\Mutation\Invoke-MutationCheck.ps1 -ValidateOnly
+```
+
+Run it after any refactor that touches a line a mutant points at, which in
+practice means run it whenever you have changed shipping code.
+
+Design the mutation so the mutated file still compiles: the analyzer set is
+enforced at error, so a mutant that orphans a field or a method fails the build
+and reports INCONCLUSIVE, which proves nothing. `if (false)` around the only use
+of a private field trips CA1823 that way; keep the symbol referenced instead -
+for example, waiting on `Task.CompletedTask` with the timeout the real call no
+longer uses.
+
 These four patterns produced the vacuous tests. Avoid them by construction:
 
 - **Never let the old implementation be the oracle.** An equivalence test that

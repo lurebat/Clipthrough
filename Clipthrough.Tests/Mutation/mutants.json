@@ -764,8 +764,8 @@
     "why": "Restores the original fire-and-forget shutdown flush. The settings service does real async file and SQLite I/O, so the process tears down before the save lands and the last filter change is lost.",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "filter": "Dispose_PersistsCurrentFilterStateImmediately",
-    "find": "            if (!Task.Run(() => _settingsService.SaveAsync(settings)).Wait(FilterFlushTimeout))",
-    "replace": "            _ = Task.Run(() => _settingsService.SaveAsync(settings));\n            if (false)"
+    "find": "            if (!Task.Run(() => _settingsService.UpdateAsync(mutation)).Wait(FilterFlushTimeout))",
+    "replace": "            _ = Task.Run(() => _settingsService.UpdateAsync(mutation));\n            if (!Task.CompletedTask.Wait(FilterFlushTimeout))"
   },
   {
     "id": "k18-flush-timeout-too-short-to-complete",
@@ -780,8 +780,8 @@
     "why": "Flushes the settings the service already holds instead of snapshotting the live filter toggles, so shutdown dutifully rewrites the state the user just changed away from.",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "filter": "Dispose_PersistsCurrentFilterStateImmediately",
-    "find": "        var settings = BuildPersistedFilterSettings();\n\n        try\n        {\n            if (!Task.Run(() => _settingsService.SaveAsync(settings)).Wait(FilterFlushTimeout))",
-    "replace": "        var settings = _settingsService.Current;\n\n        try\n        {\n            if (!Task.Run(() => _settingsService.SaveAsync(settings)).Wait(FilterFlushTimeout))"
+    "find": "        var mutation = BuildPersistedFilterMutation();",
+    "replace": "        var stale = _settingsService.Current;\n        var mutation = new System.Func<Clipthrough.Models.AppSettings, Clipthrough.Models.AppSettings>(_ => stale);"
   },
   {
     "id": "k18-settings-fake-saves-synchronously",
@@ -876,8 +876,8 @@
     "why": "Custom hotkeys are neutralised for the record comparison, so dropping the structural compare makes a rebound custom hotkey look like view state and it is never re-registered.",
     "file": "Clipthrough/Models/AppSettings.cs",
     "filter": "AppSettingsTests",
-    "find": "            && previous.CustomHotkeys.SequenceEqual(current.CustomHotkeys);",
-    "replace": "            && true;"
+    "find": "            && previous.CustomHotkeys.SequenceEqual(current.CustomHotkeys)",
+    "replace": "            && true"
   },
   {
     "id": "appsettings-view-state-gate-ignores-ai-presets",
@@ -1339,8 +1339,8 @@
     "id": "embedding-coverage-goes-back-to-debouncing",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "Semantic coverage stops updating while the embedding backlog drains, which is the only time the number moves.",
-    "find": "                .RateLimit(TimeSpan.FromMilliseconds(500), RxSchedulers.MainThreadScheduler)",
-    "replace": "                .Throttle(TimeSpan.FromMilliseconds(500), RxSchedulers.MainThreadScheduler)",
+    "find": "                .RateLimit(TimeSpan.FromMilliseconds(500), RxSchedulers.TaskpoolScheduler)",
+    "replace": "                .Throttle(TimeSpan.FromMilliseconds(500), RxSchedulers.TaskpoolScheduler)",
     "filter": "ProgressStreamWiringTests"
   },
   {
@@ -2083,7 +2083,7 @@
     "id": "rich-preview-fallback-is-unbounded",
     "file": "Clipthrough/Controls/RichDocumentView.cs",
     "why": "Handing an unbounded string to a wrapping TextBlock costs minutes of shaping on the UI thread; a 600 KB single-word clip took over four minutes before the bound existed. Raising the cap keeps every symbol referenced so the mutant still compiles.",
-    "find": "    private const int MaxFallbackChars = 16 * 1024;",
+    "find": "    private const int MaxFallbackChars = 8 * 1024;",
     "replace": "    private const int MaxFallbackChars = int.MaxValue;",
     "filter": "FullyQualifiedName~RichDocumentView"
   },
