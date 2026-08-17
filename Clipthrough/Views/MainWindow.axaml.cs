@@ -439,6 +439,34 @@ public partial class MainWindow : Window
         var searchBox = GetSearchBox();
         var isSearchFocused = searchBox?.IsKeyboardFocusWithin == true;
 
+        // Keys belonging to the open suggestion dropdown are claimed here rather than on
+        // the list itself. The window's key handler is registered to *tunnel*
+        // (see the constructor), so it sees every key before the focused control does:
+        // a handler on the ListBox is unreachable for anything this method also acts on,
+        // which is why Escape used to clear the whole search box instead of closing the
+        // dropdown. Arrow keys are deliberately not claimed - the list moves its own
+        // highlight with those.
+        var suggestions = GetSearchSuggestionsList();
+        if (suggestions?.IsKeyboardFocusWithin == true && modifiers == KeyModifiers.None)
+        {
+            switch (e.Key)
+            {
+                case Key.Enter:
+                    ApplySearchSuggestion(suggestions, suggestions.SelectedItem as string);
+                    return true;
+
+                case Key.Escape:
+                    FocusSearchBox();
+                    return true;
+
+                // Up off the top returns to the box rather than trapping focus in a list
+                // the user arrowed into from above.
+                case Key.Up when suggestions.SelectedIndex <= 0:
+                    FocusSearchBox();
+                    return true;
+            }
+        }
+
         if (isSearchFocused && modifiers == KeyModifiers.Alt && (e.Key == Key.Down || e.Key == Key.Up))
         {
             _ = viewModel.NavigateSearchHistoryAsync(e.Key == Key.Up ? -1 : 1);
@@ -465,6 +493,18 @@ public partial class MainWindow : Window
         // controls reachable only by mouse. Tab now walks the window in visual
         // order like any other app; Down from the search box (below) is still
         // the one-key path into the list.
+
+        // Down from the search box moves into the recent-search suggestions while they
+        // are showing, which is the only way to reach them without a mouse. It sits
+        // above the Clips.Count guard below deliberately: a search matching no clips is
+        // exactly when picking a different recent search is most useful, and that guard
+        // would otherwise swallow the key.
+        if (isSearchFocused && modifiers == KeyModifiers.None && e.Key == Key.Down
+            && viewModel.IsSearchSuggestionsOpen
+            && FocusSearchSuggestion(0))
+        {
+            return true;
+        }
 
         if (viewModel.Clips.Count == 0)
         {
@@ -1404,28 +1444,71 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnSearchSuggestionSelected(object? sender, SelectionChangedEventArgs e)
+    /// <summary>
+    /// Applies a suggestion on click. Deliberately <c>Tapped</c> rather than
+    /// <c>SelectionChanged</c>, for two independent reasons.
+    /// </summary>
+    /// <remarks>
+    /// Correctness: applying rewrites <c>SearchText</c>, which clears and refills
+    /// <c>FilteredRecentSearches</c> - the <c>ItemsSource</c> of this very list.
+    /// <c>SelectionChanged</c> is raised from inside the selection model's commit, so
+    /// mutating the collection there left the model indexing a list it had already
+    /// measured, and it threw <c>ArgumentOutOfRangeException</c> out of
+    /// <c>SelectedItems.GetEnumerator</c>. <c>Tapped</c> is raised from the pointer
+    /// release, after that commit has finished, so the hazard does not exist rather
+    /// than being timed around.
+    ///
+    /// Behaviour: <c>SelectionChanged</c> also fires while arrowing through the list,
+    /// which would apply every entry the highlight passed over and makes keyboard
+    /// navigation impossible. Moving the highlight and choosing an entry have to be
+    /// separate events.
+    /// </remarks>
+    private void OnSearchSuggestionTapped(object? sender, TappedEventArgs e)
     {
-        // Read the suggestion from the event's AddedItems instead of the
-        // ListBox's SelectedItem. Refreshing FilteredRecentSearches (via
-        // Clear/Add) can briefly null the selection and fire this handler
-        // with stale state; AddedItems is empty during such churn, so the
-        // guard below skips it cleanly.
-        if (DataContext is not MainWindowViewModel viewModel
-            || sender is not ListBox listBox)
+        if (sender is ListBox listBox)
         {
-            return;
+            ApplySearchSuggestion(listBox, listBox.SelectedItem as string);
         }
+    }
 
-        var suggestion = e.AddedItems?.OfType<string>().FirstOrDefault();
-        if (string.IsNullOrWhiteSpace(suggestion))
+    private void ApplySearchSuggestion(ListBox listBox, string? suggestion)
+    {
+        if (DataContext is not MainWindowViewModel viewModel
+            || string.IsNullOrWhiteSpace(suggestion))
         {
             return;
         }
 
         viewModel.ApplySearchSuggestion(suggestion);
+
+        // Clear the selection so choosing the same entry again raises a fresh event.
         listBox.SelectedItem = null;
         FocusSearchBox();
+    }
+
+    private ListBox? GetSearchSuggestionsList() => this.FindControl<ListBox>("SearchSuggestionsList");
+
+    /// <summary>
+    /// Moves focus onto a suggestion, returning whether it landed.
+    /// </summary>
+    /// <remarks>
+    /// Focuses the container rather than the list. An Avalonia <see cref="ListBox"/> is
+    /// not itself focusable, so <c>listBox.Focus()</c> returns without doing anything and
+    /// the keyboard route into the dropdown silently fails to exist - the same reason
+    /// <see cref="FocusSelectedClipInList"/> reaches for the <see cref="ListBoxItem"/>.
+    /// </remarks>
+    private bool FocusSearchSuggestion(int index)
+    {
+        var suggestions = GetSearchSuggestionsList();
+        if (suggestions is null || index < 0 || index >= suggestions.ItemCount)
+        {
+            return false;
+        }
+
+        suggestions.SelectedIndex = index;
+        suggestions.ScrollIntoView(index);
+
+        return suggestions.ContainerFromIndex(index) is ListBoxItem item && item.Focus();
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
