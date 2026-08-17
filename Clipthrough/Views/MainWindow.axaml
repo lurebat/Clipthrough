@@ -391,6 +391,39 @@
                                                   ItemsSource="{Binding #ClipsListBox.DataContext.VisibleAiMenuEntries}"
                                                   IsVisible="{Binding #ClipsListBox.DataContext.IsAiMenuVisible}">
                                             <MenuItem.Styles>
+                                                <!--
+                                                    This selector matches the AI
+                                                    menu item as well as the entries
+                                                    it generates, which is why
+                                                    MainWindow.axaml does not set
+                                                    x:CompileBindings while the other
+                                                    windows do. Confirmed with a
+                                                    probe: a Style in a MenuItem's own
+                                                    Styles does match that MenuItem,
+                                                    and a descendant selector does not.
+
+                                                    Header is unaffected because the
+                                                    item sets it locally, but Command
+                                                    and CommandParameter are not, so
+                                                    the item is handed a command
+                                                    expecting an AiMenuEntry and a
+                                                    parameter that is the clip. That is
+                                                    harmless today - a wrong-typed
+                                                    CommandParameter does not disable a
+                                                    MenuItem, and a submenu parent
+                                                    opens rather than invokes - but
+                                                    compiled bindings would turn the
+                                                    bare {Binding} into a cast and log
+                                                    a failure every time the menu opens.
+
+                                                    Narrowing this to the generated
+                                                    entries needs checking in a running
+                                                    app: the entries live in a popup,
+                                                    and the headless platform will not
+                                                    realise a nested submenu, so
+                                                    whether a descendant selector still
+                                                    reaches them cannot be settled here.
+                                                -->
                                                 <Style Selector="MenuItem" x:DataType="models:AiMenuEntry">
                                                     <Setter Property="Header" Value="{Binding Label}" />
                                                     <Setter Property="Command" Value="{Binding #ClipsListBox.DataContext.InvokeAiMenuEntryCommand}" />

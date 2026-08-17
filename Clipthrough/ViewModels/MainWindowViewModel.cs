@@ -1197,8 +1197,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string SettingsTitleText => AppText.SettingsTitleText;
 
-    public string SettingsDescriptionText => AppText.SettingsDescriptionText;
-
     public string SettingsLocalHotkeysTitle => AppText.SettingsLocalHotkeysTitle;
 
     public string SettingsGlobalHotkeyTitle => AppText.SettingsGlobalHotkeyTitle;
