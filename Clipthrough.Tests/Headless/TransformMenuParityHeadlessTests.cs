@@ -70,7 +70,7 @@ public sealed class TransformMenuParityHeadlessTests
         // would be compared as empty and agree perfectly.
         Assert.NotEmpty(inContextMenu);
 
-        var inCodeMenus = MainWindow.s_transformMenuEntries.Select(e => e.Kind).ToHashSet();
+        var inCodeMenus = TransformMenuCatalog.Entries.Select(e => e.Kind).ToHashSet();
 
         var missingFromContextMenu = inCodeMenus.Except(inContextMenu).OrderBy(k => k.ToString(), StringComparer.Ordinal).ToList();
         var missingFromCodeMenus = inContextMenu.Except(inCodeMenus).OrderBy(k => k.ToString(), StringComparer.Ordinal).ToList();
@@ -93,7 +93,7 @@ public sealed class TransformMenuParityHeadlessTests
 
         Assert.NotEmpty(contextHeaders);
 
-        var mismatched = MainWindow.s_transformMenuEntries
+        var mismatched = TransformMenuCatalog.Entries
             .Where(e => contextHeaders.TryGetValue(e.Kind, out var header)
                 && !string.Equals(header, e.Header, StringComparison.Ordinal))
             .Select(e => $"{e.Kind}: code menus say '{e.Header}', context menu says '{contextHeaders[e.Kind]}'")
@@ -119,7 +119,7 @@ public sealed class TransformMenuParityHeadlessTests
             TextTransformation.JoinWithDelimiter,
         };
 
-        var offered = MainWindow.s_transformMenuEntries.Select(e => e.Kind).ToHashSet();
+        var offered = TransformMenuCatalog.Entries.Select(e => e.Kind).ToHashSet();
 
         var unreachable = Enum.GetValues<TextTransformation>()
             .Where(t => !withheld.Contains(t) && !offered.Contains(t))

@@ -1170,45 +1170,6 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    /// <summary>
-    /// The transform menus built in code: the Edit menu and the toolbar flyout.
-    /// The clip context menu in MainWindow.axaml lists the same transforms
-    /// separately, because it applies them to the clip that was right-clicked
-    /// rather than to the current selection, so it cannot share these items.
-    /// It can share the expectation though - see
-    /// <c>TransformMenuParityHeadlessTests</c>, which fails when the two drift.
-    /// </summary>
-    internal static readonly (string Group, string Header, TextTransformation Kind)[] s_transformMenuEntries =
-    {
-        ("Case", "UPPERCASE", TextTransformation.UpperCase),
-        ("Case", "lowercase", TextTransformation.LowerCase),
-        ("Case", "Title Case", TextTransformation.TitleCase),
-        ("Case", "Sentence case", TextTransformation.SentenceCase),
-        ("Case", "UpperCamelCase", TextTransformation.UpperCamelCase),
-        ("Case", "lowerCamelCase", TextTransformation.LowerCamelCase),
-        ("Case", "From camelCase", TextTransformation.FromCamelCase),
-        ("Whitespace", "Trim whitespace", TextTransformation.TrimWhitespace),
-        ("Whitespace", "Collapse whitespace", TextTransformation.CollapseWhitespace),
-        ("Whitespace", "Tabs → Spaces", TextTransformation.TabsToSpaces),
-        ("Whitespace", "Spaces → Tabs", TextTransformation.SpacesToTabs),
-        ("Lines", "Normalize line endings", TextTransformation.NormalizeEol),
-        ("Lines", "Sort lines", TextTransformation.SortLines),
-        ("Lines", "Reverse lines", TextTransformation.ReverseLines),
-        ("Lines", "Remove empty lines", TextTransformation.RemoveEmptyLines),
-        ("Lines", "Remove duplicate lines", TextTransformation.RemoveDuplicateLines),
-        ("JSON", "JSON quote", TextTransformation.JsonQuote),
-        ("JSON", "JSON unquote", TextTransformation.JsonUnquote),
-        ("JSON", "JSON minify", TextTransformation.JsonMinify),
-        ("JSON", "JSON pretty", TextTransformation.JsonPretty),
-        ("JSON", "Lines → JSON array", TextTransformation.LinesToJsonArray),
-        ("Encoding", "URL encode", TextTransformation.UrlEncode),
-        ("Encoding", "URL decode", TextTransformation.UrlDecode),
-        ("Encoding", "Base64 encode", TextTransformation.Base64Encode),
-        ("Encoding", "Base64 decode", TextTransformation.Base64Decode),
-        ("Cleanup", "Clean terminal formatting", TextTransformation.CleanTerminalFormatting),
-        ("Convert", "Text table → HTML", TextTransformation.BoxTableToHtml),
-    };
-
     private readonly System.Collections.Generic.List<MenuItem> m_aiRoots = new();
     private System.Collections.Specialized.INotifyCollectionChanged? m_aiSubscription;
 
@@ -1248,35 +1209,7 @@ public partial class MainWindow : Window
 
         if (showTextTransforms)
         {
-            foreach (var grouping in s_transformMenuEntries.GroupBy(e => e.Group))
-            {
-                var entries = grouping.ToList();
-                if (entries.Count == 1)
-                {
-                    var (_, header, kind) = entries[0];
-                    var item = new MenuItem
-                    {
-                        Header = header,
-                        CommandParameter = kind,
-                    };
-                    item.Click += OnTransformMenuClick;
-                    controls.Add(item);
-                    continue;
-                }
-
-                var groupRoot = new MenuItem { Header = grouping.Key };
-                foreach (var (_, header, kind) in entries)
-                {
-                    var item = new MenuItem
-                    {
-                        Header = header,
-                        CommandParameter = kind,
-                    };
-                    item.Click += OnTransformMenuClick;
-                    groupRoot.Items.Add(item);
-                }
-                controls.Add(groupRoot);
-            }
+            controls.AddRange(TransformMenuCatalog.BuildItems(OnTransformMenuClick));
         }
 
         if (showAi)
