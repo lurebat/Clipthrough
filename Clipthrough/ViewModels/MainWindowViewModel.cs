@@ -1952,40 +1952,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string SettingsPasteAndFavoriteHotkeyLabel => AppText.SettingsPasteAndFavoriteHotkeyLabel;
     public string SettingsPasteAsPlainTextHotkeyLabel => AppText.SettingsPasteAsPlainTextHotkeyLabel;
 
-    private string _settingsFilter = string.Empty;
-
-    public string SettingsFilter
-    {
-        get => _settingsFilter;
-        set
-        {
-            if (_settingsFilter == value)
-            {
-                return;
-            }
-
-            this.RaiseAndSetIfChanged(ref _settingsFilter, value);
-            RaiseSettingsSectionVisibility();
-        }
-    }
-
-    private bool _settingsUseFuzzySearch = AppSettings.Default.UseFuzzySettingsSearch;
-
-    public bool SettingsUseFuzzySearch
-    {
-        get => _settingsUseFuzzySearch;
-        set
-        {
-            if (_settingsUseFuzzySearch == value)
-            {
-                return;
-            }
-
-            this.RaiseAndSetIfChanged(ref _settingsUseFuzzySearch, value);
-            RaiseSettingsSectionVisibility();
-        }
-    }
-
     private bool _useFuzzyClipSearch = AppSettings.Default.UseFuzzyClipSearch;
 
     public bool UseFuzzyClipSearch
@@ -2023,179 +1989,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public bool IsSemanticSearchEnabled => _settingsService.Current.EnableSemanticSearch;
-
-    private bool _isSettingsSectionBehaviorExpanded = true;
-    private bool _isSettingsSectionLocalHotkeysExpanded = true;
-    private bool _isSettingsSectionGlobalHotkeyExpanded = true;
-    private bool _isSettingsSectionStorageExpanded = true;
-    private bool _isSettingsSectionToolsExpanded = true;
-    private bool _isSettingsSectionRetentionExpanded = true;
-    private bool _isSettingsSectionCapacityExpanded = true;
-    private bool _isSettingsSectionSensitivityExpanded = true;
-    private bool _isSettingsSectionExcludedAppsExpanded;
-    private bool _isSettingsSectionAiExpanded;
-    private bool _isSettingsSectionUpdatesExpanded;
-    private bool _isSettingsSectionOcrExpanded;
-    private bool _isSettingsSectionSemanticExpanded;
-
-    public bool IsSettingsSectionBehaviorExpanded
-    {
-        get => _isSettingsSectionBehaviorExpanded;
-        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionBehaviorExpanded, value);
-    }
-
-    public bool IsSettingsSectionLocalHotkeysExpanded
-    {
-        get => _isSettingsSectionLocalHotkeysExpanded;
-        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionLocalHotkeysExpanded, value);
-    }
-
-    public bool IsSettingsSectionGlobalHotkeyExpanded
-    {
-        get => _isSettingsSectionGlobalHotkeyExpanded;
-        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionGlobalHotkeyExpanded, value);
-    }
-
-    public bool IsSettingsSectionStorageExpanded
-    {
-        get => _isSettingsSectionStorageExpanded;
-        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionStorageExpanded, value);
-    }
-
-    public bool IsSettingsSectionToolsExpanded
-    {
-        get => _isSettingsSectionToolsExpanded;
-        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionToolsExpanded, value);
-    }
-
-    public bool IsSettingsSectionRetentionExpanded
-    {
-        get => _isSettingsSectionRetentionExpanded;
-        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionRetentionExpanded, value);
-    }
-
-    public bool IsSettingsSectionCapacityExpanded
-    {
-        get => _isSettingsSectionCapacityExpanded;
-        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionCapacityExpanded, value);
-    }
-
-    public bool IsSettingsSectionSensitivityExpanded
-    {
-        get => _isSettingsSectionSensitivityExpanded;
-        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionSensitivityExpanded, value);
-    }
-
-    public bool IsSettingsSectionExcludedAppsExpanded
-    {
-        get => _isSettingsSectionExcludedAppsExpanded;
-        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionExcludedAppsExpanded, value);
-    }
-
-    public bool IsSettingsSectionAiExpanded
-    {
-        get => _isSettingsSectionAiExpanded;
-        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionAiExpanded, value);
-    }
-
-    public bool IsSettingsSectionUpdatesExpanded
-    {
-        get => _isSettingsSectionUpdatesExpanded;
-        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionUpdatesExpanded, value);
-    }
-
-    public bool IsSettingsSectionOcrExpanded
-    {
-        get => _isSettingsSectionOcrExpanded;
-        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionOcrExpanded, value);
-    }
-
-    public bool IsSettingsSectionSemanticExpanded
-    {
-        get => _isSettingsSectionSemanticExpanded;
-        set => this.RaiseAndSetIfChanged(ref _isSettingsSectionSemanticExpanded, value);
-    }
-
-    // Keywords searched by SettingsFilter. When filter is empty the section shows.
-    // When non-empty, the section shows only if its keyword blob contains the filter.
-    private const string _behaviorKeywords = "theme dark light tray minimize close start windows startup behavior appearance";
-    private const string _localHotkeyKeywords = "hotkey shortcut local regex favorite sensitive case wildcard whole word pasted toggle";
-    private const string _globalHotkeyKeywords = "hotkey shortcut global toggle window show hide incremental decremental paste";
-    private const string _storageKeywords = "storage database path password encryption sqlite file location clipangel import legacy migration";
-    private const string _toolsKeywords = "tools external editor diff winmerge beyond compare vscode meld kdiff";
-    private const string _retentionKeywords = "retention lifetime expiry expire clips days normal sensitive minutes age";
-    private const string _capacityKeywords = "capacity size library entries count limit max megabytes clip kb kilobytes";
-    private const string _sensitivityKeywords = "sensitivity rules pattern regex severity warn block name enabled";
-    private const string _excludedAppsKeywords = "excluded exclude exclusion ignore app apps application blocklist blacklist password manager keepass 1password bitwarden privacy capture source process never";
-    private const string _aiKeywords = "ai openai chatgpt gpt model api key base url prompt transform";
-    private const string _updatesKeywords = "update updates auto-update velopack feed url release version";
-    private const string _ocrKeywords = "ocr image text extract recognition language bcp-47 windows.media.ocr";
-    private const string _semanticKeywords = "semantic embedding embeddings similarity vector search meaning ai ml rerun reembed sort relevance date proximity";
-
-    private bool MatchesFilter(string keywords)
-    {
-        if (string.IsNullOrWhiteSpace(_settingsFilter))
-        {
-            return true;
-        }
-
-        var filter = _settingsFilter.Trim();
-        if (keywords.Contains(filter, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return SettingsUseFuzzySearch && Clipthrough.Services.FuzzyMatcher.SettingsMatch(keywords, filter);
-    }
-
-    public bool IsSettingsSectionBehaviorVisible => MatchesFilter(_behaviorKeywords);
-    public bool IsSettingsSectionLocalHotkeysVisible => MatchesFilter(_localHotkeyKeywords);
-    public bool IsSettingsSectionGlobalHotkeyVisible => MatchesFilter(_globalHotkeyKeywords);
-    public bool IsSettingsSectionStorageVisible => MatchesFilter(_storageKeywords);
-    public bool IsSettingsSectionToolsVisible => MatchesFilter(_toolsKeywords);
-    public bool IsSettingsSectionRetentionVisible => MatchesFilter(_retentionKeywords);
-    public bool IsSettingsSectionCapacityVisible => MatchesFilter(_capacityKeywords);
-    public bool IsSettingsSectionSensitivityVisible => MatchesFilter(_sensitivityKeywords);
-    public bool IsSettingsSectionExcludedAppsVisible => MatchesFilter(_excludedAppsKeywords);
-    public bool IsSettingsSectionAiVisible => MatchesFilter(_aiKeywords);
-    public bool IsSettingsSectionUpdatesVisible => MatchesFilter(_updatesKeywords);
-    public bool IsSettingsSectionOcrVisible => MatchesFilter(_ocrKeywords);
-    public bool IsSettingsSectionSemanticVisible => MatchesFilter(_semanticKeywords);
-
-    private void RaiseSettingsSectionVisibility()
-    {
-        this.RaisePropertyChanged(nameof(IsSettingsSectionBehaviorVisible));
-        this.RaisePropertyChanged(nameof(IsSettingsSectionLocalHotkeysVisible));
-        this.RaisePropertyChanged(nameof(IsSettingsSectionGlobalHotkeyVisible));
-        this.RaisePropertyChanged(nameof(IsSettingsSectionStorageVisible));
-        this.RaisePropertyChanged(nameof(IsSettingsSectionToolsVisible));
-        this.RaisePropertyChanged(nameof(IsSettingsSectionRetentionVisible));
-        this.RaisePropertyChanged(nameof(IsSettingsSectionCapacityVisible));
-        this.RaisePropertyChanged(nameof(IsSettingsSectionSensitivityVisible));
-        this.RaisePropertyChanged(nameof(IsSettingsSectionExcludedAppsVisible));
-        this.RaisePropertyChanged(nameof(IsSettingsSectionAiVisible));
-        this.RaisePropertyChanged(nameof(IsSettingsSectionUpdatesVisible));
-        this.RaisePropertyChanged(nameof(IsSettingsSectionOcrVisible));
-        this.RaisePropertyChanged(nameof(IsSettingsSectionSemanticVisible));
-
-        // Auto-expand sections that match the current filter, collapse those that don't.
-        if (!string.IsNullOrWhiteSpace(_settingsFilter))
-        {
-            IsSettingsSectionBehaviorExpanded = IsSettingsSectionBehaviorVisible;
-            IsSettingsSectionLocalHotkeysExpanded = IsSettingsSectionLocalHotkeysVisible;
-            IsSettingsSectionGlobalHotkeyExpanded = IsSettingsSectionGlobalHotkeyVisible;
-            IsSettingsSectionStorageExpanded = IsSettingsSectionStorageVisible;
-            IsSettingsSectionToolsExpanded = IsSettingsSectionToolsVisible;
-            IsSettingsSectionRetentionExpanded = IsSettingsSectionRetentionVisible;
-            IsSettingsSectionCapacityExpanded = IsSettingsSectionCapacityVisible;
-            IsSettingsSectionSensitivityExpanded = IsSettingsSectionSensitivityVisible;
-            IsSettingsSectionExcludedAppsExpanded = IsSettingsSectionExcludedAppsVisible;
-            IsSettingsSectionAiExpanded = IsSettingsSectionAiVisible;
-            IsSettingsSectionUpdatesExpanded = IsSettingsSectionUpdatesVisible;
-            IsSettingsSectionOcrExpanded = IsSettingsSectionOcrVisible;
-            IsSettingsSectionSemanticExpanded = IsSettingsSectionSemanticVisible;
-        }
-    }
 
 
     public string SettingsDatabasePassword
@@ -5960,7 +5753,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             UseFuzzyClipSearch = UseFuzzyClipSearch,
             EnableSemanticSearch = SettingsEnableSemanticSearch,
             UseSemanticClipSearch = UseSemanticClipSearch,
-            UseFuzzySettingsSearch = SettingsUseFuzzySearch,
+            UseFuzzySettingsSearch = Settings.UseFuzzySearch,
         };
 
         SecretPersistenceException? secretFailure = null;
@@ -6126,7 +5919,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SettingsCustomHotkeyDrafts.Add(CustomHotkeyDraft.From(h));
         }
         SelectedCustomHotkeyDraft = SettingsCustomHotkeyDrafts.FirstOrDefault();
-        SettingsUseFuzzySearch = settings.UseFuzzySettingsSearch;
+        Settings.UseFuzzySearch = settings.UseFuzzySettingsSearch;
         SettingsEnableSemanticSearch = settings.EnableSemanticSearch;
         IsDatabasePasswordVisible = false;
         RebuildCustomHotkeyTargetSuggestions();

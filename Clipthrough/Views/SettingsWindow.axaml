@@ -4,6 +4,7 @@
         xmlns:ctrl="using:Clipthrough.Controls"
         x:Class="Clipthrough.Views.SettingsWindow"
         x:DataType="vm:MainWindowViewModel"
+        x:CompileBindings="True"
         Title="{Binding SettingsTitleText}"
         Width="960"
         Height="720"
@@ -20,10 +21,10 @@
         <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="8">
             <TextBox Grid.Column="0"
                      PlaceholderText="Filter settings (e.g. hotkey, theme, database)…"
-                     Text="{Binding SettingsFilter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                     Text="{Binding Settings.Filter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
             <CheckBox Grid.Column="1"
                       VerticalAlignment="Center"
-                      IsChecked="{Binding SettingsUseFuzzySearch}"
+                      IsChecked="{Binding Settings.UseFuzzySearch}"
                       ToolTip.Tip="Fuzzy: match synonyms (e.g. 'keybind' → 'hotkey') and tolerate typos"
                       Content="Fuzzy" />
         </Grid>
@@ -32,8 +33,8 @@
                       HorizontalScrollBarVisibility="Disabled">
             <StackPanel Spacing="10">
                 <!-- Behavior -->
-                <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionBehaviorVisible}"
-                          IsExpanded="{Binding IsSettingsSectionBehaviorExpanded, Mode=TwoWay}">
+                <Expander Classes="settings-section" IsVisible="{Binding Settings.BehaviorSection.IsVisible}"
+                          IsExpanded="{Binding Settings.BehaviorSection.IsExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="{Binding SettingsBehaviorTitle}"
                                    FontSize="16"
@@ -57,8 +58,8 @@
                 </Expander>
 
                 <!-- Local hotkeys -->
-                <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionLocalHotkeysVisible}"
-                          IsExpanded="{Binding IsSettingsSectionLocalHotkeysExpanded, Mode=TwoWay}">
+                <Expander Classes="settings-section" IsVisible="{Binding Settings.LocalHotkeysSection.IsVisible}"
+                          IsExpanded="{Binding Settings.LocalHotkeysSection.IsExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="{Binding SettingsLocalHotkeysTitle}"
                                    FontSize="16"
@@ -126,8 +127,8 @@
                 </Expander>
 
                 <!-- Global hotkey + paste-sized hotkeys -->
-                <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionGlobalHotkeyVisible}"
-                          IsExpanded="{Binding IsSettingsSectionGlobalHotkeyExpanded, Mode=TwoWay}">
+                <Expander Classes="settings-section" IsVisible="{Binding Settings.GlobalHotkeySection.IsVisible}"
+                          IsExpanded="{Binding Settings.GlobalHotkeySection.IsExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="{Binding SettingsGlobalHotkeyTitle}"
                                    FontSize="16"
@@ -251,8 +252,8 @@
                 </Expander>
 
                 <!-- Storage -->
-                <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionStorageVisible}"
-                          IsExpanded="{Binding IsSettingsSectionStorageExpanded, Mode=TwoWay}">
+                <Expander Classes="settings-section" IsVisible="{Binding Settings.StorageSection.IsVisible}"
+                          IsExpanded="{Binding Settings.StorageSection.IsExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="{Binding SettingsStorageTitle}"
                                    FontSize="16"
@@ -378,8 +379,8 @@
                 </Expander>
 
                 <!-- Retention -->
-                <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionRetentionVisible}"
-                          IsExpanded="{Binding IsSettingsSectionRetentionExpanded, Mode=TwoWay}">
+                <Expander Classes="settings-section" IsVisible="{Binding Settings.RetentionSection.IsVisible}"
+                          IsExpanded="{Binding Settings.RetentionSection.IsExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="{Binding SettingsRetentionTitle}"
                                    FontSize="16"
@@ -407,8 +408,8 @@
                 </Expander>
 
                 <!-- Capacity -->
-                <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionCapacityVisible}"
-                          IsExpanded="{Binding IsSettingsSectionCapacityExpanded, Mode=TwoWay}">
+                <Expander Classes="settings-section" IsVisible="{Binding Settings.CapacitySection.IsVisible}"
+                          IsExpanded="{Binding Settings.CapacitySection.IsExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="{Binding SettingsCapacityTitle}"
                                    FontSize="16"
@@ -441,8 +442,8 @@
                 </Expander>
 
                 <!-- Sensitivity rules -->
-                <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionSensitivityVisible}"
-                          IsExpanded="{Binding IsSettingsSectionSensitivityExpanded, Mode=TwoWay}">
+                <Expander Classes="settings-section" IsVisible="{Binding Settings.SensitivitySection.IsVisible}"
+                          IsExpanded="{Binding Settings.SensitivitySection.IsExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <Grid ColumnDefinitions="*,Auto"
                               MinWidth="500">
@@ -505,8 +506,8 @@
                 </Expander>
 
                 <!-- Excluded applications -->
-                <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionExcludedAppsVisible}"
-                          IsExpanded="{Binding IsSettingsSectionExcludedAppsExpanded, Mode=TwoWay}">
+                <Expander Classes="settings-section" IsVisible="{Binding Settings.ExcludedAppsSection.IsVisible}"
+                          IsExpanded="{Binding Settings.ExcludedAppsSection.IsExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="{Binding SettingsExcludedAppsTitle}"
                                    FontSize="16"
@@ -526,8 +527,8 @@
                 </Expander>
 
                 <!-- Tools -->
-                <Expander Classes="settings-section" IsVisible="{Binding IsSettingsSectionToolsVisible}"
-                          IsExpanded="{Binding IsSettingsSectionToolsExpanded, Mode=TwoWay}">
+                <Expander Classes="settings-section" IsVisible="{Binding Settings.ToolsSection.IsVisible}"
+                          IsExpanded="{Binding Settings.ToolsSection.IsExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="{Binding SettingsToolsTitle}"
                                    FontSize="16"
@@ -566,8 +567,8 @@
 
                 <!-- AI transforms -->
                 <Expander Classes="settings-section"
-                          IsVisible="{Binding IsSettingsSectionAiVisible}"
-                          IsExpanded="{Binding IsSettingsSectionAiExpanded, Mode=TwoWay}">
+                          IsVisible="{Binding Settings.AiSection.IsVisible}"
+                          IsExpanded="{Binding Settings.AiSection.IsExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="AI transforms"
                                    FontSize="16"
@@ -669,8 +670,8 @@
 
                 <!-- Semantic search -->
                 <Expander Classes="settings-section"
-                          IsVisible="{Binding IsSettingsSectionSemanticVisible}"
-                          IsExpanded="{Binding IsSettingsSectionSemanticExpanded, Mode=TwoWay}">
+                          IsVisible="{Binding Settings.SemanticSection.IsVisible}"
+                          IsExpanded="{Binding Settings.SemanticSection.IsExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="Search" FontSize="16" FontWeight="SemiBold" />
                     </Expander.Header>
@@ -694,8 +695,8 @@
 
                 <!-- OCR -->
                 <Expander Classes="settings-section"
-                          IsVisible="{Binding IsSettingsSectionOcrVisible}"
-                          IsExpanded="{Binding IsSettingsSectionOcrExpanded, Mode=TwoWay}">
+                          IsVisible="{Binding Settings.OcrSection.IsVisible}"
+                          IsExpanded="{Binding Settings.OcrSection.IsExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="OCR" FontSize="16" FontWeight="SemiBold" />
                     </Expander.Header>
@@ -714,8 +715,8 @@
 
                 <!-- Updates -->
                 <Expander Classes="settings-section"
-                          IsVisible="{Binding IsSettingsSectionUpdatesVisible}"
-                          IsExpanded="{Binding IsSettingsSectionUpdatesExpanded, Mode=TwoWay}">
+                          IsVisible="{Binding Settings.UpdatesSection.IsVisible}"
+                          IsExpanded="{Binding Settings.UpdatesSection.IsExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <TextBlock Text="Updates" FontSize="16" FontWeight="SemiBold" />
                     </Expander.Header>

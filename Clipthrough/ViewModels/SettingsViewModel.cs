@@ -10,8 +10,8 @@ namespace Clipthrough.ViewModels;
 /// <see cref="MainWindowViewModel"/> (#10). Holds the form values bound by
 /// <c>SettingsWindow.axaml</c>; the host view model's <c>LoadSettingsDraft</c>
 /// populates it and <c>SaveSettingsAsync</c> applies it (the storage-lifecycle
-/// apply stays in the host). Grown one settings section per commit — currently
-/// the AI section.
+/// apply stays in the host). Grown one settings section per commit; it now also
+/// owns the form's own search box and the collapsible sections it filters.
 /// </summary>
 public sealed class SettingsViewModel : ViewModelBase
 {
@@ -523,5 +523,149 @@ public sealed class SettingsViewModel : ViewModelBase
     {
         get => _enablePasteAsPlainTextHotkey;
         set => this.RaiseAndSetIfChanged(ref _enablePasteAsPlainTextHotkey, value);
+    }
+
+    // --- Settings search / sections ---
+
+    private readonly List<SettingsSectionViewModel> _sections = [];
+
+    private string _filter = string.Empty;
+
+    /// <summary>
+    /// The settings-search box. While it is non-empty only matching sections
+    /// show, and those that match are opened so the hit is visible without a
+    /// second click.
+    /// </summary>
+    public string Filter
+    {
+        get => _filter;
+        set
+        {
+            if (_filter == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _filter, value);
+            RefreshSectionVisibility();
+        }
+    }
+
+    private bool _useFuzzySearch = AppSettings.Default.UseFuzzySettingsSearch;
+
+    /// <summary>
+    /// Whether a filter that matches no keyword exactly falls back to fuzzy
+    /// matching. Persisted, so it is part of the draft rather than session state.
+    /// </summary>
+    public bool UseFuzzySearch
+    {
+        get => _useFuzzySearch;
+        set
+        {
+            if (_useFuzzySearch == value)
+            {
+                return;
+            }
+
+            this.RaiseAndSetIfChanged(ref _useFuzzySearch, value);
+            RefreshSectionVisibility();
+        }
+    }
+
+    public SettingsSectionViewModel BehaviorSection { get; }
+    public SettingsSectionViewModel LocalHotkeysSection { get; }
+    public SettingsSectionViewModel GlobalHotkeySection { get; }
+    public SettingsSectionViewModel StorageSection { get; }
+    public SettingsSectionViewModel ToolsSection { get; }
+    public SettingsSectionViewModel RetentionSection { get; }
+    public SettingsSectionViewModel CapacitySection { get; }
+    public SettingsSectionViewModel SensitivitySection { get; }
+    public SettingsSectionViewModel ExcludedAppsSection { get; }
+    public SettingsSectionViewModel AiSection { get; }
+    public SettingsSectionViewModel UpdatesSection { get; }
+    public SettingsSectionViewModel OcrSection { get; }
+    public SettingsSectionViewModel SemanticSection { get; }
+
+    public SettingsViewModel()
+    {
+        BehaviorSection = Section(
+            "theme dark light tray minimize close start windows startup behavior appearance");
+        LocalHotkeysSection = Section(
+            "hotkey shortcut local regex favorite sensitive case wildcard whole word pasted toggle");
+        GlobalHotkeySection = Section(
+            "hotkey shortcut global toggle window show hide incremental decremental paste");
+        StorageSection = Section(
+            "storage database path password encryption sqlite file location clipangel import legacy migration");
+        ToolsSection = Section(
+            "tools external editor diff winmerge beyond compare vscode meld kdiff");
+        RetentionSection = Section(
+            "retention lifetime expiry expire clips days normal sensitive minutes age");
+        CapacitySection = Section(
+            "capacity size library entries count limit max megabytes clip kb kilobytes");
+        SensitivitySection = Section(
+            "sensitivity rules pattern regex severity warn block name enabled");
+        ExcludedAppsSection = Section(
+            "excluded exclude exclusion ignore app apps application blocklist blacklist password manager keepass 1password bitwarden privacy capture source process never",
+            isExpanded: false);
+        AiSection = Section(
+            "ai openai chatgpt gpt model api key base url prompt transform",
+            isExpanded: false);
+        UpdatesSection = Section(
+            "update updates auto-update velopack feed url release version",
+            isExpanded: false);
+        OcrSection = Section(
+            "ocr image text extract recognition language bcp-47 windows.media.ocr",
+            isExpanded: false);
+        SemanticSection = Section(
+            "semantic embedding embeddings similarity vector search meaning ai ml rerun reembed sort relevance date proximity",
+            isExpanded: false);
+    }
+
+    private SettingsSectionViewModel Section(string keywords, bool isExpanded = true)
+    {
+        var section = new SettingsSectionViewModel(keywords, MatchesFilter, isExpanded);
+        _sections.Add(section);
+        return section;
+    }
+
+    private bool MatchesFilter(string keywords)
+    {
+        if (string.IsNullOrWhiteSpace(_filter))
+        {
+            return true;
+        }
+
+        var filter = _filter.Trim();
+        if (keywords.Contains(filter, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return UseFuzzySearch && Services.FuzzyMatcher.SettingsMatch(keywords, filter);
+    }
+
+    /// <summary>
+    /// Re-evaluates every section against the filter. Both loops run over
+    /// <c>_sections</c> rather than naming the sections, so a section that
+    /// exists necessarily participates in both.
+    /// </summary>
+    private void RefreshSectionVisibility()
+    {
+        foreach (var section in _sections)
+        {
+            section.RaiseVisibilityChanged();
+        }
+
+        // An empty filter matches everything, so auto-expanding on it would
+        // throw away whatever the user had collapsed.
+        if (string.IsNullOrWhiteSpace(_filter))
+        {
+            return;
+        }
+
+        foreach (var section in _sections)
+        {
+            section.IsExpanded = section.IsVisible;
+        }
     }
 }

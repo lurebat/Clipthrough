@@ -2127,4 +2127,29 @@
     "replace": "                    case nameof(SettingsViewModel.EnableMaxLibrarySize):\n                    case nameof(SettingsViewModel.MaxLibrarySizeMegabytes):\n                        break;",
     "filter": "FullyQualifiedName~SettingsDraftCapacity"
   }
+,
+  {
+    "id": "settings-section-notification-skips-most-sections",
+    "file": "Clipthrough/ViewModels/SettingsViewModel.cs",
+    "why": "The point of making sections objects is that the notification loop covers every section it finds. A loop reaching only some of them leaves the rest rendered against a stale filter - exactly the silent failure the old hand-written thirteen-line list produced.",
+    "find": "        foreach (var section in _sections)\n        {\n            section.RaiseVisibilityChanged();\n        }",
+    "replace": "        foreach (var section in _sections)\n        {\n            if (section == BehaviorSection)\n            {\n                section.RaiseVisibilityChanged();\n            }\n        }",
+    "filter": "FullyQualifiedName~SettingsSectionFilterTests"
+  },
+  {
+    "id": "settings-section-auto-expand-runs-on-an-empty-filter",
+    "file": "Clipthrough/ViewModels/SettingsViewModel.cs",
+    "why": "An empty filter matches every section, so auto-expanding on it flings the whole form open and discards whatever the user had collapsed. The guard is the only thing preventing that, and clearing the search box is the common path.",
+    "find": "        if (string.IsNullOrWhiteSpace(_filter))\n        {\n            return;\n        }\n\n        foreach (var section in _sections)\n        {\n            section.IsExpanded = section.IsVisible;\n        }",
+    "replace": "        if (string.IsNullOrWhiteSpace(_filter + \"x\"))\n        {\n            return;\n        }\n\n        foreach (var section in _sections)\n        {\n            section.IsExpanded = section.IsVisible;\n        }",
+    "filter": "FullyQualifiedName~SettingsSectionFilterTests"
+  },
+  {
+    "id": "settings-search-ignores-the-fuzzy-toggle",
+    "file": "Clipthrough/ViewModels/SettingsViewModel.cs",
+    "why": "Turning fuzzy matching off has to actually narrow the search to literal keyword hits. A fallback that runs regardless leaves the setting present in the form and inert, which no round trip through save and load would reveal.",
+    "find": "        return UseFuzzySearch && Services.FuzzyMatcher.SettingsMatch(keywords, filter);",
+    "replace": "        return Services.FuzzyMatcher.SettingsMatch(keywords, filter);",
+    "filter": "FullyQualifiedName~SettingsSectionFilterTests"
+  }
 ]
