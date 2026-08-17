@@ -187,14 +187,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private string _settingsDatabasePassword = StorageOptions.Default.DatabasePassword;
     private string _settingsDatabasePasswordConfirm = StorageOptions.Default.DatabasePassword;
-    private bool _settingsEnableNormalClipLifetime = AppSettings.Default.EnableNormalClipLifetime;
-    private string _settingsNormalClipLifetimeDays = AppSettings.Default.NormalClipLifetimeDays.ToString(CultureInfo.InvariantCulture);
-    private bool _settingsEnableSensitiveClipLifetime = AppSettings.Default.EnableSensitiveClipLifetime;
-    private string _settingsSensitiveClipLifetimeMinutes = AppSettings.Default.SensitiveClipLifetimeMinutes.ToString(CultureInfo.InvariantCulture);
-    private bool _settingsEnableMaxLibrarySize = AppSettings.Default.EnableMaxLibrarySize;
-    private string _settingsMaxLibrarySizeMegabytes = AppSettings.Default.MaxLibrarySizeMegabytes.ToString(CultureInfo.InvariantCulture);
-    private bool _settingsEnableMaxEntryCount = AppSettings.Default.EnableMaxEntryCount;
-    private string _settingsMaxEntryCount = AppSettings.Default.MaxEntryCount.ToString(CultureInfo.InvariantCulture);
     private string _editedClipText = string.Empty;
     private string _editedClipBaseline = string.Empty;
     private int _editedClipSelectionStart;
@@ -225,6 +217,35 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _embeddingWorker = embeddingWorker;
         Copilot = new CopilotViewModel(copilotAuthService, _systemInteractionService, _clipboardMonitorService, () => this.RaisePropertyChanged(nameof(IsAiMenuVisible)));
         Settings = new SettingsViewModel();
+
+        // The storage and entry capacity readouts on the main window are derived from
+        // the settings *draft*, so they follow a limit as it is typed. Declaring that
+        // dependency once here replaces the four RaisePropertyChanged calls that used
+        // to be copied into each limit's setter - a shape where adding a fifth limit
+        // meant remembering to copy them again, and forgetting produced a readout that
+        // silently stopped updating.
+        _subscriptions.Add(Observable
+            .FromEventPattern<PropertyChangedEventHandler, PropertyChangedEventArgs>(
+                h => Settings.PropertyChanged += h,
+                h => Settings.PropertyChanged -= h)
+            .Subscribe(e =>
+            {
+                switch (e.EventArgs.PropertyName)
+                {
+                    case nameof(SettingsViewModel.EnableMaxLibrarySize):
+                    case nameof(SettingsViewModel.MaxLibrarySizeMegabytes):
+                        this.RaisePropertyChanged(nameof(StorageCapacityText));
+                        this.RaisePropertyChanged(nameof(StorageUsagePercent));
+                        break;
+
+                    case nameof(SettingsViewModel.EnableMaxEntryCount):
+                    case nameof(SettingsViewModel.MaxEntryCount):
+                        this.RaisePropertyChanged(nameof(EntryCapacityText));
+                        this.RaisePropertyChanged(nameof(EntryUsagePercent));
+                        break;
+                }
+            }));
+
         _databaseInitializer = databaseInitializer;
         SessionLogs = new SessionLogsViewModel(sessionLogService);
         ContentTypeOptions =
@@ -1335,11 +1356,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public double StorageUsagePercent => BuildUsagePercent(
         TotalStoredBytes,
-        SettingsEnableMaxLibrarySize ? ParseIntOrDefault(SettingsMaxLibrarySizeMegabytes, AppSettings.DefaultMaxLibrarySizeMegabytes) * 1024d * 1024d : 0d);
+        Settings.EnableMaxLibrarySize ? ParseIntOrDefault(Settings.MaxLibrarySizeMegabytes, AppSettings.DefaultMaxLibrarySizeMegabytes) * 1024d * 1024d : 0d);
 
     public double EntryUsagePercent => BuildUsagePercent(
         TotalClipCount,
-        SettingsEnableMaxEntryCount ? ParseIntOrDefault(SettingsMaxEntryCount, AppSettings.DefaultMaxEntryCount) : 0d);
+        Settings.EnableMaxEntryCount ? ParseIntOrDefault(Settings.MaxEntryCount, AppSettings.DefaultMaxEntryCount) : 0d);
 
     public bool IsSelectedClipFavorite => SelectedClip?.IsFavorite == true;
 
@@ -2255,74 +2276,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
 
     public string SettingsThemeModeLabel => AppText.SettingsThemeModeLabel;
-
-    public bool SettingsEnableNormalClipLifetime
-    {
-        get => _settingsEnableNormalClipLifetime;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableNormalClipLifetime, value);
-    }
-
-    public string SettingsNormalClipLifetimeDays
-    {
-        get => _settingsNormalClipLifetimeDays;
-        set => this.RaiseAndSetIfChanged(ref _settingsNormalClipLifetimeDays, value);
-    }
-
-    public bool SettingsEnableSensitiveClipLifetime
-    {
-        get => _settingsEnableSensitiveClipLifetime;
-        set => this.RaiseAndSetIfChanged(ref _settingsEnableSensitiveClipLifetime, value);
-    }
-
-    public string SettingsSensitiveClipLifetimeMinutes
-    {
-        get => _settingsSensitiveClipLifetimeMinutes;
-        set => this.RaiseAndSetIfChanged(ref _settingsSensitiveClipLifetimeMinutes, value);
-    }
-
-    public bool SettingsEnableMaxLibrarySize
-    {
-        get => _settingsEnableMaxLibrarySize;
-        set
-        {
-            this.RaiseAndSetIfChanged(ref _settingsEnableMaxLibrarySize, value);
-            this.RaisePropertyChanged(nameof(StorageCapacityText));
-            this.RaisePropertyChanged(nameof(StorageUsagePercent));
-        }
-    }
-
-    public string SettingsMaxLibrarySizeMegabytes
-    {
-        get => _settingsMaxLibrarySizeMegabytes;
-        set
-        {
-            this.RaiseAndSetIfChanged(ref _settingsMaxLibrarySizeMegabytes, value);
-            this.RaisePropertyChanged(nameof(StorageCapacityText));
-            this.RaisePropertyChanged(nameof(StorageUsagePercent));
-        }
-    }
-
-    public bool SettingsEnableMaxEntryCount
-    {
-        get => _settingsEnableMaxEntryCount;
-        set
-        {
-            this.RaiseAndSetIfChanged(ref _settingsEnableMaxEntryCount, value);
-            this.RaisePropertyChanged(nameof(EntryCapacityText));
-            this.RaisePropertyChanged(nameof(EntryUsagePercent));
-        }
-    }
-
-    public string SettingsMaxEntryCount
-    {
-        get => _settingsMaxEntryCount;
-        set
-        {
-            this.RaiseAndSetIfChanged(ref _settingsMaxEntryCount, value);
-            this.RaisePropertyChanged(nameof(EntryCapacityText));
-            this.RaisePropertyChanged(nameof(EntryUsagePercent));
-        }
-    }
 
     public void Dispose()
     {
@@ -5874,25 +5827,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        if (!TryParseOptionalPositiveInt(SettingsEnableNormalClipLifetime, SettingsNormalClipLifetimeDays, AppSettings.MinNormalClipLifetimeDays, AppSettings.MaxNormalClipLifetimeDays, out var normalClipLifetimeDays))
+        if (!TryParseOptionalPositiveInt(Settings.EnableNormalClipLifetime, Settings.NormalClipLifetimeDays, AppSettings.MinNormalClipLifetimeDays, AppSettings.MaxNormalClipLifetimeDays, out var normalClipLifetimeDays))
         {
             StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidNormalLifetime);
             return;
         }
 
-        if (!TryParseOptionalPositiveInt(SettingsEnableSensitiveClipLifetime, SettingsSensitiveClipLifetimeMinutes, AppSettings.MinSensitiveClipLifetimeMinutes, AppSettings.MaxSensitiveClipLifetimeMinutes, out var sensitiveClipLifetimeMinutes))
+        if (!TryParseOptionalPositiveInt(Settings.EnableSensitiveClipLifetime, Settings.SensitiveClipLifetimeMinutes, AppSettings.MinSensitiveClipLifetimeMinutes, AppSettings.MaxSensitiveClipLifetimeMinutes, out var sensitiveClipLifetimeMinutes))
         {
             StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidSensitiveLifetime);
             return;
         }
 
-        if (!TryParseOptionalPositiveInt(SettingsEnableMaxLibrarySize, SettingsMaxLibrarySizeMegabytes, AppSettings.MinMaxLibrarySizeMegabytes, AppSettings.MaxMaxLibrarySizeMegabytes, out var maxLibrarySizeMegabytes))
+        if (!TryParseOptionalPositiveInt(Settings.EnableMaxLibrarySize, Settings.MaxLibrarySizeMegabytes, AppSettings.MinMaxLibrarySizeMegabytes, AppSettings.MaxMaxLibrarySizeMegabytes, out var maxLibrarySizeMegabytes))
         {
             StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidMaxLibrarySize);
             return;
         }
 
-        if (!TryParseOptionalPositiveInt(SettingsEnableMaxEntryCount, SettingsMaxEntryCount, AppSettings.MinMaxEntryCount, AppSettings.MaxMaxEntryCount, out var maxEntryCount))
+        if (!TryParseOptionalPositiveInt(Settings.EnableMaxEntryCount, Settings.MaxEntryCount, AppSettings.MinMaxEntryCount, AppSettings.MaxMaxEntryCount, out var maxEntryCount))
         {
             StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidMaxEntryCount);
             return;
@@ -5996,13 +5949,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             MinimizeToTray = Settings.MinimizeToTray,
             StartWithWindows = Settings.StartWithWindows,
             ThemeMode = Settings.ThemeMode,
-            EnableNormalClipLifetime = SettingsEnableNormalClipLifetime,
+            EnableNormalClipLifetime = Settings.EnableNormalClipLifetime,
             NormalClipLifetimeDays = normalClipLifetimeDays,
-            EnableSensitiveClipLifetime = SettingsEnableSensitiveClipLifetime,
+            EnableSensitiveClipLifetime = Settings.EnableSensitiveClipLifetime,
             SensitiveClipLifetimeMinutes = sensitiveClipLifetimeMinutes,
-            EnableMaxLibrarySize = SettingsEnableMaxLibrarySize,
+            EnableMaxLibrarySize = Settings.EnableMaxLibrarySize,
             MaxLibrarySizeMegabytes = maxLibrarySizeMegabytes,
-            EnableMaxEntryCount = SettingsEnableMaxEntryCount,
+            EnableMaxEntryCount = Settings.EnableMaxEntryCount,
             MaxEntryCount = maxEntryCount,
             UseFuzzyClipSearch = UseFuzzyClipSearch,
             EnableSemanticSearch = SettingsEnableSemanticSearch,
@@ -6116,14 +6069,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.MinimizeToTray = settings.MinimizeToTray;
         Settings.StartWithWindows = settings.StartWithWindows;
         Settings.ThemeMode = settings.ThemeMode;
-        SettingsEnableNormalClipLifetime = settings.EnableNormalClipLifetime;
-        SettingsNormalClipLifetimeDays = settings.NormalClipLifetimeDays.ToString(CultureInfo.InvariantCulture);
-        SettingsEnableSensitiveClipLifetime = settings.EnableSensitiveClipLifetime;
-        SettingsSensitiveClipLifetimeMinutes = settings.SensitiveClipLifetimeMinutes.ToString(CultureInfo.InvariantCulture);
-        SettingsEnableMaxLibrarySize = settings.EnableMaxLibrarySize;
-        SettingsMaxLibrarySizeMegabytes = settings.MaxLibrarySizeMegabytes.ToString(CultureInfo.InvariantCulture);
-        SettingsEnableMaxEntryCount = settings.EnableMaxEntryCount;
-        SettingsMaxEntryCount = settings.MaxEntryCount.ToString(CultureInfo.InvariantCulture);
+        Settings.EnableNormalClipLifetime = settings.EnableNormalClipLifetime;
+        Settings.NormalClipLifetimeDays = settings.NormalClipLifetimeDays.ToString(CultureInfo.InvariantCulture);
+        Settings.EnableSensitiveClipLifetime = settings.EnableSensitiveClipLifetime;
+        Settings.SensitiveClipLifetimeMinutes = settings.SensitiveClipLifetimeMinutes.ToString(CultureInfo.InvariantCulture);
+        Settings.EnableMaxLibrarySize = settings.EnableMaxLibrarySize;
+        Settings.MaxLibrarySizeMegabytes = settings.MaxLibrarySizeMegabytes.ToString(CultureInfo.InvariantCulture);
+        Settings.EnableMaxEntryCount = settings.EnableMaxEntryCount;
+        Settings.MaxEntryCount = settings.MaxEntryCount.ToString(CultureInfo.InvariantCulture);
         Settings.EnableToggleWildcardHotkey = settings.EnableToggleWildcardHotkey;
         Settings.ToggleWildcardHotkey = settings.ToggleWildcardHotkey;
         Settings.EnableToggleWholeWordHotkey = settings.EnableToggleWholeWordHotkey;
@@ -6877,23 +6830,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private string BuildStorageCapacityText()
     {
-        if (!SettingsEnableMaxLibrarySize)
+        if (!Settings.EnableMaxLibrarySize)
         {
             return AppText.UnlimitedCapacityText;
         }
 
-        var megabytes = ParseIntOrDefault(SettingsMaxLibrarySizeMegabytes, AppSettings.DefaultMaxLibrarySizeMegabytes);
+        var megabytes = ParseIntOrDefault(Settings.MaxLibrarySizeMegabytes, AppSettings.DefaultMaxLibrarySizeMegabytes);
         return AppText.FormatStorageCapacity(megabytes);
     }
 
     private string BuildEntryCapacityText()
     {
-        if (!SettingsEnableMaxEntryCount)
+        if (!Settings.EnableMaxEntryCount)
         {
             return AppText.UnlimitedCapacityText;
         }
 
-        var maxEntries = ParseIntOrDefault(SettingsMaxEntryCount, AppSettings.DefaultMaxEntryCount);
+        var maxEntries = ParseIntOrDefault(Settings.MaxEntryCount, AppSettings.DefaultMaxEntryCount);
         return AppText.FormatEntryCapacity(maxEntries);
     }
 

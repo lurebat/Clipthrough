@@ -177,6 +177,75 @@ public sealed class SettingsViewModel : ViewModelBase
         set => this.RaiseAndSetIfChanged(ref _externalDiffToolPath, value);
     }
 
+    // --- Retention / capacity limits ---
+    //
+    // The host mirrors four of these into its storage- and entry-capacity readouts,
+    // so the main window reflects a limit as it is typed. It does that by observing
+    // this view model rather than by having these setters raise the host's property
+    // names, which is what they used to do while they lived on the host: a dependency
+    // declared once beats the same four RaisePropertyChanged calls copied into four
+    // setters, where adding a fifth limit means remembering to copy them again.
+
+    private bool _enableNormalClipLifetime = AppSettings.Default.EnableNormalClipLifetime;
+    public bool EnableNormalClipLifetime
+    {
+        get => _enableNormalClipLifetime;
+        set => this.RaiseAndSetIfChanged(ref _enableNormalClipLifetime, value);
+    }
+
+    private string _normalClipLifetimeDays =
+        AppSettings.Default.NormalClipLifetimeDays.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    public string NormalClipLifetimeDays
+    {
+        get => _normalClipLifetimeDays;
+        set => this.RaiseAndSetIfChanged(ref _normalClipLifetimeDays, value);
+    }
+
+    private bool _enableSensitiveClipLifetime = AppSettings.Default.EnableSensitiveClipLifetime;
+    public bool EnableSensitiveClipLifetime
+    {
+        get => _enableSensitiveClipLifetime;
+        set => this.RaiseAndSetIfChanged(ref _enableSensitiveClipLifetime, value);
+    }
+
+    private string _sensitiveClipLifetimeMinutes =
+        AppSettings.Default.SensitiveClipLifetimeMinutes.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    public string SensitiveClipLifetimeMinutes
+    {
+        get => _sensitiveClipLifetimeMinutes;
+        set => this.RaiseAndSetIfChanged(ref _sensitiveClipLifetimeMinutes, value);
+    }
+
+    private bool _enableMaxLibrarySize = AppSettings.Default.EnableMaxLibrarySize;
+    public bool EnableMaxLibrarySize
+    {
+        get => _enableMaxLibrarySize;
+        set => this.RaiseAndSetIfChanged(ref _enableMaxLibrarySize, value);
+    }
+
+    private string _maxLibrarySizeMegabytes =
+        AppSettings.Default.MaxLibrarySizeMegabytes.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    public string MaxLibrarySizeMegabytes
+    {
+        get => _maxLibrarySizeMegabytes;
+        set => this.RaiseAndSetIfChanged(ref _maxLibrarySizeMegabytes, value);
+    }
+
+    private bool _enableMaxEntryCount = AppSettings.Default.EnableMaxEntryCount;
+    public bool EnableMaxEntryCount
+    {
+        get => _enableMaxEntryCount;
+        set => this.RaiseAndSetIfChanged(ref _enableMaxEntryCount, value);
+    }
+
+    private string _maxEntryCount =
+        AppSettings.Default.MaxEntryCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    public string MaxEntryCount
+    {
+        get => _maxEntryCount;
+        set => this.RaiseAndSetIfChanged(ref _maxEntryCount, value);
+    }
+
     // --- Tray / startup ---
 
     private bool _closeToTray = AppSettings.Default.CloseToTray;

@@ -2118,5 +2118,13 @@
     "find": "        if (isSearchFocused && modifiers == KeyModifiers.None && e.Key == Key.Up)\n        {\n            if (!viewModel.IsSearchSuggestionsOpen || !FocusSearchSuggestion(0))",
     "replace": "        if (isSearchFocused && modifiers == KeyModifiers.None && (e.Key == Key.Up || e.Key == Key.Down))\n        {\n            if (!viewModel.IsSearchSuggestionsOpen || !FocusSearchSuggestion(0))",
     "filter": "FullyQualifiedName~SearchSuggestionHeadlessTests"
+  },
+  {
+    "id": "settings-draft-capacity-readout-stops-following",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "The capacity readouts are derived from the settings draft. Extracting the limit properties to the child view model drops the notifications their setters used to raise, and nothing fails - the readout just stops updating.",
+    "find": "                    case nameof(SettingsViewModel.EnableMaxLibrarySize):\n                    case nameof(SettingsViewModel.MaxLibrarySizeMegabytes):\n                        this.RaisePropertyChanged(nameof(StorageCapacityText));\n                        this.RaisePropertyChanged(nameof(StorageUsagePercent));\n                        break;",
+    "replace": "                    case nameof(SettingsViewModel.EnableMaxLibrarySize):\n                    case nameof(SettingsViewModel.MaxLibrarySizeMegabytes):\n                        break;",
+    "filter": "FullyQualifiedName~SettingsDraftCapacity"
   }
 ]

@@ -391,18 +391,18 @@
                           RowSpacing="10"
                           Margin="8,10,0,0">
                         <CheckBox Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableNormalClipLifetime}" />
+                                  IsChecked="{Binding Settings.EnableNormalClipLifetime}" />
                         <TextBlock Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsNormalClipLifetimeLabel}" />
                         <TextBox Grid.Column="2"
-                                 Text="{Binding SettingsNormalClipLifetimeDays, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                 Text="{Binding Settings.NormalClipLifetimeDays, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="1" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableSensitiveClipLifetime}" />
+                                  IsChecked="{Binding Settings.EnableSensitiveClipLifetime}" />
                         <TextBlock Grid.Row="1" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsSensitiveClipLifetimeLabel}" />
                         <TextBox Grid.Row="1" Grid.Column="2"
-                                 Text="{Binding SettingsSensitiveClipLifetimeMinutes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                 Text="{Binding Settings.SensitiveClipLifetimeMinutes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                     </Grid>
                 </Expander>
 
@@ -420,18 +420,18 @@
                           RowSpacing="10"
                           Margin="8,10,0,0">
                         <CheckBox Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableMaxLibrarySize}" />
+                                  IsChecked="{Binding Settings.EnableMaxLibrarySize}" />
                         <TextBlock Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsMaxLibrarySizeLabel}" />
                         <TextBox Grid.Column="2"
-                                 Text="{Binding SettingsMaxLibrarySizeMegabytes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                 Text="{Binding Settings.MaxLibrarySizeMegabytes, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <CheckBox Grid.Row="1" Content="{Binding SettingsEnableShortcutLabel}"
-                                  IsChecked="{Binding SettingsEnableMaxEntryCount}" />
+                                  IsChecked="{Binding Settings.EnableMaxEntryCount}" />
                         <TextBlock Grid.Row="1" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsMaxEntryCountLabel}" />
                         <TextBox Grid.Row="1" Grid.Column="2"
-                                 Text="{Binding SettingsMaxEntryCount, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                 Text="{Binding Settings.MaxEntryCount, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                         <TextBlock Grid.Row="2" Grid.Column="1" VerticalAlignment="Center"
                                    Text="{Binding SettingsClipLimitLabel}" />
