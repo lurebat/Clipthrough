@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
+using Avalonia;
 using Avalonia.Threading;
 
 using Clipthrough.Controls;
@@ -42,29 +43,41 @@ public sealed class RichDocumentInteractionHeadlessTests
     /// </remarks>
     private static async Task<(RichDocumentView View, Window Window)> RenderAsync(string markup)
     {
-        for (var attempt = 1; ; attempt++)
+        var view = new RichDocumentView
         {
-            var view = new RichDocumentView
-            {
-                ContentFormat = ClipContentFormat.Html,
-                Markup = markup,
-            };
-            var window = new Window { Content = view };
-            window.Show();
-            Dispatcher.UIThread.RunJobs();
-            await view.PendingRender;
+            // A minute instead of three seconds. Not because import is slow -
+            // these fragments parse in under a millisecond - but because the
+            // production timeout is wall-clock, and a machine busy with a
+            // mutation sweep made a dozen words miss it. The pane then fell back
+            // to plain text and every assertion below failed for a reason that
+            // had nothing to do with what was being tested. This makes the test
+            // independent of how loaded the machine is rather than lucky.
+            ImportTimeout = TimeSpan.FromMinutes(1),
+            ContentFormat = ClipContentFormat.Html,
+            Markup = markup,
+        };
+        var window = new Window { Content = view };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+        await view.PendingRender;
 
-            if (view.Viewer.IsVisible || attempt == 3)
-            {
-                Assert.True(
-                    view.Viewer.IsVisible,
-                    $"the document path was not taken after {attempt} attempts, so nothing here says anything about selection");
-                return (view, window);
-            }
+        Assert.True(
+            view.Viewer.IsVisible,
+            "the document path was not taken, so nothing here says anything about selection");
 
-            window.Close();
-            Dispatcher.UIThread.RunJobs();
-        }
+        // Lay out again now that the editor is visible.
+        //
+        // It is created with IsVisible = false and only revealed once the async
+        // render finishes, and an invisible control is never measured - so its
+        // template has not been applied and RichTextEditor.View is still null.
+        // Whether anything else happened to trigger a layout pass in between
+        // varied with what ran before, which is why this passed alone and failed
+        // in a full run rather than failing honestly every time.
+        view.Viewer.Measure(new Size(800, 600));
+        view.Viewer.Arrange(new Rect(0, 0, 800, 600));
+        Dispatcher.UIThread.RunJobs();
+
+        return (view, window);
     }
 
     [AvaloniaFact]

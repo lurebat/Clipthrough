@@ -45,7 +45,19 @@ public sealed class RichDocumentView : UserControl
     // preview degrades to plain text, which is what the WebView did too.
     private const int MaxImportSizeChars = 512 * 1024;
 
-    private static readonly TimeSpan ImportTimeout = TimeSpan.FromSeconds(3);
+    /// <summary>
+    /// How long an import may take before the preview degrades to plain text.
+    /// </summary>
+    /// <remarks>
+    /// Settable so a test can stop depending on wall-clock time. Three seconds
+    /// is generous for a person and tight for a build agent: on a machine also
+    /// running a mutation sweep, a fragment of a dozen words missed it and the
+    /// pane fell back, which made assertions about selection fail for a reason
+    /// that had nothing to do with selection. Retrying only reduced the odds -
+    /// the test had a real dependency on how busy the machine was, and this
+    /// removes it rather than papering over it.
+    /// </remarks>
+    internal TimeSpan ImportTimeout { get; init; } = TimeSpan.FromSeconds(3);
 
     // Avalonia's line breaking is quadratic in the length of a run that offers no break
     // opportunity, because the cost is characters x lines and an unbreakable run wraps

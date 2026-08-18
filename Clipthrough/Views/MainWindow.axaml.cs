@@ -689,13 +689,23 @@ public partial class MainWindow : Window
 
         var generation = BeginFocusRequest();
 
-        // Scroll the selected item into view
-        if (m_clipsListBox.SelectedItem is not null)
-        {
-            m_clipsListBox.ScrollIntoView(m_clipsListBox.SelectedItem);
-        }
+        // Scroll now, and again once the selection has settled.
+        //
+        // The immediate call reads m_clipsListBox.SelectedItem, which arrives
+        // through a two-way binding from the view model property the caller has
+        // just assigned. Whenever that binding has already run the two agree and
+        // the second scroll is a no-op; if it has not, the first scroll goes to
+        // the row the user came *from*. Repeating it inside the same post that
+        // moves focus removes the ordering question rather than reasoning about
+        // it - and focus was already deferred for exactly this kind of reason.
+        //
+        // Not written against a reproduction: Asaf reported the list not
+        // following the selection and this path is correct under every headless
+        // variant tried - short lists, a virtualising 2,000-row list, a list
+        // wheel-scrolled away from the selection, and key repeat. So this is the
+        // one hazard visible in the code, not a demonstrated fix.
+        ScrollSelectedClipIntoView();
 
-        // Focus the ListBoxItem for the selected clip
         Dispatcher.UIThread.Post(() =>
         {
             if (m_focusRequestGeneration != generation || m_clipsListBox.SelectedIndex < 0)
@@ -703,12 +713,26 @@ public partial class MainWindow : Window
                 return;
             }
 
+            ScrollSelectedClipIntoView();
+
             var container = m_clipsListBox.ContainerFromIndex(m_clipsListBox.SelectedIndex);
             if (container is ListBoxItem item)
             {
                 item.Focus();
             }
         }, DispatcherPriority.Input);
+    }
+
+    /// <summary>
+    /// Scrolls to the selected row by index rather than by item, so it follows
+    /// whatever the list itself has settled on.
+    /// </summary>
+    private void ScrollSelectedClipIntoView()
+    {
+        if (m_clipsListBox is { SelectedIndex: >= 0 } list)
+        {
+            list.ScrollIntoView(list.SelectedIndex);
+        }
     }
 
     /// <summary>
