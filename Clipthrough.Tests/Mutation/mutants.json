@@ -2258,4 +2258,21 @@
     "replace": "        if (e.Key == Key.X && e.KeyModifiers.HasFlag(KeyModifiers.Alt))",
     "filter": "FullyQualifiedName~CtrlXOnTheRenderedPreview"
   }
+,
+  {
+    "id": "search-hotkeys-ignore-the-physical-key-fallback",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "A keyboard layout can report Key.None while PhysicalKey still identifies the position. Without the fallback every in-window search toggle stops responding on such a layout, and nothing logs - the user concludes the feature is broken rather than that their layout is.",
+    "find": "        => key != Key.None ? key : physicalKey switch",
+    "replace": "        => key != Key.None || physicalKey != PhysicalKey.None ? key : physicalKey switch",
+    "filter": "FullyQualifiedName~SearchToggleHotkey"
+  },
+  {
+    "id": "search-hotkeys-match-on-a-subset-of-modifiers",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Modifiers are compared for equality so Ctrl+Shift+R cannot fire the Ctrl+R toggle. Testing for a subset instead would let a broader gesture swallow whatever the user bound it to.",
+    "find": "            || (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Meta)) != gesture.KeyModifiers)",
+    "replace": "            || (e.KeyModifiers & gesture.KeyModifiers) != gesture.KeyModifiers)",
+    "filter": "FullyQualifiedName~SearchToggleHotkey"
+  }
 ]

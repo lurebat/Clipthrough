@@ -160,6 +160,13 @@ public sealed class RichDocumentInteractionHeadlessTests
     /// aimed at one key would have left the bug reachable by another. Measured:
     /// it binds neither, so the single gate is complete today.
     ///
+    /// Since confirmed from the other side. VellumText 0.4.1's input switch has
+    /// no <c>Key.Insert</c> arm at all, and its <c>Key.Delete</c> arm carries no
+    /// modifier guard, so Shift+Delete falls into a plain delete that the
+    /// read-only gate already refuses rather than into a cut. Recorded because
+    /// otherwise the next reader has to re-derive it, and the measurement alone
+    /// cannot distinguish "not bound" from "bound but harmless".
+    ///
     /// The value of this test is the day that changes. It is a tripwire for
     /// moving off 0.4.1 - a release that binds a Cut synonym, or routes Delete
     /// through a copy, fails here rather than silently restoring a clipboard
