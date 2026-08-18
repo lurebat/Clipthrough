@@ -148,6 +148,96 @@ public sealed class RichDocumentInteractionHeadlessTests
             Dispatcher.UIThread.RunJobs();
         }
     }
+    /// <summary>
+    /// Of every clipboard-adjacent shortcut, only Ctrl+C may write the clipboard
+    /// from the preview. Asserts the ones that must NOT, which is the half a
+    /// test of Ctrl+C alone cannot cover.
+    /// </summary>
+    /// <remarks>
+    /// Written after gating Ctrl+X, to check that gate was not itself the
+    /// partial fix it was warning about: Shift+Delete and Ctrl+Insert are the
+    /// classic synonyms for Cut and Copy, and had VellumText bound either, a fix
+    /// aimed at one key would have left the bug reachable by another. Measured:
+    /// it binds neither, so the single gate is complete today.
+    ///
+    /// The value of this test is the day that changes. It is a tripwire for
+    /// moving off 0.4.1 - a release that binds a Cut synonym, or routes Delete
+    /// through a copy, fails here rather than silently restoring a clipboard
+    /// write we already paid to find once.
+    /// </remarks>
+    [AvaloniaFact]
+    public async Task OnlyCopyMayWriteTheClipboardFromTheRenderedPreview()
+    {
+        var mustNotWrite = new (string Name, PhysicalKey Key, RawInputModifiers Modifiers)[]
+        {
+            ("Ctrl+X", PhysicalKey.X, RawInputModifiers.Control),
+            ("Shift+Delete", PhysicalKey.Delete, RawInputModifiers.Shift),
+            ("Ctrl+Insert", PhysicalKey.Insert, RawInputModifiers.Control),
+            ("Shift+Insert", PhysicalKey.Insert, RawInputModifiers.Shift),
+            ("Ctrl+V", PhysicalKey.V, RawInputModifiers.Control),
+            ("Delete", PhysicalKey.Delete, RawInputModifiers.None),
+            ("Backspace", PhysicalKey.Backspace, RawInputModifiers.None),
+        };
+
+        foreach (var (name, key, modifiers) in mustNotWrite)
+        {
+            var (view, window) = await RenderAsync("<p>PREVIEW CONTENTS</p>");
+            try
+            {
+                var editorView = view.Viewer.View;
+                Assert.NotNull(editorView);
+                editorView.SelectAll();
+                editorView.Focus();
+                Dispatcher.UIThread.RunJobs();
+
+                // Without a selection Cut has nothing to take and every case
+                // below would pass for the wrong reason.
+                Assert.False(string.IsNullOrEmpty(editorView.SelectedText()), $"{name}: nothing was selected");
+                Assert.True(editorView.IsKeyboardFocusWithin, $"{name}: the editor never took focus");
+
+                var clipboard = TopLevel.GetTopLevel(window)!.Clipboard!;
+                await WriteClipboardTextAsync(clipboard, "USER HELD THIS");
+
+                window.KeyPressQwerty(key, modifiers);
+                Dispatcher.UIThread.RunJobs();
+                await Task.Delay(120);
+                Dispatcher.UIThread.RunJobs();
+
+                Assert.Equal("USER HELD THIS", await ReadClipboardTextAsync(clipboard));
+            }
+            finally
+            {
+                window.Close();
+                Dispatcher.UIThread.RunJobs();
+            }
+        }
+
+        // The control: Ctrl+C must still work, or the loop above would pass just
+        // as well against a pane with no clipboard access at all.
+        var (copyView, copyWindow) = await RenderAsync("<p>PREVIEW CONTENTS</p>");
+        try
+        {
+            var editorView = copyView.Viewer.View!;
+            editorView.SelectAll();
+            editorView.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            var clipboard = TopLevel.GetTopLevel(copyWindow)!.Clipboard!;
+            await WriteClipboardTextAsync(clipboard, "USER HELD THIS");
+
+            copyWindow.KeyPressQwerty(PhysicalKey.C, RawInputModifiers.Control);
+            Dispatcher.UIThread.RunJobs();
+            await Task.Delay(120);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Contains("PREVIEW CONTENTS", await ReadClipboardTextAsync(clipboard), StringComparison.Ordinal);
+        }
+        finally
+        {
+            copyWindow.Close();
+            Dispatcher.UIThread.RunJobs();
+        }
+    }
     [AvaloniaFact]
     public async Task TheRenderedPreviewCanSelectItsText()
     {
