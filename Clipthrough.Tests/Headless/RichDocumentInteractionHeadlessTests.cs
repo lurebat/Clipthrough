@@ -6,6 +6,10 @@ using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia;
 using Avalonia.Threading;
+using System.Linq;
+using Avalonia.Automation.Peers;
+using Avalonia.Automation.Provider;
+using Avalonia.VisualTree;
 using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
@@ -242,6 +246,62 @@ public sealed class RichDocumentInteractionHeadlessTests
         finally
         {
             copyWindow.Close();
+            Dispatcher.UIThread.RunJobs();
+        }
+    }
+    /// <summary>
+    /// KNOWN DEFECT, not our own, and not fixable here. The preview reports
+    /// itself to assistive technology as an EDITABLE document even though
+    /// IsReadOnly is set.
+    /// </summary>
+    /// <remarks>
+    /// Measured on VellumText 0.4.1, the version vendored under external/:
+    /// RichTextView's automation peer exposes IValueProvider.IsReadOnly = false
+    /// while the editor's own IsReadOnly is true, because the peer derives it
+    /// from SupportsTextInput, which 0.4.1 answers unconditionally.
+    ///
+    /// It is the selection-toolbar defect aimed at the one user who cannot see
+    /// that nothing happened: a screen reader announces an editable document,
+    /// the user types, and the edit is silently refused.
+    ///
+    /// There is no local fix. The peer comes from a control we do not
+    /// construct - RichTextView is templated inside RichTextEditor - and the
+    /// only lever from outside is AutomationProperties.AccessibilityView=Raw,
+    /// which would hide the pane from screen readers entirely. Being unable to
+    /// read the preview is worse than being told the wrong thing about it.
+    ///
+    /// So this asserts the WRONG value on purpose, to hold the defect still.
+    /// Upstream has fixed it; when we move off 0.4.1 this test goes red, and
+    /// that red is the good news. Flip both assertions to the correct values,
+    /// delete this remark, and the tripwire becomes an ordinary guarantee.
+    /// </remarks>
+    [AvaloniaFact]
+    public async Task ThePreviewStillMisreportsItselfAsEditableToAssistiveTech()
+    {
+        var (view, window) = await RenderAsync("<p>PREVIEW CONTENTS</p>");
+        try
+        {
+            Assert.True(view.Viewer.IsReadOnly, "the pane is supposed to be read-only");
+
+            var documentPeer = view.Viewer.GetSelfAndVisualDescendants()
+                .OfType<Control>()
+                .Select(ControlAutomationPeer.CreatePeerForElement)
+                .OfType<IValueProvider>()
+                .FirstOrDefault();
+
+            Assert.True(
+                documentPeer is not null,
+                "no automation peer exposes IValueProvider any more - the shape of this defect has changed, so re-measure before trusting either branch of it.");
+
+            Assert.False(
+                documentPeer!.IsReadOnly,
+                "GOOD NEWS: the preview now reports itself as read-only to assistive technology. "
+                    + "The VellumText upgrade has fixed it. Change this assertion to Assert.True and "
+                    + "delete the remark above.");
+        }
+        finally
+        {
+            window.Close();
             Dispatcher.UIThread.RunJobs();
         }
     }
