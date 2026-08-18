@@ -46,10 +46,13 @@ public sealed class RichDocumentInteractionHeadlessTests
         var (view, window) = await RenderAsync("<p>Hello <strong>selectable</strong> world</p>");
         try
         {
-            view.Viewer.View.SelectAll();
+            var editorView = view.Viewer.View;
+            Assert.NotNull(editorView);
+
+            editorView.SelectAll();
             Dispatcher.UIThread.RunJobs();
 
-            var selected = view.Viewer.View.SelectedText();
+            var selected = editorView.SelectedText();
 
             Assert.Contains("Hello", selected, StringComparison.Ordinal);
             Assert.Contains("selectable", selected, StringComparison.Ordinal);
@@ -74,9 +77,12 @@ public sealed class RichDocumentInteractionHeadlessTests
         {
             Assert.True(view.Viewer.IsReadOnly);
 
-            view.Viewer.View.SelectAll();
+            var editorView = view.Viewer.View;
+            Assert.NotNull(editorView);
+
+            editorView.SelectAll();
             Dispatcher.UIThread.RunJobs();
-            Assert.False(string.IsNullOrEmpty(view.Viewer.View.SelectedText()));
+            Assert.False(string.IsNullOrEmpty(editorView.SelectedText()));
         }
         finally
         {

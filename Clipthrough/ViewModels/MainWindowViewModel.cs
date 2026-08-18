@@ -5632,7 +5632,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SecretPersistenceException? secretFailure = null;
         await Task.Run(async () =>
         {
-            await _storageOptionsService.SaveAsync(storageOptions).ConfigureAwait(false);
+            // Settings first, storage second, because only the second is
+            // destructive: a path change copies the database and deletes the
+            // source. The two writes cannot be made atomic - rolling storage
+            // back would mean moving the database a second time, which can fail
+            // in its own right - so the question is only which half is safer to
+            // leave undone.
+            //
+            // The old order answered it the wrong way round. It moved the
+            // database and then, if writing settings.json threw anything other
+            // than a secret failure, dropped every other setting on the floor:
+            // the user's library had moved, their hotkeys and retention had
+            // silently reverted, and the save reported nothing specific. This
+            // way a failure leaves the database exactly where it was and still
+            // working, and the change can simply be made again.
+            //
+            // The two files are independent - settings.json and storage.json,
+            // both in LocalApplicationData - and AppSettings carries no storage
+            // location or password, so neither write needs the other to have
+            // happened first.
             try
             {
                 // The dialog owns configuration, never session state: the filter
@@ -5647,6 +5665,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 // Keep going, but never report an unqualified success below.
                 secretFailure = ex;
             }
+
+            await _storageOptionsService.SaveAsync(storageOptions).ConfigureAwait(false);
         });
         if (!_isDatabaseReady)
         {

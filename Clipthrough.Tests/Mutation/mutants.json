@@ -746,9 +746,9 @@
   {
     "id": "settings-saves-hotkeys-the-window-swallows",
     "why": "Removes the reserved-gesture check from settings validation, so the user can still save a filter hotkey that the window handles first and that therefore never fires.",
-    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "file": "Clipthrough/ViewModels/SettingsDraftValidator.cs",
     "filter": "SaveSettings_RefusesAFilterHotkeyTheWindowHandlesItself",
-    "find": "        foreach (var draft in localHotkeys.Where(static draft => draft.IsEnabled))\n        {\n            var normalized = normalizedHotkeys[draft.Name];\n            if (BuiltInShortcuts.DescribeCollision(normalized) is { } builtIn)\n            {\n                StatusText = AppText.FormatSettingsValidationError(AppText.FormatHotkeyReservedByBuiltIn(normalized, builtIn));\n                return;\n            }\n        }",
+    "find": "        foreach (var pair in localDrafts.Where(static d => d.IsEnabled))\n        {\n            var normalized = localHotkeys[pair.Name];\n            if (BuiltInShortcuts.DescribeCollision(normalized) is { } builtIn)\n            {\n                error = AppText.FormatSettingsValidationError(AppText.FormatHotkeyReservedByBuiltIn(normalized, builtIn));\n                return false;\n            }\n        }",
     "replace": ""
   },
   {
@@ -2186,5 +2186,14 @@
     "find": "    <SolidColorBrush x:Key=\"SurfaceHeroBrush\" Color=\"#FFFFFF\" />\n",
     "replace": "",
     "filter": "FullyQualifiedName~ThemeVariantParityHeadlessTests"
+  }
+,
+  {
+    "id": "settings-save-moves-the-database-before-persisting-settings",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Saving writes two files that cannot be made atomic, and only one of them is destructive - a path change copies the database and deletes the source. Doing that half first means a failure to write settings.json leaves the library moved and every other setting silently reverted.",
+    "find": "            try\n            {\n                // The dialog owns configuration, never session state: the filter\n                // toggles and view modes keep saving while it is open, and its\n                // snapshot of them is already stale. Re-read them under the gate.\n                await _settingsService.UpdateAsync(current => settings.WithSessionStateFrom(current))\n                    .ConfigureAwait(false);\n            }\n            catch (SecretPersistenceException ex)\n            {\n                // Everything else saved; only the credential sidecars failed.\n                // Keep going, but never report an unqualified success below.\n                secretFailure = ex;\n            }\n\n            await _storageOptionsService.SaveAsync(storageOptions).ConfigureAwait(false);",
+    "replace": "            await _storageOptionsService.SaveAsync(storageOptions).ConfigureAwait(false);\n            try\n            {\n                await _settingsService.UpdateAsync(current => settings.WithSessionStateFrom(current))\n                    .ConfigureAwait(false);\n            }\n            catch (SecretPersistenceException ex)\n            {\n                secretFailure = ex;\n            }",
+    "filter": "FullyQualifiedName~SettingsSavePartialFailureHeadlessTests"
   }
 ]

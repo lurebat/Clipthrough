@@ -34,10 +34,18 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
 
     public bool DatabaseExists => File.Exists(Current.DatabasePath);
 
+    /// <summary>
+    /// How many times storage was persisted. Saving storage moves the database
+    /// file in the real service, so a test that cares whether a failed save left
+    /// the library alone has to be able to see that this never ran.
+    /// </summary>
+    public int SaveCount { get; private set; }
+
     public Task SaveAsync(StorageOptions options, CancellationToken cancellationToken = default)
     {
         Current = options.Normalize();
         _hasSavedConfig = true;
+        SaveCount++;
         return Task.CompletedTask;
     }
 
@@ -117,10 +125,25 @@ internal sealed class TestSettingsService : ISettingsService
     /// production gate gives. A fake that captured the argument up front would
     /// hide exactly the lost-update bug this contract exists to prevent.
     /// </summary>
+    /// <summary>
+    /// Thrown by the next <see cref="UpdateAsync"/> and then cleared. Lets a test
+    /// drive the case where persisting settings fails for a reason that is not a
+    /// credential failure - a full disk, a locked file - which is the failure the
+    /// save has to survive without having already moved the database.
+    /// </summary>
+    public Exception? ThrowOnNextUpdate { get; set; }
+
     public async Task<AppSettings> UpdateAsync(
         Func<AppSettings, AppSettings> mutate,
         CancellationToken cancellationToken = default)
     {
+        var failure = ThrowOnNextUpdate;
+        ThrowOnNextUpdate = null;
+        if (failure is not null)
+        {
+            throw failure;
+        }
+
         LastMutation = mutate;
 
         var hold = HoldNextSave;

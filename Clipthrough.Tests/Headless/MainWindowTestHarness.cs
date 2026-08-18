@@ -44,6 +44,12 @@ internal sealed class MainWindowTestHarness : IDisposable
     /// </summary>
     public TestSettingsService Settings => _scope.SettingsService;
 
+    /// <summary>
+    /// The same storage service the view model saves through, so a test can see
+    /// whether a save actually reached the half that moves the database.
+    /// </summary>
+    public TestStorageOptionsService StorageOptions => _scope.StorageOptionsService;
+
     public TextBox SearchBox => Window.FindControl<TextBox>("SearchTextBox")!;
 
     public ListBox ClipList => Window.FindControl<ListBox>("ClipsListBox")!;
