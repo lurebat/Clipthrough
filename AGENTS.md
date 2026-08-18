@@ -146,6 +146,35 @@ All seven killed once rewritten, so the tests had been sound the whole time and
 only the mutants were broken — which is exactly why an unrun mutant is worth no
 more than an unrun test. `-ValidateOnly` cannot catch this; only running them can.
 
+### Re-run the mutants after a dependency bump
+
+A mutant can also stop discriminating with no edit to it and no diff anywhere,
+because the *guarantor* of the behaviour moved. When an upstream project absorbs
+a fix we had made locally, our guard stops changing the outcome and the test
+defending it passes for a reason that has nothing to do with our code.
+
+Measured on the VellumText 0.4.1 -> 0.5.0 upgrade: 0.5.0 gates Cut inside
+`CutAsync`, so `RichDocumentView`'s own Ctrl+X handler became redundant and its
+mutant went from KILLED to SURVIVED. **The suite was green, the build was clean,
+and `-ValidateOnly` passed all 284 anchors.** Nothing short of running the
+mutants against the new package would have shown it. We pin Avalonia too
+(`12.1.1`), so the same thing is waiting on that bump: a test that passes because
+Avalonia grew a guard is not a test of our code.
+
+So a dependency bump is not done when the suite is green. Run the sweep, or at
+minimum re-run the mutants covering anything we implemented *because* of that
+dependency. When one survives, separate two questions the green suite conflates:
+
+- **Does the property still hold?** Keep the test. Users still need Ctrl+X not to
+  take the clipboard, whoever enforces it. Note the new guarantor in the test, or
+  a future reader credits our handler for upstream's work.
+- **Does our code still provide it?** If not, delete the mutant — one that cannot
+  be killed reads as coverage while testing nothing — and decide about the guard
+  deliberately. Keeping a redundant guard is fine where the failure it prevents
+  is silent or costly, but say in the code that it is not load-bearing on the
+  current version, or its existence reads as evidence the dependency is still
+  broken.
+
 These four patterns produced the vacuous tests. Avoid them by construction:
 
 - **Never let the old implementation be the oracle.** An equivalence test that
