@@ -133,15 +133,15 @@ public sealed record AppSettings
 
     public ViewModels.ImageViewMode LastImageViewMode { get; init; } = ViewModels.ImageViewMode.Editor;
 
-    public bool UseFuzzyClipSearch { get; init; }
-
     public bool EnableSemanticSearch { get; init; }
-
-    public bool UseSemanticClipSearch { get; init; }
 
     public bool UseFuzzySettingsSearch { get; init; } = true;
 
-    // Persisted last-session filter toggle states
+    // Persisted last-session filter toggle states. The two search toggles live
+    // here and only here: an earlier pair of UseFuzzyClipSearch /
+    // UseSemanticClipSearch was written on every save and never read back, so
+    // the same concept had two names and one of them was inert. Removed rather
+    // than kept as an alias, because the trap is finding the dead one first.
     public bool LastShowFavoritesOnly { get; init; }
     public bool LastShowSensitiveOnly { get; init; }
     public bool LastShowPastedOnly { get; init; }

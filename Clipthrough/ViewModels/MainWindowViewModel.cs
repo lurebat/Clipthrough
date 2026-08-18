@@ -1967,7 +1967,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string SettingsPasteAndFavoriteHotkeyLabel => AppText.SettingsPasteAndFavoriteHotkeyLabel;
     public string SettingsPasteAsPlainTextHotkeyLabel => AppText.SettingsPasteAsPlainTextHotkeyLabel;
 
-    private bool _useFuzzyClipSearch = AppSettings.Default.UseFuzzyClipSearch;
+    private bool _useFuzzyClipSearch = AppSettings.Default.LastUseFuzzyClipSearch;
 
     public bool UseFuzzyClipSearch
     {
@@ -1975,7 +1975,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => this.RaiseAndSetIfChanged(ref _useFuzzyClipSearch, value);
     }
 
-    private bool _useSemanticClipSearch = AppSettings.Default.UseSemanticClipSearch;
+    private bool _useSemanticClipSearch = AppSettings.Default.LastUseSemanticClipSearch;
 
     // Previous EnableSemanticSearch value, so OnSettingsChanged can tell the
     // off->on edge from a save that left it on.
@@ -5625,9 +5625,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             MaxLibrarySizeMegabytes = maxLibrarySizeMegabytes,
             EnableMaxEntryCount = Settings.EnableMaxEntryCount,
             MaxEntryCount = maxEntryCount,
-            UseFuzzyClipSearch = UseFuzzyClipSearch,
             EnableSemanticSearch = SettingsEnableSemanticSearch,
-            UseSemanticClipSearch = UseSemanticClipSearch,
             UseFuzzySettingsSearch = Settings.UseFuzzySearch,
         };
 
