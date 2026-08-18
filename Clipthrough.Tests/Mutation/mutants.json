@@ -2196,4 +2196,22 @@
     "replace": "            await _storageOptionsService.SaveAsync(storageOptions).ConfigureAwait(false);\n            try\n            {\n                await _settingsService.UpdateAsync(current => settings.WithSessionStateFrom(current))\n                    .ConfigureAwait(false);\n            }\n            catch (SecretPersistenceException ex)\n            {\n                secretFailure = ex;\n            }",
     "filter": "FullyQualifiedName~SettingsSavePartialFailureHeadlessTests"
   }
+,
+  {
+    "id": "a-selection-property-stops-being-announced",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "RaiseSelectionStateProperties is around seventy hand-written notifications. Dropping one is silent: the field keeps showing the previously selected clip's value until some unrelated refresh happens to raise it. This is the largest instance of a pattern that has already produced two real bugs in this codebase.",
+    "find": "        this.RaisePropertyChanged(nameof(SelectedClipCapturedAtText));\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~SelectionNotificationHeadlessTests"
+  }
+,
+  {
+    "id": "the-selected-clip-age-chip-stops-being-announced",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Checks the selection-notification test reaches more than one kind of property: the age chip is a brush chosen by bucket, so it only moves when two clips fall in different age bands. A test whose fixture cannot tell those apart guards the list in name only.",
+    "find": "        this.RaisePropertyChanged(nameof(SelectedClipAgeChipBackground));\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~SelectionNotificationHeadlessTests"
+  }
 ]

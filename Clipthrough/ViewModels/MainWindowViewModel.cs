@@ -1526,13 +1526,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// clip, so previewing an HTML clip told its sender when you looked at it
     /// (see <see cref="Controls.RichDocumentView"/>).
     ///
-    /// What remains is not the renderer. <c>RichTextEditor</c> is wired up and
-    /// <c>HtmlFormat.Export</c> turns a document back into markup, so the
-    /// mechanics are a flag and a call. The open question is what an edit to a
-    /// rich clip should put in <see cref="EditedClipText"/>, which is a string
-    /// and today holds plain text. Holding markup there instead would change
-    /// what every transform in the Edit menu operates on, and that is a product
-    /// decision rather than a wiring one.
+    /// Editing is wanted for 1.0 and is deliberately waiting on the next
+    /// VellumText release. Nothing here is blocked on our side:
+    /// <c>RichTextEditor</c> is wired up and <c>HtmlFormat.Export</c> turns a
+    /// document back into markup, so switching it on is a flag and a call.
+    ///
+    /// The design question to settle when it does land is what an edit to a rich
+    /// clip should put in <see cref="EditedClipText"/>, which is a string and
+    /// today holds plain text. Holding markup there instead would change what
+    /// every transform in the Edit menu operates on.
     ///
     /// Persistence is not the obstacle it was once thought to be: an edit is
     /// already captured as a new clip rather than written over the original
