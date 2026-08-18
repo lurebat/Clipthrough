@@ -2214,4 +2214,13 @@
     "replace": "",
     "filter": "FullyQualifiedName~SelectionNotificationHeadlessTests"
   }
+,
+  {
+    "id": "shift-click-drags-the-selection-anchor-with-it",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Setting SelectedClip moves the anchor, which is right for arrowing but wrong for a shift-click. Without restoring it, every range pivots on its own far end, so a selection can only grow - ctrl-click 3, shift-click 5, shift-click 1 gives 1..5 instead of 1..3 and there is no way back to a smaller range.",
+    "find": "        var anchor = _checkedSelectionAnchorId;\n        SelectedClip = clip;\n        _checkedSelectionAnchorId = anchor;",
+    "replace": "        SelectedClip = clip;",
+    "filter": "FullyQualifiedName~ClipRangeSelectionHeadlessTests"
+  }
 ]

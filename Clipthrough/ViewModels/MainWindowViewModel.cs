@@ -4051,7 +4051,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Clips[index].IsChecked = true;
         }
 
+        // Setting SelectedClip moves the anchor, which is right for arrowing or
+        // clicking a row - the next shift-click should extend from where you
+        // just were. It is wrong here. A shift-click has to leave the anchor
+        // where it was, or every range pivots on its own far end and the
+        // selection can only ever grow: ctrl-click 3, shift-click 5, then
+        // shift-click 1 gave 1..5 instead of 1..3, so there was no way to make
+        // a range smaller than the largest one you had reached.
+        var anchor = _checkedSelectionAnchorId;
         SelectedClip = clip;
+        _checkedSelectionAnchorId = anchor;
+
         RaiseBulkSelectionProperties();
     }
 
