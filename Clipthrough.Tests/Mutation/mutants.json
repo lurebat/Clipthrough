@@ -2249,4 +2249,13 @@
     "replace": "        var checkedClips = Clips.Where(static clip => clip.IsChecked || true).ToArray();",
     "filter": "FullyQualifiedName~DeleteWithNothingChecked"
   }
+,
+  {
+    "id": "ctrl-x-reaches-the-read-only-preview-again",
+    "file": "Clipthrough/Controls/RichDocumentView.cs",
+    "why": "VellumText's CutAsync copies before it gates the delete, so Cut on a read-only editor silently behaves as Copy. Letting Ctrl+X through discards whatever the user had on the clipboard and the monitor captures the replacement as a clip they never copied. Removing the Cut context-menu entry does not cover this: the shortcut is a separate path.",
+    "find": "        if (e.Key == Key.X && e.KeyModifiers.HasFlag(KeyModifiers.Control))",
+    "replace": "        if (e.Key == Key.X && e.KeyModifiers.HasFlag(KeyModifiers.Alt))",
+    "filter": "FullyQualifiedName~CtrlXOnTheRenderedPreview"
+  }
 ]

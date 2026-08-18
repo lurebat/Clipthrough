@@ -6,6 +6,9 @@ using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia;
 using Avalonia.Threading;
+using Avalonia.Headless;
+using Avalonia.Input;
+using Avalonia.Input.Platform;
 
 using Clipthrough.Controls;
 using Clipthrough.Localization;
@@ -80,6 +83,71 @@ public sealed class RichDocumentInteractionHeadlessTests
         return (view, window);
     }
 
+    private static async Task<string> ReadClipboardTextAsync(IClipboard clipboard)
+    {
+        using var data = await clipboard.TryGetDataAsync();
+        return data is null ? "<no data>" : await data.TryGetValueAsync(DataFormat.Text) ?? "<no text>";
+    }
+
+    private static async Task WriteClipboardTextAsync(IClipboard clipboard, string text)
+    {
+        var transfer = new DataTransfer();
+        var item = new DataTransferItem();
+        item.Set(DataFormat.Text, text);
+        transfer.Add(item);
+        await clipboard.SetDataAsync(transfer);
+    }
+
+    /// <summary>
+    /// Ctrl+X must not reach the editor, because on a read-only control Cut is
+    /// not a no-op: VellumText copies before it gates the delete, so it silently
+    /// behaves as Copy.
+    /// </summary>
+    /// <remarks>
+    /// Measured before the fix: the clipboard went from the sentinel to the
+    /// preview's own text while the document stayed put. Dropping Cut from the
+    /// context menu had removed the entry but left the shortcut, and in a
+    /// clipboard manager the shortcut is the half that costs something - it
+    /// discards whatever the user was holding and the monitor captures the
+    /// replacement as a clip they never copied.
+    ///
+    /// Asserting the clipboard rather than the document is the point. The
+    /// document is unchanged either way, so any assertion about it passes
+    /// against the bug.
+    /// </remarks>
+    [AvaloniaFact]
+    public async Task CtrlXOnTheRenderedPreview_LeavesTheClipboardAlone()
+    {
+        var (view, window) = await RenderAsync("<p>PREVIEW CONTENTS</p>");
+        try
+        {
+            var editorView = view.Viewer.View;
+            Assert.NotNull(editorView);
+            editorView.SelectAll();
+            Dispatcher.UIThread.RunJobs();
+            Assert.False(string.IsNullOrEmpty(editorView.SelectedText()), "nothing selected, so Cut had nothing to take");
+
+            var clipboard = TopLevel.GetTopLevel(window)!.Clipboard!;
+            await WriteClipboardTextAsync(clipboard, "USER HELD THIS");
+            Assert.Equal("USER HELD THIS", await ReadClipboardTextAsync(clipboard));
+
+            editorView.Focus();
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(editorView.IsKeyboardFocusWithin, "the editor never took focus, so the key never reached it");
+
+            window.KeyPressQwerty(PhysicalKey.X, RawInputModifiers.Control);
+            Dispatcher.UIThread.RunJobs();
+            await Task.Delay(150);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal("USER HELD THIS", await ReadClipboardTextAsync(clipboard));
+        }
+        finally
+        {
+            window.Close();
+            Dispatcher.UIThread.RunJobs();
+        }
+    }
     [AvaloniaFact]
     public async Task TheRenderedPreviewCanSelectItsText()
     {

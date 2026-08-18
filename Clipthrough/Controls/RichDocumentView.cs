@@ -4,6 +4,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Clipthrough.Localization;
@@ -131,8 +133,14 @@ public sealed class RichDocumentView : UserControl
         // toolbar - bold, lists, colour - and every button on it is inapplicable
         // while IsReadOnly is set, so offering it on selection promises an edit
         // the pane will not accept. VellumText enables it by default and does
-        // not gate it on IsReadOnly; reported upstream, and this line stays
-        // either way because the pane would not want it even when editing lands.
+        // not gate it on IsReadOnly; reported upstream and accepted.
+        //
+        // Keep this line after that lands, and note it will look redundant then:
+        // the fix makes IsReadOnly alone enough, so the flag reads as belt and
+        // braces right up until someone makes this pane editable for 1.0. At
+        // that moment IsReadOnly goes away and this line is the only thing still
+        // holding the bar back - and a preview pane does not want a formatting
+        // bar even when it can be edited. Dropping it is what turns it back on.
         _viewer = new RichTextEditor
         {
             IsReadOnly = true,
@@ -142,6 +150,7 @@ public sealed class RichDocumentView : UserControl
         };
 
         _viewer.ContextMenu = BuildReadOnlyContextMenu(_viewer);
+        _viewer.AddHandler(KeyDownEvent, OnViewerKeyDown, RoutingStrategies.Tunnel);
 
         _emptyState = new TextBlock
         {
@@ -175,16 +184,53 @@ public sealed class RichDocumentView : UserControl
     }
 
     /// <summary>
+    /// Swallows Ctrl+X on the preview, which is read-only and has nothing to cut.
+    /// </summary>
+    /// <remarks>
+    /// Dropping Cut from the context menu removed the visible entry but not the
+    /// shortcut, and the shortcut is the half that does damage. VellumText's
+    /// <c>CutAsync</c> copies first and gates only the delete, so on a read-only
+    /// editor Cut silently behaves as Copy: measured here, Ctrl+X on this pane
+    /// replaced the clipboard with the selected preview text while leaving the
+    /// document alone.
+    ///
+    /// That is worse in a clipboard manager than it would be anywhere else. The
+    /// keystroke appears to do nothing, yet it overwrites whatever the user had
+    /// on the clipboard and the monitor then captures the replacement as a new
+    /// clip - so a mis-hit for Ctrl+C both loses the current clipboard and adds
+    /// a clip the user never copied.
+    ///
+    /// Ctrl+C and Ctrl+A are deliberately left alone: they are the two things a
+    /// read-only pane should still do. Paste is inert here (InsertText is gated
+    /// and reads rather than writes the clipboard) so it needs no handling.
+    /// </remarks>
+    private static void OnViewerKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.X && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>
     /// A context menu that offers only what a read-only pane can do.
     /// </summary>
     /// <remarks>
-    /// VellumText's built-in menu includes Cut, which a read-only editor cannot
-    /// perform. The operations themselves are safely gated - CutAsync,
-    /// DeleteSelection and InsertText all leave the document untouched while
-    /// IsReadOnly is set, so nothing here could corrupt a clip - but offering
-    /// them is still wrong: a menu item that does nothing when clicked reads as
-    /// a broken application rather than as a disabled feature. Reported upstream
-    /// as a default that should follow IsReadOnly.
+    /// VellumText's built-in menu offers four things a read-only editor cannot
+    /// do: Cut, Paste, and the whole eight-entry Table submenu whenever the
+    /// caret sits in a table, leaving Copy as the only legitimate entry. The
+    /// operations themselves are safely gated - CutAsync, DeleteSelection and
+    /// InsertText all leave the document untouched while IsReadOnly is set, so
+    /// nothing here could corrupt a clip - but offering them is still wrong: a
+    /// menu item that does nothing when clicked reads as a broken application
+    /// rather than as a disabled feature. Reported upstream and accepted.
+    ///
+    /// Replacing the menu rather than trimming it is not a workaround to undo
+    /// once that is fixed. The built-in menu can only be replaced anyway, since
+    /// it comes from the control template - but more to the point, this pane
+    /// wants a smaller menu than a correctly gated read-only editor would offer,
+    /// and building it here is what kept all four leaks off screen at once
+    /// rather than the one that was noticed.
     /// </remarks>
     private static ContextMenu BuildReadOnlyContextMenu(RichTextEditor editor)
     {
