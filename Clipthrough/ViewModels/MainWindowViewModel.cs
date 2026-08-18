@@ -3262,15 +3262,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var copyAsRichContent = isRich
             && (_contentDisplayMode == ContentDisplayMode.Raw || CanEditSelectedRichTextInRenderedMode);
 
-        // Put on clipboard (suppressed so we don't race our own capture)
-        _clipboardMonitorService.SuppressNext();
+        // Suppressed so we do not race our own capture. Armed inside each
+        // branch, immediately before the write: the gate is one-shot, so
+        // anything that throws between arming and writing hands the skip to
+        // whatever the user copies next. No failure is demonstrated between
+        // these two points today - RenderRichContent is defensive throughout -
+        // but the same ordering was a real bug in TryCopySelectedAsync, and the
+        // cost of getting it wrong is a clip silently missing from history.
         if (copyAsRichContent)
         {
             var renderedText = ClipDisplayFormatter.RenderRichContent(text);
+            _clipboardMonitorService.SuppressNext();
             await _systemInteractionService.CopyRichContentAsync(text, renderedText, SelectedClip.Clip.ContentFormat);
         }
         else
         {
+            _clipboardMonitorService.SuppressNext();
             await _systemInteractionService.CopyTextAsync(text);
         }
 
@@ -3419,14 +3426,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         try
         {
-            _clipboardMonitorService.SuppressNext();
+            // Armed inside each branch, immediately before the write. See
+            // TryCopySelectedAsync: this gate is one-shot, and the catch below
+            // makes a throw between arming and writing especially easy to miss,
+            // because the failure is reported against this copy while the cost
+            // lands on the user's next one.
             if (format == ClipContentFormat.Html)
             {
                 var plain = ClipDisplayFormatter.RenderRichContent(result);
+                _clipboardMonitorService.SuppressNext();
                 await _systemInteractionService.CopyRichContentAsync(result, plain, ClipContentFormat.Html);
             }
             else
             {
+                _clipboardMonitorService.SuppressNext();
                 await _systemInteractionService.CopyTextAsync(result);
             }
 
