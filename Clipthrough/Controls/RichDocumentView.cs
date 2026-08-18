@@ -188,17 +188,26 @@ public sealed class RichDocumentView : UserControl
     /// </summary>
     /// <remarks>
     /// Dropping Cut from the context menu removed the visible entry but not the
-    /// shortcut, and the shortcut is the half that does damage. VellumText's
-    /// <c>CutAsync</c> copies first and gates only the delete, so on a read-only
-    /// editor Cut silently behaves as Copy: measured here, Ctrl+X on this pane
-    /// replaced the clipboard with the selected preview text while leaving the
-    /// document alone.
+    /// shortcut, and the shortcut is the half that does damage. VellumText
+    /// 0.4.1's <c>CutAsync</c> copied first and gated only the delete, so on a
+    /// read-only editor Cut silently behaved as Copy: measured then, Ctrl+X on
+    /// this pane replaced the clipboard with the selected preview text while
+    /// leaving the document alone.
     ///
     /// That is worse in a clipboard manager than it would be anywhere else. The
     /// keystroke appears to do nothing, yet it overwrites whatever the user had
     /// on the clipboard and the monitor then captures the replacement as a new
     /// clip - so a mis-hit for Ctrl+C both loses the current clipboard and adds
     /// a clip the user never copied.
+    ///
+    /// VellumText 0.5.0 moved the guard into <c>CutAsync</c> itself, which
+    /// refuses before it copies, so this handler is now provably redundant: the
+    /// mutant that used to prove it load-bearing SURVIVES against 0.5.0 and was
+    /// removed rather than left reading as coverage. It is kept deliberately,
+    /// not by inertia. It costs four lines, it is the only thing standing
+    /// between a regression in a vendored dependency and a silent clipboard
+    /// overwrite, and the failure it prevents is one the user cannot see
+    /// happening. Do not read its presence as evidence that 0.5.0 needs it.
     ///
     /// Ctrl+C and Ctrl+A are deliberately left alone: they are the two things a
     /// read-only pane should still do. Paste is inert here (InsertText is gated

@@ -2126,8 +2126,7 @@
     "find": "                    case nameof(SettingsViewModel.EnableMaxLibrarySize):\n                    case nameof(SettingsViewModel.MaxLibrarySizeMegabytes):\n                        this.RaisePropertyChanged(nameof(StorageCapacityText));\n                        this.RaisePropertyChanged(nameof(StorageUsagePercent));\n                        break;",
     "replace": "                    case nameof(SettingsViewModel.EnableMaxLibrarySize):\n                    case nameof(SettingsViewModel.MaxLibrarySizeMegabytes):\n                        break;",
     "filter": "FullyQualifiedName~SettingsDraftCapacity"
-  }
-,
+  },
   {
     "id": "settings-section-notification-skips-most-sections",
     "file": "Clipthrough/ViewModels/SettingsViewModel.cs",
@@ -2151,8 +2150,7 @@
     "find": "        return UseFuzzySearch && Services.FuzzyMatcher.SettingsMatch(keywords, filter);",
     "replace": "        return Services.FuzzyMatcher.SettingsMatch(keywords, filter);",
     "filter": "FullyQualifiedName~SettingsSectionFilterTests"
-  }
-,
+  },
   {
     "id": "binding-failures-are-no-longer-routed-to-trace",
     "file": "Clipthrough.Tests/AvaloniaHeadlessSetup.cs",
@@ -2160,8 +2158,7 @@
     "find": ".LogToTrace(LogEventLevel.Warning, LogArea.Binding)",
     "replace": ".LogToTrace(LogEventLevel.Warning, LogArea.Layout)",
     "filter": "FullyQualifiedName~BindingErrorHeadlessTests"
-  }
-,
+  },
   {
     "id": "a-transform-is-dropped-from-the-code-built-menus",
     "file": "Clipthrough/Views/TransformMenuCatalog.cs",
@@ -2177,8 +2174,7 @@
     "find": "        (\"Case\", \"Title Case\", TextTransformation.TitleCase),",
     "replace": "        (\"Case\", \"Capitalise Each Word\", TextTransformation.TitleCase),",
     "filter": "FullyQualifiedName~TransformMenuParityHeadlessTests"
-  }
-,
+  },
   {
     "id": "a-brush-is-defined-for-dark-but-not-light",
     "file": "Clipthrough/Styles/ModernTheme.axaml",
@@ -2186,8 +2182,7 @@
     "find": "    <SolidColorBrush x:Key=\"SurfaceHeroBrush\" Color=\"#FFFFFF\" />\n",
     "replace": "",
     "filter": "FullyQualifiedName~ThemeVariantParityHeadlessTests"
-  }
-,
+  },
   {
     "id": "settings-save-moves-the-database-before-persisting-settings",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
@@ -2195,8 +2190,7 @@
     "find": "            try\n            {\n                // The dialog owns configuration, never session state: the filter\n                // toggles and view modes keep saving while it is open, and its\n                // snapshot of them is already stale. Re-read them under the gate.\n                await _settingsService.UpdateAsync(current => settings.WithSessionStateFrom(current))\n                    .ConfigureAwait(false);\n            }\n            catch (SecretPersistenceException ex)\n            {\n                // Everything else saved; only the credential sidecars failed.\n                // Keep going, but never report an unqualified success below.\n                secretFailure = ex;\n            }\n\n            await _storageOptionsService.SaveAsync(storageOptions).ConfigureAwait(false);",
     "replace": "            await _storageOptionsService.SaveAsync(storageOptions).ConfigureAwait(false);\n            try\n            {\n                await _settingsService.UpdateAsync(current => settings.WithSessionStateFrom(current))\n                    .ConfigureAwait(false);\n            }\n            catch (SecretPersistenceException ex)\n            {\n                secretFailure = ex;\n            }",
     "filter": "FullyQualifiedName~SettingsSavePartialFailureHeadlessTests"
-  }
-,
+  },
   {
     "id": "a-selection-property-stops-being-announced",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
@@ -2204,8 +2198,7 @@
     "find": "        this.RaisePropertyChanged(nameof(SelectedClipCapturedAtText));\n",
     "replace": "",
     "filter": "FullyQualifiedName~SelectionNotificationHeadlessTests"
-  }
-,
+  },
   {
     "id": "the-selected-clip-age-chip-stops-being-announced",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
@@ -2213,8 +2206,7 @@
     "find": "        this.RaisePropertyChanged(nameof(SelectedClipAgeChipBackground));\n",
     "replace": "",
     "filter": "FullyQualifiedName~SelectionNotificationHeadlessTests"
-  }
-,
+  },
   {
     "id": "shift-click-drags-the-selection-anchor-with-it",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
@@ -2222,8 +2214,7 @@
     "find": "        var anchor = _checkedSelectionAnchorId;\n        SelectedClip = clip;\n        _checkedSelectionAnchorId = anchor;",
     "replace": "        SelectedClip = clip;",
     "filter": "FullyQualifiedName~ClipRangeSelectionHeadlessTests"
-  }
-,
+  },
   {
     "id": "search-history-walks-toward-the-newest-instead-of-away",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
@@ -2231,8 +2222,7 @@
     "find": "            var next = _recentSearchNavigationIndex + (goingBack ? 1 : -1);",
     "replace": "            var next = _recentSearchNavigationIndex + (goingBack ? -1 : 1);",
     "filter": "FullyQualifiedName~SearchHistoryNavigationHeadlessTests"
-  }
-,
+  },
   {
     "id": "deselecting-no-longer-falls-back-to-the-first-clip",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
@@ -2248,17 +2238,7 @@
     "find": "        var checkedClips = Clips.Where(static clip => clip.IsChecked).ToArray();",
     "replace": "        var checkedClips = Clips.Where(static clip => clip.IsChecked || true).ToArray();",
     "filter": "FullyQualifiedName~DeleteWithNothingChecked"
-  }
-,
-  {
-    "id": "ctrl-x-reaches-the-read-only-preview-again",
-    "file": "Clipthrough/Controls/RichDocumentView.cs",
-    "why": "VellumText's CutAsync copies before it gates the delete, so Cut on a read-only editor silently behaves as Copy. Letting Ctrl+X through discards whatever the user had on the clipboard and the monitor captures the replacement as a clip they never copied. Removing the Cut context-menu entry does not cover this: the shortcut is a separate path.",
-    "find": "        if (e.Key == Key.X && e.KeyModifiers.HasFlag(KeyModifiers.Control))",
-    "replace": "        if (e.Key == Key.X && e.KeyModifiers.HasFlag(KeyModifiers.Alt))",
-    "filter": "FullyQualifiedName~CtrlXOnTheRenderedPreview"
-  }
-,
+  },
   {
     "id": "search-hotkeys-ignore-the-physical-key-fallback",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
@@ -2274,8 +2254,7 @@
     "find": "            || (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Meta)) != gesture.KeyModifiers)",
     "replace": "            || (e.KeyModifiers & gesture.KeyModifiers) != gesture.KeyModifiers)",
     "filter": "FullyQualifiedName~SearchToggleHotkey"
-  }
-,
+  },
   {
     "id": "a-failed-copy-leaves-the-capture-gate-armed",
     "why": "The suppression gate is one-shot. Arming it before the work that can fail - TryLoadImage returns null for any image over MaxClipSizeBytes - leaves the arm pending when the copy throws, and the next thing the user copies for real is silently missing from their history. The cost lands on the following copy, so it does not look related to the copy that failed.",
@@ -2283,8 +2262,7 @@
     "find": "                _clipboardMonitorService.SuppressNext();\n                await _systemInteractionService.CopyBitmapAsync(bitmap);",
     "replace": "                await _systemInteractionService.CopyBitmapAsync(bitmap);",
     "filter": "FullyQualifiedName~ACopyThatFails"
-  }
-,
+  },
   {
     "id": "copy-arms-the-capture-gate-before-the-work-that-can-fail",
     "why": "The original ordering: arm once up front, then decode. A decode that fails leaves the arm pending and the user's next real copy is dropped from their history. Restoring it must fail the test, or the fix is not defended.",

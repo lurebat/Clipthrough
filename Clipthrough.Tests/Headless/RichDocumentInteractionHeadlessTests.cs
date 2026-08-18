@@ -164,15 +164,21 @@ public sealed class RichDocumentInteractionHeadlessTests
     /// aimed at one key would have left the bug reachable by another. Measured:
     /// it binds neither, so the single gate is complete today.
     ///
-    /// Since confirmed from the other side. VellumText 0.4.1's input switch has
-    /// no <c>Key.Insert</c> arm at all, and its <c>Key.Delete</c> arm carries no
-    /// modifier guard, so Shift+Delete falls into a plain delete that the
+    /// Since confirmed from the other side. VellumText 0.4.1's input switch had
+    /// no <c>Key.Insert</c> arm at all, and its <c>Key.Delete</c> arm carried no
+    /// modifier guard, so Shift+Delete fell into a plain delete that the
     /// read-only gate already refuses rather than into a cut. Recorded because
     /// otherwise the next reader has to re-derive it, and the measurement alone
     /// cannot distinguish "not bound" from "bound but harmless".
     ///
-    /// The value of this test is the day that changes. It is a tripwire for
-    /// moving off 0.4.1 - a release that binds a Cut synonym, or routes Delete
+    /// On 0.5.0 the guarantee moved upstream: CutAsync now refuses before it
+    /// copies, so this holds whether or not our own Ctrl+X handler is present.
+    /// That is why it survived the upgrade unchanged while the mutant defending
+    /// that handler did not - the property still matters, but our code is no
+    /// longer what provides it.
+    ///
+    /// The value of this test is the day that changes. It is a tripwire for the
+    /// next upgrade - a release that binds a Cut synonym, or routes Delete
     /// through a copy, fails here rather than silently restoring a clipboard
     /// write we already paid to find once.
     /// </remarks>
@@ -250,33 +256,31 @@ public sealed class RichDocumentInteractionHeadlessTests
         }
     }
     /// <summary>
-    /// KNOWN DEFECT, not our own, and not fixable here. The preview reports
-    /// itself to assistive technology as an EDITABLE document even though
-    /// IsReadOnly is set.
+    /// A read-only preview must report itself as read-only to assistive
+    /// technology, not merely refuse the edits it is asked to make.
     /// </summary>
     /// <remarks>
-    /// Measured on VellumText 0.4.1, the version vendored under external/:
-    /// RichTextView's automation peer exposes IValueProvider.IsReadOnly = false
-    /// while the editor's own IsReadOnly is true, because the peer derives it
-    /// from SupportsTextInput, which 0.4.1 answers unconditionally.
+    /// VellumText 0.4.1 got this wrong: the automation peer derived
+    /// IValueProvider.IsReadOnly from SupportsTextInput, which was answered
+    /// unconditionally, so a screen reader announced this pane as an editable
+    /// document. The user would type and the edit would be refused in silence -
+    /// the same defect as the selection toolbar, aimed at the one user with no
+    /// way to see that nothing happened. Shipped in every Clipthrough release
+    /// from the adoption of VellumText until 0.5.0.
     ///
-    /// It is the selection-toolbar defect aimed at the one user who cannot see
-    /// that nothing happened: a screen reader announces an editable document,
-    /// the user types, and the edit is silently refused.
+    /// It was not fixable here. The peer belongs to RichTextView, which is
+    /// templated inside RichTextEditor and never constructed by us, and the only
+    /// lever from outside was AccessibilityView=Raw, which hides the pane from
+    /// screen readers altogether - unreadable being worse than mislabelled. So
+    /// this test spent its first life asserting the wrong value on purpose, and
+    /// went red on the 0.5.0 upgrade with the instructions for fixing it in the
+    /// failure message. That is what it was for.
     ///
-    /// There is no local fix. The peer comes from a control we do not
-    /// construct - RichTextView is templated inside RichTextEditor - and the
-    /// only lever from outside is AutomationProperties.AccessibilityView=Raw,
-    /// which would hide the pane from screen readers entirely. Being unable to
-    /// read the preview is worse than being told the wrong thing about it.
-    ///
-    /// So this asserts the WRONG value on purpose, to hold the defect still.
-    /// Upstream has fixed it; when we move off 0.4.1 this test goes red, and
-    /// that red is the good news. Flip both assertions to the correct values,
-    /// delete this remark, and the tripwire becomes an ordinary guarantee.
+    /// It stays as an ordinary guarantee. The property it pins is one no
+    /// sighted test would notice regressing.
     /// </remarks>
     [AvaloniaFact]
-    public async Task ThePreviewStillMisreportsItselfAsEditableToAssistiveTech()
+    public async Task ThePreviewReportsItselfAsReadOnlyToAssistiveTech()
     {
         var (view, window) = await RenderAsync("<p>PREVIEW CONTENTS</p>");
         try
@@ -293,11 +297,9 @@ public sealed class RichDocumentInteractionHeadlessTests
                 documentPeer is not null,
                 "no automation peer exposes IValueProvider any more - the shape of this defect has changed, so re-measure before trusting either branch of it.");
 
-            Assert.False(
+            Assert.True(
                 documentPeer!.IsReadOnly,
-                "GOOD NEWS: the preview now reports itself as read-only to assistive technology. "
-                    + "The VellumText upgrade has fixed it. Change this assertion to Assert.True and "
-                    + "delete the remark above.");
+                "the preview is announcing itself to screen readers as an editable document");
         }
         finally
         {
