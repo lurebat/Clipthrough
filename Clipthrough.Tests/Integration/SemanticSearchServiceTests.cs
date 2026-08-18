@@ -999,6 +999,113 @@ public sealed class SemanticSearchServiceTests
         return result.Items.First(c => c.Content == text).Id;
     }
 
+    /// <summary>
+    /// Top-K has to keep the best K, not the first K it happened to see.
+    /// </summary>
+    /// <remarks>
+    /// The selector is a min-heap: while it fills, each entry sifts up so the
+    /// weakest sits at the root, and every later candidate is compared against
+    /// that weakest one. Skip the sift and the root is whichever entry arrived
+    /// first. If that one happens to be strong, it becomes the bar every later
+    /// candidate is measured against, and genuinely better matches are turned
+    /// away while two weak early entries keep their places.
+    ///
+    /// The whole suite missed this - a full mutation sweep found twenty-two
+    /// tests passing against the broken heap. They missed it because the bug
+    /// needs three things at once that no natural fixture supplies: more
+    /// candidates than K, an arrival order where the first is not the weakest,
+    /// and the strong candidates arriving late. Hash-derived similarity gives
+    /// none of those on purpose, so this builds vectors at chosen angles to the
+    /// query instead.
+    /// </remarks>
+    [Fact]
+    public async Task QueryAsync_KeepsTheBestMatchesEvenWhenAStrongOneArrivesFirst()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        const string query = "the query text";
+        var emb = new DeterministicEmbeddingService(dims: 8);
+        var queryVector = emb.VectorFor(query);
+
+        // Similarities in arrival order. The first is the strongest, so a heap
+        // that never sifts leaves it at the root and rejects everything below
+        // it - which is every remaining candidate.
+        var similarities = new[] { 0.95f, 0.10f, 0.11f, 0.80f, 0.70f, 0.60f };
+
+        var ids = new List<long>();
+        for (var i = 0; i < similarities.Length; i++)
+        {
+            var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = $"candidate {i}",
+                ContentBytes = Encoding.UTF8.GetBytes($"candidate {i}"),
+                IncrementExistingCopyCount = true,
+            });
+            ids.Add(clip!.Id);
+        }
+
+        var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
+        await scope.ClipStoreService.SaveEmbeddingBatchAsync(
+            [.. ids.Select((id, i) => new ClipEmbeddingRecord(id, AtSimilarity(queryVector, similarities[i])))],
+            "test");
+        await semantic.RefreshCacheAsync();
+        Assert.Equal(similarities.Length, semantic.CachedCount);
+
+        var hits = await semantic.QueryAsync(query, topK: 3);
+
+        // The three strongest, in order: 0.95, 0.80, 0.70.
+        Assert.Equal(new[] { ids[0], ids[3], ids[4] }, hits.Select(h => h.ClipId).ToArray());
+
+        // And explicitly not the two weak ones that arrived early, which is what
+        // a heap that never sifted would have returned alongside the first.
+        Assert.DoesNotContain(ids[1], hits.Select(h => h.ClipId));
+        Assert.DoesNotContain(ids[2], hits.Select(h => h.ClipId));
+    }
+
+    /// <summary>
+    /// A unit vector whose cosine similarity to <paramref name="target"/> is
+    /// <paramref name="similarity"/>, built by blending the target with a
+    /// direction orthogonal to it.
+    /// </summary>
+    private static float[] AtSimilarity(float[] target, float similarity)
+    {
+        var orthogonal = new float[target.Length];
+        orthogonal[0] = -target[1];
+        orthogonal[1] = target[0];
+
+        // Remove any residual component along the target, then normalise.
+        var dot = 0f;
+        for (var i = 0; i < target.Length; i++)
+        {
+            dot += orthogonal[i] * target[i];
+        }
+
+        var norm = 0f;
+        for (var i = 0; i < target.Length; i++)
+        {
+            orthogonal[i] -= dot * target[i];
+            norm += orthogonal[i] * orthogonal[i];
+        }
+
+        norm = (float)Math.Sqrt(norm);
+        for (var i = 0; i < target.Length; i++)
+        {
+            orthogonal[i] /= norm;
+        }
+
+        var perpendicular = (float)Math.Sqrt(1f - (similarity * similarity));
+        var result = new float[target.Length];
+        for (var i = 0; i < target.Length; i++)
+        {
+            result[i] = (similarity * target[i]) + (perpendicular * orthogonal[i]);
+        }
+
+        return result;
+    }
     private static async Task WaitForBatchAsync(EmbeddingWorker worker)
     {
         var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);

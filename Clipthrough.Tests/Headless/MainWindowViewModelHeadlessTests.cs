@@ -1530,13 +1530,32 @@ public sealed class MainWindowViewModelHeadlessTests
         viewModel.StartBackgroundServices();
         Assert.True(worker.IsRunning);
 
-        scope.SettingsService.SetCurrent(scope.SettingsService.Current with { EnableSemanticSearch = false });
-        scope.SettingsService.SetCurrent(scope.SettingsService.Current with { EnableSemanticSearch = true });
-        await viewModel.SemanticWorkerTransition;
+        // Repeated, and settled before asserting. Awaiting the transition is only
+        // conclusive because the transitions are chained: the last task cannot
+        // complete until the previous one has. Run them unchained and both are in
+        // flight at once, so awaiting the last says nothing about the other, and
+        // whether the stop lands after the start is left to the scheduler. One
+        // pass therefore agrees with a broken implementation about half the time,
+        // which is how this stayed green against exactly that.
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            var stopsBefore = worker.StopCount;
 
-        Assert.True(worker.IsRunning);
-        Assert.Equal(1, worker.StopCount);
-        Assert.Equal(2, worker.StartCount);
+            scope.SettingsService.SetCurrent(scope.SettingsService.Current with { EnableSemanticSearch = false });
+            scope.SettingsService.SetCurrent(scope.SettingsService.Current with { EnableSemanticSearch = true });
+            await viewModel.SemanticWorkerTransition;
+
+            // Give anything still pending room to land on top of the result.
+            await Task.Delay(80);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.True(
+                worker.IsRunning,
+                $"attempt {attempt}: the worker is stopped while semantic search is on, so a pending stop overtook the start");
+            Assert.Equal(stopsBefore + 1, worker.StopCount);
+        }
+
+        Assert.Equal(11, worker.StartCount);
     }
 
     // A7: startup is a long chain of awaits and nothing cancels it, so quitting

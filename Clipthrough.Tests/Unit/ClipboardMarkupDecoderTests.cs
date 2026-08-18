@@ -51,18 +51,44 @@ public sealed class ClipboardMarkupDecoderTests
         Assert.Equal(fragment, extracted);
     }
 
+    /// <summary>
+    /// The offsets, and only the offsets, across a surrogate pair.
+    /// </summary>
+    /// <remarks>
+    /// This test used to carry <c>&lt;!--StartFragment--&gt;</c> comments in its
+    /// document, which made it prove nothing: the decoder prefers the comments
+    /// over the header offsets, so the byte arithmetic this exists to guard was
+    /// never reached. It passed identically with the surrogate width counted as
+    /// 4 bytes or as 2. A full mutation sweep is what found that; twelve tests
+    /// in this file passed against the broken arithmetic.
+    ///
+    /// So the fixture now omits the comments, which is the only way to force the
+    /// offset path, and the second assertion pins that miscounting would have
+    /// been visible - without it the fixture could drift back to one where both
+    /// readings agree and the test would go quiet again.
+    /// </remarks>
     [Fact]
     public void ExtractHtmlFragment_HonoursByteOffsetsAcrossSurrogatePairs()
     {
-        // U+1F600 is a surrogate pair: 2 chars, 4 UTF-8 bytes.
+        // U+1F600 is a surrogate pair: 2 chars, 4 UTF-8 bytes. Two of them put
+        // the fragment 4 bytes further along than a char count would suggest.
         const string prefix = "<p>\U0001F600\U0001F600</p>";
         const string fragment = "<p>Fragment</p>";
-        const string document = "<html><body>" + prefix + "<!--StartFragment-->" + fragment + "<!--EndFragment--></body></html>";
+        const string document = "<html><body>" + prefix + fragment + "</body></html>";
         var html = CreateClipboardHtml(document, fragment);
+
+        Assert.DoesNotContain("StartFragment--", html, StringComparison.Ordinal);
 
         var extracted = ClipboardMarkupDecoder.ExtractHtmlFragment(html);
 
         Assert.Equal(fragment, extracted);
+
+        // Counting each pair as 2 bytes rather than 4 lands 4 bytes early, which
+        // has to produce something other than the fragment or the assertion
+        // above would hold either way.
+        var charIndexOfFragment = document.IndexOf(fragment, StringComparison.Ordinal);
+        var whatMiscountingWouldSee = document.Substring(charIndexOfFragment - 2, fragment.Length);
+        Assert.NotEqual(fragment, whatMiscountingWouldSee);
     }
 
     [Fact]
