@@ -5485,162 +5485,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var previousAutoOcr = _settingsService.Current.AutoOcrImageClips;
         var previousOcrLanguages = (_settingsService.Current.OcrLanguages ?? string.Empty).Trim();
 
-        var localHotkeys = new[]
+        if (!SettingsDraftValidator.TryValidate(Settings, out var validated, out var validationError))
         {
-            new HotkeyDraft(nameof(AppSettings.ToggleRegexHotkey), Settings.EnableToggleRegexHotkey, Settings.ToggleRegexHotkey),
-            new HotkeyDraft(nameof(AppSettings.ToggleFavoritesHotkey), Settings.EnableToggleFavoritesHotkey, Settings.ToggleFavoritesHotkey),
-            new HotkeyDraft(nameof(AppSettings.ToggleSensitiveHotkey), Settings.EnableToggleSensitiveHotkey, Settings.ToggleSensitiveHotkey),
-            new HotkeyDraft(nameof(AppSettings.ToggleCaseSensitiveHotkey), Settings.EnableToggleCaseSensitiveHotkey, Settings.ToggleCaseSensitiveHotkey),
-            new HotkeyDraft(nameof(AppSettings.ToggleWildcardHotkey), Settings.EnableToggleWildcardHotkey, Settings.ToggleWildcardHotkey),
-            new HotkeyDraft(nameof(AppSettings.ToggleWholeWordHotkey), Settings.EnableToggleWholeWordHotkey, Settings.ToggleWholeWordHotkey),
-            new HotkeyDraft(nameof(AppSettings.TogglePastedHotkey), Settings.EnableTogglePastedHotkey, Settings.TogglePastedHotkey),
-            new HotkeyDraft(nameof(AppSettings.ToggleFuzzyHotkey), Settings.EnableToggleFuzzyHotkey, Settings.ToggleFuzzyHotkey),
-            new HotkeyDraft(nameof(AppSettings.ToggleSemanticHotkey), Settings.EnableToggleSemanticHotkey, Settings.ToggleSemanticHotkey),
-        };
-
-        var normalizedHotkeys = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var pair in localHotkeys)
-        {
-            if (!pair.IsEnabled)
-            {
-                normalizedHotkeys[pair.Name] = pair.HotkeyText.Trim();
-                continue;
-            }
-
-            if (!TryParseAvaloniaGesture(pair.HotkeyText, out var gesture) || gesture is null)
-            {
-                StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidHotkeyFallback);
-                return;
-            }
-
-            normalizedHotkeys[pair.Name] = gesture.ToString();
-        }
-
-        var normalizedGlobalHotkey = Settings.ToggleWindowHotkey.Trim();
-        HotkeyGesture? parsedGlobalHotkey = null;
-        string? globalHotkeyError = null;
-        if (Settings.EnableToggleWindowHotkey
-            && (!HotkeyGesture.TryParse(Settings.ToggleWindowHotkey, out parsedGlobalHotkey, out globalHotkeyError) || parsedGlobalHotkey is null))
-        {
-            StatusText = AppText.FormatSettingsValidationError(globalHotkeyError ?? AppText.SettingsInvalidHotkeyFallback);
-            return;
-        }
-        else if (Settings.EnableToggleWindowHotkey)
-        {
-            normalizedGlobalHotkey = parsedGlobalHotkey!.ToString();
-        }
-
-        var normalizedIncrementalHotkey = Settings.IncrementalPasteHotkey.Trim();
-        HotkeyGesture? parsedIncrementalHotkey = null;
-        if (Settings.EnableIncrementalPasteHotkey
-            && (!HotkeyGesture.TryParse(Settings.IncrementalPasteHotkey, out parsedIncrementalHotkey, out var incHotkeyError) || parsedIncrementalHotkey is null))
-        {
-            StatusText = AppText.FormatSettingsValidationError(incHotkeyError ?? AppText.SettingsInvalidHotkeyFallback);
-            return;
-        }
-        else if (Settings.EnableIncrementalPasteHotkey)
-        {
-            normalizedIncrementalHotkey = parsedIncrementalHotkey!.ToString();
-        }
-
-        var normalizedDecrementalHotkey = Settings.DecrementalPasteHotkey.Trim();
-        HotkeyGesture? parsedDecrementalHotkey = null;
-        if (Settings.EnableDecrementalPasteHotkey
-            && (!HotkeyGesture.TryParse(Settings.DecrementalPasteHotkey, out parsedDecrementalHotkey, out var decHotkeyError) || parsedDecrementalHotkey is null))
-        {
-            StatusText = AppText.FormatSettingsValidationError(decHotkeyError ?? AppText.SettingsInvalidHotkeyFallback);
-            return;
-        }
-        else if (Settings.EnableDecrementalPasteHotkey)
-        {
-            normalizedDecrementalHotkey = parsedDecrementalHotkey!.ToString();
-        }
-
-        var extendedHotkeys = new[]
-        {
-            ("copy-and-favorite", Settings.EnableCopyAndFavoriteHotkey, Settings.CopyAndFavoriteHotkey),
-            ("copy-and-sensitive", Settings.EnableCopyAndSensitiveHotkey, Settings.CopyAndSensitiveHotkey),
-            ("copy-without-saving", Settings.EnableCopyWithoutSavingHotkey, Settings.CopyWithoutSavingHotkey),
-            ("paste-and-delete", Settings.EnablePasteAndDeleteHotkey, Settings.PasteAndDeleteHotkey),
-            ("paste-and-favorite", Settings.EnablePasteAndFavoriteHotkey, Settings.PasteAndFavoriteHotkey),
-            ("paste-as-plain-text", Settings.EnablePasteAsPlainTextHotkey, Settings.PasteAsPlainTextHotkey),
-        };
-        var normalizedExtended = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var (id, enabled, raw) in extendedHotkeys)
-        {
-            var norm = (raw ?? string.Empty).Trim();
-            if (enabled)
-            {
-                if (!HotkeyGesture.TryParse(norm, out var parsed, out var err) || parsed is null)
-                {
-                    StatusText = AppText.FormatSettingsValidationError(err ?? AppText.SettingsInvalidHotkeyFallback);
-                    return;
-                }
-                norm = parsed.ToString();
-            }
-            normalizedExtended[id] = norm;
-        }
-
-        var duplicates = localHotkeys
-            .Where(static draft => draft.IsEnabled)
-            .Select(draft => normalizedHotkeys[draft.Name])
-            .Append(Settings.EnableToggleWindowHotkey ? normalizedGlobalHotkey : string.Empty)
-            .Append(Settings.EnableIncrementalPasteHotkey ? normalizedIncrementalHotkey : string.Empty)
-            .Append(Settings.EnableDecrementalPasteHotkey ? normalizedDecrementalHotkey : string.Empty)
-            .Concat(extendedHotkeys.Where(h => h.Item2).Select(h => normalizedExtended[h.Item1]))
-            .Where(static value => !string.IsNullOrWhiteSpace(value))
-            .GroupBy(static value => value, StringComparer.OrdinalIgnoreCase)
-            .FirstOrDefault(static group => group.Count() > 1);
-        if (duplicates is not null)
-        {
-            StatusText = AppText.FormatSettingsValidationError(AppText.FormatDuplicateHotkey(duplicates.Key));
+            StatusText = validationError!;
             return;
         }
 
-        // The window's own handlers run before TryHandleShortcut, so a filter
-        // hotkey that matches one of them never fires while that built-in
-        // applies - and for the clip-list built-ins that is the window's normal
-        // focus state. Refuse the assignment rather than let the user configure
-        // a shortcut that silently does nothing.
-        foreach (var draft in localHotkeys.Where(static draft => draft.IsEnabled))
-        {
-            var normalized = normalizedHotkeys[draft.Name];
-            if (BuiltInShortcuts.DescribeCollision(normalized) is { } builtIn)
-            {
-                StatusText = AppText.FormatSettingsValidationError(AppText.FormatHotkeyReservedByBuiltIn(normalized, builtIn));
-                return;
-            }
-        }
-
-        if (!TryParseMaxClipSizeBytes(Settings.MaxClipSizeKilobytes, out var maxClipSizeBytes))
-        {
-            StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidClipSize);
-            return;
-        }
-
-        if (!TryParseOptionalPositiveInt(Settings.EnableNormalClipLifetime, Settings.NormalClipLifetimeDays, AppSettings.MinNormalClipLifetimeDays, AppSettings.MaxNormalClipLifetimeDays, out var normalClipLifetimeDays))
-        {
-            StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidNormalLifetime);
-            return;
-        }
-
-        if (!TryParseOptionalPositiveInt(Settings.EnableSensitiveClipLifetime, Settings.SensitiveClipLifetimeMinutes, AppSettings.MinSensitiveClipLifetimeMinutes, AppSettings.MaxSensitiveClipLifetimeMinutes, out var sensitiveClipLifetimeMinutes))
-        {
-            StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidSensitiveLifetime);
-            return;
-        }
-
-        if (!TryParseOptionalPositiveInt(Settings.EnableMaxLibrarySize, Settings.MaxLibrarySizeMegabytes, AppSettings.MinMaxLibrarySizeMegabytes, AppSettings.MaxMaxLibrarySizeMegabytes, out var maxLibrarySizeMegabytes))
-        {
-            StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidMaxLibrarySize);
-            return;
-        }
-
-        if (!TryParseOptionalPositiveInt(Settings.EnableMaxEntryCount, Settings.MaxEntryCount, AppSettings.MinMaxEntryCount, AppSettings.MaxMaxEntryCount, out var maxEntryCount))
-        {
-            StatusText = AppText.FormatSettingsValidationError(AppText.SettingsInvalidMaxEntryCount);
-            return;
-        }
+        var normalizedHotkeys = validated!.LocalHotkeys;
+        var normalizedGlobalHotkey = validated.GlobalHotkey;
+        var normalizedIncrementalHotkey = validated.IncrementalPasteHotkey;
+        var normalizedDecrementalHotkey = validated.DecrementalPasteHotkey;
+        var normalizedExtended = validated.ExtendedHotkeys;
+        var maxClipSizeBytes = validated.MaxClipSizeBytes;
+        var normalClipLifetimeDays = validated.NormalClipLifetimeDays;
+        var sensitiveClipLifetimeMinutes = validated.SensitiveClipLifetimeMinutes;
+        var maxLibrarySizeMegabytes = validated.MaxLibrarySizeMegabytes;
+        var maxEntryCount = validated.MaxEntryCount;
 
         if (!string.IsNullOrEmpty(SettingsDatabasePassword)
             && !string.Equals(SettingsDatabasePassword, SettingsDatabasePasswordConfirm, StringComparison.Ordinal))
@@ -6603,19 +6463,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _subscriptions.Add(maintenanceSubscription);
     }
 
-    private static bool TryParseOptionalPositiveInt(bool isEnabled, string? value, int min, int max, out int parsed)
-    {
-        parsed = min;
-        if (!isEnabled)
-        {
-            return true;
-        }
-
-        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed)
-               && parsed >= min
-               && parsed <= max;
-    }
-
     private static int ParseIntOrDefault(string? value, int fallback)
         => int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : fallback;
 
@@ -6651,30 +6498,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return Math.Clamp(current / max * 100d, 0d, 100d);
     }
 
-    private static bool TryParseMaxClipSizeBytes(string? value, out int maxClipSizeBytes)
-    {
-        maxClipSizeBytes = 0;
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        var normalized = value.Trim();
-        if (!double.TryParse(normalized, NumberStyles.Float, CultureInfo.InvariantCulture, out var kilobytes)
-            && !double.TryParse(normalized, NumberStyles.Float, CultureInfo.CurrentCulture, out kilobytes))
-        {
-            return false;
-        }
-
-        var bytes = (int)Math.Round(kilobytes * 1024d, MidpointRounding.AwayFromZero);
-        if (bytes < AppSettings.MinMaxClipSizeBytes || bytes > AppSettings.MaxMaxClipSizeBytes)
-        {
-            return false;
-        }
-
-        maxClipSizeBytes = bytes;
-        return true;
-    }
 
     private static bool TryParseAvaloniaGesture(string? value, out KeyGesture? gesture)
     {
@@ -7403,8 +7226,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _backgroundOcrQueue.Enqueue(clip.Id);
         }
     }
-
-    private readonly record struct HotkeyDraft(string Name, bool IsEnabled, string HotkeyText);
 
     private readonly record struct RefreshRequest(ClipSearchFilters Filters, bool UseSemanticClipSearch);
 
