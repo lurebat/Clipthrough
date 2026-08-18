@@ -1515,17 +1515,32 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             && _contentDisplayMode is ContentDisplayMode.Textual or ContentDisplayMode.Raw);
 
     /// <summary>
-    /// Rendered rich text is read-only. It was editable while it rendered in a WebView,
-    /// through <c>contenteditable</c> with edits posted back over a message channel; the
-    /// native renderer that replaced it shows a document rather than hosting an editor.
+    /// Rendered rich text is read-only. The pane is a real editor and is fully
+    /// interactive - selection, caret, copy, find, context menu - but editing
+    /// itself is still switched off.
     /// </summary>
     /// <remarks>
-    /// This is a deliberate, temporary loss of WYSIWYG editing for HTML clips, taken to
-    /// close a privacy defect: the WebView fetched remote images, styles and fonts named
-    /// by the clip, so previewing an HTML clip told its sender when you looked at it (see
-    /// <see cref="Controls.RichDocumentView"/>). Editing HTML is still available through
-    /// the Textual and Raw panes, which are unchanged, and WYSIWYG editing returns once
-    /// the native editor is wired up.
+    /// The WebView made this editable through <c>contenteditable</c> with edits
+    /// posted back over a message channel. It was given up to close a privacy
+    /// defect: the WebView fetched remote images, styles and fonts named by the
+    /// clip, so previewing an HTML clip told its sender when you looked at it
+    /// (see <see cref="Controls.RichDocumentView"/>).
+    ///
+    /// What remains is not the renderer. <c>RichTextEditor</c> is wired up and
+    /// <c>HtmlFormat.Export</c> turns a document back into markup, so the
+    /// mechanics are a flag and a call. The open question is what an edit to a
+    /// rich clip should put in <see cref="EditedClipText"/>, which is a string
+    /// and today holds plain text. Holding markup there instead would change
+    /// what every transform in the Edit menu operates on, and that is a product
+    /// decision rather than a wiring one.
+    ///
+    /// Persistence is not the obstacle it was once thought to be: an edit is
+    /// already captured as a new clip rather than written over the original
+    /// (see <c>CommitEditedClipOnSelectionChangeAsync</c>), so nothing here
+    /// risks the captured payload.
+    ///
+    /// Editing HTML meanwhile remains available through the Textual and Raw
+    /// panes, which are unchanged.
     /// </remarks>
     public bool CanEditSelectedRichTextInRenderedMode => false;
 
