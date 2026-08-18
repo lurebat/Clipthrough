@@ -204,6 +204,8 @@ public static class AppText
         [nameof(NoCapturesYetLower)] = "no captures yet",
         [nameof(SelectClipTypeFallback)] = "Clip",
         [nameof(SelectClipTitleFallback)] = "Select a clip",
+        [nameof(PreviewCopySelection)] = "Copy",
+        [nameof(PreviewSelectAll)] = "Select all",
         [nameof(PreviewSelectContent)] = "Select a clip to preview its content.",
         [nameof(PreviewSelectRawContent)] = "Select a clip to preview its full content.",
         [nameof(PreviewSelectImage)] = "Select an image clip to preview it.",
@@ -535,6 +537,8 @@ public static class AppText
     public static string NoCapturesYetLower => Text(nameof(NoCapturesYetLower));
     public static string SelectClipTypeFallback => Text(nameof(SelectClipTypeFallback));
     public static string SelectClipTitleFallback => Text(nameof(SelectClipTitleFallback));
+    public static string PreviewCopySelection => Text(nameof(PreviewCopySelection));
+    public static string PreviewSelectAll => Text(nameof(PreviewSelectAll));
     public static string PreviewSelectContent => Text(nameof(PreviewSelectContent));
     public static string PreviewSelectRawContent => Text(nameof(PreviewSelectRawContent));
     public static string PreviewSelectImage => Text(nameof(PreviewSelectImage));

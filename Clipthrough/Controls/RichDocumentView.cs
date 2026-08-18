@@ -129,6 +129,8 @@ public sealed class RichDocumentView : UserControl
             Margin = new Thickness(12),
         };
 
+        _viewer.ContextMenu = BuildReadOnlyContextMenu(_viewer);
+
         _emptyState = new TextBlock
         {
             Text = AppText.PreviewEmptyRichTextData,
@@ -160,6 +162,37 @@ public sealed class RichDocumentView : UserControl
         this.GetObservable(ContentFormatProperty).Subscribe(_ => StartRender());
     }
 
+    /// <summary>
+    /// A context menu that offers only what a read-only pane can do.
+    /// </summary>
+    /// <remarks>
+    /// VellumText's built-in menu includes Cut, which a read-only editor cannot
+    /// perform. The operations themselves are safely gated - CutAsync,
+    /// DeleteSelection and InsertText all leave the document untouched while
+    /// IsReadOnly is set, so nothing here could corrupt a clip - but offering
+    /// them is still wrong: a menu item that does nothing when clicked reads as
+    /// a broken application rather than as a disabled feature. Reported upstream
+    /// as a default that should follow IsReadOnly.
+    /// </remarks>
+    private static ContextMenu BuildReadOnlyContextMenu(RichTextEditor editor)
+    {
+        var copy = new MenuItem { Header = AppText.PreviewCopySelection };
+        copy.Click += async (_, _) =>
+        {
+            if (editor.View is { } view)
+            {
+                await view.CopyAsync();
+            }
+        };
+
+        var selectAll = new MenuItem { Header = AppText.PreviewSelectAll };
+        selectAll.Click += (_, _) => editor.View?.SelectAll();
+
+        var menu = new ContextMenu();
+        menu.Items.Add(copy);
+        menu.Items.Add(selectAll);
+        return menu;
+    }
     public string? Markup
     {
         get => GetValue(MarkupProperty);

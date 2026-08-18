@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 using Avalonia.Controls;
@@ -6,6 +7,7 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 
 using Clipthrough.Controls;
+using Clipthrough.Localization;
 using Clipthrough.Models;
 
 using Xunit;
@@ -147,6 +149,49 @@ public sealed class RichDocumentInteractionHeadlessTests
             // offer that is unwanted.
             Assert.False(string.IsNullOrEmpty(editorView.SelectedText()));
             Assert.False(view.Viewer.IsSelectionToolbarEnabled);
+        }
+        finally
+        {
+            window.Close();
+            Dispatcher.UIThread.RunJobs();
+        }
+    }
+    /// <summary>
+    /// The context menu offers only what a read-only pane can actually do.
+    /// </summary>
+    /// <remarks>
+    /// VellumText's built-in menu includes Cut. The operation is safely gated -
+    /// CutAsync leaves the document untouched while IsReadOnly is set, verified
+    /// separately - so this is about what is advertised rather than about data
+    /// loss. A menu item that does nothing when clicked reads as a broken
+    /// application. The final assertion is the load-bearing one: it fails if a
+    /// VellumText upgrade reinstates a menu with mutating entries.
+    /// </remarks>
+    [AvaloniaFact]
+    public async Task TheContextMenuOffersNothingTheReadOnlyPaneWouldRefuse()
+    {
+        var (view, window) = await RenderAsync("<p>Hello selectable world</p>");
+        try
+        {
+            var menu = view.Viewer.ContextMenu;
+            Assert.NotNull(menu);
+
+            var headers = new List<string>();
+            foreach (var item in menu!.Items)
+            {
+                if (item is MenuItem menuItem)
+                {
+                    headers.Add(menuItem.Header?.ToString() ?? string.Empty);
+                }
+            }
+
+            Assert.NotEmpty(headers);
+            Assert.Contains(AppText.PreviewCopySelection, headers);
+            Assert.Contains(AppText.PreviewSelectAll, headers);
+
+            Assert.DoesNotContain(headers, h => h.Contains("Cut", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(headers, h => h.Contains("Paste", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(headers, h => h.Contains("Delete", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
