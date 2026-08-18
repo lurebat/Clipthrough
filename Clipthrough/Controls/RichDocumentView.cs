@@ -114,9 +114,17 @@ public sealed class RichDocumentView : UserControl
         // no clipboard, no context menu - so choosing it did not merely defer
         // editing, it removed the ability to select a sentence and copy it,
         // which the WebView it replaced had always allowed.
+        //
+        // The selection toolbar is switched off explicitly. It is a formatting
+        // toolbar - bold, lists, colour - and every button on it is inapplicable
+        // while IsReadOnly is set, so offering it on selection promises an edit
+        // the pane will not accept. VellumText enables it by default and does
+        // not gate it on IsReadOnly; reported upstream, and this line stays
+        // either way because the pane would not want it even when editing lands.
         _viewer = new RichTextEditor
         {
             IsReadOnly = true,
+            IsSelectionToolbarEnabled = false,
             IsVisible = false,
             Margin = new Thickness(12),
         };

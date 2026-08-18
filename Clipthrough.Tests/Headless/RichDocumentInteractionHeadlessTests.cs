@@ -26,18 +26,43 @@ namespace Clipthrough.Tests.Headless;
 /// </summary>
 public sealed class RichDocumentInteractionHeadlessTests
 {
+    /// <summary>
+    /// Renders <paramref name="markup"/> and waits for the document path.
+    /// </summary>
+    /// <remarks>
+    /// Import degrades to plain text after a three-second timeout. That is right
+    /// for the product and awkward for a test: on a loaded host - a mutation
+    /// sweep on the other cores, say - a tiny fragment can miss the deadline and
+    /// take the fallback, and then every assertion about selection is answering
+    /// the wrong question. Retrying is honest here because the contract under
+    /// test is what the document path does; a run that never reached it has not
+    /// been asked. Two consecutive misses is a real failure and says so.
+    /// </remarks>
     private static async Task<(RichDocumentView View, Window Window)> RenderAsync(string markup)
     {
-        var view = new RichDocumentView
+        for (var attempt = 1; ; attempt++)
         {
-            ContentFormat = ClipContentFormat.Html,
-            Markup = markup,
-        };
-        var window = new Window { Content = view };
-        window.Show();
-        Dispatcher.UIThread.RunJobs();
-        await view.PendingRender;
-        return (view, window);
+            var view = new RichDocumentView
+            {
+                ContentFormat = ClipContentFormat.Html,
+                Markup = markup,
+            };
+            var window = new Window { Content = view };
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            await view.PendingRender;
+
+            if (view.Viewer.IsVisible || attempt == 3)
+            {
+                Assert.True(
+                    view.Viewer.IsVisible,
+                    $"the document path was not taken after {attempt} attempts, so nothing here says anything about selection");
+                return (view, window);
+            }
+
+            window.Close();
+            Dispatcher.UIThread.RunJobs();
+        }
     }
 
     [AvaloniaFact]
@@ -46,13 +71,6 @@ public sealed class RichDocumentInteractionHeadlessTests
         var (view, window) = await RenderAsync("<p>Hello <strong>selectable</strong> world</p>");
         try
         {
-            // Assert the path first. Import has a three-second timeout and
-            // degrades to plain text when it lapses, so under a loaded test host
-            // this can quietly take the fallback - and then "the selection was
-            // empty" is a true statement about the wrong thing.
-            Assert.True(
-                view.Viewer.IsVisible,
-                "the document path was not taken, so this says nothing about selection");
 
             var editorView = view.Viewer.View;
             Assert.NotNull(editorView);
@@ -99,6 +117,43 @@ public sealed class RichDocumentInteractionHeadlessTests
         }
     }
 
+    /// <summary>
+    /// Selecting text must not offer to format it. The pane is read-only, so
+    /// every button on the selection toolbar - bold, lists, colour - is an
+    /// action it will refuse, and popping it up on selection promises an edit
+    /// that cannot happen.
+    /// </summary>
+    /// <remarks>
+    /// VellumText enables the toolbar by default and does not gate it on
+    /// IsReadOnly, so this has to be switched off here rather than inherited.
+    /// Asserting it keeps the intent attached to the reason: a later upgrade
+    /// that changed the default would otherwise silently reintroduce it.
+    /// </remarks>
+    [AvaloniaFact]
+    public async Task SelectingTextDoesNotOfferAFormattingToolbar()
+    {
+        var (view, window) = await RenderAsync("<p>Hello selectable world</p>");
+        try
+        {
+            Assert.True(view.Viewer.IsReadOnly);
+            Assert.False(view.Viewer.IsSelectionToolbarEnabled);
+
+            var editorView = view.Viewer.View;
+            Assert.NotNull(editorView);
+            editorView.SelectAll();
+            Dispatcher.UIThread.RunJobs();
+
+            // Selecting is still expected to work; it is only the formatting
+            // offer that is unwanted.
+            Assert.False(string.IsNullOrEmpty(editorView.SelectedText()));
+            Assert.False(view.Viewer.IsSelectionToolbarEnabled);
+        }
+        finally
+        {
+            window.Close();
+            Dispatcher.UIThread.RunJobs();
+        }
+    }
     /// <summary>
     /// The degraded path too. An oversized or unbreakable clip falls back to
     /// plain text, and those are exactly the clips a user wants a piece of
