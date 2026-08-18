@@ -85,9 +85,9 @@ public sealed class RichDocumentView : UserControl
         return longest;
     }
 
-    private readonly RichTextViewer _viewer;
+    private readonly RichTextEditor _viewer;
     private readonly TextBlock _emptyState;
-    private readonly TextBlock _fallbackContent;
+    private readonly SelectableTextBlock _fallbackContent;
 
     // Rendering is asynchronous, so a test that only drained the dispatcher would assert
     // against whatever happened to be there. Exposing the in-flight render lets a test
@@ -96,9 +96,9 @@ public sealed class RichDocumentView : UserControl
 
     internal Task PendingRender => _pendingRender;
 
-    internal RichTextViewer Viewer => _viewer;
+    internal RichTextEditor Viewer => _viewer;
 
-    internal TextBlock FallbackText => _fallbackContent;
+    internal SelectableTextBlock FallbackText => _fallbackContent;
 
     internal TextBlock EmptyState => _emptyState;
 
@@ -109,8 +109,14 @@ public sealed class RichDocumentView : UserControl
 
     public RichDocumentView()
     {
-        _viewer = new RichTextViewer
+        // An editor rather than a viewer, and read-only rather than inert. The
+        // viewer exposes a Document and nothing else - no selection, no caret,
+        // no clipboard, no context menu - so choosing it did not merely defer
+        // editing, it removed the ability to select a sentence and copy it,
+        // which the WebView it replaced had always allowed.
+        _viewer = new RichTextEditor
         {
+            IsReadOnly = true,
             IsVisible = false,
             Margin = new Thickness(12),
         };
@@ -126,7 +132,10 @@ public sealed class RichDocumentView : UserControl
             Margin = new Thickness(20),
         };
 
-        _fallbackContent = new TextBlock
+        // Selectable too: the fallback is what an oversized or unbreakable clip
+        // degrades to, and those are exactly the clips worth copying a piece of
+        // rather than the whole thing.
+        _fallbackContent = new SelectableTextBlock
         {
             IsVisible = false,
             Margin = new Thickness(12),
@@ -213,7 +222,7 @@ public sealed class RichDocumentView : UserControl
             return;
         }
 
-        _viewer.Document = document;
+        _viewer.State = EditorState.Create(document);
         _viewer.IsVisible = true;
         _fallbackContent.IsVisible = false;
         _emptyState.IsVisible = false;
@@ -230,7 +239,7 @@ public sealed class RichDocumentView : UserControl
 
     private void ShowEmpty()
     {
-        _viewer.Document = DocumentNode.Empty;
+        _viewer.State = EditorState.Create(DocumentNode.Empty);
         _viewer.IsVisible = false;
         _fallbackContent.IsVisible = false;
         _emptyState.IsVisible = true;
@@ -238,7 +247,7 @@ public sealed class RichDocumentView : UserControl
 
     private void ShowFallback(string content)
     {
-        _viewer.Document = DocumentNode.Empty;
+        _viewer.State = EditorState.Create(DocumentNode.Empty);
         _viewer.IsVisible = false;
         _fallbackContent.Text = BuildFallbackText(content);
         _fallbackContent.IsVisible = true;

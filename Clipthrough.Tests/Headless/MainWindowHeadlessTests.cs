@@ -83,7 +83,7 @@ public sealed class MainWindowHeadlessTests
         Dispatcher.UIThread.RunJobs();
         await view.PendingRender;
 
-        var text = DocumentText.Of(view.Viewer.Document);
+        var text = DocumentText.Of(view.Viewer.State.Doc);
         Assert.Contains("Hello", text, StringComparison.Ordinal);
         Assert.Contains("headless", text, StringComparison.Ordinal);
     }
@@ -102,7 +102,7 @@ public sealed class MainWindowHeadlessTests
         Dispatcher.UIThread.RunJobs();
         await view.PendingRender;
 
-        Assert.Contains("hello", DocumentText.Of(view.Viewer.Document), StringComparison.Ordinal);
+        Assert.Contains("hello", DocumentText.Of(view.Viewer.State.Doc), StringComparison.Ordinal);
     }
 
     /// <summary>
