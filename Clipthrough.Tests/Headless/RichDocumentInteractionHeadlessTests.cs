@@ -46,6 +46,14 @@ public sealed class RichDocumentInteractionHeadlessTests
         var (view, window) = await RenderAsync("<p>Hello <strong>selectable</strong> world</p>");
         try
         {
+            // Assert the path first. Import has a three-second timeout and
+            // degrades to plain text when it lapses, so under a loaded test host
+            // this can quietly take the fallback - and then "the selection was
+            // empty" is a true statement about the wrong thing.
+            Assert.True(
+                view.Viewer.IsVisible,
+                "the document path was not taken, so this says nothing about selection");
+
             var editorView = view.Viewer.View;
             Assert.NotNull(editorView);
 

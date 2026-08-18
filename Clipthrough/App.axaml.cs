@@ -670,19 +670,18 @@ public partial class App : Application
         if (_clipStoreService is null || _systemInteractionService is null || _clipboardMonitorService is null) return;
         try
         {
-            var target = binding.Target ?? string.Empty;
-            var colon = target.IndexOf(':', StringComparison.Ordinal);
-            if (colon <= 0)
+            var parsed = CustomHotkeyTarget.Parse(binding.Target);
+            if (parsed.Kind == CustomHotkeyKind.Unknown)
             {
-                Trace.TraceWarning($"Custom hotkey '{binding.Gesture}': invalid target format '{target}' (missing ':')");
+                Trace.TraceWarning($"Custom hotkey '{binding.Gesture}': unusable target '{binding.Target}'");
                 return;
             }
-            var kind = target[..colon].Trim().ToLowerInvariant();
-            var name = target[(colon + 1)..].Trim();
 
-            // The "aiprompt:" target just opens the AI prompt dialog. It does not
-            // need a recent clip and does not produce text to paste.
-            if (kind == "aiprompt")
+            var name = parsed.Value;
+
+            // The AI prompt dialog needs no clip and produces nothing to paste,
+            // so it leaves before any of the clip handling below.
+            if (parsed.Kind == CustomHotkeyKind.AiPromptDialog)
             {
                 ExecuteAiPromptHotkey(name);
                 return;
@@ -709,9 +708,9 @@ public partial class App : Application
             string output;
             var isHtmlOutput = false;
 
-            switch (kind)
+            switch (parsed.Kind)
             {
-                case "builtin":
+                case CustomHotkeyKind.BuiltIn:
                     if (!Enum.TryParse<TextTransformation>(name, ignoreCase: true, out var tx) || tx == TextTransformation.None)
                     {
                         Trace.TraceWarning($"Custom hotkey '{binding.Gesture}': unknown builtin transform '{name}'");
@@ -720,7 +719,7 @@ public partial class App : Application
                     output = Clipthrough.Services.TextTransformationService.Apply(tx, input);
                     isHtmlOutput = tx == TextTransformation.BoxTableToHtml;
                     break;
-                case "ai":
+                case CustomHotkeyKind.AiPreset:
                 {
                     if (_aiTransformService is null || !_aiTransformService.IsConfigured) return;
                     var preset = _settingsService?.Current.AiPresets.FirstOrDefault(p =>
@@ -733,7 +732,7 @@ public partial class App : Application
                     output = await _aiTransformService.TransformAsync(preset.Prompt, input);
                     break;
                 }
-                case "prompt":
+                case CustomHotkeyKind.InlinePrompt:
                 {
                     if (_aiTransformService is null || !_aiTransformService.IsConfigured) return;
                     if (string.IsNullOrWhiteSpace(name)) return;
@@ -741,7 +740,7 @@ public partial class App : Application
                     break;
                 }
                 default:
-                    Trace.TraceWarning($"Custom hotkey '{binding.Gesture}': unknown target kind '{kind}'");
+                    Trace.TraceWarning($"Custom hotkey '{binding.Gesture}': unknown target kind '{parsed.Token}'");
                     return;
             }
 
@@ -761,7 +760,7 @@ public partial class App : Application
                 SourceWindowTitle = clip.SourceWindowTitle,
                 IncrementExistingCopyCount = false,
                 SourceClipId = clip.Id,
-                TransformKind = $"{kind}:{name}",
+                TransformKind = $"{parsed.Token}:{name}",
                 SkipPostInsertMaintenance = true,
             }));
 
