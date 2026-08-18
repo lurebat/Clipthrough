@@ -245,9 +245,15 @@ internal sealed class TestClipboardMonitorService : IClipboardMonitorService
         IsRunning = false;
     }
 
-    public void SuppressNext()
-    {
-    }
+    /// <summary>
+    /// Counts arming without consuming, so a test can tell a copy that
+    /// suppressed exactly one capture from one that armed the gate and then
+    /// failed. The real gate is one-shot, so an arm left over is not harmless
+    /// bookkeeping - it eats the next clip the user copies for real.
+    /// </summary>
+    public int PendingSuppressions { get; private set; }
+
+    public void SuppressNext() => PendingSuppressions++;
 
     public void Emit(ClipEntry clip) => _capturedClips.OnNext(clip);
 

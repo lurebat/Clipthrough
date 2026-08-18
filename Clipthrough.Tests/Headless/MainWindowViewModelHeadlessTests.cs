@@ -3065,6 +3065,89 @@ public sealed class MainWindowViewModelHeadlessTests
 
     }
 
+    /// <summary>
+    /// A copy that fails must not leave the capture gate armed.
+    /// </summary>
+    /// <remarks>
+    /// The suppression gate is one-shot: arming it tells the monitor to skip the
+    /// next clipboard change, because that change is the app writing the clip
+    /// the user asked to copy. Arming it and then failing hands that skip to
+    /// whatever the user copies next, which is silently missing from their
+    /// history afterwards.
+    ///
+    /// Reachable without anything exotic: TryLoadImage returns null for an
+    /// image it cannot decode and for any image over MaxClipSizeBytes, which
+    /// defaults to 2 MB - smaller than plenty of real screenshots. The cost
+    /// lands on the *following* copy, so it does not look related to the copy
+    /// that actually failed, which is why it needed a test rather than a bug
+    /// report.
+    ///
+    /// The successful case is asserted alongside deliberately. Without it a fix
+    /// that simply never suppressed would pass, and then every copy the app
+    /// makes would be captured straight back as a duplicate clip.
+    /// </remarks>
+    [AvaloniaFact]
+    public async Task ACopyThatFails_DoesNotSwallowTheNextClipboardCapture()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+
+        scope.SettingsService.SetCurrent(scope.SettingsService.Current with
+        {
+            MaxClipSizeBytes = AppSettings.MinMaxClipSizeBytes,
+        });
+        Assert.Equal(AppSettings.MinMaxClipSizeBytes, scope.SettingsService.Current.MaxClipSizeBytes);
+
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        // Over the size limit rather than undecodable. TryLoadImage checks the
+        // limit *before* decoding, which is what makes this reachable here at
+        // all: the headless platform does not really decode, so garbage bytes
+        // copy "successfully" and prove nothing. Two earlier setups asserted
+        // nothing for that reason - one where the limit was silently clamped
+        // back to the 2 MB default because Normalize rejects anything under
+        // 256, and one that relied on a decode that never happened.
+        viewModel.Clips.Add(new ClipItemViewModel(new ClipEntry
+        {
+            Id = 42,
+            Content = "too large to copy",
+            ContentBytes = new byte[AppSettings.MinMaxClipSizeBytes + 44],
+            ContentType = ContentType.Image,
+            ContentFormat = ClipContentFormat.Bitmap,
+            SourceApp = "Tests",
+            Hash = "hash-undecodable",
+            LastCopiedAt = DateTimeOffset.UtcNow,
+            FirstCopiedAt = DateTimeOffset.UtcNow,
+        }));
+        viewModel.SelectedClip = viewModel.Clips[0];
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.False(await viewModel.TryCopySelectedForPasteAsync());
+        Assert.Equal(0, clipboardMonitor.PendingSuppressions);
+
+        // Control: a copy that succeeds must still arm exactly one, or the app
+        // re-captures everything it writes as a duplicate clip.
+        //
+        // An image, not text. With a text control this test passed against a
+        // mutant that removed the suppression from the image write entirely -
+        // the only difference that mattered was the branch, and the control
+        // exercised the other one.
+        viewModel.Clips.Clear();
+        viewModel.Clips.Add(new ClipItemViewModel(CreateImageClipEntry(
+            CreatePngBytes(unchecked((int)0xFF00FF00)),
+            "small enough to copy")));
+        viewModel.SelectedClip = viewModel.Clips[0];
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(await viewModel.TryCopySelectedForPasteAsync());
+        Assert.Equal(1, clipboardMonitor.PendingSuppressions);
+    }
+
     private static async Task PrepareInitializedScopeAsync(TemporaryDatabaseScope scope)
     {
         scope.SettingsService.SetHasSavedSettings(true);

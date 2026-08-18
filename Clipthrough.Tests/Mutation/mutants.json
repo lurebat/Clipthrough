@@ -2275,4 +2275,22 @@
     "replace": "            || (e.KeyModifiers & gesture.KeyModifiers) != gesture.KeyModifiers)",
     "filter": "FullyQualifiedName~SearchToggleHotkey"
   }
+,
+  {
+    "id": "a-failed-copy-leaves-the-capture-gate-armed",
+    "why": "The suppression gate is one-shot. Arming it before the work that can fail - TryLoadImage returns null for any image over MaxClipSizeBytes - leaves the arm pending when the copy throws, and the next thing the user copies for real is silently missing from their history. The cost lands on the following copy, so it does not look related to the copy that failed.",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "find": "                _clipboardMonitorService.SuppressNext();\n                await _systemInteractionService.CopyBitmapAsync(bitmap);",
+    "replace": "                await _systemInteractionService.CopyBitmapAsync(bitmap);",
+    "filter": "FullyQualifiedName~ACopyThatFails"
+  }
+,
+  {
+    "id": "copy-arms-the-capture-gate-before-the-work-that-can-fail",
+    "why": "The original ordering: arm once up front, then decode. A decode that fails leaves the arm pending and the user's next real copy is dropped from their history. Restoring it must fail the test, or the fix is not defended.",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "find": "            if (clip.Clip.ContentType == ContentType.Image)\n            {\n                using var bitmap = TryLoadImage(clip.Clip, _settingsService.Current.MaxClipSizeBytes);",
+    "replace": "            _clipboardMonitorService.SuppressNext();\n            if (clip.Clip.ContentType == ContentType.Image)\n            {\n                using var bitmap = TryLoadImage(clip.Clip, _settingsService.Current.MaxClipSizeBytes);",
+    "filter": "FullyQualifiedName~ACopyThatFails"
+  }
 ]

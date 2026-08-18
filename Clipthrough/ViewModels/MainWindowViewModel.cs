@@ -2815,8 +2815,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 SelectedClip = clip;
             }
 
-            _clipboardMonitorService.SuppressNext();
-
+            // Armed immediately before each write rather than once up front.
+            // The gate is one-shot: arming it and then failing leaves it armed,
+            // and the next thing the user copies for real is silently dropped
+            // from their history. The image branch can fail after this point -
+            // TryLoadImage returns null for anything over MaxClipSizeBytes, so
+            // a large image clip is enough - and the cost lands on the *next*
+            // copy, which makes it look unrelated to what went wrong.
             if (clip.Clip.ContentType == ContentType.Image)
             {
                 using var bitmap = TryLoadImage(clip.Clip, _settingsService.Current.MaxClipSizeBytes);
@@ -2825,6 +2830,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     throw new InvalidOperationException("The selected image clip could not be decoded for copying.");
                 }
 
+                _clipboardMonitorService.SuppressNext();
                 await _systemInteractionService.CopyBitmapAsync(bitmap);
                 StatusText = AppText.CopiedImageStatus;
                 PublishSensitiveCopyNotificationIfNeeded(clip);
@@ -2834,7 +2840,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             if (clip.Clip.ContentType == ContentType.RichText)
             {
-                await _systemInteractionService.CopyRichContentAsync(clip.FullContent, SelectedClipRenderedText, clip.Clip.ContentFormat);
+                var renderedText = SelectedClipRenderedText;
+                _clipboardMonitorService.SuppressNext();
+                await _systemInteractionService.CopyRichContentAsync(clip.FullContent, renderedText, clip.Clip.ContentFormat);
                 StatusText = AppText.FormatCopiedClip(clip.DisplayContentType.ToLower(AppText.CurrentCulture));
                 PublishSensitiveCopyNotificationIfNeeded(clip);
                 TrackPasteInBackground(clip.Clip.Id);
@@ -2846,6 +2854,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 ? string.Join(Environment.NewLine, SelectedClipFiles.Select(static file => file.FilePath))
                 : clip.FullContent;
 
+            _clipboardMonitorService.SuppressNext();
             await _systemInteractionService.CopyTextAsync(contentToCopy);
             StatusText = isFileList
                 ? AppText.FormatCopiedFileList(SelectedClipFiles.Count)
