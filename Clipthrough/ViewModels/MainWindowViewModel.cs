@@ -4918,6 +4918,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(IsSearchSuggestionsOpen));
     }
 
+    /// <summary>
+    /// Steps through the search history in the box.
+    /// </summary>
+    /// <param name="delta">
+    /// Negative for Up, positive for Down, matching the keys that call it.
+    /// </param>
+    /// <remarks>
+    /// <c>RecentSearches</c> is ordered most-recent-first, so going further back
+    /// in time means moving *up* the index while the key is Down-ward in sign.
+    /// The previous version added <paramref name="delta"/> to the index
+    /// directly, which walked the wrong way and hit a boundary immediately:
+    /// pressing Up gave the newest search and then cleared the box, again and
+    /// again, so an entry in the middle of the history could not be reached at
+    /// all. Only the two extremes were ever selectable.
+    /// </remarks>
     public async Task NavigateSearchHistoryAsync(int delta)
     {
         if (RecentSearches.Count == 0)
@@ -4930,29 +4945,46 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        if (_recentSearchNavigationIndex == 0 && delta < 0)
+        var goingBack = delta < 0;
+
+        if (_recentSearchNavigationIndex < 0)
         {
-            _recentSearchNavigationIndex = -1;
-            await ClearSearchFilterAsync(forceRefresh: true);
-            return;
+            // Nothing selected yet. Up starts at the most recent search; Down
+            // has nowhere newer to go, so it leaves the box alone.
+            if (!goingBack)
+            {
+                return;
+            }
+
+            _recentSearchNavigationIndex = 0;
+        }
+        else
+        {
+            var next = _recentSearchNavigationIndex + (goingBack ? 1 : -1);
+
+            if (next < 0)
+            {
+                // Past the newest entry: back to the empty box the user started
+                // from, which is the only way out of the history from this end.
+                _recentSearchNavigationIndex = -1;
+                await ClearSearchFilterAsync(forceRefresh: true);
+                return;
+            }
+
+            if (next >= RecentSearches.Count)
+            {
+                // Nothing older. Stay put rather than clearing, so holding Up
+                // does not throw away the oldest search once it reaches it.
+                return;
+            }
+
+            _recentSearchNavigationIndex = next;
         }
 
-        if (_recentSearchNavigationIndex == RecentSearches.Count - 1 && delta > 0)
-        {
-            _recentSearchNavigationIndex = -1;
-            await ClearSearchFilterAsync(forceRefresh: true);
-            return;
-        }
-
-        var next = _recentSearchNavigationIndex < 0
-            ? (delta < 0 ? 0 : RecentSearches.Count - 1)
-            : Math.Clamp(_recentSearchNavigationIndex + delta, 0, RecentSearches.Count - 1);
-
-        _recentSearchNavigationIndex = next;
         _isNavigatingSearchHistory = true;
         try
         {
-            SearchText = RecentSearches[next];
+            SearchText = RecentSearches[_recentSearchNavigationIndex];
         }
         finally
         {

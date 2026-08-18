@@ -2223,4 +2223,13 @@
     "replace": "        SelectedClip = clip;",
     "filter": "FullyQualifiedName~ClipRangeSelectionHeadlessTests"
   }
+,
+  {
+    "id": "search-history-walks-toward-the-newest-instead-of-away",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "RecentSearches is ordered most-recent-first, so going further back in time means moving up the index while the key's delta is negative. Adding the delta directly walks the wrong way and hits a boundary on the second press, which made every entry except the two ends unreachable.",
+    "find": "            var next = _recentSearchNavigationIndex + (goingBack ? 1 : -1);",
+    "replace": "            var next = _recentSearchNavigationIndex + (goingBack ? -1 : 1);",
+    "filter": "FullyQualifiedName~SearchHistoryNavigationHeadlessTests"
+  }
 ]
