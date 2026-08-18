@@ -13,6 +13,7 @@
         d:DesignHeight="860"
         x:Class="Clipthrough.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
+        x:CompileBindings="True"
         Icon="/Assets/avalonia-logo.ico"
         Title="{Binding WindowTitle}"
         Width="1360"
@@ -392,37 +393,39 @@
                                                   IsVisible="{Binding #ClipsListBox.DataContext.IsAiMenuVisible}">
                                             <MenuItem.Styles>
                                                 <!--
-                                                    This selector matches the AI
-                                                    menu item as well as the entries
-                                                    it generates, which is why
-                                                    MainWindow.axaml does not set
-                                                    x:CompileBindings while the other
-                                                    windows do. Confirmed with a
-                                                    probe: a Style in a MenuItem's own
-                                                    Styles does match that MenuItem,
-                                                    and a descendant selector does not.
+                                                    Note the scope: a Style in a
+                                                    MenuItem's own Styles matches that
+                                                    MenuItem as well as the entries
+                                                    beneath it, so the AI item also
+                                                    receives this Command and
+                                                    CommandParameter. Header escapes
+                                                    only because the item sets it
+                                                    locally.
 
-                                                    Header is unaffected because the
-                                                    item sets it locally, but Command
-                                                    and CommandParameter are not, so
-                                                    the item is handed a command
-                                                    expecting an AiMenuEntry and a
-                                                    parameter that is the clip. That is
-                                                    harmless today - a wrong-typed
+                                                    Left as it is, having checked
+                                                    rather than assumed what that
+                                                    costs. A wrong-typed
                                                     CommandParameter does not disable a
-                                                    MenuItem, and a submenu parent
-                                                    opens rather than invokes - but
-                                                    compiled bindings would turn the
-                                                    bare {Binding} into a cast and log
-                                                    a failure every time the menu opens.
+                                                    MenuItem, a submenu parent opens
+                                                    rather than invokes, and the bare
+                                                    {Binding} is an identity binding
+                                                    that compiles and evaluates without
+                                                    a cast - so x:CompileBindings on
+                                                    this window neither fails to build
+                                                    nor logs at runtime.
 
-                                                    Narrowing this to the generated
-                                                    entries needs checking in a running
-                                                    app: the entries live in a popup,
-                                                    and the headless platform will not
-                                                    realise a nested submenu, so
-                                                    whether a descendant selector still
-                                                    reaches them cannot be settled here.
+                                                    Narrowing the selector is not the
+                                                    one-word change it looks like:
+                                                    "MenuItem MenuItem" still matches,
+                                                    because this item is itself a
+                                                    descendant of the Transform item.
+                                                    ItemContainerTheme is immune to
+                                                    ancestry and would be the right
+                                                    construct, but the entries only
+                                                    generate inside a nested popup that
+                                                    the headless platform will not
+                                                    realise, so such a change cannot be
+                                                    shown here to keep working.
                                                 -->
                                                 <Style Selector="MenuItem" x:DataType="models:AiMenuEntry">
                                                     <Setter Property="Header" Value="{Binding Label}" />

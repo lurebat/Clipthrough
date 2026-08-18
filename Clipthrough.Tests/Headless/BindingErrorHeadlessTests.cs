@@ -107,8 +107,9 @@ public sealed class BindingErrorHeadlessTests
     /// submenu's generated entries. A nested submenu does not realise under the
     /// headless platform even with the menu open and the entries populated, so
     /// asserting on its children only ever produced an empty collection. The
-    /// style that generates those entries is therefore still uncovered, and is
-    /// the reason MainWindow.axaml does not yet turn x:CompileBindings on.
+    /// style that generates those entries is therefore still uncovered - though
+    /// the AI item itself is realised and styled, which is what lets this test
+    /// speak to the one compiled-binding question that mattered about it.
     /// </summary>
     [AvaloniaFact]
     public void OpeningTheClipContextMenuLogsNoBindingErrors()
