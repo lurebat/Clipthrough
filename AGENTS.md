@@ -136,6 +136,16 @@ of a private field trips CA1823 that way; keep the symbol referenced instead -
 for example, waiting on `Task.CompletedTask` with the timeout the real call no
 longer uses.
 
+This is the single most common way to write a mutant that never runs: the first
+full sweep found **seven** of them, every one CA1823 on the constant the
+mutation deleted the last use of. The reliable idiom is a condition that still
+mentions the constant but always yields the broken value — `SortOrderIndexes.Length > 0 ? "SELECT 1;" : SortOrderIndexes`,
+`RegexMatchTimeout > TimeSpan.Zero ? Regex.InfiniteMatchTimeout : RegexMatchTimeout`,
+`(SqliteCantOpen * 0) + 26`, or `x == C || x != C` for an always-true predicate.
+All seven killed once rewritten, so the tests had been sound the whole time and
+only the mutants were broken — which is exactly why an unrun mutant is worth no
+more than an unrun test. `-ValidateOnly` cannot catch this; only running them can.
+
 These four patterns produced the vacuous tests. Avoid them by construction:
 
 - **Never let the old implementation be the oracle.** An equivalence test that

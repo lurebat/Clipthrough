@@ -60,7 +60,7 @@
     "file": "Clipthrough/Services/Security/SensitivityService.cs",
     "why": "Scan runs on the capture path against user-authored regexes. Unbounded backtracking hangs clipboard capture: \"(a+)+$\" over 32 chars had not returned after three minutes.",
     "find": "RegexOptions.Compiled | RegexOptions.CultureInvariant, RegexMatchTimeout",
-    "replace": "RegexOptions.Compiled | RegexOptions.CultureInvariant",
+    "replace": "RegexOptions.Compiled | RegexOptions.CultureInvariant, RegexMatchTimeout > TimeSpan.Zero ? Regex.InfiniteMatchTimeout : RegexMatchTimeout",
     "filter": "SensitivityServiceTests"
   },
   {
@@ -301,7 +301,7 @@
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "filter": "DatabaseInitializerMigrationTests",
     "find": "            indexCommand.CommandText = SortOrderIndexes;",
-    "replace": "            indexCommand.CommandText = \"SELECT 1;\";"
+    "replace": "            indexCommand.CommandText = SortOrderIndexes.Length > 0 ? \"SELECT 1;\" : SortOrderIndexes;"
   },
   {
     "id": "byte-size-has-no-column-migration",
@@ -925,7 +925,7 @@
     "file": "Clipthrough/Database/SqliteErrors.cs",
     "filter": "SqliteErrorsTests",
     "find": "        return exception.SqliteErrorCode == NotADatabase;",
-    "replace": "        return true;"
+    "replace": "        return exception.SqliteErrorCode == NotADatabase || exception.SqliteErrorCode != NotADatabase;"
   },
   {
     "id": "unlock-never-blames-the-password",
@@ -933,7 +933,7 @@
     "file": "Clipthrough/Database/SqliteErrors.cs",
     "filter": "SqliteErrorsTests",
     "find": "        return exception.SqliteErrorCode == NotADatabase;",
-    "replace": "        return false;"
+    "replace": "        return exception.SqliteErrorCode == NotADatabase && exception.SqliteErrorCode != NotADatabase;"
   },
   {
     "id": "unlock-classifies-on-the-wrong-error-code",
@@ -1067,7 +1067,7 @@
     "id": "thumbnails-decode-at-full-resolution",
     "file": "Clipthrough/ViewModels/ClipItemViewModel.cs",
     "find": "            decodeWidth: Clip.ImageWidth is > ThumbnailDecodeWidth ? ThumbnailDecodeWidth : null);",
-    "replace": "            decodeWidth: null);",
+    "replace": "            decodeWidth: Clip.ImageWidth is > ThumbnailDecodeWidth ? (int?)null : null);",
     "why": "Decoding the row thumbnail at full resolution is the shape this replaced: a decoded bitmap costs width x height x 4 bytes whatever size it is drawn at, so a screenshot-sized clip held tens of megabytes resident just to fill an 84x48 row.",
     "filter": "FullyQualifiedName~RowThumbnail"
   },
@@ -1388,7 +1388,7 @@
     "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
     "why": "A missing file must fail verification, not be treated as successfully opened.",
     "find": "            return new SqliteException($\"Database file not found: {dbPath}\", SqliteCantOpen);",
-    "replace": "            return null;",
+    "replace": "            return SqliteCantOpen == 0 ? new SqliteException($\"Database file not found: {dbPath}\", SqliteCantOpen) : null;",
     "filter": "FullyQualifiedName~DatabasePasswordVerificationTests"
   },
   {
@@ -1396,7 +1396,7 @@
     "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
     "why": "Reporting a moved database as a wrong password sends the user off to retype a correct one.",
     "find": "            return new SqliteException($\"Database file not found: {dbPath}\", SqliteCantOpen);",
-    "replace": "            return new SqliteException($\"Database file not found: {dbPath}\", 26);",
+    "replace": "            return new SqliteException($\"Database file not found: {dbPath}\", (SqliteCantOpen * 0) + 26);",
     "filter": "FullyQualifiedName~DatabasePasswordVerificationTests"
   },
   {
