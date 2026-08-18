@@ -3001,6 +3001,70 @@ public sealed class MainWindowViewModelHeadlessTests
         Dispatcher.UIThread.RunJobs();
     }
 
+    /// <summary>
+    /// Delete has no canExecute gate and no guard of its own, and its targets
+    /// come from GetCheckedOrSelectedClips, whose last fallback is
+    /// Clips.FirstOrDefault(). That reads as "delete with nothing chosen
+    /// destroys the newest clip", but it is not reachable: the SelectedClip
+    /// setter coerces null back to Clips[0] while the list is non-empty, so
+    /// there is always an explicit selection to act on. Both halves are pinned
+    /// because that coercion looks like defensive noise and is the only thing
+    /// standing between this command and a clip the user never pointed at.
+    ///
+    /// Captured through the real store rather than seeded into Clips, because
+    /// the whole point is what survives in the database.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task DeleteWithNothingChecked_TakesOnlyTheSelectedClip()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        await CaptureTextClipAsync(scope.ClipStoreService, "oldest");
+        await CaptureTextClipAsync(scope.ClipStoreService, "middle");
+        var newest = await CaptureTextClipAsync(scope.ClipStoreService, "newest");
+
+        await viewModel.RefreshCommand.Execute().ToTask();
+        await PumpAsync(() => viewModel.Clips.Count == 3);
+        Assert.Equal(3, viewModel.Clips.Count);
+
+        // The state a user is in after a refresh drops their selection, or
+        // before anything has been chosen at all.
+        foreach (var clip in viewModel.Clips)
+        {
+            clip.IsChecked = false;
+        }
+
+        // The setter coerces this back to Clips[0]; that coercion is the thing
+        // under test, so drive it rather than asserting the field.
+        viewModel.SelectedClip = null;
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.NotNull(viewModel.SelectedClip);
+        Assert.Same(viewModel.Clips[0], viewModel.SelectedClip);
+
+        await viewModel.DeleteCheckedClipsCommand.Execute().ToTask();
+        await PumpAsync(() => false, maxAttempts: 4);
+
+        // Exactly the selected clip goes, and the two the user never pointed at
+        // stay. Delete takes its targets from GetCheckedOrSelectedClips, so a
+        // change that made "nothing checked" mean "everything" would land here.
+        var remaining = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        Assert.Equal(2, remaining.TotalMatchingCount);
+        Assert.DoesNotContain(remaining.Items, clip => clip.Id == newest.Id);
+
+        await viewModel.DeleteCheckedClipsCommand.Execute().ToTask();
+        await PumpAsync(() => false, maxAttempts: 4);
+
+    }
+
     private static async Task PrepareInitializedScopeAsync(TemporaryDatabaseScope scope)
     {
         scope.SettingsService.SetHasSavedSettings(true);

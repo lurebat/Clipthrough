@@ -2232,4 +2232,21 @@
     "replace": "            var next = _recentSearchNavigationIndex + (goingBack ? -1 : 1);",
     "filter": "FullyQualifiedName~SearchHistoryNavigationHeadlessTests"
   }
+,
+  {
+    "id": "deselecting-no-longer-falls-back-to-the-first-clip",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "The SelectedClip setter coerces null back to Clips[0] while the list is non-empty. It reads as defensive noise, but roughly fifty SelectedClip? sites and the delete command's target resolution assume a selection exists whenever clips do.",
+    "find": "            if (value is null && Clips.Count > 0)",
+    "replace": "            if (value is null && Clips.Count < 0)",
+    "filter": "FullyQualifiedName~DeleteWithNothingChecked"
+  },
+  {
+    "id": "delete-with-nothing-checked-takes-every-clip",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "GetCheckedOrSelectedClips narrows to the single selected clip when nothing is checked. Treating an empty check set as 'all clips' instead would silently make one Delete destroy the whole visible history.",
+    "find": "        var checkedClips = Clips.Where(static clip => clip.IsChecked).ToArray();",
+    "replace": "        var checkedClips = Clips.Where(static clip => clip.IsChecked || true).ToArray();",
+    "filter": "FullyQualifiedName~DeleteWithNothingChecked"
+  }
 ]
