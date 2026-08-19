@@ -2306,4 +2306,13 @@
     "replace": "        return tokens.Any(static t => t.Length >= 3);",
     "filter": "FullyQualifiedName~ShortTokenSearchTests"
   }
+,
+  {
+    "id": "an-image-clip-never-re-presents-after-hydrating",
+    "why": "Hydration is the only thing that gives an image clip its bytes, and the preview is built before it finishes. Returning false unconditionally means the pane never rebuilds, so a selected image stays blank until something unrelated refreshes it. This is the risk taken by skipping the re-present for clips that did not hydrate.",
+    "file": "Clipthrough/ViewModels/ClipItemViewModel.cs",
+    "find": "        return true;\n    }\n\n    // ContentBytes may be null on metadata-only list reads (U12); test ContentType only so the",
+    "replace": "        return false;\n    }\n\n    // ContentBytes may be null on metadata-only list reads (U12); test ContentType only so the",
+    "filter": "FullyQualifiedName~ClipHydrationTests"
+  }
 ]

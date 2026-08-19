@@ -586,16 +586,27 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     /// when the entry already carries its bytes. The source-app icon has its own,
     /// much cheaper loader - see <see cref="EnsureSourceAppIconAsync"/>.
     /// </summary>
-    public async Task EnsureContentHydratedAsync()
+    /// <summary>
+    /// Loads the full row when this clip needs it, and reports whether anything
+    /// was actually hydrated so callers can skip work that only matters if it was.
+    /// </summary>
+    /// <remarks>
+    /// Only image clips ever need this - list reads omit image blobs (U12) and
+    /// nothing else is withheld - so for text and rich text it returns false
+    /// immediately. The caller in MainWindowViewModel used to rebuild the whole
+    /// preview afterwards regardless, so every selection change rendered the clip
+    /// twice and the second render could not differ from the first.
+    /// </remarks>
+    public async Task<bool> EnsureContentHydratedAsync()
     {
         if (_contentHydrator is null || _contentHydrationStarted || _isDisposed)
         {
-            return;
+            return false;
         }
         var needsImage = Clip.ContentType == ContentType.Image && Clip.ContentBytes is null;
         if (!needsImage)
         {
-            return;
+            return false;
         }
         _contentHydrationStarted = true;
         try
@@ -603,7 +614,7 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
             var full = await _contentHydrator(Clip.Id).ConfigureAwait(false);
             if (full is null || _isDisposed)
             {
-                return;
+                return false;
             }
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
@@ -623,7 +634,10 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         {
             _contentHydrationStarted = false; // allow a later retry
             System.Diagnostics.Trace.TraceWarning($"Clip {Clip.Id} content hydration failed: {ex.Message}");
+            return false;
         }
+
+        return true;
     }
 
     // ContentBytes may be null on metadata-only list reads (U12); test ContentType only so the

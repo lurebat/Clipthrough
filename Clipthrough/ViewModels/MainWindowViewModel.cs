@@ -4550,7 +4550,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             return;
         }
-        await clip.EnsureContentHydratedAsync();
+
+        // Only re-present when the clip actually gained content. Hydration only
+        // ever does anything for images, so for text and rich text this used to
+        // rebuild the whole preview a second time with identical inputs -
+        // BuildRenderedText over the full content again, on every arrow key.
+        if (!await clip.EnsureContentHydratedAsync())
+        {
+            return;
+        }
+
         if (ReferenceEquals(clip, SelectedClip))
         {
             UpdateSelectedClipPresentation();
