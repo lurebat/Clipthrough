@@ -439,6 +439,34 @@ public partial class MainWindow : Window
         var searchBox = GetSearchBox();
         var isSearchFocused = searchBox?.IsKeyboardFocusWithin == true;
 
+        // Ctrl+Up/Down are the explicit jump between the search box and the clip
+        // list. They exist so plain Up/Down can behave the way an autocomplete
+        // is expected to, without the list becoming unreachable while the
+        // dropdown is showing - which is what forced the earlier compromise
+        // below. Claimed before anything else so they work from the box, the
+        // dropdown, and the list alike.
+        //
+        // These shadow a custom hotkey bound to the same chord, because this
+        // handler runs before the configurable ones. Neither is a default and
+        // the tradeoff is deliberate: navigation between the two panes has to
+        // work from a standing start, whatever else is configured.
+        if (modifiers == KeyModifiers.Control && e.Key is Key.Down or Key.Up)
+        {
+            if (e.Key == Key.Up)
+            {
+                FocusSearchBox();
+                return true;
+            }
+
+            if (viewModel.Clips.Count > 0)
+            {
+                viewModel.SelectedClip ??= viewModel.GetDefaultAutoSelectedClip();
+                FocusSelectedClipInList();
+            }
+
+            return true;
+        }
+
         // Keys belonging to the open suggestion dropdown are claimed here rather than on
         // the list itself. The window's key handler is registered to *tunnel*
         // (see the constructor), so it sees every key before the focused control does:
@@ -473,18 +501,21 @@ public partial class MainWindow : Window
             return true;
         }
 
-        // Plain Up from the search box reaches the recent searches: into the suggestion
-        // dropdown while it is showing, and otherwise cycling history straight into the
-        // box as it always has. Up is the right key because it already meant "recent
-        // searches" before the dropdown existed - the dropdown is just the visible form
-        // of what this did blindly.
+        // Plain Up and Down both belong to the suggestion dropdown while it is
+        // showing: Up reaches it from the box, Down walks into it, and inside it
+        // the list moves its own highlight. Up with the dropdown closed still
+        // cycles recent searches straight into the box, which is what Up meant
+        // before the dropdown existed.
         //
-        // Down is deliberately NOT shared with the dropdown. Down belongs to the clip
-        // list, which is the live result of what is being typed, and the dropdown opens
-        // whenever the query substring-matches any past search - which is most of the
-        // time, because people search for similar things repeatedly. Sharing Down made
-        // the common move, looking at the results, unreachable exactly when the query
-        // resembled an old one, and Escape was no way out because it clears the box.
+        // This reverses an earlier decision, so the reasoning is worth keeping.
+        // Down used to skip the dropdown and go to the clip list, because the
+        // dropdown opens whenever the query substring-matches any past search -
+        // which is most of the time - and sharing Down would have made looking
+        // at the results unreachable exactly when the query resembled an old
+        // one. That was a real problem with no good answer while Up and Down
+        // were the only keys available. Ctrl+Down above is the answer: the list
+        // is now always one chord away, so the dropdown can have the plain keys
+        // and behave like every other autocomplete.
         if (isSearchFocused && modifiers == KeyModifiers.None && e.Key == Key.Up)
         {
             if (!viewModel.IsSearchSuggestionsOpen || !FocusSearchSuggestion(0))
@@ -513,9 +544,17 @@ public partial class MainWindow : Window
             return false;
         }
 
-        // Arrow Down from search box: move focus to clip list, select first clip if none selected
+        // Down from the search box: into the suggestion dropdown while it is
+        // showing, and into the clip list when it is not. With the dropdown
+        // closed there is nothing for Down to navigate, so the one-key path into
+        // the results is kept rather than made Ctrl-only.
         if (e.Key == Key.Down && modifiers == KeyModifiers.None && isSearchFocused)
         {
+            if (viewModel.IsSearchSuggestionsOpen && FocusSearchSuggestion(0))
+            {
+                return true;
+            }
+
             if (viewModel.SelectedClip is null)
             {
                 viewModel.SelectedClip = viewModel.GetDefaultAutoSelectedClip();

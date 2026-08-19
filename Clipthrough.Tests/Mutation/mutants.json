@@ -2271,4 +2271,21 @@
     "replace": "            _clipboardMonitorService.SuppressNext();\n            if (clip.Clip.ContentType == ContentType.Image)\n            {\n                using var bitmap = TryLoadImage(clip.Clip, _settingsService.Current.MaxClipSizeBytes);",
     "filter": "FullyQualifiedName~ACopyThatFails"
   }
+,
+  {
+    "id": "down-in-the-search-box-skips-the-open-dropdown",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "Restores the old routing, where Down jumped to the clip list even with the suggestion dropdown showing. Asaf reported that as the dropdown having its keys stolen: the dropdown opens whenever the query matches a past search, so Down was unusable there most of the time.",
+    "find": "            if (viewModel.IsSearchSuggestionsOpen && FocusSearchSuggestion(0))\n            {\n                return true;\n            }\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~SearchSuggestionKeyRouting"
+  },
+  {
+    "id": "ctrl-down-no-longer-reaches-the-clip-list",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "Ctrl+Down is what makes it safe for the plain keys to belong to the dropdown. Without it the clip list is unreachable by keyboard whenever the dropdown is open, which is the trap the old routing existed to avoid.",
+    "find": "        if (modifiers == KeyModifiers.Control && e.Key is Key.Down or Key.Up)",
+    "replace": "        if (modifiers == KeyModifiers.Control && e.Key is Key.F19)",
+    "filter": "FullyQualifiedName~SearchSuggestionKeyRouting"
+  }
 ]

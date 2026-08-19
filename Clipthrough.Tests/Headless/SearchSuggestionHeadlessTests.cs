@@ -82,15 +82,24 @@ public sealed class SearchSuggestionHeadlessTests
     }
 
     /// <summary>
-    /// The reported regression. Down belongs to the clip list, which is the live result
-    /// of what is being typed, and it has to keep working while the dropdown is open -
-    /// which is most of the time, because the dropdown opens whenever the query
-    /// substring-matches a past search. Sharing Down with the dropdown made the common
-    /// move unreachable exactly when the query resembled an old one, and Escape was no
-    /// way out because it clears the box.
+    /// The clip list must stay reachable from the search box while the dropdown
+    /// is open - but by Ctrl+Down now, not plain Down.
     /// </summary>
+    /// <remarks>
+    /// This test previously asserted the opposite key, and the requirement it
+    /// was protecting is unchanged: the dropdown opens whenever the query
+    /// substring-matches a past search, which is most of the time, so a routing
+    /// that left the results unreachable while it was showing would be worse
+    /// than the problem it solved.
+    ///
+    /// What changed is that there is now a second chord. Asaf reported plain
+    /// Down skipping the dropdown as focus-stealing - correctly, since an
+    /// autocomplete that ignores Down is not one - and Ctrl+Down satisfies this
+    /// requirement without the plain keys having to. Kept rather than deleted
+    /// because the requirement is the point, not the key.
+    /// </remarks>
     [AvaloniaFact]
-    public void DownFromTheSearchBox_WithSuggestionsOpen_StillReachesTheClipList()
+    public void CtrlDownFromTheSearchBox_WithSuggestionsOpen_StillReachesTheClipList()
     {
         using var harness = MainWindowTestHarness.Create();
         harness.SeedClips(3);
@@ -98,7 +107,7 @@ public sealed class SearchSuggestionHeadlessTests
 
         Assert.True(harness.ViewModel.IsSearchSuggestionsOpen);
 
-        harness.Window.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, null);
+        harness.Window.KeyPress(Key.Down, RawInputModifiers.Control, PhysicalKey.ArrowDown, null);
         Dispatcher.UIThread.RunJobs();
 
         Assert.True(harness.ClipList.IsKeyboardFocusWithin);
