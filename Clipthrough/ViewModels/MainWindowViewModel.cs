@@ -2663,6 +2663,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// are outside the query's offset space, so <see cref="FtsRowsConsumed"/>
     /// discounts them.
     /// </summary>
+    /// <summary>Last announced value per selection-state property; see <see cref="RaiseIfChanged"/>.</summary>
+    private readonly Dictionary<string, object?> _lastSelectionState = new(StringComparer.Ordinal);
+
     private readonly HashSet<long> _semanticOnlyIds = [];
 
     /// <summary>
@@ -4646,75 +4649,109 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// Announces a selection-state property only when its value actually moved.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="RaiseSelectionStateProperties"/> announces 67 properties on every
+    /// selection change, and a selection change happens on every arrow key. Each
+    /// announcement is offered to every binding on this view model, so the cost is
+    /// notifications x bindings rather than notifications: measured at 4.6 ms of
+    /// the 5.75 ms the setter spent on a small clip, which is most of a 16 ms
+    /// frame spent before anything is drawn. Holding an arrow key made the window
+    /// look frozen.
+    ///
+    /// Reading the getters to compare is affordable because they are all thin
+    /// delegations - every readable property on this view model together measures
+    /// 326 us, against the 4.6 ms being saved.
+    ///
+    /// This preserves the contract SelectionNotificationHeadlessTests enforces,
+    /// which is "anything whose value moved was announced" and explicitly not
+    /// "everything is announced". Two properties stay unconditional:
+    /// SelectedClipFiles is a collection mutated in place, so its reference does
+    /// not change when its contents do, and SelectedClipSourceAppIcon can decode
+    /// a bitmap on read.
+    /// </remarks>
+    private void RaiseIfChanged<T>(string propertyName, T value)
+    {
+        if (_lastSelectionState.TryGetValue(propertyName, out var previous) && Equals(previous, value))
+        {
+            return;
+        }
+
+        _lastSelectionState[propertyName] = value;
+        this.RaisePropertyChanged(propertyName);
+    }
+
     private void RaiseSelectionStateProperties()
     {
-        this.RaisePropertyChanged(nameof(IsSelectedClipFavorite));
-        this.RaisePropertyChanged(nameof(IsSelectedClipPinned));
-        this.RaisePropertyChanged(nameof(SelectedClipFavoriteButtonLabel));
-        this.RaisePropertyChanged(nameof(SelectedClipPinButtonLabel));
-        this.RaisePropertyChanged(nameof(HasSelectedClip));
-        this.RaisePropertyChanged(nameof(SelectionStateTitle));
-        this.RaisePropertyChanged(nameof(ShowEmptySelectionState));
+        RaiseIfChanged(nameof(IsSelectedClipFavorite), IsSelectedClipFavorite);
+        RaiseIfChanged(nameof(IsSelectedClipPinned), IsSelectedClipPinned);
+        RaiseIfChanged(nameof(SelectedClipFavoriteButtonLabel), SelectedClipFavoriteButtonLabel);
+        RaiseIfChanged(nameof(SelectedClipPinButtonLabel), SelectedClipPinButtonLabel);
+        RaiseIfChanged(nameof(HasSelectedClip), HasSelectedClip);
+        RaiseIfChanged(nameof(SelectionStateTitle), SelectionStateTitle);
+        RaiseIfChanged(nameof(ShowEmptySelectionState), ShowEmptySelectionState);
         this.RaisePropertyChanged(nameof(SelectedClipFiles));
-        this.RaisePropertyChanged(nameof(HasSelectedClipFileItems));
-        this.RaisePropertyChanged(nameof(SelectedClipRenderedText));
-        this.RaisePropertyChanged(nameof(SelectedClipRawContent));
-        this.RaisePropertyChanged(nameof(SelectedClipImageBytes));
-        this.RaisePropertyChanged(nameof(SelectedClipImageHint));
-        this.RaisePropertyChanged(nameof(SelectedClipContentTypeText));
-        this.RaisePropertyChanged(nameof(SelectedClipContentFormat));
-        this.RaisePropertyChanged(nameof(SelectedClipTitleText));
-        this.RaisePropertyChanged(nameof(SelectedClipSourceText));
+        RaiseIfChanged(nameof(HasSelectedClipFileItems), HasSelectedClipFileItems);
+        RaiseIfChanged(nameof(SelectedClipRenderedText), SelectedClipRenderedText);
+        RaiseIfChanged(nameof(SelectedClipRawContent), SelectedClipRawContent);
+        RaiseIfChanged(nameof(SelectedClipImageBytes), SelectedClipImageBytes);
+        RaiseIfChanged(nameof(SelectedClipImageHint), SelectedClipImageHint);
+        RaiseIfChanged(nameof(SelectedClipContentTypeText), SelectedClipContentTypeText);
+        RaiseIfChanged(nameof(SelectedClipContentFormat), SelectedClipContentFormat);
+        RaiseIfChanged(nameof(SelectedClipTitleText), SelectedClipTitleText);
+        RaiseIfChanged(nameof(SelectedClipSourceText), SelectedClipSourceText);
         this.RaisePropertyChanged(nameof(SelectedClipSourceAppIcon));
-        this.RaisePropertyChanged(nameof(ShowSelectedClipSourceAppIcon));
-        this.RaisePropertyChanged(nameof(SelectedClipFirstCopiedAtText));
-        this.RaisePropertyChanged(nameof(SelectedClipCapturedAtText));
-        this.RaisePropertyChanged(nameof(SelectedClipExpiresAtText));
-        this.RaisePropertyChanged(nameof(SelectedClipCopyCountText));
-        this.RaisePropertyChanged(nameof(HasSelectedClipMultipleCopies));
-        this.RaisePropertyChanged(nameof(HasSelectedClipLineage));
-        this.RaisePropertyChanged(nameof(SelectedClipLineageText));
-        this.RaisePropertyChanged(nameof(SelectedClipByteSizeText));
-        this.RaisePropertyChanged(nameof(SelectedClipImageResolutionText));
-        this.RaisePropertyChanged(nameof(ShowSelectedImageResolutionCard));
-        this.RaisePropertyChanged(nameof(SelectedClipSensitivityText));
-        this.RaisePropertyChanged(nameof(SelectedClipWindowTitleText));
-        this.RaisePropertyChanged(nameof(ShowSelectedClipWindowTitle));
-        this.RaisePropertyChanged(nameof(HasSelectedClipSourceUrl));
-        this.RaisePropertyChanged(nameof(SelectedClipPastedText));
-        this.RaisePropertyChanged(nameof(ShowSelectedClipPasted));
-        this.RaisePropertyChanged(nameof(SelectedClipTypeChipBackground));
-        this.RaisePropertyChanged(nameof(SelectedClipTypeChipBorderBrush));
-        this.RaisePropertyChanged(nameof(SelectedClipTypeChipForeground));
-        this.RaisePropertyChanged(nameof(SelectedClipAgeChipBackground));
-        this.RaisePropertyChanged(nameof(SelectedClipAgeChipBorderBrush));
-        this.RaisePropertyChanged(nameof(SelectedClipAgeChipForeground));
-        this.RaisePropertyChanged(nameof(SelectedClipPastedChipBackground));
-        this.RaisePropertyChanged(nameof(SelectedClipPastedChipBorderBrush));
-        this.RaisePropertyChanged(nameof(SelectedClipPastedChipForeground));
-        this.RaisePropertyChanged(nameof(SelectedClipSizeChipBackground));
-        this.RaisePropertyChanged(nameof(SelectedClipSizeChipBorderBrush));
-        this.RaisePropertyChanged(nameof(SelectedClipSizeChipForeground));
-        this.RaisePropertyChanged(nameof(SelectedClipSensitivityChipBackground));
-        this.RaisePropertyChanged(nameof(SelectedClipSensitivityChipBorderBrush));
-        this.RaisePropertyChanged(nameof(SelectedClipSensitivityChipForeground));
-        this.RaisePropertyChanged(nameof(SelectedClipAccentBrush));
-        this.RaisePropertyChanged(nameof(SelectedClipAreaBorderBrush));
-        this.RaisePropertyChanged(nameof(SelectedClipAreaBorderThickness));
-        this.RaisePropertyChanged(nameof(ShowSelectedClipSeverityIndicator));
-        this.RaisePropertyChanged(nameof(SelectedClipSeverityIndicatorText));
-        this.RaisePropertyChanged(nameof(SelectedClipSeverityBadgeBackground));
-        this.RaisePropertyChanged(nameof(SelectedClipSeverityBadgeBorderBrush));
-        this.RaisePropertyChanged(nameof(SelectedClipSeverityBadgeForeground));
-        this.RaisePropertyChanged(nameof(IsSelectedClipTextEditable));
-        this.RaisePropertyChanged(nameof(SelectedClipTextIsReadOnly));
-        this.RaisePropertyChanged(nameof(IsDisplayModeApplicable));
-        this.RaisePropertyChanged(nameof(HasCheckedOrSelectedClip));
-        this.RaisePropertyChanged(nameof(HasTransformableTarget));
-        this.RaisePropertyChanged(nameof(HasTextTransformTarget));
-        this.RaisePropertyChanged(nameof(HasImageTransformTarget));
-        this.RaisePropertyChanged(nameof(HasSelectedImageClip));
-        this.RaisePropertyChanged(nameof(CanRunOcr));
+        RaiseIfChanged(nameof(ShowSelectedClipSourceAppIcon), ShowSelectedClipSourceAppIcon);
+        RaiseIfChanged(nameof(SelectedClipFirstCopiedAtText), SelectedClipFirstCopiedAtText);
+        RaiseIfChanged(nameof(SelectedClipCapturedAtText), SelectedClipCapturedAtText);
+        RaiseIfChanged(nameof(SelectedClipExpiresAtText), SelectedClipExpiresAtText);
+        RaiseIfChanged(nameof(SelectedClipCopyCountText), SelectedClipCopyCountText);
+        RaiseIfChanged(nameof(HasSelectedClipMultipleCopies), HasSelectedClipMultipleCopies);
+        RaiseIfChanged(nameof(HasSelectedClipLineage), HasSelectedClipLineage);
+        RaiseIfChanged(nameof(SelectedClipLineageText), SelectedClipLineageText);
+        RaiseIfChanged(nameof(SelectedClipByteSizeText), SelectedClipByteSizeText);
+        RaiseIfChanged(nameof(SelectedClipImageResolutionText), SelectedClipImageResolutionText);
+        RaiseIfChanged(nameof(ShowSelectedImageResolutionCard), ShowSelectedImageResolutionCard);
+        RaiseIfChanged(nameof(SelectedClipSensitivityText), SelectedClipSensitivityText);
+        RaiseIfChanged(nameof(SelectedClipWindowTitleText), SelectedClipWindowTitleText);
+        RaiseIfChanged(nameof(ShowSelectedClipWindowTitle), ShowSelectedClipWindowTitle);
+        RaiseIfChanged(nameof(HasSelectedClipSourceUrl), HasSelectedClipSourceUrl);
+        RaiseIfChanged(nameof(SelectedClipPastedText), SelectedClipPastedText);
+        RaiseIfChanged(nameof(ShowSelectedClipPasted), ShowSelectedClipPasted);
+        RaiseIfChanged(nameof(SelectedClipTypeChipBackground), SelectedClipTypeChipBackground);
+        RaiseIfChanged(nameof(SelectedClipTypeChipBorderBrush), SelectedClipTypeChipBorderBrush);
+        RaiseIfChanged(nameof(SelectedClipTypeChipForeground), SelectedClipTypeChipForeground);
+        RaiseIfChanged(nameof(SelectedClipAgeChipBackground), SelectedClipAgeChipBackground);
+        RaiseIfChanged(nameof(SelectedClipAgeChipBorderBrush), SelectedClipAgeChipBorderBrush);
+        RaiseIfChanged(nameof(SelectedClipAgeChipForeground), SelectedClipAgeChipForeground);
+        RaiseIfChanged(nameof(SelectedClipPastedChipBackground), SelectedClipPastedChipBackground);
+        RaiseIfChanged(nameof(SelectedClipPastedChipBorderBrush), SelectedClipPastedChipBorderBrush);
+        RaiseIfChanged(nameof(SelectedClipPastedChipForeground), SelectedClipPastedChipForeground);
+        RaiseIfChanged(nameof(SelectedClipSizeChipBackground), SelectedClipSizeChipBackground);
+        RaiseIfChanged(nameof(SelectedClipSizeChipBorderBrush), SelectedClipSizeChipBorderBrush);
+        RaiseIfChanged(nameof(SelectedClipSizeChipForeground), SelectedClipSizeChipForeground);
+        RaiseIfChanged(nameof(SelectedClipSensitivityChipBackground), SelectedClipSensitivityChipBackground);
+        RaiseIfChanged(nameof(SelectedClipSensitivityChipBorderBrush), SelectedClipSensitivityChipBorderBrush);
+        RaiseIfChanged(nameof(SelectedClipSensitivityChipForeground), SelectedClipSensitivityChipForeground);
+        RaiseIfChanged(nameof(SelectedClipAccentBrush), SelectedClipAccentBrush);
+        RaiseIfChanged(nameof(SelectedClipAreaBorderBrush), SelectedClipAreaBorderBrush);
+        RaiseIfChanged(nameof(SelectedClipAreaBorderThickness), SelectedClipAreaBorderThickness);
+        RaiseIfChanged(nameof(ShowSelectedClipSeverityIndicator), ShowSelectedClipSeverityIndicator);
+        RaiseIfChanged(nameof(SelectedClipSeverityIndicatorText), SelectedClipSeverityIndicatorText);
+        RaiseIfChanged(nameof(SelectedClipSeverityBadgeBackground), SelectedClipSeverityBadgeBackground);
+        RaiseIfChanged(nameof(SelectedClipSeverityBadgeBorderBrush), SelectedClipSeverityBadgeBorderBrush);
+        RaiseIfChanged(nameof(SelectedClipSeverityBadgeForeground), SelectedClipSeverityBadgeForeground);
+        RaiseIfChanged(nameof(IsSelectedClipTextEditable), IsSelectedClipTextEditable);
+        RaiseIfChanged(nameof(SelectedClipTextIsReadOnly), SelectedClipTextIsReadOnly);
+        RaiseIfChanged(nameof(IsDisplayModeApplicable), IsDisplayModeApplicable);
+        RaiseIfChanged(nameof(HasCheckedOrSelectedClip), HasCheckedOrSelectedClip);
+        RaiseIfChanged(nameof(HasTransformableTarget), HasTransformableTarget);
+        RaiseIfChanged(nameof(HasTextTransformTarget), HasTextTransformTarget);
+        RaiseIfChanged(nameof(HasImageTransformTarget), HasImageTransformTarget);
+        RaiseIfChanged(nameof(HasSelectedImageClip), HasSelectedImageClip);
+        RaiseIfChanged(nameof(CanRunOcr), CanRunOcr);
         RefreshVisibleTransformMenus();
         RaiseRenderModeProperties();
         RaiseEditedClipProperties();

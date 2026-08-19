@@ -2195,7 +2195,7 @@
     "id": "a-selection-property-stops-being-announced",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "RaiseSelectionStateProperties is around seventy hand-written notifications. Dropping one is silent: the field keeps showing the previously selected clip's value until some unrelated refresh happens to raise it. This is the largest instance of a pattern that has already produced two real bugs in this codebase.",
-    "find": "        this.RaisePropertyChanged(nameof(SelectedClipCapturedAtText));\n",
+    "find": "        RaiseIfChanged(nameof(SelectedClipCapturedAtText), SelectedClipCapturedAtText);\n",
     "replace": "",
     "filter": "FullyQualifiedName~SelectionNotificationHeadlessTests"
   },
@@ -2203,7 +2203,7 @@
     "id": "the-selected-clip-age-chip-stops-being-announced",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "Checks the selection-notification test reaches more than one kind of property: the age chip is a brush chosen by bucket, so it only moves when two clips fall in different age bands. A test whose fixture cannot tell those apart guards the list in name only.",
-    "find": "        this.RaisePropertyChanged(nameof(SelectedClipAgeChipBackground));\n",
+    "find": "        RaiseIfChanged(nameof(SelectedClipAgeChipBackground), SelectedClipAgeChipBackground);\n",
     "replace": "",
     "filter": "FullyQualifiedName~SelectionNotificationHeadlessTests"
   },
