@@ -2288,4 +2288,13 @@
     "replace": "        if (modifiers == KeyModifiers.Control && e.Key is Key.F19)",
     "filter": "FullyQualifiedName~SearchSuggestionKeyRouting"
   }
+,
+  {
+    "id": "transform-menu-shows-with-nothing-in-it",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "why": "Review finding A18, second clause. CanAiTransform is true for any image clip because an image is AI-transformable in principle, but every text group inside the menu is gated on CanTransform, which is false for images. With no AI configured an image clip therefore offered a Transform menu containing nothing at all. HasTransformableTarget already accounts for both.",
+    "find": "                                              IsVisible=\"{Binding #ClipsListBox.DataContext.HasTransformableTarget}\">",
+    "replace": "                                              IsVisible=\"{Binding CanAiTransform}\">",
+    "filter": "FullyQualifiedName~TransformMenuVisibility"
+  }
 ]

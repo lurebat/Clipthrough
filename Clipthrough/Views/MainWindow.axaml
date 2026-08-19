@@ -289,7 +289,7 @@
                                     <MenuItem Header="{Binding ExportLabel}"
                                               Command="{Binding ExportCommand}" />
                                     <MenuItem Header="Transform"
-                                              IsVisible="{Binding CanAiTransform}">
+                                              IsVisible="{Binding #ClipsListBox.DataContext.HasTransformableTarget}">
                                         <MenuItem Header="Case"
                                                   IsVisible="{Binding CanTransform}">
                                             <MenuItem Header="UPPERCASE"
