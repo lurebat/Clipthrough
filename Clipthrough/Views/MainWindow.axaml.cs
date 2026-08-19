@@ -585,6 +585,31 @@ public partial class MainWindow : Window
         // Up/Down in clip list: navigate between clips
         if (m_clipsListBox?.IsKeyboardFocusWithin != true)
         {
+            // Focus nowhere is a state this window really reaches: replacing a
+            // row destroys its container and Avalonia leaves focus null rather
+            // than moving it somewhere sensible, which is why the collection
+            // -changed handler restores it. Until that restore runs, an arrow
+            // key falls out of here unhandled and Avalonia's own directional
+            // navigation decides where it goes - and the top menu sits above the
+            // list, so "File" can take it. TryRecoverFromTopMenuFocus already
+            // covers focus that has *arrived* in the menu; this stops the key
+            // that puts it there.
+            //
+            // Asaf reported the menu stealing focus while holding Down. This is
+            // the one hole visible in the code, not a reproduction: sustained
+            // key repeat over a seeded list keeps focus on a ListBoxItem for
+            // every press in the headless host, which has no real window
+            // activation or menu access-key handling to reproduce it with.
+            if (e.Key is Key.Up or Key.Down
+                && modifiers == KeyModifiers.None
+                && viewModel.Clips.Count > 0
+                && TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is null)
+            {
+                viewModel.SelectedClip ??= viewModel.GetDefaultAutoSelectedClip();
+                FocusSelectedClipInList();
+                return true;
+            }
+
             return false;
         }
 
