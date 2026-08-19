@@ -2297,4 +2297,13 @@
     "replace": "                                              IsVisible=\"{Binding CanAiTransform}\">",
     "filter": "FullyQualifiedName~TransformMenuVisibility"
   }
+,
+  {
+    "id": "search-takes-the-fts-path-when-a-token-is-too-short",
+    "why": "The trigram index stores 3-character shingles, so BuildFtsExpression drops shorter tokens. Choosing the FTS path because ANY token was long enough answers a different query from the one typed - 'go home' searches for 'home' alone and returns every clip containing it, which at the search box is indistinguishable from spaces meaning OR.",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "find": "        return tokens.Length > 0 && tokens.All(static t => t.Length >= 3);",
+    "replace": "        return tokens.Any(static t => t.Length >= 3);",
+    "filter": "FullyQualifiedName~ShortTokenSearchTests"
+  }
 ]

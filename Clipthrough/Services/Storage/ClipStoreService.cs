@@ -1780,6 +1780,25 @@ public sealed class ClipStoreService : IClipStoreService
         command.Parameters.AddWithValue("$offset", filters.Offset);
     }
 
+    /// <summary>
+    /// Whether every token in <paramref name="searchText"/> can be looked up in
+    /// the trigram index, and therefore whether the FTS path can answer the query
+    /// in full.
+    /// </summary>
+    /// <remarks>
+    /// This asks about EVERY token, not any. The index stores 3-character
+    /// shingles, so a shorter token cannot be looked up and
+    /// <see cref="BuildFtsExpression"/> drops it. Choosing the FTS path because
+    /// one token was long enough therefore answered a different query from the
+    /// one that was typed: "go home" searched for "home" alone and returned every
+    /// clip containing it, which at the search box is indistinguishable from
+    /// spaces meaning OR. Reported as exactly that.
+    ///
+    /// A query with a short token now falls back to the substring path, which
+    /// requires all of them. That path is a scan, so this trades speed for
+    /// answering the question asked - and two-word queries with a short word are
+    /// ordinary rather than exotic: "is null", "to do", "on off", "a bug".
+    /// </remarks>
     private static bool HasFtsCompatibleSearchTerm(string searchText)
     {
         if (string.IsNullOrWhiteSpace(searchText))
@@ -1789,7 +1808,7 @@ public sealed class ClipStoreService : IClipStoreService
 
         var tokens = searchText
             .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return tokens.Any(static t => t.Length >= 3);
+        return tokens.Length > 0 && tokens.All(static t => t.Length >= 3);
     }
 
     private static string BuildFtsExpression(string searchText, bool useFuzzy = false)
