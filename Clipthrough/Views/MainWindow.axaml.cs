@@ -539,22 +539,31 @@ public partial class MainWindow : Window
         // order like any other app; Down from the search box (below) is still
         // the one-key path into the list.
 
+        // Down from the search box: into the suggestion dropdown while it is
+        // showing, and into the clip list when it is not. With the dropdown
+        // closed there is nothing for Down to navigate, so the one-key path into
+        // the results is kept rather than made Ctrl-only.
+        //
+        // Deliberately ABOVE the empty-list bail-out below. The dropdown offers
+        // past searches, which is most useful precisely when the current query
+        // matches nothing - and that is exactly when Clips.Count is 0. Sitting
+        // below the bail-out meant Down did nothing in the one case the user
+        // most needed it, while Up still worked because it is handled earlier.
+        // Found independently by two reviewers in round 2 (quality-opus Q3,
+        // bugs-opus F5), against a change made the day before.
+        if (e.Key == Key.Down && modifiers == KeyModifiers.None && isSearchFocused
+            && viewModel.IsSearchSuggestionsOpen && FocusSearchSuggestion(0))
+        {
+            return true;
+        }
+
         if (viewModel.Clips.Count == 0)
         {
             return false;
         }
 
-        // Down from the search box: into the suggestion dropdown while it is
-        // showing, and into the clip list when it is not. With the dropdown
-        // closed there is nothing for Down to navigate, so the one-key path into
-        // the results is kept rather than made Ctrl-only.
         if (e.Key == Key.Down && modifiers == KeyModifiers.None && isSearchFocused)
         {
-            if (viewModel.IsSearchSuggestionsOpen && FocusSearchSuggestion(0))
-            {
-                return true;
-            }
-
             if (viewModel.SelectedClip is null)
             {
                 viewModel.SelectedClip = viewModel.GetDefaultAutoSelectedClip();

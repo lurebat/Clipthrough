@@ -75,6 +75,32 @@ public sealed class SearchSuggestionKeyRoutingHeadlessTests
     /// With no dropdown there is nothing for Down to navigate, so the one-key
     /// path into the results is kept rather than made Ctrl-only.
     /// </summary>
+    /// <summary>
+    /// Down must reach the dropdown even when the query matched no clips.
+    /// </summary>
+    /// <remarks>
+    /// Round 2, quality-opus Q3 and bugs-opus F5, found independently by two
+    /// reviewers against the change made the day before. The suggestion handling
+    /// sat below an early return taken when the clip list is empty, so Down did
+    /// nothing in the one case the dropdown is most useful - the query matches
+    /// nothing and past searches are the way out. Up was unaffected because it is
+    /// handled earlier in the method, which is why this was easy to miss by hand.
+    /// </remarks>
+    [AvaloniaFact]
+    public void DownWithAnEmptyResultList_StillEntersTheDropdown()
+    {
+        using var harness = MainWindowTestHarness.Create();
+
+        // No clips seeded on purpose: this is the empty-result case.
+        Assert.Empty(harness.ViewModel.Clips);
+        OpenTheDropdown(harness);
+
+        Press(harness, Key.Down, RawInputModifiers.None);
+
+        Assert.True(
+            Suggestions(harness).IsKeyboardFocusWithin,
+            "Down did not reach the dropdown, so past searches are unreachable exactly when the query matches nothing");
+    }
     [AvaloniaFact]
     public void DownWithNoDropdown_StillReachesTheClipList()
     {

@@ -1051,8 +1051,8 @@
     "id": "markup-stripping-is-culture-sensitive-again",
     "file": "Clipthrough/Presentation/ClipDisplayFormatter.cs",
     "why": "The original interpreted Regex.Replace with IgnoreCase folds case using the CURRENT culture. Under tr-TR upper-case I does not fold to i, so <LI> and <DIV> stop matching: bullets and paragraph breaks vanish while the catch-all still strips the tags, so the damage is invisible.",
-    "find": "            var withListItems = ListItemTagRegex().Replace(withoutScripts, \"\u2022 \");\n            var withBreaks = BlockLevelTagRegex().Replace(withListItems, Environment.NewLine);",
-    "replace": "            var withListItems = Regex.Replace(withoutScripts, @\"<li[^>]*>\", \"\u2022 \", RegexOptions.IgnoreCase);\n            var withBreaks = Regex.Replace(withListItems, @\"</?(br|p|div|section|article|ul|ol|h[1-6]|tr)[^>]*>\", Environment.NewLine, RegexOptions.IgnoreCase);",
+    "find": "            var withListItems = ListItemTagRegex().Replace(withoutScripts, \"• \");\n            var withBreaks = BlockLevelTagRegex().Replace(withListItems, Environment.NewLine);",
+    "replace": "            var withListItems = Regex.Replace(withoutScripts, @\"<li[^>]*>\", \"• \", RegexOptions.IgnoreCase);\n            var withBreaks = Regex.Replace(withListItems, @\"</?(br|p|div|section|article|ul|ol|h[1-6]|tr)[^>]*>\", Environment.NewLine, RegexOptions.IgnoreCase);",
     "filter": "RenderRichContent_HandlesUpperCaseMarkup_UnderAnyCulture"
   },
   {
@@ -2270,15 +2270,6 @@
     "find": "            if (clip.Clip.ContentType == ContentType.Image)\n            {\n                using var bitmap = TryLoadImage(clip.Clip, _settingsService.Current.MaxClipSizeBytes);",
     "replace": "            _clipboardMonitorService.SuppressNext();\n            if (clip.Clip.ContentType == ContentType.Image)\n            {\n                using var bitmap = TryLoadImage(clip.Clip, _settingsService.Current.MaxClipSizeBytes);",
     "filter": "FullyQualifiedName~ACopyThatFails"
-  }
-,
-  {
-    "id": "down-in-the-search-box-skips-the-open-dropdown",
-    "file": "Clipthrough/Views/MainWindow.axaml.cs",
-    "why": "Restores the old routing, where Down jumped to the clip list even with the suggestion dropdown showing. Asaf reported that as the dropdown having its keys stolen: the dropdown opens whenever the query matches a past search, so Down was unusable there most of the time.",
-    "find": "            if (viewModel.IsSearchSuggestionsOpen && FocusSearchSuggestion(0))\n            {\n                return true;\n            }\n",
-    "replace": "",
-    "filter": "FullyQualifiedName~SearchSuggestionKeyRouting"
   },
   {
     "id": "ctrl-down-no-longer-reaches-the-clip-list",
@@ -2287,8 +2278,7 @@
     "find": "        if (modifiers == KeyModifiers.Control && e.Key is Key.Down or Key.Up)",
     "replace": "        if (modifiers == KeyModifiers.Control && e.Key is Key.F19)",
     "filter": "FullyQualifiedName~SearchSuggestionKeyRouting"
-  }
-,
+  },
   {
     "id": "transform-menu-shows-with-nothing-in-it",
     "file": "Clipthrough/Views/MainWindow.axaml",
@@ -2296,8 +2286,7 @@
     "find": "                                              IsVisible=\"{Binding #ClipsListBox.DataContext.HasTransformableTarget}\">",
     "replace": "                                              IsVisible=\"{Binding CanAiTransform}\">",
     "filter": "FullyQualifiedName~TransformMenuVisibility"
-  }
-,
+  },
   {
     "id": "search-takes-the-fts-path-when-a-token-is-too-short",
     "why": "The trigram index stores 3-character shingles, so BuildFtsExpression drops shorter tokens. Choosing the FTS path because ANY token was long enough answers a different query from the one typed - 'go home' searches for 'home' alone and returns every clip containing it, which at the search box is indistinguishable from spaces meaning OR.",
@@ -2305,8 +2294,7 @@
     "find": "        return tokens.Length > 0 && tokens.All(static t => t.Length >= 3);",
     "replace": "        return tokens.Any(static t => t.Length >= 3);",
     "filter": "FullyQualifiedName~ShortTokenSearchTests"
-  }
-,
+  },
   {
     "id": "an-image-clip-never-re-presents-after-hydrating",
     "why": "Hydration is the only thing that gives an image clip its bytes, and the preview is built before it finishes. Returning false unconditionally means the pane never rebuilds, so a selected image stays blank until something unrelated refreshes it. This is the risk taken by skipping the re-present for clips that did not hydrate.",
@@ -2314,8 +2302,7 @@
     "find": "        return true;\n    }\n\n    // ContentBytes may be null on metadata-only list reads (U12); test ContentType only so the",
     "replace": "        return false;\n    }\n\n    // ContentBytes may be null on metadata-only list reads (U12); test ContentType only so the",
     "filter": "FullyQualifiedName~ClipHydrationTests"
-  }
-,
+  },
   {
     "id": "paste-hotkeys-copy-an-image-as-its-text-label",
     "why": "An image clip's Content is the short text label stored beside the bytes. Copying that instead of the picture makes the global paste hotkeys paste a caption, and PasteAndDelete then destroys the only copy of the image.",
@@ -2347,8 +2334,7 @@
     "find": "            monitor.CancelSuppressNext();\n            throw;",
     "replace": "            throw;",
     "filter": "FullyQualifiedName~ClipClipboardWriterTests"
-  }
-,
+  },
   {
     "id": "a-clip-that-is-one-enormous-line-is-laid-out-in-full",
     "why": "AvaloniaEdit virtualises per document line, so a single very long line defeats virtualisation and is laid out whole on the UI thread on every selection change - measured at ~18 us per character, linear across three doublings. Minified JSON, base64 and log lines all land here, and 852 of 1638 clips take this path.",
@@ -2364,5 +2350,13 @@
     "find": "            _editor.IsReadOnly = IsReadOnly || _isShowingShortenedText;\n        }\n        finally\n        {\n            _isSyncingText = false;\n        }\n    }\n\n    /// <summary>\n    /// Returns the text to lay out",
     "replace": "            _editor.IsReadOnly = IsReadOnly;\n        }\n        finally\n        {\n            _isSyncingText = false;\n        }\n    }\n\n    /// <summary>\n    /// Returns the text to lay out",
     "filter": "FullyQualifiedName~SyntaxTextEditorLongLine"
+  },
+  {
+    "id": "down-cannot-reach-the-dropdown-when-no-clips-match",
+    "why": "The dropdown offers past searches, which matters most when the query matches nothing - and that is exactly when the clip list is empty. Putting the suggestion handling back below the empty-list bail-out makes Down dead in that case while Up keeps working, which is what made it easy to miss by hand.",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "find": "        if (e.Key == Key.Down && modifiers == KeyModifiers.None && isSearchFocused\n            && viewModel.IsSearchSuggestionsOpen && FocusSearchSuggestion(0))\n        {\n            return true;\n        }\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~SearchSuggestionKeyRouting"
   }
 ]
