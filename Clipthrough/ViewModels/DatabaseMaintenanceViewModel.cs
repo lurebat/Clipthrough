@@ -216,31 +216,25 @@ public sealed class DatabaseMaintenanceViewModel : ViewModelBase
             return;
         }
 
-        var monitorWasRunning = false;
-        var ocrWasRunning = false;
-        var embeddingWasRunning = false;
-
         try
         {
-            BackupRestoreStatus = "Stopping background services…";
-
-            // Stop everything that holds a SqliteConnection open so the file
-            // moves below don't race against an active writer. StopAsync, not
-            // Stop: off the UI thread Stop only posts, and neither form waits
-            // for the enrichment a capture spawns fire-and-forget. A restore
-            // replaces the file outright, so an in-flight write is worse here
-            // than anywhere else. (arch-sol A6, sibling of the maintenance scope)
-            monitorWasRunning = _clipboardMonitorService.IsRunning;
-            ocrWasRunning = _backgroundOcrQueue.IsRunning;
-            embeddingWasRunning = _embeddingWorker?.IsRunning ?? false;
-            await _clipboardMonitorService.StopAsync();
-            await _backgroundOcrQueue.StopAsync();
-            if (_embeddingWorker is not null)
-            {
-                await _embeddingWorker.StopAsync();
-            }
-
             BackupRestoreStatus = "Restoring…";
+
+            // Quiescing the workers is deliberately NOT done here.
+            // DatabaseBackupService.RestoreAsync enters a DatabaseMaintenanceScope
+            // before it touches a file, and that scope stops the three workers,
+            // clears the connection pools and restarts on dispose whatever it
+            // found running - including when the restore throws.
+            //
+            // This method used to do all of that by hand first, which had two
+            // costs. The duplicate protocol had to stay correct in two places,
+            // and worse, it made the real one inert: the scope snapshots
+            // IsRunning in its constructor, found all three already false, and
+            // so stopped nothing and restarted nothing. Anyone reading
+            // RestoreAsync saw an await using and concluded the workers were
+            // quiesced by it; they were quiesced somewhere else entirely.
+            // The hand-rolled version also never cleared the pools.
+            // (arch-opus A26 and A27)
             await _databaseBackupService.RestoreAsync(target.Path);
 
             BackupRestoreStatus = "Restored. The app will exit — restart to load the restored data.";
@@ -259,24 +253,12 @@ public sealed class DatabaseMaintenanceViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            // The restore failed before the app could exit; restart the workers we
-            // stopped above (and only those) so the session keeps capturing clips
-            // instead of going silently dead until the next launch.
-            if (monitorWasRunning)
-            {
-                _clipboardMonitorService.Start();
-            }
-
-            if (ocrWasRunning)
-            {
-                _backgroundOcrQueue.Start();
-            }
-
-            if (embeddingWasRunning)
-            {
-                _embeddingWorker?.Start();
-            }
-
+            // No worker restart here. The scope inside RestoreAsync restarts on
+            // dispose whatever it found running, including on the throwing path,
+            // which is the case DatabaseMaintenanceScope was fixed for in
+            // round 1 (K4). Restarting again from here would start workers this
+            // method never stopped - and if the failure happened before the
+            // scope was entered, there is nothing to restart at all.
             BackupRestoreStatus = $"Restore failed: {ex.Message}";
             System.Diagnostics.Trace.TraceError($"Restore from backup failed: {ex}");
             _notificationService.PublishError("Restore failed", ex.Message);

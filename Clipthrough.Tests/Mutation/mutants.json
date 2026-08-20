@@ -1195,8 +1195,8 @@
     "id": "semantic-results-are-sorted-ascending",
     "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
     "why": "Semantic results must come back best-first; the heap's internal order is not sorted, so this final sort is what the caller relies on.",
-    "find": "            Array.Sort(result, static (a, b) => b.Score.CompareTo(a.Score));",
-    "replace": "            Array.Sort(result, static (a, b) => a.Score.CompareTo(b.Score));",
+    "find": "                var byScore = b.Score.CompareTo(a.Score);",
+    "replace": "                var byScore = a.Score.CompareTo(b.Score);",
     "filter": "FullyQualifiedName~SemanticSearchServiceTests"
   },
   {
@@ -2446,14 +2446,6 @@
     "find": "        await Task.WhenAll(pending).ConfigureAwait(false);",
     "replace": "        await Task.WhenAll(pending.Length >= 0 ? [] : pending).ConfigureAwait(false);",
     "filter": "FullyQualifiedName~ClipboardMonitorServiceStopTests"
-  },
-  {
-    "id": "restore-stops-the-monitor-without-waiting",
-    "why": "Puts back the posted Stop() in the backup restore, which hand-rolls the maintenance sequence rather than using DatabaseMaintenanceScope. A restore replaces the database file outright, so an in-flight capture or enrichment write is worse here than anywhere else.",
-    "file": "Clipthrough/ViewModels/DatabaseMaintenanceViewModel.cs",
-    "find": "            await _clipboardMonitorService.StopAsync();",
-    "replace": "            _clipboardMonitorService.Stop();",
-    "filter": "FullyQualifiedName~DatabaseMaintenanceViewModelHeadlessTests"
   },
   {
     "id": "copy-as-plain-text-copies-the-markup",

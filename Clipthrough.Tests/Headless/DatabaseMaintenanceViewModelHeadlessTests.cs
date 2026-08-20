@@ -14,12 +14,23 @@ namespace Clipthrough.Tests.Headless;
 
 public sealed class DatabaseMaintenanceViewModelHeadlessTests
 {
-    // Bug #5: RestoreBackupAsync stops the clipboard monitor, OCR queue, and
-    // embedding worker before the swap. On success the app exits, but on FAILURE
-    // the workers must be restarted — otherwise the running session silently stops
-    // capturing clips until the next launch.
+    // Bug #5 originally: RestoreBackupAsync stopped the clipboard monitor, OCR
+    // queue and embedding worker before the swap, and on FAILURE had to restart
+    // them or the session went silently dead until the next launch.
+    //
+    // That protocol now lives where it belongs. DatabaseBackupService.RestoreAsync
+    // enters a DatabaseMaintenanceScope before touching a file, and the scope
+    // stops, clears the pools, and restarts on dispose whatever it found running
+    // - including when the restore throws. Doing it here as well made the real
+    // scope inert: it snapshots IsRunning in its constructor and found all three
+    // already false. (round 2, arch-opus A26 and A27)
+    //
+    // So the property this test defends has changed rather than disappeared. The
+    // view model must leave the workers alone; the restart guarantee is asserted
+    // against the scope itself in DatabaseMaintenanceScopeTests, which is where
+    // the code that provides it now lives.
     [AvaloniaFact]
-    public async Task RestoreBackup_WhenRestoreFails_RestartsStoppedWorkers()
+    public async Task RestoreBackup_WhenRestoreFails_LeavesWorkerLifecycleToTheScope()
     {
         var monitor = new RecordingMonitor();
         var ocr = new RecordingOcrQueue();
@@ -41,15 +52,16 @@ public sealed class DatabaseMaintenanceViewModelHeadlessTests
         // owner == null auto-confirms; the restore then throws inside the try.
         await vm.RestoreBackupCommand.Execute(null);
 
-        // The awaited stop specifically: a restore replaces the database file,
-        // so returning while a capture or its enrichment is still writing is
-        // what StopAsync exists to prevent. Asserting StopCount is 0 makes a
-        // revert to the posted Stop() fail rather than pass. (arch-sol A6)
-        Assert.Equal(1, monitor.StopAsyncCount);
         Assert.Equal(0, monitor.StopCount);
-        Assert.Equal(1, monitor.StartCount);
-        Assert.Equal(1, ocr.StartCount);
-        Assert.Equal(1, embedding.StartCount);
+        Assert.Equal(0, monitor.StopAsyncCount);
+
+        // And having stopped nothing, it must not start anything either: a
+        // restart from here would run workers this method never quiesced, and
+        // would fight the scope over which of them should be running.
+        Assert.Equal(0, monitor.StartCount);
+        Assert.Equal(0, ocr.StartCount);
+        Assert.Equal(0, embedding.StartCount);
+
         Assert.Contains("Restore failed", vm.BackupRestoreStatus);
     }
 

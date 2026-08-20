@@ -916,15 +916,34 @@ public sealed class SemanticSearchServiceTests
                 return (clip.Id, Score: score);
             })
             .OrderByDescending(x => x.Score)
+            .ThenByDescending(x => x.Id)
             .Take(topK)
             .ToArray();
 
         Assert.Equal(Math.Min(topK, clipCount), ranked.Count);
-        Assert.Equal(expected.Select(x => x.Id), ranked.Select(x => x.ClipId));
 
-        for (var i = 0; i < ranked.Count; i++)
+        // The same clips, and each with the score this oracle computes for it.
+        Assert.Equal(
+            expected.Select(x => x.Id).OrderBy(id => id),
+            ranked.Select(x => x.ClipId).OrderBy(id => id));
+
+        var oracleScores = expected.ToDictionary(x => x.Id, x => x.Score);
+        foreach (var (clipId, score) in ranked)
         {
-            Assert.Equal(expected[i].Score, ranked[i].Score, 4);
+            Assert.Equal(oracleScores[clipId], score, 4);
+        }
+
+        // Ordering is asserted as a property rather than as an exact permutation.
+        // Production widens the dot product to SIMD; this oracle sums scalar, so
+        // the two disagree in the last bits and two clips whose true scores are
+        // within that noise can legitimately swap places. Demanding the exact
+        // sequence asserts more than either implementation promises, and it
+        // failed intermittently on precisely such a pair.
+        for (var i = 1; i < ranked.Count; i++)
+        {
+            Assert.True(
+                ranked[i - 1].Score >= ranked[i].Score,
+                $"Ranking was not descending at {i}: {ranked[i - 1].Score} then {ranked[i].Score}.");
         }
 
         // Ranking is only meaningful if the scores actually differ; an all-equal corpus would

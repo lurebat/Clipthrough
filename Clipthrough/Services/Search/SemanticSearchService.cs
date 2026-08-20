@@ -404,8 +404,18 @@ public sealed class SemanticSearchService : ISemanticSearchService
     /// </summary>
     /// <remarks>
     /// Replaces sorting every candidate to keep the top fifty: that was O(N log N) plus a
-    /// twelve-byte-per-clip array allocated on every keystroke. Ties are broken arbitrarily,
-    /// as they were by the unstable sort this replaced.
+    /// twelve-byte-per-clip array allocated on every keystroke.
+    ///
+    /// Equal scores are broken by clip id, newest first, which is the order the rest of the
+    /// application already shows clips in. Without it <see cref="Array.Sort{T}(T[], Comparison{T})"/>
+    /// is unstable over a heap whose arrangement depends on arrival order, so the same query
+    /// against the same corpus could return equal-scoring clips in a different order each time -
+    /// a list that reshuffles under the user for no reason they can see. It also made the
+    /// ranking test fail intermittently, which is how this was noticed.
+    ///
+    /// The tie-break makes the *ordering* deterministic, not the *selection*: when more clips
+    /// tie for the last place than there is capacity, which of them survives still depends on
+    /// the order the cache offered them in.
     /// </remarks>
     private struct TopKSelector(int capacity)
     {
@@ -443,7 +453,11 @@ public sealed class SemanticSearchService : ISemanticSearchService
                 result[i] = (_ids[i], _scores[i]);
             }
 
-            Array.Sort(result, static (a, b) => b.Score.CompareTo(a.Score));
+            Array.Sort(result, static (a, b) =>
+            {
+                var byScore = b.Score.CompareTo(a.Score);
+                return byScore != 0 ? byScore : b.ClipId.CompareTo(a.ClipId);
+            });
             return result;
         }
 
