@@ -66,6 +66,8 @@ public sealed class DatabaseMaintenanceScopeTests
         public void Start() { StartCount++; IsRunning = true; }
         public void Stop() { StopCount++; IsRunning = false; }
         public void SuppressNext() { }
+
+        public void CancelSuppressNext() { }
     }
 
     private sealed class RecordingOcrQueue : IBackgroundOcrQueue

@@ -33,5 +33,17 @@ public interface IClipboardMonitorService
     /// to prevent the monitor from re-capturing content the app itself placed on the clipboard.
     /// </summary>
     void SuppressNext();
+
+    /// <summary>
+    /// Withdraws a suppression armed by <see cref="SuppressNext"/> when the write it was
+    /// armed for threw before reaching the clipboard.
+    /// </summary>
+    /// <remarks>
+    /// Only call this when no write landed. A suppression that is armed and never consumed
+    /// is spent on whatever the user copies next, which is then missing from their history
+    /// with nothing to explain it. The suppression window bounds that to a couple of
+    /// seconds on its own; this closes it outright for the case the caller can be sure of.
+    /// </remarks>
+    void CancelSuppressNext();
 }
 

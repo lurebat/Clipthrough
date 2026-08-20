@@ -2315,4 +2315,37 @@
     "replace": "        return false;\n    }\n\n    // ContentBytes may be null on metadata-only list reads (U12); test ContentType only so the",
     "filter": "FullyQualifiedName~ClipHydrationTests"
   }
+,
+  {
+    "id": "paste-hotkeys-copy-an-image-as-its-text-label",
+    "why": "An image clip's Content is the short text label stored beside the bytes. Copying that instead of the picture makes the global paste hotkeys paste a caption, and PasteAndDelete then destroys the only copy of the image.",
+    "file": "Clipthrough/Services/System/ClipClipboardWriter.cs",
+    "find": "        if (clip.ContentType == ContentType.Image)\n        {\n            using var bitmap = ClipBitmapFactory.TryLoad(SizeLimitedImageBytes(clip, maxImageBytes));",
+    "replace": "        if (clip.ContentType == ContentType.Image && clip.Content is null)\n        {\n            using var bitmap = ClipBitmapFactory.TryLoad(SizeLimitedImageBytes(clip, maxImageBytes));",
+    "filter": "FullyQualifiedName~ClipClipboardWriterTests"
+  },
+  {
+    "id": "an-unreadable-image-reports-a-successful-copy",
+    "why": "The return value is what stops PasteAndDelete destroying a clip that never reached the clipboard. Reporting success when the bitmap could not be read restores the data-loss path.",
+    "file": "Clipthrough/Services/System/ClipClipboardWriter.cs",
+    "find": "            if (bitmap is null)\n            {\n                return false;\n            }",
+    "replace": "            if (bitmap is null)\n            {\n                return true;\n            }",
+    "filter": "FullyQualifiedName~ClipClipboardWriterTests"
+  },
+  {
+    "id": "rich-text-is-flattened-by-the-paste-hotkeys",
+    "why": "Rich clips are 740 of this user's 1,638. Copying them as plain text loses every bit of formatting on a global paste hotkey.",
+    "file": "Clipthrough/Services/System/ClipClipboardWriter.cs",
+    "find": "        if (clip.ContentType == ContentType.RichText)",
+    "replace": "        if (clip.ContentType == ContentType.RichText && clip.Content is null)",
+    "filter": "FullyQualifiedName~ClipClipboardWriterTests"
+  },
+  {
+    "id": "a-failed-clipboard-write-keeps-its-suppression-armed",
+    "why": "Arming must precede the write to win the race against the change notification, so a throw leaves the arm pending. An arm that is never consumed is spent on whatever the user copies next, which then vanishes from history with nothing to explain it.",
+    "file": "Clipthrough/Services/System/ClipClipboardWriter.cs",
+    "find": "            monitor.CancelSuppressNext();\n            throw;",
+    "replace": "            throw;",
+    "filter": "FullyQualifiedName~ClipClipboardWriterTests"
+  }
 ]

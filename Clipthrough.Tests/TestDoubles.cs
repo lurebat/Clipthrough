@@ -255,6 +255,12 @@ internal sealed class TestClipboardMonitorService : IClipboardMonitorService
 
     public void SuppressNext() => PendingSuppressions++;
 
+    /// <summary>Mirrors the real gate: a withdrawn suppression is no longer pending.</summary>
+    public void CancelSuppressNext()
+    {
+        if (PendingSuppressions > 0) { PendingSuppressions--; }
+    }
+
     public void Emit(ClipEntry clip) => _capturedClips.OnNext(clip);
 
     public void EmitUpdate(ClipEntry clip) => _updatedClips.OnNext(clip);
@@ -377,14 +383,23 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
 
     public int SimulatedPasteCount { get; private set; }
 
+    /// <summary>
+    /// When set, every clipboard write throws this instead of recording. The real
+    /// service throws when another application holds the clipboard lock, and that
+    /// path decides whether an armed suppression is withdrawn.
+    /// </summary>
+    public Exception? ThrowOnCopy { get; set; }
+
     public Task CopyTextAsync(string text)
     {
+        if (ThrowOnCopy is { } ex) { throw ex; }
         LastCopiedText = text;
         return Task.CompletedTask;
     }
 
     public Task CopyRichContentAsync(string richContent, string plainText, ClipContentFormat contentFormat)
     {
+        if (ThrowOnCopy is { } ex) { throw ex; }
         LastCopiedRichContent = richContent;
         LastCopiedRichPlainText = plainText;
         LastCopiedRichContentFormat = contentFormat;
@@ -393,6 +408,7 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
 
     public Task CopyBitmapAsync(Bitmap bitmap)
     {
+        if (ThrowOnCopy is { } ex) { throw ex; }
         BitmapCopyCount++;
         return Task.CompletedTask;
     }

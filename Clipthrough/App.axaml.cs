@@ -28,6 +28,22 @@ public partial class App : Application
     private TrayIcon? _trayIcon;
     private ISystemInteractionService? _systemInteractionService;
     private ISettingsService? _settingsService;
+    /// <summary>
+    /// Pause between putting a clip on the clipboard and sending Ctrl+V, and
+    /// again before touching the database.
+    /// </summary>
+    /// <remarks>
+    /// 120 ms is the value these hotkeys have always used. Note the paste
+    /// sequence is implemented three times in this codebase and the delays have
+    /// diverged - <see cref="Views.MainWindow"/> waits 150 ms, and two paths
+    /// lower in this file still use bare literals. They are deliberately NOT
+    /// unified here: which delay is correct is a question about how long a
+    /// foreign window needs to see a clipboard update, and nothing in the test
+    /// suite can answer it. Unifying them on a guess would be a behavioural
+    /// change wearing a refactor's clothes.
+    /// </remarks>
+    private const int PasteSettleDelayMs = 120;
+
     private IClipStoreService? _clipStoreService;
     private IClipboardMonitorService? _clipboardMonitorService;
     private IAppNotificationService? _notificationService;
@@ -608,6 +624,18 @@ public partial class App : Application
         _clipboardMonitorService?.SuppressNext();
     }
 
+    /// <summary>
+    /// Puts the newest clip on the clipboard in its captured format.
+    /// </summary>
+    /// <returns>False when nothing reached the clipboard, in which case the
+    /// caller must not paste, delete, or mark the clip.</returns>
+    private Task<bool> TryCopyNewestClipAsync(ClipEntry clip)
+        => ClipClipboardWriter.TryCopyAsync(
+            clip,
+            _systemInteractionService!,
+            _clipboardMonitorService!,
+            _settingsService?.Current.MaxClipSizeBytes);
+
     private async void PasteAndDelete()
     {
         if (_clipStoreService is null || _systemInteractionService is null || _clipboardMonitorService is null) return;
@@ -615,14 +643,21 @@ public partial class App : Application
         {
             var clip = await Task.Run(() => _clipStoreService.GetClipAtOffsetAsync(0));
             if (clip is null) return;
-            _clipboardMonitorService.SuppressNext();
-            if (!string.IsNullOrEmpty(clip.Content))
+
+            // Nothing is destroyed on the strength of a copy that did not
+            // happen. This used to paste whatever was already on the clipboard
+            // and delete the clip regardless - and for an image clip the copy
+            // "succeeded" by putting the text label on the clipboard, so the
+            // picture was replaced by a caption and then deleted.
+            if (!await TryCopyNewestClipAsync(clip))
             {
-                await _systemInteractionService.CopyTextAsync(clip.Content);
+                Trace.TraceWarning($"PasteAndDelete: clip {clip.Id} could not be copied; not pasting and not deleting.");
+                return;
             }
-            await Task.Delay(120);
+
+            await Task.Delay(PasteSettleDelayMs);
             _systemInteractionService.SimulatePasteKeystroke();
-            await Task.Delay(120);
+            await Task.Delay(PasteSettleDelayMs);
             await Task.Run(() => _clipStoreService.DeleteAsync(clip.Id));
         }
         catch (Exception ex) { Trace.TraceWarning($"PasteAndDelete failed: {ex.Message}"); }
@@ -635,14 +670,16 @@ public partial class App : Application
         {
             var clip = await Task.Run(() => _clipStoreService.GetClipAtOffsetAsync(0));
             if (clip is null) return;
-            _clipboardMonitorService.SuppressNext();
-            if (!string.IsNullOrEmpty(clip.Content))
+
+            if (!await TryCopyNewestClipAsync(clip))
             {
-                await _systemInteractionService.CopyTextAsync(clip.Content);
+                Trace.TraceWarning($"PasteAndFavorite: clip {clip.Id} could not be copied; not pasting and not favouriting.");
+                return;
             }
+
             await Task.Run(() => _clipStoreService.MarkPastedAsync(clip.Id));
             await Task.Run(() => _clipStoreService.SetFavoriteAsync(clip.Id, true));
-            await Task.Delay(120);
+            await Task.Delay(PasteSettleDelayMs);
             _systemInteractionService.SimulatePasteKeystroke();
         }
         catch (Exception ex) { Trace.TraceWarning($"PasteAndFavorite failed: {ex.Message}"); }
@@ -655,11 +692,14 @@ public partial class App : Application
         {
             var clip = await Task.Run(() => _clipStoreService.GetClipAtOffsetAsync(0));
             if (clip is null || string.IsNullOrEmpty(clip.Content)) return;
+
+            // Deliberately NOT the shared writer: this hotkey exists to strip
+            // formatting, so it copies the plain-text Content field whatever the
+            // clip stored. Armed immediately before the write.
             _clipboardMonitorService.SuppressNext();
-            // Always copy the plain-text Content field, regardless of stored HTML/RTF.
             await _systemInteractionService.CopyTextAsync(clip.Content);
             await Task.Run(() => _clipStoreService.MarkPastedAsync(clip.Id));
-            await Task.Delay(120);
+            await Task.Delay(PasteSettleDelayMs);
             _systemInteractionService.SimulatePasteKeystroke();
         }
         catch (Exception ex) { Trace.TraceWarning($"PasteAsPlainText failed: {ex.Message}"); }

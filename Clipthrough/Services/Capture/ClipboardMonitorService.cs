@@ -73,6 +73,8 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
 
     public void SuppressNext() => _suppressionGate.Arm();
 
+    public void CancelSuppressNext() => _suppressionGate.Disarm();
+
     public bool IsRunning => _isStarted;
 
     public void Start()

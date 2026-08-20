@@ -885,6 +885,8 @@ public sealed class StorageOptionsServicePhase2Tests : IDisposable
         public void Stop() { IsRunning = false; }
 
         public void SuppressNext() { }
+
+        public void CancelSuppressNext() { }
     }
 
     private sealed class SingleServiceProvider : IServiceProvider
