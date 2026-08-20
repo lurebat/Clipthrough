@@ -187,4 +187,58 @@ public sealed class SearchSuggestionKeyRoutingHeadlessTests
 
         Assert.Equal("newest search", harness.ViewModel.SearchText);
     }
+
+    /// <summary>
+    /// Walking down past the last suggestion continues into the results, the
+    /// mirror of Up off the top returning to the box and of Up from the top clip
+    /// reaching the box. Asaf asked for the symmetry; the Ctrl chords stay.
+    /// </summary>
+    [AvaloniaFact]
+    public void DownFromTheLastSuggestion_ContinuesIntoTheClipList()
+    {
+        using var harness = MainWindowTestHarness.Create();
+        harness.SeedClips(10);
+        OpenTheDropdown(harness);
+
+        Press(harness, Key.Down, RawInputModifiers.None);
+        var suggestions = Suggestions(harness);
+        Assert.True(suggestions.IsKeyboardFocusWithin, "setup failed: never entered the dropdown");
+
+        // Walk to the last suggestion, however many the fixture opened with.
+        for (var i = suggestions.SelectedIndex; i < suggestions.ItemCount - 1; i++)
+        {
+            Press(harness, Key.Down, RawInputModifiers.None);
+        }
+
+        Assert.Equal(suggestions.ItemCount - 1, suggestions.SelectedIndex);
+        Assert.True(suggestions.IsKeyboardFocusWithin, "left the dropdown before reaching its last row");
+
+        Press(harness, Key.Down, RawInputModifiers.None);
+
+        Assert.True(harness.ClipList.IsKeyboardFocusWithin, "Down off the last suggestion did not reach the clip list");
+        Assert.False(suggestions.IsKeyboardFocusWithin);
+    }
+
+    /// <summary>
+    /// The control. Falling out of the dropdown must happen at the bottom and
+    /// nowhere else, or Down stops being able to walk the suggestions at all.
+    /// </summary>
+    [AvaloniaFact]
+    public void DownFromAMiddleSuggestion_StaysInTheDropdown()
+    {
+        using var harness = MainWindowTestHarness.Create();
+        harness.SeedClips(10);
+        OpenTheDropdown(harness);
+
+        Press(harness, Key.Down, RawInputModifiers.None);
+        var suggestions = Suggestions(harness);
+        Assert.True(suggestions.ItemCount >= 2, "the fixture needs at least two suggestions to have a middle");
+        Assert.Equal(0, suggestions.SelectedIndex);
+
+        Press(harness, Key.Down, RawInputModifiers.None);
+
+        Assert.True(suggestions.IsKeyboardFocusWithin, "Down left the dropdown from a row that was not the last");
+        Assert.Equal(1, suggestions.SelectedIndex);
+        Assert.False(harness.ClipList.IsKeyboardFocusWithin);
+    }
 }

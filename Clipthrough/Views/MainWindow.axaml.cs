@@ -492,6 +492,22 @@ public partial class MainWindow : Window
                 case Key.Up when suggestions.SelectedIndex <= 0:
                     FocusSearchBox();
                     return true;
+
+                // Down off the bottom continues into the results, for the same
+                // reason and in the same spirit: Up from the top clip reaches the
+                // search box, so walking down past the last suggestion should
+                // reach the clips rather than stop dead at the end of a list the
+                // user arrowed into from above. Ctrl+Up/Down still jump between
+                // the two panes from anywhere. (reported by Asaf)
+                case Key.Down when suggestions.ItemCount > 0
+                    && suggestions.SelectedIndex >= suggestions.ItemCount - 1:
+                    if (viewModel.Clips.Count > 0)
+                    {
+                        viewModel.SelectedClip ??= viewModel.GetDefaultAutoSelectedClip();
+                        FocusSelectedClipInList();
+                    }
+
+                    return true;
             }
         }
 

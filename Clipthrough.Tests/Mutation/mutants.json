@@ -2510,5 +2510,21 @@
     "find": "        var needsBytes = Clip.ContentBytes is null\n            && (Clip.ContentType == ContentType.Image\n                || Clip.ContentFormat is ClipContentFormat.Html or ClipContentFormat.Rtf);",
     "replace": "        var needsBytes = Clip.ContentBytes is null || Clip.ContentType == ContentType.Image;",
     "filter": "FullyQualifiedName~RichClipListHydrationHeadlessTests"
+  },
+  {
+    "id": "down-traps-focus-at-the-last-suggestion",
+    "why": "Removes the fall-through past the last suggestion, so Down stops dead at the end of the dropdown while Up off the top still returns to the box. That asymmetry is what Asaf reported.",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "find": "                case Key.Down when suggestions.ItemCount > 0\n                    && suggestions.SelectedIndex >= suggestions.ItemCount - 1:",
+    "replace": "                case Key.Down when suggestions.ItemCount > 0 && suggestions.SelectedIndex < 0:",
+    "filter": "FullyQualifiedName~SearchSuggestionKeyRouting"
+  },
+  {
+    "id": "down-leaves-the-dropdown-from-any-row",
+    "why": "Falls out of the dropdown from every row rather than only the last, so Down can no longer walk the suggestions at all - the over-broad way to add the symmetry.",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "find": "                case Key.Down when suggestions.ItemCount > 0\n                    && suggestions.SelectedIndex >= suggestions.ItemCount - 1:",
+    "replace": "                case Key.Down when suggestions.ItemCount > 0 && suggestions.SelectedIndex >= 0:",
+    "filter": "FullyQualifiedName~SearchSuggestionKeyRouting"
   }
 ]
