@@ -1884,6 +1884,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// False while a full-window overlay owns the screen. Bound to the workspace
+    /// grid's <c>IsVisible</c>, which is the point: the welcome and password
+    /// overlays are siblings that stack on top of the workspace rather than
+    /// replacing it, so without this the menu, the search box and the clip list
+    /// stayed hit-testable and in the tab order behind a modal.
+    /// </summary>
+    /// <remarks>
+    /// This property was computed and notified from both setters but bound
+    /// nowhere for as long as it existed, so the containment it describes did
+    /// not happen. The password prompt typing into the search box behind it was
+    /// the same hole reached by a different route. (bugs-opus F4)
+    /// </remarks>
     public bool IsMainWorkspaceVisible => !IsWelcomeOpen && !IsPasswordPromptOpen;
 
     public bool IsPasswordPromptOpen

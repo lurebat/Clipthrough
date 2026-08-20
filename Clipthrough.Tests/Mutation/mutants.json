@@ -2566,5 +2566,13 @@
     "find": "                          InputGesture=\"Ctrl+Shift+C\" />",
     "replace": "                          />",
     "filter": "FullyQualifiedName~MenuGesturePromisesHeadlessTests"
+  },
+  {
+    "id": "workspace-stays-reachable-behind-a-modal-overlay",
+    "why": "Unbinds IsMainWorkspaceVisible, restoring the state it described but never enforced. The welcome and password overlays are siblings that stack on top of the workspace rather than replacing it, so the menu, search box and clip list stay hit-testable and in the tab order behind a modal.",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "find": "              IsVisible=\"{Binding IsMainWorkspaceVisible}\"\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~PasswordPromptInputHeadlessTests"
   }
 ]

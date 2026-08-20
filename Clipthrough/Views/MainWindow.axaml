@@ -30,6 +30,7 @@
     <Grid>
         <Grid RowDefinitions="Auto,Auto,*,Auto"
               RowSpacing="6"
+              IsVisible="{Binding IsMainWorkspaceVisible}"
               Margin="8">
         <Menu Grid.Row="0" x:Name="TopMenu">
             <MenuItem Header="File">
