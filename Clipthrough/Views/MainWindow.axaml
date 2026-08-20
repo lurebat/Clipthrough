@@ -50,12 +50,18 @@
                           Command="{Binding DeleteSelectedCommand}"
                           InputGesture="Delete" />
                 <Separator />
+                <!--
+                    No InputGesture on these two. They advertised "F" and "P",
+                    which never worked and cannot: a plain letter with the clip
+                    list focused is type-to-filter, so pressing F puts "f" in the
+                    search box. A menu that promises a shortcut the app answers
+                    by doing something else is worse than one that promises
+                    nothing. (bugs-opus F7)
+                -->
                 <MenuItem Header="Toggle _favorite"
-                          Command="{Binding ToggleFavoriteCommand}"
-                          InputGesture="F" />
+                          Command="{Binding ToggleFavoriteCommand}" />
                 <MenuItem Header="Toggle _pin"
-                          Command="{Binding TogglePinCommand}"
-                          InputGesture="P" />
+                          Command="{Binding TogglePinCommand}" />
                 <Separator />
                 <MenuItem Header="_Transform"
                           x:Name="EditTransformMenu"

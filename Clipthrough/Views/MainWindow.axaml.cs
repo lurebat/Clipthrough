@@ -151,6 +151,10 @@ public partial class MainWindow : Window
             m_subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
             m_subscribedViewModel.HelpRequested -= OnHelpRequested;
             m_subscribedViewModel.AboutRequested -= OnAboutRequested;
+            // Subscribed in OnDataContextChanged alongside the three above, and
+            // detached there on every context change - but not here, so closing
+            // the window left this one attached. (bugs-opus F9)
+            m_subscribedViewModel.Clips.CollectionChanged -= OnClipsCollectionChanged;
             m_subscribedViewModel.Dispose();
             m_subscribedViewModel = null;
         }
@@ -169,19 +173,18 @@ public partial class MainWindow : Window
             m_aiPromptWindow = null;
         }
 
-        if (m_clipListScrollViewer is null)
+        // Unconditional. This used to return early when the list ScrollViewer was
+        // never connected - which happens whenever the window closes before the
+        // list is realised - and that skipped three of the four list handlers and
+        // both of the window's own drag-drop handlers below. RemoveHandler for
+        // something never added is a no-op, so there is nothing to guard.
+        // (bugs-opus F8)
+        if (m_clipListScrollViewer is not null)
         {
-            if (m_clipsListBox is not null)
-            {
-                m_clipsListBox.RemoveHandler(InputElement.DoubleTappedEvent, OnClipsListDoubleTapped);
-                m_clipsListBox = null;
-            }
-
-            return;
+            m_clipListScrollViewer.ScrollChanged -= OnClipListScrollChanged;
+            m_clipListScrollViewer = null;
         }
 
-        m_clipListScrollViewer.ScrollChanged -= OnClipListScrollChanged;
-        m_clipListScrollViewer = null;
         if (m_clipsListBox is not null)
         {
             m_clipsListBox.RemoveHandler(InputElement.DoubleTappedEvent, OnClipsListDoubleTapped);

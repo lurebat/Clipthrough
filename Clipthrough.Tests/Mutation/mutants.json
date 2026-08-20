@@ -2550,5 +2550,21 @@
     "find": "                loaded = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions)?.Normalize();",
     "replace": "                loaded = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions)?.Normalize();\n                LoadFault = QuarantineCorruptSettings(new JsonException(\"forced\"));",
     "filter": "FullyQualifiedName~SettingsFileIntegrityTests"
+  },
+  {
+    "id": "menu-advertises-a-shortcut-that-types-into-the-search-box",
+    "why": "Puts back InputGesture=\"F\" on Toggle favourite. It was never handled and cannot be: an unmodified letter with the clip list focused is type-to-filter, so the advertised shortcut puts \"f\" in the search box instead.",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "find": "                <MenuItem Header=\"Toggle _favorite\"\n                          Command=\"{Binding ToggleFavoriteCommand}\" />",
+    "replace": "                <MenuItem Header=\"Toggle _favorite\"\n                          Command=\"{Binding ToggleFavoriteCommand}\"\n                          InputGesture=\"F\" />",
+    "filter": "FullyQualifiedName~MenuGesturePromisesHeadlessTests"
+  },
+  {
+    "id": "menu-stops-advertising-real-shortcuts",
+    "why": "Strips the gesture from a shortcut that does work, which is how the no-bare-letters rule could be satisfied by a menu that documents nothing.",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "find": "                          InputGesture=\"Ctrl+Shift+C\" />",
+    "replace": "                          />",
+    "filter": "FullyQualifiedName~MenuGesturePromisesHeadlessTests"
   }
 ]
