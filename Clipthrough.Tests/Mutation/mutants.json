@@ -2574,5 +2574,29 @@
     "find": "              IsVisible=\"{Binding IsMainWorkspaceVisible}\"\n",
     "replace": "",
     "filter": "FullyQualifiedName~PasswordPromptInputHeadlessTests"
+  },
+  {
+    "id": "tray-click-compares-the-whole-lparam",
+    "why": "Drops the low-word mask. Under NOTIFYICON_VERSION_4 the icon uID sits in the high word, so a balloon click arrives as 0x0001_0405 and no comparison can match - the first-run tray toast invites a click that does nothing.",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "find": "            var notificationMessage = unchecked((uint)lParam.ToInt64()) & 0xFFFF;",
+    "replace": "            var notificationMessage = unchecked((uint)lParam.ToInt64()) & 0xFFFFFFFF;",
+    "filter": "FullyQualifiedName~TrayActivationNotificationTests"
+  },
+  {
+    "id": "tray-treats-every-callback-as-a-click",
+    "why": "Accepts any callback as an activation. The icon receives mouse-move and balloon-lifecycle notifications constantly, so the window would raise itself unbidden - the over-broad way to fix the masking bug.",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "find": "            return notificationMessage is NinSelect or NinKeySelect or NinBalloonUserClick or WmLButtonUp;",
+    "replace": "            return notificationMessage is NinSelect or NinKeySelect or NinBalloonUserClick or WmLButtonUp || notificationMessage >= 0;",
+    "filter": "FullyQualifiedName~TrayActivationNotificationTests"
+  },
+  {
+    "id": "tray-icon-cannot-be-activated-from-the-keyboard",
+    "why": "Drops NIN_KEYSELECT, which is what Windows sends when the icon is selected with Space or Enter. A keyboard user could then never open the window they were just told had gone to the tray, and would have no way to discover why.",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "find": "            return notificationMessage is NinSelect or NinKeySelect or NinBalloonUserClick or WmLButtonUp;",
+    "replace": "            return notificationMessage is NinSelect or NinBalloonUserClick or WmLButtonUp || notificationMessage == NinKeySelect + 0xFFFF;",
+    "filter": "FullyQualifiedName~TrayActivationNotificationTests"
   }
 ]

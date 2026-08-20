@@ -1020,6 +1020,13 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern nint GlobalFree(nint hMem);
 
+    /// <summary>
+    /// Test seam for the tray callback decision, which is otherwise reachable
+    /// only through a Win32 window procedure.
+    /// </summary>
+    internal static bool IsTrayActivationNotification(nint lParam)
+        => WindowsBalloonNotificationHost.IsActivationNotification(lParam);
+
     private sealed class WindowsBalloonNotificationHost : IDisposable
     {
         private const int GwlWndProc = -4;
@@ -1031,6 +1038,14 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         private const uint WmApp = 0x8000;
         private const uint WmTrayIcon = WmApp + 1;
         private const uint WmLButtonUp = 0x0202;
+
+        // Version 4 sends NIN_SELECT for a left click on the icon; WM_LBUTTONUP
+        // is the legacy equivalent and is kept for the case where NIM_SETVERSION
+        // did not take. NIN_KEYSELECT is the same activation reached with the
+        // keyboard (Space or Enter), and a keyboard user has to be able to open
+        // the window they were just told went to the tray.
+        private const uint NinSelect = 0x0400;
+        private const uint NinKeySelect = 0x0401;
         private const uint NinBalloonUserClick = 0x0405;
         private const uint NifIcon = 0x00000002;
         private const uint NifState = 0x00000008;
@@ -1173,19 +1188,44 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
                 : new Win32Exception(errorCode).Message;
         }
 
+        /// <summary>
+        /// True when a tray callback means "the user activated this icon or its
+        /// balloon", which is the only thing this host acts on.
+        /// </summary>
+        /// <remarks>
+        /// The low word is the part that carries the notification event. Under
+        /// <c>NOTIFYICON_VERSION_4</c> - which <see cref="CreateNotificationData"/>
+        /// requests - the callback packs the icon's <c>uID</c> into the high word
+        /// of <c>lParam</c>, so with <c>uID = 1</c> a balloon click arrives as
+        /// <c>0x0001_0405</c>. Comparing the whole value could never match, and
+        /// the first-run "Clipthrough moved to the tray" toast therefore invited
+        /// a click that did nothing - at the moment a new user has just lost the
+        /// window and is being told where it went. (bugs-opus F6)
+        ///
+        /// Masking also keeps the legacy layout working, where <c>lParam</c> is
+        /// the bare message with nothing packed alongside it. That matters
+        /// because <c>NIM_SETVERSION</c> can fail, and this host does not treat
+        /// that as fatal.
+        ///
+        /// <c>NIN_SELECT</c> is listed because version 4 sends it for a left
+        /// click instead of <c>WM_LBUTTONUP</c>; the older message stays for the
+        /// legacy path.
+        /// </remarks>
+        internal static bool IsActivationNotification(nint lParam)
+        {
+            var notificationMessage = unchecked((uint)lParam.ToInt64()) & 0xFFFF;
+            return notificationMessage is NinSelect or NinKeySelect or NinBalloonUserClick or WmLButtonUp;
+        }
+
         private nint WindowProc(nint hWnd, uint msg, nint wParam, nint lParam)
         {
-            if (msg == WmTrayIcon)
+            if (msg == WmTrayIcon && IsActivationNotification(lParam))
             {
-                var notificationMessage = unchecked((uint)lParam.ToInt64());
-                if (notificationMessage == NinBalloonUserClick || notificationMessage == WmLButtonUp)
+                var callback = _activationCallback;
+                if (callback is not null)
                 {
-                    var callback = _activationCallback;
-                    if (callback is not null)
-                    {
-                        Dispatcher.UIThread.Post(callback);
-                        return 0;
-                    }
+                    Dispatcher.UIThread.Post(callback);
+                    return 0;
                 }
             }
 
