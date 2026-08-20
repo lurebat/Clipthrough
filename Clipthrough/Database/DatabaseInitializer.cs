@@ -275,7 +275,7 @@ public sealed class DatabaseInitializer
             TraceStep(sw, "integrity-check");
         }
 
-        await MigrateFtsSchemaIfNeededAsync(connection, cancellationToken);
+        var ftsSchemaRecreated = await MigrateFtsSchemaIfNeededAsync(connection, cancellationToken);
         TraceStep(sw, "fts-schema-migrate");
 
         await using (var schemaCommand = connection.CreateCommand())
@@ -326,7 +326,23 @@ public sealed class DatabaseInitializer
         }
         else
         {
-            TraceStep(sw, "schema-up-to-date (migrations skipped)");
+            // A repair drops the FTS table and the schema DDL above recreates it
+            // empty, so without this every clip already stored stops being
+            // findable by keyword until some later launch happens to migrate.
+            // The rebuild lives inside the version gate, which only helps when
+            // the version is behind as well - and it need not be:
+            // HasPendingStructuralWorkAsync ends with a bare FTS check reached
+            // only at the current version, and buys a full-file quick_check on
+            // the strength of it. (arch-sol A16)
+            if (ftsSchemaRecreated)
+            {
+                await RebuildClipSearchIndexAsync(connection, cancellationToken);
+                TraceStep(sw, "rebuild-search-index (fts repaired at current version)");
+            }
+            else
+            {
+                TraceStep(sw, "schema-up-to-date (migrations skipped)");
+            }
         }
 
         // After the column migrations, never before: these index expressions
@@ -966,11 +982,15 @@ public sealed class DatabaseInitializer
     /// triggers so the Schema DDL can recreate them with the current 5-column
     /// schema and the trigram tokenizer (which supports substring matching).
     /// </summary>
-    private static async Task MigrateFtsSchemaIfNeededAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    /// <returns>
+    /// True when the table was dropped, meaning the caller is responsible for
+    /// repopulating the empty index the schema DDL is about to create.
+    /// </returns>
+    private static async Task<bool> MigrateFtsSchemaIfNeededAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
         if (!await FtsSchemaNeedsMigrationAsync(connection, cancellationToken))
         {
-            return;
+            return false;
         }
 
         // Drop old triggers and FTS table so they're recreated with the new schema/tokenizer.
@@ -978,6 +998,7 @@ public sealed class DatabaseInitializer
         await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_ad;", cancellationToken);
         await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_au;", cancellationToken);
         await ExecuteNonQueryAsync(connection, "DROP TABLE IF EXISTS clips_fts;", cancellationToken);
+        return true;
     }
 
     /// <summary>

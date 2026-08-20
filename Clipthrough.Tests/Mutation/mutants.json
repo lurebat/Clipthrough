@@ -2390,5 +2390,21 @@
     "find": "            && (guardViewModel.IsSettingsOpen || guardViewModel.IsWelcomeOpen\n                || guardViewModel.IsPasswordPromptOpen || guardViewModel.IsAiPromptOpen\n                || guardViewModel.SessionLogs.IsOpen))",
     "replace": "            && (guardViewModel.IsSettingsOpen || guardViewModel.IsWelcomeOpen\n                || guardViewModel.IsPasswordPromptOpen || guardViewModel.IsAiPromptOpen\n                || guardViewModel.SessionLogs.IsOpen || true))",
     "filter": "FullyQualifiedName~PasswordPromptInputHeadlessTests"
+  },
+  {
+    "id": "fts-repair-leaves-the-index-empty",
+    "why": "Stops the rebuild that follows an FTS repair at the current schema version. The schema DDL then recreates an empty external-content index and every clip already stored silently stops being findable by keyword.",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "find": "            if (ftsSchemaRecreated)",
+    "replace": "            if (ftsSchemaRecreated && !ftsSchemaRecreated)",
+    "filter": "FullyQualifiedName~FtsSchemaRepairTests"
+  },
+  {
+    "id": "fts-repair-runs-on-every-launch",
+    "why": "Makes the repair decision always say yes, so every launch drops and rebuilds the whole search index. That is the over-broad way to fix the empty-index bug, and it is invisible in the resulting database - same definition, same rows, same hits - so only the traced step catches it.",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "find": "        return columnCount < 5 || !hasTrigramTokenizer;",
+    "replace": "        return columnCount < 5 || !hasTrigramTokenizer || columnCount >= 0;",
+    "filter": "FullyQualifiedName~FtsSchemaRepairTests"
   }
 ]
