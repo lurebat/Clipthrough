@@ -2348,4 +2348,21 @@
     "replace": "            throw;",
     "filter": "FullyQualifiedName~ClipClipboardWriterTests"
   }
+,
+  {
+    "id": "a-clip-that-is-one-enormous-line-is-laid-out-in-full",
+    "why": "AvaloniaEdit virtualises per document line, so a single very long line defeats virtualisation and is laid out whole on the UI thread on every selection change - measured at ~18 us per character, linear across three doublings. Minified JSON, base64 and log lines all land here, and 852 of 1638 clips take this path.",
+    "file": "Clipthrough/Controls/SyntaxTextEditor.cs",
+    "find": "        if (string.IsNullOrEmpty(text) || LongestUnbrokenRun(text) <= MaxUnbrokenRunChars)",
+    "replace": "        if (string.IsNullOrEmpty(text) || LongestUnbrokenRun(text) <= int.MaxValue)",
+    "filter": "FullyQualifiedName~SyntaxTextEditorLongLine"
+  },
+  {
+    "id": "a-shortened-clip-view-stays-editable",
+    "why": "The shortened stand-in is not the clip. Leaving it editable lets a save commit the truncation over the real content, turning a display guard into data loss.",
+    "file": "Clipthrough/Controls/SyntaxTextEditor.cs",
+    "find": "            _editor.IsReadOnly = IsReadOnly || _isShowingShortenedText;\n        }\n        finally\n        {\n            _isSyncingText = false;\n        }\n    }\n\n    /// <summary>\n    /// Returns the text to lay out",
+    "replace": "            _editor.IsReadOnly = IsReadOnly;\n        }\n        finally\n        {\n            _isSyncingText = false;\n        }\n    }\n\n    /// <summary>\n    /// Returns the text to lay out",
+    "filter": "FullyQualifiedName~SyntaxTextEditorLongLine"
+  }
 ]

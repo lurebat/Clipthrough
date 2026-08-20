@@ -217,6 +217,7 @@ public static class AppText
         [nameof(PreviewEmptyFilesData)] = "This file clip does not include any stored paths.",
         [nameof(PreviewEmptyRichTextData)] = "This rich text clip is empty.",
         [nameof(PreviewTruncatedSuffix)] = "\n\n... preview truncated. Use Raw or Textual view to see the whole clip.",
+        [nameof(EditorLineTooLongSuffix)] = "\n\n... shown in part, and read-only: this clip has a very long line with no breaks, and laying all of it out would freeze the window. The clip itself is unchanged - copy or export it to get the whole thing.",
         [nameof(PreviewEmptyClip)] = "This clip is empty.",
         [nameof(PreviewTextUnavailable)] = "This clip does not contain previewable text.",
         [nameof(EmptyClip)] = "Empty clip",
@@ -551,6 +552,8 @@ public static class AppText
     public static string PreviewEmptyRichTextData => Text(nameof(PreviewEmptyRichTextData));
 
     public static string PreviewTruncatedSuffix => Text(nameof(PreviewTruncatedSuffix));
+
+    public static string EditorLineTooLongSuffix => Text(nameof(EditorLineTooLongSuffix));
     public static string PreviewEmptyClip => Text(nameof(PreviewEmptyClip));
     public static string PreviewTextUnavailable => Text(nameof(PreviewTextUnavailable));
     public static string EmptyClip => Text(nameof(EmptyClip));

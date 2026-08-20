@@ -1,4 +1,6 @@
 using System;
+using System.Diagnostics;
+using Clipthrough.Localization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -48,6 +50,62 @@ public sealed class SyntaxTextEditor : UserControl
     private string? _pendingHiddenText;
     private bool _hasPendingHiddenText;
 
+    /// <summary>
+    /// True while the editor is showing a shortened stand-in because the real
+    /// content has a run too long to lay out. Forces read-only so the stand-in
+    /// can never be saved over the clip it stands in for.
+    /// </summary>
+    private bool _isShowingShortenedText;
+
+    /// <summary>
+    /// Longest run without a line break that this control will hand to
+    /// AvaloniaEdit.
+    /// </summary>
+    /// <remarks>
+    /// AvaloniaEdit virtualises per *document line*, so a clip with many lines
+    /// is flat in cost no matter how large, while a clip that is one enormous
+    /// line defeats virtualisation entirely - the single visual line covering
+    /// the viewport has to be laid out in full, on the UI thread, on every
+    /// selection change.
+    ///
+    /// Measured in review round 2: linear at about 18 us per character, 2.00x
+    /// per doubling across three doublings. A one-line clip of the library's
+    /// mean 8,883 characters costs ~150 ms per arrow key; 200,000 characters
+    /// costs 3.5 s; the largest clip in the reporting user's library, 766,983
+    /// characters, extrapolates to about 13 s. Those are headless lower bounds.
+    ///
+    /// Word wrap is NOT the cause. That was the first hypothesis and the control
+    /// disproved it: turning wrapping off removed about 4% and left the curve
+    /// cleanly linear. A fix that only set WordWrap=false would have achieved
+    /// nothing.
+    ///
+    /// The value matches <c>RichDocumentView.MaxUnbrokenRunChars</c>, which
+    /// guards the rich-text pane against the same failure. That guard existing
+    /// while the plain-text pane had none - though plain text is 852 of 1,638
+    /// clips - is what identified this as an oversight rather than a cost
+    /// inherent to showing large clips.
+    /// </remarks>
+    private const int MaxUnbrokenRunChars = 10_000;
+
+    /// <summary>
+    /// True when the pane is showing a shortened stand-in because the clip has a
+    /// line too long to lay out, and is therefore read-only regardless of
+    /// <see cref="IsReadOnly"/>.
+    /// </summary>
+    /// <remarks>
+    /// Public because it is a real state of the control rather than a test hook:
+    /// a caller that wants to explain the truncation in the surrounding UI needs
+    /// to know it is happening.
+    /// </remarks>
+    public bool IsShowingShortenedText => _isShowingShortenedText;
+
+    /// <summary>
+    /// Whether the underlying editor currently refuses edits. This is the state
+    /// that actually protects the clip, and it is not the same as
+    /// <see cref="IsReadOnly"/>, which is the caller's request.
+    /// </summary>
+    internal bool IsEffectivelyReadOnly => _editor.IsReadOnly;
+
     public SyntaxTextEditor()
     {
         _editor = new TextEditor
@@ -76,7 +134,7 @@ public sealed class SyntaxTextEditor : UserControl
         _editor.TextArea.AddHandler(KeyDownEvent, OnTextAreaKeyDownTunnel, RoutingStrategies.Tunnel);
 
         this.GetObservable(TextProperty).Subscribe(OnTextPropertyChanged);
-        this.GetObservable(IsReadOnlyProperty).Subscribe(v => _editor.IsReadOnly = v);
+        this.GetObservable(IsReadOnlyProperty).Subscribe(v => _editor.IsReadOnly = v || _isShowingShortenedText);
         this.GetObservable(SyntaxHintProperty).Subscribe(_ => ScheduleGrammarUpdate());
         this.GetObservable(IsVisibleProperty).Subscribe(OnIsVisibleChanged);
     }
@@ -172,15 +230,80 @@ public sealed class SyntaxTextEditor : UserControl
         _isSyncingText = true;
         try
         {
-            if (_editor.Text != newText)
+            var displayText = ShortenIfUnlayoutable(newText);
+            if (_editor.Text != displayText)
             {
-                _editor.Text = newText ?? string.Empty;
+                _editor.Text = displayText;
             }
+
+            _editor.IsReadOnly = IsReadOnly || _isShowingShortenedText;
         }
         finally
         {
             _isSyncingText = false;
         }
+    }
+
+    /// <summary>
+    /// Returns the text to lay out, shortened when the real content contains a
+    /// run longer than <see cref="MaxUnbrokenRunChars"/>, and records whether it
+    /// did.
+    /// </summary>
+    /// <remarks>
+    /// Shortening rather than inserting break opportunities: a break-inserted
+    /// view shows everything but lies about the content, so selecting and
+    /// copying out of the pane would yield text with newlines the clip does not
+    /// have. A visibly truncated view is honest about being partial, and the
+    /// clip itself is untouched - the copy commands still read the stored clip,
+    /// not this control.
+    ///
+    /// The pane is forced read-only whenever this fires, so the shortened stand
+    /// -in can never be committed over the real clip.
+    /// </remarks>
+    private string ShortenIfUnlayoutable(string? text)
+    {
+        if (string.IsNullOrEmpty(text) || LongestUnbrokenRun(text) <= MaxUnbrokenRunChars)
+        {
+            _isShowingShortenedText = false;
+            return text ?? string.Empty;
+        }
+
+        _isShowingShortenedText = true;
+        Trace.TraceWarning(
+            $"Clip text contains a {LongestUnbrokenRun(text):N0}-character run with no line break; "
+            + "showing a shortened, read-only view because laying it out would stall the UI thread.");
+
+        return text[..Math.Min(text.Length, MaxUnbrokenRunChars)] + AppText.EditorLineTooLongSuffix;
+    }
+
+    /// <summary>Length of the longest stretch containing no line break.</summary>
+    private static int LongestUnbrokenRun(string text)
+    {
+        var longest = 0;
+        var current = 0;
+        foreach (var ch in text)
+        {
+            if (ch is '\n' or '\r')
+            {
+                current = 0;
+                continue;
+            }
+
+            current++;
+            if (current > longest)
+            {
+                longest = current;
+            }
+
+            // Nothing above the cap changes the decision, so stop walking a
+            // 767 KB clip once the answer is settled.
+            if (longest > MaxUnbrokenRunChars)
+            {
+                return longest;
+            }
+        }
+
+        return longest;
     }
 
     private void OnIsVisibleChanged(bool isVisible)
@@ -199,10 +322,16 @@ public sealed class SyntaxTextEditor : UserControl
         _isSyncingText = true;
         try
         {
-            if (_editor.Text != pending)
+            // Compare against what will actually be assigned. Comparing the raw
+            // pending text against an already-shortened editor would never match,
+            // so a shortened clip would be re-laid-out on every visibility flip.
+            var displayText = ShortenIfUnlayoutable(pending);
+            if (_editor.Text != displayText)
             {
-                _editor.Text = pending ?? string.Empty;
+                _editor.Text = displayText;
             }
+
+            _editor.IsReadOnly = IsReadOnly || _isShowingShortenedText;
         }
         finally
         {
