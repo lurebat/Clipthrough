@@ -1489,7 +1489,8 @@
                             <StackPanel Spacing="6">
                                 <TextBlock Classes="detail-label"
                                            Text="Password" />
-                                <TextBox Text="{Binding PasswordPromptInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                <TextBox Name="PasswordPromptTextBox"
+                                         Text="{Binding PasswordPromptInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                          PasswordChar="*"
                                          RevealPassword="{Binding IsPasswordPromptPasswordVisible}"
                                          PlaceholderText="Enter your database password" />

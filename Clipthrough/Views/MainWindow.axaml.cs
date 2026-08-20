@@ -837,6 +837,21 @@ public partial class MainWindow : Window
 
     private bool TryRedirectToSearchBox(string text, object? source)
     {
+        // A modal overlay owns the keyboard while it is up. Without this the
+        // encrypted-database password prompt - an in-window overlay, not a
+        // separate window - let every character the user typed reach the search
+        // box covered by it, so the password accumulated in cleartext in a
+        // TwoWay-bound filter that feeds RecentSearches, and never reached the
+        // password field at all. Every other handler in this file already has
+        // this guard; this one was the exception. (bugs-opus F3)
+        if (DataContext is MainWindowViewModel guardViewModel
+            && (guardViewModel.IsSettingsOpen || guardViewModel.IsWelcomeOpen
+                || guardViewModel.IsPasswordPromptOpen || guardViewModel.IsAiPromptOpen
+                || guardViewModel.SessionLogs.IsOpen))
+        {
+            return false;
+        }
+
         var searchBox = GetSearchBox();
         if (searchBox is null || searchBox.IsKeyboardFocusWithin)
         {
@@ -1581,6 +1596,9 @@ public partial class MainWindow : Window
             m_subscribedViewModel.Clips.CollectionChanged += OnClipsCollectionChanged;
             UpdateSettingsWindowVisibility(viewModel.IsSettingsOpen);
             UpdateAiPromptWindowVisibility(viewModel.IsAiPromptOpen);
+            // The encrypted-database prompt is already open by the time the view
+            // binds, so the PropertyChanged path above never fires for it.
+            UpdatePasswordPromptFocus(viewModel.IsPasswordPromptOpen);
             PopulateTransformMenus();
         }
     }
@@ -1682,6 +1700,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (e.PropertyName == nameof(MainWindowViewModel.IsPasswordPromptOpen) && sender is MainWindowViewModel passwordVm)
+        {
+            UpdatePasswordPromptFocus(passwordVm.IsPasswordPromptOpen);
+            return;
+        }
+
         if (e.PropertyName == nameof(MainWindowViewModel.SelectedClip) && m_focusClipOnNextSelectionChange)
         {
             m_focusClipOnNextSelectionChange = false;
@@ -1696,6 +1720,33 @@ public partial class MainWindow : Window
         {
             Dispatcher.UIThread.Post(PopulateTransformMenus);
         }
+    }
+
+    private void UpdatePasswordPromptFocus(bool open)
+    {
+        if (!open)
+        {
+            return;
+        }
+
+        // Nothing focused the password field before, because both focus entry
+        // points bail out while the prompt is up. That left the first keystroke
+        // with no home, which is what let TryRedirectToSearchBox claim it.
+        // Guarding the redirect alone would have made the prompt silently eat
+        // the password instead of misfiling it - still broken, just quieter.
+        var passwordBox = this.FindControl<TextBox>("PasswordPromptTextBox");
+        if (passwordBox is null)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (DataContext is MainWindowViewModel viewModel && viewModel.IsPasswordPromptOpen)
+            {
+                passwordBox.Focus();
+            }
+        }, DispatcherPriority.Input);
     }
 
     private void UpdateSettingsWindowVisibility(bool open)

@@ -1051,8 +1051,8 @@
     "id": "markup-stripping-is-culture-sensitive-again",
     "file": "Clipthrough/Presentation/ClipDisplayFormatter.cs",
     "why": "The original interpreted Regex.Replace with IgnoreCase folds case using the CURRENT culture. Under tr-TR upper-case I does not fold to i, so <LI> and <DIV> stop matching: bullets and paragraph breaks vanish while the catch-all still strips the tags, so the damage is invisible.",
-    "find": "            var withListItems = ListItemTagRegex().Replace(withoutScripts, \"\u2022 \");\n            var withBreaks = BlockLevelTagRegex().Replace(withListItems, Environment.NewLine);",
-    "replace": "            var withListItems = Regex.Replace(withoutScripts, @\"<li[^>]*>\", \"\u2022 \", RegexOptions.IgnoreCase);\n            var withBreaks = Regex.Replace(withListItems, @\"</?(br|p|div|section|article|ul|ol|h[1-6]|tr)[^>]*>\", Environment.NewLine, RegexOptions.IgnoreCase);",
+    "find": "            var withListItems = ListItemTagRegex().Replace(withoutScripts, \"• \");\n            var withBreaks = BlockLevelTagRegex().Replace(withListItems, Environment.NewLine);",
+    "replace": "            var withListItems = Regex.Replace(withoutScripts, @\"<li[^>]*>\", \"• \", RegexOptions.IgnoreCase);\n            var withBreaks = Regex.Replace(withListItems, @\"</?(br|p|div|section|article|ul|ol|h[1-6]|tr)[^>]*>\", Environment.NewLine, RegexOptions.IgnoreCase);",
     "filter": "RenderRichContent_HandlesUpperCaseMarkup_UnderAnyCulture"
   },
   {
@@ -2366,5 +2366,29 @@
     "find": "            if (!char.IsLowSurrogate(token[i]))",
     "replace": "            if (token[i] != char.MaxValue)",
     "filter": "FullyQualifiedName~ShortTokenSearchTests"
+  },
+  {
+    "id": "type-to-filter-ignores-a-modal-overlay",
+    "why": "Removes the modal guard, restoring the state where the password prompt - an in-window overlay - let every typed character reach the search box behind it. The password then accumulated in cleartext in a TwoWay-bound filter feeding RecentSearches, and never reached the password field.",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "find": "        if (DataContext is MainWindowViewModel guardViewModel\n            && (guardViewModel.IsSettingsOpen || guardViewModel.IsWelcomeOpen\n                || guardViewModel.IsPasswordPromptOpen || guardViewModel.IsAiPromptOpen\n                || guardViewModel.SessionLogs.IsOpen))\n        {\n            return false;\n        }\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~PasswordPromptInputHeadlessTests"
+  },
+  {
+    "id": "password-prompt-opens-with-nothing-focused",
+    "why": "Inverts the open check so the prompt opens with nothing focused, as it did before. The first keystroke then has no home, which is what let the redirect claim it. Guarding the redirect alone would leave the prompt silently eating the password instead.",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "find": "        if (!open)",
+    "replace": "        if (open || !open)",
+    "filter": "FullyQualifiedName~PasswordPromptInputHeadlessTests"
+  },
+  {
+    "id": "type-to-filter-guard-swallows-every-keystroke",
+    "why": "Widens the modal guard to always hold, so type-to-filter dies everywhere rather than only under an overlay. The security fix traded for a dead feature is the plausible way this guard regresses, and only the no-prompt test stands against it.",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "find": "            && (guardViewModel.IsSettingsOpen || guardViewModel.IsWelcomeOpen\n                || guardViewModel.IsPasswordPromptOpen || guardViewModel.IsAiPromptOpen\n                || guardViewModel.SessionLogs.IsOpen))",
+    "replace": "            && (guardViewModel.IsSettingsOpen || guardViewModel.IsWelcomeOpen\n                || guardViewModel.IsPasswordPromptOpen || guardViewModel.IsAiPromptOpen\n                || guardViewModel.SessionLogs.IsOpen || true))",
+    "filter": "FullyQualifiedName~PasswordPromptInputHeadlessTests"
   }
 ]

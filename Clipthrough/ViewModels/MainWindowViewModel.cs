@@ -1892,6 +1892,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// Test seam for the password-prompt overlay, which is otherwise only
+    /// reachable by starting against a real encrypted database. The view
+    /// behaviour under test - what a keystroke does while the overlay is up -
+    /// does not depend on how the flag came to be set.
+    /// </summary>
+    internal void OpenPasswordPromptForTests() => IsPasswordPromptOpen = true;
+
     public string PasswordPromptInput
     {
         get => _passwordPromptInput;
