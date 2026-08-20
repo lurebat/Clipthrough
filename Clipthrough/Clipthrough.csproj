@@ -43,7 +43,6 @@
     <PackageReference Include="VellumText.Avalonia" Version="0.7.0" />
     <PackageReference Include="VellumText.Interop.Html" Version="0.7.0" />
     <PackageReference Include="VellumText.Interop.Rtf" Version="0.7.0" />
-    <PackageReference Include="VellumText.Interop.Json" Version="0.7.0" />
     </ItemGroup>
 
     <ItemGroup>
