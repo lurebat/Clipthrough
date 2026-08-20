@@ -2158,6 +2158,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 await _settingsService.InitializeAsync();
             }
 
+            // A settings file that could not be read is recovered from silently -
+            // legacy mirror, then defaults - so this is the only place the user
+            // is told their configuration is not the one they left behind.
+            // (arch-opus A24)
+            if (_settingsService.LoadFault is { Length: > 0 } settingsFault)
+            {
+                _notificationService.PublishError(AppText.SettingsLoadFailedTitle, settingsFault);
+                StatusText = settingsFault;
+            }
+
             var draftSettings = _settingsService.HasSavedSettings ? _settingsService.Current : AppSettings.Default;
             LoadSettingsDraft(draftSettings);
             ApplyPersistedFilters(draftSettings, notify: true);

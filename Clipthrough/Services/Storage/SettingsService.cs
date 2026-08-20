@@ -52,6 +52,42 @@ public sealed class SettingsService : ISettingsService
 
     public bool HasSavedSettings => File.Exists(_settingsPath);
 
+    /// <summary>
+    /// Describes an unreadable settings file found during load, or null when the
+    /// settings came from where they were supposed to. Set once, at load.
+    /// </summary>
+    /// <remarks>
+    /// A corrupt settings.json does not stop startup: the service falls back to
+    /// a legacy copy in the database and then to defaults. That fallback is
+    /// reasonable; doing it without saying so is not, because the alternative is
+    /// the user rediscovering their configuration one feature at a time.
+    /// </remarks>
+    public string? LoadFault { get; private set; }
+
+    /// <summary>
+    /// Renames an unparseable settings file out of the way so the next save does
+    /// not overwrite it, and returns the message to show the user.
+    /// </summary>
+    private string QuarantineCorruptSettings(JsonException ex)
+    {
+        var fileName = Path.GetFileName(_settingsPath);
+        var quarantinePath = $"{_settingsPath}.corrupt-{DateTime.UtcNow:yyyyMMdd-HHmmss}";
+
+        try
+        {
+            File.Move(_settingsPath, quarantinePath, overwrite: true);
+            Trace.TraceError($"Settings file could not be parsed and was moved to '{quarantinePath}': {ex.Message}");
+            return $"{fileName} could not be read and was moved to {Path.GetFileName(quarantinePath)}. " +
+                "Clipthrough started with the last settings it had stored, or defaults.";
+        }
+        catch (Exception moveFailure) when (moveFailure is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceError($"Settings file could not be parsed, and moving it aside failed: {moveFailure.Message}");
+            return $"{fileName} could not be read, and could not be moved aside. " +
+                "Clipthrough started with the last settings it had stored, or defaults.";
+        }
+    }
+
     public event EventHandler<AppSettings>? SettingsChanged;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -180,8 +216,21 @@ public sealed class SettingsService : ISettingsService
                 var json = await File.ReadAllTextAsync(_settingsPath, cancellationToken);
                 loaded = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions)?.Normalize();
             }
-            catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+            catch (JsonException ex)
             {
+                // Unreadable content, as opposed to an unreadable file. The
+                // recovery below is a silent fallback to a legacy mirror in the
+                // database and then to defaults, so without this the user's
+                // settings change underneath them and the only record is a trace
+                // line. Quarantine the file so it is not overwritten by the next
+                // save, and report it. (arch-opus A24)
+                LoadFault = QuarantineCorruptSettings(ex);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Deliberately NOT quarantined: a locked or briefly unreadable
+                // file is usually transient, and moving it aside would destroy
+                // settings that were never corrupt.
                 Trace.TraceWarning($"Settings file load failed: {ex.Message}");
             }
         }
@@ -296,7 +345,17 @@ public sealed class SettingsService : ISettingsService
         // Serialize without the secret field.
         var stripped = settings with { AiApiKey = string.Empty };
         var json = JsonSerializer.Serialize(stripped, JsonOptions);
-        await File.WriteAllTextAsync(_settingsPath, json, cancellationToken);
+
+        // Written via a temp file and an atomic rename rather than straight over
+        // the live one. A crash, a power loss or a full disk part-way through a
+        // direct write leaves settings.json truncated, and the recovery path for
+        // an unreadable settings file is not "defaults, and say so" - it silently
+        // falls back to a legacy mirror in the database. Losing settings is bad;
+        // losing them and being told nothing is what makes the write worth
+        // getting right. (arch-opus A23)
+        var tempPath = _settingsPath + ".tmp";
+        await File.WriteAllTextAsync(tempPath, json, cancellationToken);
+        File.Move(tempPath, _settingsPath, overwrite: true);
 
         // Everything except the named credentials is now on disk. Report the
         // credentials that are not, so the caller never shows an unqualified

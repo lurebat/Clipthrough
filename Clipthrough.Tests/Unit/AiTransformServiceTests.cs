@@ -92,6 +92,8 @@ public class AiTransformServiceTests
         public StubSettingsService(AppSettings current) => Current = current;
         public AppSettings Current { get; private set; }
         public bool HasSavedSettings => true;
+
+        public string? LoadFault => null;
         public event EventHandler<AppSettings>? SettingsChanged { add { } remove { } }
         public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)

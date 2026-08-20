@@ -2526,5 +2526,29 @@
     "find": "                case Key.Down when suggestions.ItemCount > 0\n                    && suggestions.SelectedIndex >= suggestions.ItemCount - 1:",
     "replace": "                case Key.Down when suggestions.ItemCount > 0 && suggestions.SelectedIndex >= 0:",
     "filter": "FullyQualifiedName~SearchSuggestionKeyRouting"
+  },
+  {
+    "id": "settings-are-written-straight-over-the-live-file",
+    "why": "Puts back the direct write. A crash or a full disk part-way through leaves settings.json truncated, and the recovery path for an unreadable settings file is a silent fallback rather than an error.",
+    "file": "Clipthrough/Services/Storage/SettingsService.cs",
+    "find": "        var tempPath = _settingsPath + \".tmp\";\n        await File.WriteAllTextAsync(tempPath, json, cancellationToken);\n        File.Move(tempPath, _settingsPath, overwrite: true);",
+    "replace": "        var tempPath = _settingsPath + \".tmp\";\n        await File.WriteAllTextAsync(tempPath.Length > 0 ? _settingsPath : tempPath, json, cancellationToken);",
+    "filter": "FullyQualifiedName~SettingsFileIntegrityTests"
+  },
+  {
+    "id": "a-corrupt-settings-file-is-swallowed",
+    "why": "Restores the silent fallback: the parse failure becomes a trace line, the corrupt file stays where the next save will overwrite it, and the user is never told their configuration was replaced.",
+    "file": "Clipthrough/Services/Storage/SettingsService.cs",
+    "find": "                LoadFault = QuarantineCorruptSettings(ex);",
+    "replace": "                Trace.TraceWarning($\"Settings file load failed: {ex.Message}\");",
+    "filter": "FullyQualifiedName~SettingsFileIntegrityTests"
+  },
+  {
+    "id": "every-settings-load-quarantines-the-file",
+    "why": "Quarantines on a successful load too, so a working settings.json is moved aside on startup and the user loses their configuration to the fix rather than to the bug.",
+    "file": "Clipthrough/Services/Storage/SettingsService.cs",
+    "find": "                loaded = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions)?.Normalize();",
+    "replace": "                loaded = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions)?.Normalize();\n                LoadFault = QuarantineCorruptSettings(new JsonException(\"forced\"));",
+    "filter": "FullyQualifiedName~SettingsFileIntegrityTests"
   }
 ]

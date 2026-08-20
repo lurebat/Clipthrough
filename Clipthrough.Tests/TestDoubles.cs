@@ -103,6 +103,8 @@ internal sealed class TestSettingsService : ISettingsService
 
     public bool HasSavedSettings { get; private set; }
 
+    public string? LoadFault => null;
+
     public event EventHandler<AppSettings>? SettingsChanged;
 
     public Task InitializeAsync(CancellationToken cancellationToken = default)

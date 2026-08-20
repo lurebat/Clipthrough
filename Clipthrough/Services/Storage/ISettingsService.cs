@@ -11,6 +11,18 @@ public interface ISettingsService
 
     bool HasSavedSettings { get; }
 
+    /// <summary>
+    /// Describes an unreadable settings file found during load, or null when the
+    /// settings came from where they were supposed to.
+    /// </summary>
+    /// <remarks>
+    /// A corrupt settings.json does not stop startup - the service falls back to
+    /// a legacy copy in the database and then to defaults. Callers must surface
+    /// this, because a silent settings reset leaves the user to rediscover their
+    /// configuration one feature at a time.
+    /// </remarks>
+    string? LoadFault { get; }
+
     event EventHandler<AppSettings>? SettingsChanged;
 
     Task InitializeAsync(CancellationToken cancellationToken = default);

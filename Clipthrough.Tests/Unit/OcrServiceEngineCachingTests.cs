@@ -133,6 +133,8 @@ public sealed class OcrServiceEngineCachingTests
 
         public bool HasSavedSettings => true;
 
+        public string? LoadFault => null;
+
         public event EventHandler<AppSettings>? SettingsChanged { add { } remove { } }
 
         public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
