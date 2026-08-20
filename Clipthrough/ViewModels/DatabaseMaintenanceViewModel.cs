@@ -225,11 +225,15 @@ public sealed class DatabaseMaintenanceViewModel : ViewModelBase
             BackupRestoreStatus = "Stopping background services…";
 
             // Stop everything that holds a SqliteConnection open so the file
-            // moves below don't race against an active writer.
+            // moves below don't race against an active writer. StopAsync, not
+            // Stop: off the UI thread Stop only posts, and neither form waits
+            // for the enrichment a capture spawns fire-and-forget. A restore
+            // replaces the file outright, so an in-flight write is worse here
+            // than anywhere else. (arch-sol A6, sibling of the maintenance scope)
             monitorWasRunning = _clipboardMonitorService.IsRunning;
             ocrWasRunning = _backgroundOcrQueue.IsRunning;
             embeddingWasRunning = _embeddingWorker?.IsRunning ?? false;
-            _clipboardMonitorService.Stop();
+            await _clipboardMonitorService.StopAsync();
             await _backgroundOcrQueue.StopAsync();
             if (_embeddingWorker is not null)
             {

@@ -47,6 +47,8 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     private readonly Subject<ClipEntry> _updatedClips = new();
     private readonly BehaviorSubject<bool> _captureBusy = new(false);
     private readonly SemaphoreSlim _captureGate = new(1, 1);
+    private readonly Lock _enrichmentLock = new();
+    private readonly List<Task> _enrichmentTasks = [];
     private readonly ClipboardSuppressionGate _suppressionGate = new();
     private static readonly TimeSpan CoalesceDelay = TimeSpan.FromMilliseconds(60);
 
@@ -109,6 +111,51 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
         }
 
         Dispatcher.UIThread.Post(StopCore);
+    }
+
+    public async Task StopAsync()
+    {
+        // Awaited, not posted: the caller is usually about to move or rekey the
+        // database file, and Stop's posted branch would let it clear the pools
+        // while _isStarted is still true and a capture is still admitting writes.
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            StopCore();
+        }
+        else
+        {
+            await Dispatcher.UIThread.InvokeAsync(StopCore);
+        }
+
+        // Whoever is inside the capture body holds this. Taking it once means
+        // that capture has finished deciding whether to write, and the
+        // _isStarted check it makes now reads false.
+        await _captureGate.WaitAsync().ConfigureAwait(false);
+        _captureGate.Release();
+
+        Task[] pending;
+        lock (_enrichmentLock)
+        {
+            pending = [.. _enrichmentTasks];
+        }
+
+        // EnrichCapturedClipAsync catches everything it can raise, so this
+        // cannot throw on behalf of work the caller did not start.
+        await Task.WhenAll(pending).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Keeps a handle on fire-and-forget enrichment so <see cref="StopAsync"/>
+    /// can wait for it. Completed tasks are swept here rather than on a timer,
+    /// which bounds the list to the captures actually in flight.
+    /// </summary>
+    private void TrackEnrichment(Task enrichment)
+    {
+        lock (_enrichmentLock)
+        {
+            _enrichmentTasks.RemoveAll(static task => task.IsCompleted);
+            _enrichmentTasks.Add(enrichment);
+        }
     }
 
     public void Dispose()
@@ -224,7 +271,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                 {
                     Trace.TraceInformation($"Clipboard fast capture completed in {captureStopwatch.ElapsedMilliseconds} ms for clip {capturedClip.Id}.");
                     _capturedClips.OnNext(capturedClip);
-                    _ = EnrichCapturedClipAsync(capturedClip, deferredContent);
+                    TrackEnrichment(EnrichCapturedClipAsync(capturedClip, deferredContent));
                 }
             }
             finally

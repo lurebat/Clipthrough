@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reactive.Linq;
+using System.Reactive.Subjects;
 using System.Threading;
 using System.Threading.Tasks;
 using Clipthrough.Models;
@@ -28,7 +29,8 @@ public sealed class DatabaseMaintenanceScopeTests
 
         // monitor + ocr were stopped before the embedding stop threw; all three
         // must be restarted so the session's workers are not left permanently down.
-        Assert.Equal(1, monitor.StopCount);
+        Assert.Equal(1, monitor.StopAsyncCount);
+        Assert.Equal(0, monitor.StopCount);
         Assert.Equal(1, monitor.StartCount);
         Assert.Equal(1, ocr.StopCount);
         Assert.Equal(1, ocr.StartCount);
@@ -53,6 +55,58 @@ public sealed class DatabaseMaintenanceScopeTests
         Assert.Equal(0, embedding.StartCount);
     }
 
+    /// <summary>
+    /// The monitor has to be stopped through the awaited path. Stop() off the UI
+    /// thread only posts, so EnterAsync could clear the connection pools - and
+    /// return to a caller about to move or rekey the file - while a capture was
+    /// still writing. (round 2, arch-sol A6)
+    /// </summary>
+    [Fact]
+    public async Task EnterAsync_WaitsForTheMonitorToDrainBeforeReturning()
+    {
+        var draining = new TaskCompletionSource();
+        var monitor = new GatedMonitor(draining.Task);
+
+        var entering = DatabaseMaintenanceScope.EnterAsync(monitor, null, null);
+
+        Assert.False(
+            entering.IsCompleted,
+            "EnterAsync returned while the monitor was still draining, so maintenance can overlap a clipboard write");
+
+        draining.SetResult();
+        var scope = await entering;
+        await scope.DisposeAsync();
+
+        Assert.Equal(0, monitor.StopCount);
+        Assert.Equal(1, monitor.StopAsyncCount);
+    }
+
+    /// <summary>A monitor whose drain the test decides when to finish.</summary>
+    private sealed class GatedMonitor(Task drain) : IClipboardMonitorService
+    {
+        public int StopCount;
+        public int StopAsyncCount;
+
+        public IObservable<ClipEntry> CapturedClips { get; } = new Subject<ClipEntry>();
+        public IObservable<ClipEntry> UpdatedClips { get; } = new Subject<ClipEntry>();
+        public IObservable<bool> CaptureBusy { get; } = new Subject<bool>();
+        public bool IsRunning { get; private set; } = true;
+
+        public void Start() => IsRunning = true;
+        public void Stop() { StopCount++; IsRunning = false; }
+
+        public async Task StopAsync()
+        {
+            StopAsyncCount++;
+            await drain;
+            IsRunning = false;
+        }
+
+        public void SuppressNext() { }
+
+        public void CancelSuppressNext() { }
+    }
+
     private sealed class RecordingMonitor : IClipboardMonitorService
     {
         public int StartCount;
@@ -65,6 +119,16 @@ public sealed class DatabaseMaintenanceScopeTests
 
         public void Start() { StartCount++; IsRunning = true; }
         public void Stop() { StopCount++; IsRunning = false; }
+
+        /// <summary>
+        /// Counted separately from <see cref="Stop"/> on purpose. Maintenance has
+        /// to use the awaited path, and a shared counter would let a revert to
+        /// the posted one pass.
+        /// </summary>
+        public int StopAsyncCount;
+
+        public Task StopAsync() { StopAsyncCount++; IsRunning = false; return Task.CompletedTask; }
+
         public void SuppressNext() { }
 
         public void CancelSuppressNext() { }

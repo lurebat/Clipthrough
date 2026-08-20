@@ -245,6 +245,12 @@ internal sealed class TestClipboardMonitorService : IClipboardMonitorService
         IsRunning = false;
     }
 
+    public Task StopAsync()
+    {
+        IsRunning = false;
+        return Task.CompletedTask;
+    }
+
     /// <summary>
     /// Counts arming without consuming, so a test can tell a copy that
     /// suppressed exactly one capture from one that armed the gate and then

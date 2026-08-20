@@ -2422,5 +2422,37 @@
     "find": "     tokenize='trigram')",
     "replace": "     tokenize='unicode61 remove_diacritics 2')",
     "filter": "FullyQualifiedName~StorageSchemaDocTests"
+  },
+  {
+    "id": "maintenance-stops-the-monitor-without-waiting",
+    "why": "Puts back the void Stop(), which off the UI thread only posts and never waits for enrichment. Maintenance then clears the connection pools and hands control to a caller about to move or rekey the database while a clipboard-originated write is still in flight.",
+    "file": "Clipthrough/Services/Storage/DatabaseMaintenanceScope.cs",
+    "find": "                await monitor.StopAsync().ConfigureAwait(false);",
+    "replace": "                monitor.Stop();",
+    "filter": "FullyQualifiedName~DatabaseMaintenanceScopeTests"
+  },
+  {
+    "id": "stop-does-not-wait-for-the-capture-gate",
+    "why": "Drops the capture-gate wait, so StopAsync returns while a capture is still inside the body it uses to decide whether to write.",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "find": "        await _captureGate.WaitAsync().ConfigureAwait(false);\n        _captureGate.Release();",
+    "replace": "        await Task.CompletedTask.ConfigureAwait(false);",
+    "filter": "FullyQualifiedName~ClipboardMonitorServiceStopTests"
+  },
+  {
+    "id": "stop-does-not-wait-for-enrichment",
+    "why": "Waits on an empty set instead of the tracked enrichment tasks. Enrichment outlives the capture that spawned it and performs its own writes, so this is the half of the drain that a synchronous stop could never have covered.",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "find": "        await Task.WhenAll(pending).ConfigureAwait(false);",
+    "replace": "        await Task.WhenAll(pending.Length >= 0 ? [] : pending).ConfigureAwait(false);",
+    "filter": "FullyQualifiedName~ClipboardMonitorServiceStopTests"
+  },
+  {
+    "id": "restore-stops-the-monitor-without-waiting",
+    "why": "Puts back the posted Stop() in the backup restore, which hand-rolls the maintenance sequence rather than using DatabaseMaintenanceScope. A restore replaces the database file outright, so an in-flight capture or enrichment write is worse here than anywhere else.",
+    "file": "Clipthrough/ViewModels/DatabaseMaintenanceViewModel.cs",
+    "find": "            await _clipboardMonitorService.StopAsync();",
+    "replace": "            _clipboardMonitorService.Stop();",
+    "filter": "FullyQualifiedName~DatabaseMaintenanceViewModelHeadlessTests"
   }
 ]

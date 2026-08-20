@@ -41,7 +41,12 @@ public sealed class DatabaseMaintenanceViewModelHeadlessTests
         // owner == null auto-confirms; the restore then throws inside the try.
         await vm.RestoreBackupCommand.Execute(null);
 
-        Assert.Equal(1, monitor.StopCount);
+        // The awaited stop specifically: a restore replaces the database file,
+        // so returning while a capture or its enrichment is still writing is
+        // what StopAsync exists to prevent. Asserting StopCount is 0 makes a
+        // revert to the posted Stop() fail rather than pass. (arch-sol A6)
+        Assert.Equal(1, monitor.StopAsyncCount);
+        Assert.Equal(0, monitor.StopCount);
         Assert.Equal(1, monitor.StartCount);
         Assert.Equal(1, ocr.StartCount);
         Assert.Equal(1, embedding.StartCount);
@@ -70,6 +75,8 @@ public sealed class DatabaseMaintenanceViewModelHeadlessTests
 
         public void Start() { StartCount++; IsRunning = true; }
         public void Stop() { StopCount++; IsRunning = false; }
+        public int StopAsyncCount;
+        public Task StopAsync() { StopAsyncCount++; IsRunning = false; return Task.CompletedTask; }
         public void SuppressNext() { }
 
         public void CancelSuppressNext() { }

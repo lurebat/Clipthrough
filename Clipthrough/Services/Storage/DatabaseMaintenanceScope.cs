@@ -56,6 +56,12 @@ public sealed class DatabaseMaintenanceScope : System.IAsyncDisposable
     /// Returns a scope whose <see cref="DisposeAsync"/> reverses the steps:
     /// clear pools again, then restart each worker.
     /// </summary>
+    /// <remarks>
+    /// "Waiting for each to drain" was untrue of the monitor for as long as this
+    /// comment existed: it was stopped through the void <c>Stop()</c>, which off
+    /// the UI thread only posts. The monitor now has a <c>StopAsync</c> that
+    /// waits, and the sentence is true of all three.
+    /// </remarks>
     public static async Task<DatabaseMaintenanceScope> EnterAsync(
         IClipboardMonitorService? monitor,
         IBackgroundOcrQueue? ocrQueue,
@@ -65,7 +71,15 @@ public sealed class DatabaseMaintenanceScope : System.IAsyncDisposable
 
         try
         {
-            monitor?.Stop();
+            if (monitor is not null)
+            {
+                // StopAsync, not Stop: the pool clear below and whatever the
+                // caller does next (move, rekey, replace the file) must not
+                // overlap a clipboard-originated write. Stop only posts when
+                // called off the UI thread, and never waits for the enrichment
+                // that outlives a capture. (arch-sol A6)
+                await monitor.StopAsync().ConfigureAwait(false);
+            }
 
             if (ocrQueue is not null)
             {

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Threading.Tasks;
 using Clipthrough.Models;
 
 namespace Clipthrough.Services;
@@ -27,6 +28,24 @@ public interface IClipboardMonitorService
     void Start();
 
     void Stop();
+
+    /// <summary>
+    /// Stops capturing and does not return until nothing clipboard-originated is
+    /// still writing to the database.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Stop"/> is not enough for that. Off the UI thread it only posts
+    /// the stop and returns, so a caller that is about to move, rekey or replace
+    /// the database file can clear the connection pools while a capture is still
+    /// mid-write. Background enrichment - the deferred content update, the
+    /// sensitivity scan, the icon write, the retention pass - is started
+    /// fire-and-forget and outlives the capture that spawned it, so even a
+    /// synchronous stop leaves writes in flight.
+    ///
+    /// Await this before touching database files. <see cref="Stop"/> remains the
+    /// right call for an ordinary pause, where waiting would only add latency.
+    /// </remarks>
+    Task StopAsync();
 
     /// <summary>
     /// Suppresses the next clipboard change capture. Call before app-initiated clipboard writes
