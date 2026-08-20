@@ -950,11 +950,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
             UpdateSelectedClipPresentation();
             _ = EnsureSelectedClipHydratedAsync();
+
+            // Selection drives which AI entries are eligible (text vs. image),
+            // and RaiseSelectionStateProperties refreshes them. The explicit
+            // second call that used to sit here was redundant, and not harmlessly
+            // so: each refresh raises IsAiMenuVisible, and the view answers that
+            // by clearing and rebuilding both the Edit and toolbar transform
+            // trees from the 27-entry catalogue. Every arrow key paid for that
+            // twice.
             RaiseSelectionStateProperties();
-            // Selection drives which AI entries are eligible
-            // (text vs. image). Without this the visible-entries collection
-            // stays stuck on whatever the previous selection allowed.
-            RefreshVisibleTransformMenus();
         }
     }
 
@@ -4563,8 +4567,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (ReferenceEquals(clip, SelectedClip))
         {
             UpdateSelectedClipPresentation();
+
+            // Hydration is what gives an image clip its bytes, and three
+            // separate things are computed from those bytes: whether the image
+            // panes are shown at all, whether image AI transforms are offered,
+            // and which entries the AI menu contains. Only the middle one used
+            // to be announced here, so a freshly hydrated image showed a blank
+            // preview pane and no image AI entries until some unrelated event
+            // rebuilt them (review round 2, bugs-sol F3 and quality-sol Q1).
             this.RaisePropertyChanged(nameof(HasTransformableTarget));
             this.RaisePropertyChanged(nameof(HasImageTransformTarget));
+            this.RaisePropertyChanged(nameof(SelectedClipImageBytes));
+            this.RaisePropertyChanged(nameof(ShowSelectedImagePreview));
+            this.RaisePropertyChanged(nameof(ShowSelectedImageEditor));
+
+            // The eligibility cache keys on the target set, which has not
+            // changed - the same clip just gained bytes - so it must be told.
+            InvalidateVisibleTransformMenus();
+            RefreshVisibleTransformMenus();
         }
     }
 
@@ -6062,6 +6082,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             AiMenuEntries.Add(new AiMenuEntry(label, p, false, p.Kind));
         }
 
+        // The eligibility cache in RefreshVisibleTransformMenus keys on the
+        // target clips, so it cannot see that the entries themselves just
+        // changed. Without this, editing a preset would leave the old menu on
+        // screen until the user happened to select a clip of a different kind.
+        InvalidateVisibleTransformMenus();
         RefreshVisibleTransformMenus();
     }
 
@@ -6976,12 +7001,36 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RefreshVisibleTransformMenus();
     }
 
+    /// <summary>
+    /// Recomputes which AI menu entries the current target set allows, and tells
+    /// the view only when the answer actually changed.
+    /// </summary>
+    /// <remarks>
+    /// The view answers a change of <see cref="IsAiMenuVisible"/> by clearing and
+    /// rebuilding both transform menu trees from the 27-entry catalogue, which is
+    /// posted work on the UI thread. Eligibility depends only on whether the
+    /// targets include transformable text and usable image bytes, and 1,592 of
+    /// the reporting library's 1,638 clips are text or rich text - so arrowing
+    /// between rows almost never changes the answer, and almost every rebuild was
+    /// reconstructing an identical menu.
+    /// </remarks>
     private void RefreshVisibleTransformMenus()
     {
         var targets = GetCheckedOrSelectedClips();
         var hasTextTargets = targets.Any(static clip => clip.CanTransform);
         var hasImageTargets = _aiTransformService.IsConfigured
                               && targets.Any(static clip => clip.IsImageClip && clip.Clip.ContentBytes is { Length: > 0 });
+
+        if (_lastVisibleMenuHadTextTargets == hasTextTargets
+            && _lastVisibleMenuHadImageTargets == hasImageTargets
+            && _hasBuiltVisibleMenusOnce)
+        {
+            return;
+        }
+
+        _lastVisibleMenuHadTextTargets = hasTextTargets;
+        _lastVisibleMenuHadImageTargets = hasImageTargets;
+        _hasBuiltVisibleMenusOnce = true;
 
         ReplaceVisibleCollection(
             VisibleAiMenuEntries,
@@ -6990,6 +7039,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 || (entry.Kind is AiPresetKind.ImageToText or AiPresetKind.ImageToImage && hasImageTargets)));
         this.RaisePropertyChanged(nameof(IsAiMenuVisible));
     }
+
+    /// <summary>
+    /// Eligibility inputs behind the last menu build, so an unchanged answer can
+    /// skip the rebuild. Reset by <see cref="InvalidateVisibleTransformMenus"/>
+    /// whenever something other than the target set changes the entry list.
+    /// </summary>
+    private bool _lastVisibleMenuHadTextTargets;
+    private bool _lastVisibleMenuHadImageTargets;
+    private bool _hasBuiltVisibleMenusOnce;
+
+    /// <summary>
+    /// Forces the next <see cref="RefreshVisibleTransformMenus"/> to rebuild even
+    /// if the target set looks unchanged.
+    /// </summary>
+    /// <remarks>
+    /// The cache above keys on the *targets*, so it cannot see a change to the
+    /// entries themselves - editing AI presets, or configuring the AI service for
+    /// the first time. Those paths call this first.
+    /// </remarks>
+    private void InvalidateVisibleTransformMenus() => _hasBuiltVisibleMenusOnce = false;
 
     private static void ReplaceVisibleCollection<T>(ObservableCollection<T> target, IEnumerable<T> source)
     {
