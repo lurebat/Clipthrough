@@ -406,6 +406,29 @@ public sealed class SettingsService : ISettingsService
         }
     }
 
+    /// <summary>
+    /// Mirrors the settings into <c>app_metadata</c> as a fallback for an
+    /// unparseable settings.json.
+    /// </summary>
+    /// <remarks>
+    /// This opens a connection while the save gate is held, which reads like a
+    /// serialization hazard - a review filed it as one, on the assumption that
+    /// each open repeats SQLCipher's deliberately expensive key derivation.
+    ///
+    /// It does not. Microsoft.Data.Sqlite pools by connection string, so the
+    /// derivation happens once rather than per open. Measured on this machine:
+    /// a warm open plus a round trip was hundredths of a millisecond encrypted,
+    /// and a cold one - the state a maintenance operation leaves behind, since
+    /// DatabaseMaintenanceScope calls ClearAllPools - was still a fraction of a
+    /// millisecond.
+    ///
+    /// Those numbers are a snapshot and the conclusion rests on the pooling,
+    /// not on them. If you are about to move this write off the save path,
+    /// measure first: time SaveAsync against a database opened with a password,
+    /// and compare against the same run with this call removed. Do not infer
+    /// the cost from the fact that SQLCipher key derivation is expensive - that
+    /// is true and was still the wrong answer here.
+    /// </remarks>
     private async Task TrySaveLegacyCopyToDatabaseAsync(AppSettings settings, CancellationToken cancellationToken)
     {
         try
