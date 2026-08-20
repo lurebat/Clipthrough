@@ -2406,5 +2406,21 @@
     "find": "        return columnCount < 5 || !hasTrigramTokenizer;",
     "replace": "        return columnCount < 5 || !hasTrigramTokenizer || columnCount >= 0;",
     "filter": "FullyQualifiedName~FtsSchemaRepairTests"
+  },
+  {
+    "id": "storage-doc-misses-a-renamed-index",
+    "why": "Renames an index in the schema without touching the doc. That is exactly how the doc drifted - idx_clips_embedding_status became idx_clips_embedding_backlog and the reference never moved - and it must fail both directions of the drift check.",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "find": "        CREATE INDEX IF NOT EXISTS idx_clips_recency ON clips(",
+    "replace": "        CREATE INDEX IF NOT EXISTS idx_clips_freshness ON clips(",
+    "filter": "FullyQualifiedName~StorageSchemaDocTests"
+  },
+  {
+    "id": "storage-doc-describes-the-wrong-tokenizer",
+    "why": "Puts back the unicode61 tokenizer the doc claimed long after the schema moved to trigram. Search code reasons about trigram directly - token length is measured against 3-character shingles - so this misleads about behaviour, not just about a name.",
+    "file": ".github/copilot-cli-skills/clipthrough-storage-schema.md",
+    "find": "     tokenize='trigram')",
+    "replace": "     tokenize='unicode61 remove_diacritics 2')",
+    "filter": "FullyQualifiedName~StorageSchemaDocTests"
   }
 ]

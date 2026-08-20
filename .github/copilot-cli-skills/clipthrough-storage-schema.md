@@ -5,7 +5,8 @@ Use this when adding columns, indexes, queries, or full-text-search behavior. It
 ## Files
 
 - `Clipthrough/Database/DatabaseInitializer.cs` — owns all `CREATE TABLE`, `CREATE INDEX`, `CREATE TRIGGER`, and forward-only `ALTER TABLE` migrations. Idempotent: every block uses `IF NOT EXISTS` or a `PRAGMA table_info` check before `ALTER`.
-- `Clipthrough/Database/SqliteConnectionFactory.cs` — single source of `SqliteConnection`. Sets `Mode=ReadWriteCreate`, `ForeignKeys=true`, `Cache=Shared`, and (when configured) `Password=` for SQLCipher. Re-applies `PRAGMA busy_timeout = 5000;` on every `StateChange→Open`.
+- `Clipthrough/Database/SqliteConnectionFactory.cs` - single source of `SqliteConnection`. Sets `ForeignKeys=true` and, when configured, a SQLCipher key. `CreateConnection()` opens `ReadWriteCreate`; `CreateReadOnlyConnection()` opens `ReadOnly`. Re-applies `PRAGMA busy_timeout = 5000;` on every `StateChange` to Open.
+  **Do not add `Cache=Shared`.** The private cache is deliberate: shared cache reports in-process write contention as `SQLITE_LOCKED`, which `busy_timeout` does *not* retry, while private cache reports `SQLITE_BUSY`, which it does. The reasoning is recorded at the call site.
 - `Clipthrough/Services/Storage/ClipStoreService.cs` — all reads/writes go through this `IClipStoreService`. Capture, query, paste-tracking, sensitivity tagging, OCR / embedding status updates.
 
 ## Engine + connection settings
@@ -67,7 +68,15 @@ All `IClipStoreService` calls from ViewModel command handlers must be wrapped in
 - `idx_clips_pinned_at` — partial, pinned-only.
 - `idx_clips_ocr_status` — partial, non-null only.
 - `idx_clips_source_clip_id` — partial, non-null only.
-- `idx_clips_embedding_status` — partial, non-null only.
+- `idx_clips_embedding_backlog` — `embedding_status`. Not partial: the backlog scan looks for a specific status, not for non-null.
+- `idx_clips_stored_bytes` — `stored_bytes`.
+- `idx_clips_retention` — `(is_sensitive, last_copied_at)`. Retention purges run after every capture and both lifetime deletes filter on exactly this pair.
+- `idx_clips_recency` — `COALESCE(last_copied_at, captured_at)`.
+- `idx_clips_hash_unique` — UNIQUE on `hash`, created by the migration that de-duplicates first. It replaces the older non-unique `idx_clips_hash`.
+- `idx_sensitivity_rules_name` — on `sensitivity_rules(name)`.
+
+This list is verified: `StorageSchemaDocTests` fails if an index exists that is
+not named here, or if a name here is not an index the schema creates.
 
 #### Sort-order indexes
 
@@ -88,11 +97,19 @@ Measured at 20k clips, Alphabetical went 118 ms (no new indexes) -> 206 ms
 - `idx_clips_oldest_order` — same, ASC. Serves `OldestFirst`.
 - `idx_clips_paste_order` — `(..., paste_count DESC, id DESC)`. Serves `MostPasted`.
 - `idx_clips_size_order` — `(..., byte_size DESC, id DESC)`. Serves `LargestFirst`.
-- `idx_clips_alpha_order` — `(..., substr(content, 1, 64) ASC, id ASC)`. Serves `Alphabetical`, whose ORDER BY leads with the same `substr` expression and then falls back to full `content` to break prefix ties. That is order-equivalent to ordering by `content` alone, because when two prefixes differ the first differing character is inside the prefix. Indexing full `content` instead would copy the whole text corpus into the index (+71% database on a 2 KB-average fixture); the prefix costs 2.6%.
+- `idx_clips_alpha_order_ci` — `(..., substr(content, 1, 64) COLLATE NOCASE ASC, id ASC)`. Serves `Alphabetical`, whose ORDER BY leads with the same `substr` expression and then falls back to full `content` to break prefix ties. That is order-equivalent to ordering by `content` alone, because when two prefixes differ the first differing character is inside the prefix. Indexing full `content` instead would copy the whole text corpus into the index (+71% database on a 2 KB-average fixture); the prefix costs 2.6%.
 
-`content` must stay BINARY-collated, or the `Alphabetical` clause must change with it. `substr()` is a function, so its result is always BINARY and does **not** inherit the column's collation, while a bare `c.content` does; a `NOCASE` column would leave the prefix term and the tie-break term disagreeing about what "less than" means. The clause names `COLLATE BINARY` explicitly for that reason, and `Alphabetical_OrdersIdenticallyToOrderingByWholeContent` fails if the collation changes underneath it.
+`COLLATE NOCASE` is spelled explicitly on **both** ORDER BY terms and on the
+index, and that is load-bearing. `substr()` is a function, so its result is
+always BINARY and does not inherit the column's collation, whereas a bare
+`c.content` does. If the two terms disagreed about what "less than" means, the
+clause would produce an order that is neither, and the index — which stores the
+NOCASE prefix — could not serve it. NOCASE folds ASCII only, so scripts without
+case (Hebrew, CJK) keep code-point order, which is already their alphabetical
+order. The equivalence and structural tests fail if the clause and the index
+drift apart.
 
-Do not assert on `Alphabetical`'s query plan. With `idx_clips_alpha_order` present, ordering by whole `content` and ordering by the prefix produce a byte-identical plan string, so a plan assertion passes even against a full revert. `Alphabetical_OrdersByTheExpressionItsIndexStores` pins the clause to the index definition read from `sqlite_master` instead.
+Do not assert on `Alphabetical`'s query plan. With `idx_clips_alpha_order_ci` present, ordering by whole `content` and ordering by the prefix produce a byte-identical plan string, so a plan assertion passes even against a full revert. `Alphabetical_OrdersByTheExpressionItsIndexStores` pins the clause to the index definition read from `sqlite_master` instead.
 
 ### `clips_fts` (FTS5)
 
@@ -101,10 +118,24 @@ External-content virtual table over `clips`:
 ```
 fts5(content, source_app, source_window_title, source_url, ocr_text,
      content='clips', content_rowid='id',
-     tokenize='unicode61 remove_diacritics 2')
+     tokenize='trigram')
 ```
 
-Triggers `clips_ai`, `clips_ad`, `clips_au` keep FTS in sync on `INSERT` / `DELETE` / `UPDATE`. If you add a column you want searchable, you must:
+The tokenizer is **trigram**, not a word tokenizer, and that is load-bearing:
+the index stores 3-character shingles, so a search token shorter than three
+characters cannot be looked up in it at all. `ClipStoreService` routes such
+queries to the substring path instead — see `HasFtsCompatibleSearchTerm` and
+`BuildFtsExpression`, which must agree about what counts as indexable. Measure
+that length in **code points**, not `string.Length`: the tokenizer indexes code
+points, so a UTF-16 count overstates any token containing an emoji.
+
+Triggers `clips_ai`, `clips_ad`, `clips_au` keep FTS in sync on `INSERT` /
+`DELETE` / `UPDATE`. `clips_au` is scoped `AFTER UPDATE OF` the five indexed
+columns and is dropped and recreated unconditionally, because
+`CREATE TRIGGER IF NOT EXISTS` would silently preserve an older unscoped
+trigger that re-tokenises the whole clip on every metadata-only write.
+
+If you add a column you want searchable, you must:
 
 1. Add it to the FTS5 column list.
 2. Update all three triggers.
@@ -143,6 +174,31 @@ if (!existingColumns.Contains("my_new_col"))
 For a new index or trigger, just emit `CREATE … IF NOT EXISTS …`. SQLite ALTER cannot drop columns; if you need to remove one, accept that it lingers or write a `CREATE TABLE clips_new (…) → INSERT SELECT → DROP → RENAME` block.
 
 When you change FTS columns or triggers, **always** run a `'rebuild'` once after the migration so existing rows reflect the new shape.
+
+### The FTS repair path is not the version-gated path
+
+`MigrateFtsSchemaIfNeededAsync` runs *before* the schema-version gate and drops
+`clips_fts` outright when its stored definition no longer matches (wrong column
+count, wrong tokenizer). The schema DDL then recreates it **empty**. So a repair
+has to repopulate the index itself — it returns `bool` for exactly that reason,
+and the caller rebuilds on `true` regardless of `schema_version`.
+
+This matters because "FTS needs repair" and "schema version is behind" are
+independent. `HasPendingStructuralWorkAsync` already relies on that: its last
+check is a bare FTS-migration test reached only once the version is current, and
+it buys a full-file `PRAGMA quick_check` on the strength of it. Putting the
+rebuild back inside the version gate would make every clip in an established
+database silently unsearchable by keyword, with no error and nothing logged.
+
+Two ways to test this wrong, both of which happened:
+
+- `SELECT COUNT(*) FROM clips_fts` does **not** measure the index. `clips_fts`
+  is external-content, so SQLite answers a bare count from `clips` and returns
+  the same number over a full index and an empty one. Count what a `MATCH`
+  returns instead.
+- Asserting the resulting schema and hit count are unchanged does not prove the
+  repair was skipped — an unnecessary drop-and-rebuild produces a byte-identical
+  result. Assert on the `[init-timing] rebuild-search-index` trace step.
 
 ## Test conventions
 
