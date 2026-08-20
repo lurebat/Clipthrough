@@ -603,8 +603,18 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         {
             return false;
         }
-        var needsImage = Clip.ContentType == ContentType.Image && Clip.ContentBytes is null;
-        if (!needsImage)
+        // List and search queries select NULL for content_bytes to avoid
+        // materialising blobs per row, so a row arrives without them. That was
+        // treated as an image-only concern, but rich text keeps its HTML/RTF in
+        // the same column: without the bytes GetRawMarkup returns null,
+        // FullContent falls back to the plain-text Content field, and the clip
+        // silently loses its formatting everywhere it is read from - the
+        // rendered preview and, worse, Copy. Reported by Asaf after pasting a
+        // copied rich clip and finding it plain.
+        var needsBytes = Clip.ContentBytes is null
+            && (Clip.ContentType == ContentType.Image
+                || Clip.ContentFormat is ClipContentFormat.Html or ClipContentFormat.Rtf);
+        if (!needsBytes)
         {
             return false;
         }

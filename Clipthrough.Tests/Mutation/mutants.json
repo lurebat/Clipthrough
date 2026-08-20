@@ -2454,5 +2454,61 @@
     "find": "            await _clipboardMonitorService.StopAsync();",
     "replace": "            _clipboardMonitorService.Stop();",
     "filter": "FullyQualifiedName~DatabaseMaintenanceViewModelHeadlessTests"
+  },
+  {
+    "id": "copy-as-plain-text-copies-the-markup",
+    "why": "Puts back FullContent, the raw display string. GetRawContentDisplay returns decoded HTML/RTF ahead of the text field, so the command whose entire purpose is to strip formatting puts markup on the clipboard for any rich clip.",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "find": "            var plainText = string.IsNullOrEmpty(clip.Clip.Content)\n                ? ClipDisplayFormatter.RenderRichContent(clip.FullContent)\n                : clip.Clip.Content;",
+    "replace": "            var plainText = string.IsNullOrEmpty(clip.Clip.Content) ? clip.FullContent : clip.FullContent;",
+    "filter": "FullyQualifiedName~CopyAsPlainTextHeadlessTests"
+  },
+  {
+    "id": "copy-as-plain-text-has-no-fallback",
+    "why": "Drops the render fallback, so a rich clip with no text field copies an empty string instead of its words.",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "find": "            var plainText = string.IsNullOrEmpty(clip.Clip.Content)\n                ? ClipDisplayFormatter.RenderRichContent(clip.FullContent)\n                : clip.Clip.Content;",
+    "replace": "            var plainText = string.IsNullOrEmpty(clip.Clip.Content) ? clip.Clip.Content : clip.Clip.Content;",
+    "filter": "FullyQualifiedName~CopyAsPlainTextHeadlessTests"
+  },
+  {
+    "id": "copy-as-plain-text-always-renders",
+    "why": "Renders every clip rather than only the ones with no text field. A user copying \"a < b && c > d\" then loses the middle of their own line to a tag stripper - the over-broad way to fix the markup bug.",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "find": "            var plainText = string.IsNullOrEmpty(clip.Clip.Content)\n                ? ClipDisplayFormatter.RenderRichContent(clip.FullContent)\n                : clip.Clip.Content;",
+    "replace": "            var plainText = ClipDisplayFormatter.RenderRichContent(clip.FullContent);",
+    "filter": "FullyQualifiedName~CopyAsPlainTextHeadlessTests"
+  },
+  {
+    "id": "copy-as-plain-text-vanishes-from-the-edit-menu",
+    "why": "Removes the Edit-menu entry, restoring the state where a correct command had no menu item, no toolbar button and no context-menu entry - discoverable only through a settings validation collision message.",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "find": "                <MenuItem Header=\"Copy as _plain text\"\n                          Command=\"{Binding CopySelectedAsPlainTextCommand}\"\n                          InputGesture=\"Ctrl+Shift+C\" />",
+    "replace": "",
+    "filter": "FullyQualifiedName~CopyAsPlainTextHeadlessTests"
+  },
+  {
+    "id": "copy-as-plain-text-vanishes-from-the-context-menu",
+    "why": "Removes the context-menu entry. Its command binding reaches back through the list box rather than the clip, which is the fragile half and the one a refactor is most likely to break silently.",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "find": "                                    <MenuItem Header=\"Copy as plain text\"\n                                              IsVisible=\"{Binding IsTextClip}\"\n                                              Command=\"{Binding #ClipsListBox.DataContext.CopySelectedAsPlainTextCommand}\" />",
+    "replace": "",
+    "filter": "FullyQualifiedName~CopyAsPlainTextHeadlessTests"
+  },
+  {
+    "id": "hydration-refuses-to-fetch-rich-text-bytes",
+    "why": "Restores the image-only hydration guard. List queries select NULL for content_bytes and rich text keeps its HTML/RTF there, so every rich clip read back from the list loses its markup - the preview renders plain text and Copy hands plain text to the rich-content writer. Reported by Asaf.",
+    "file": "Clipthrough/ViewModels/ClipItemViewModel.cs",
+    "find": "        var needsBytes = Clip.ContentBytes is null\n            && (Clip.ContentType == ContentType.Image\n                || Clip.ContentFormat is ClipContentFormat.Html or ClipContentFormat.Rtf);",
+    "replace": "        var needsBytes = Clip.ContentBytes is null && Clip.ContentType == ContentType.Image;",
+    "filter": "FullyQualifiedName~RichClipListHydrationHeadlessTests"
+  },
+  {
+    "id": "hydration-fetches-bytes-for-every-clip",
+    "why": "Hydrates plain-text rows too, so every arrow key buys a database round trip and rebuilds the preview for content that is already complete. The over-broad way to fix the rich-text loss.",
+    "file": "Clipthrough/ViewModels/ClipItemViewModel.cs",
+    "find": "        var needsBytes = Clip.ContentBytes is null\n            && (Clip.ContentType == ContentType.Image\n                || Clip.ContentFormat is ClipContentFormat.Html or ClipContentFormat.Rtf);",
+    "replace": "        var needsBytes = Clip.ContentBytes is null || Clip.ContentType == ContentType.Image;",
+    "filter": "FullyQualifiedName~RichClipListHydrationHeadlessTests"
   }
 ]

@@ -43,6 +43,9 @@
                 <MenuItem Header="_Copy selected"
                           Command="{Binding CopySelectedCommand}"
                           InputGesture="Ctrl+D" />
+                <MenuItem Header="Copy as _plain text"
+                          Command="{Binding CopySelectedAsPlainTextCommand}"
+                          InputGesture="Ctrl+Shift+C" />
                 <MenuItem Header="_Delete selected"
                           Command="{Binding DeleteSelectedCommand}"
                           InputGesture="Delete" />
@@ -277,6 +280,9 @@
                                 <ContextMenu DataContext="{Binding SelectedClip}">
                                     <MenuItem Header="{Binding CopyLabel}"
                                               Command="{Binding CopyCommand}" />
+                                    <MenuItem Header="Copy as plain text"
+                                              IsVisible="{Binding IsTextClip}"
+                                              Command="{Binding #ClipsListBox.DataContext.CopySelectedAsPlainTextCommand}" />
                                     <MenuItem Header="Open in editor"
                                               Command="{Binding #ClipsListBox.DataContext.OpenInEditorCommand}" />
                                     <MenuItem Header="Compare checked clips"

@@ -275,6 +275,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         TogglePinCommand = ReactiveCommand.CreateFromTask(TogglePinAsync, hasSelection);
         DeleteSelectedCommand = ReactiveCommand.CreateFromTask(DeleteSelectedAsync, hasSelection);
         CopySelectedCommand = ReactiveCommand.CreateFromTask(CopySelectedAsync, hasSelection);
+        CopySelectedAsPlainTextCommand = ReactiveCommand.CreateFromTask(CopySelectedAsPlainTextAsync, hasSelection);
         PasteSelectedCommand = ReactiveCommand.CreateFromTask(PasteSelectedAsync, hasSelection);
         ExportSelectedCommand = ReactiveCommand.CreateFromTask(ExportSelectedAsync, hasSelection);
         OpenInEditorCommand = ReactiveCommand.CreateFromTask(OpenInEditorAsync, hasSelection);
@@ -507,6 +508,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ReactiveCommand<Unit, Unit> TogglePinCommand { get; }
 
     public ReactiveCommand<Unit, Unit> CopySelectedCommand { get; }
+
+    /// <summary>
+    /// Copies the selection with formatting stripped. Existed only as a keyboard
+    /// shortcut with no menu, toolbar or context-menu entry, so the one route to
+    /// discovering it was a settings validation collision message.
+    /// </summary>
+    public ReactiveCommand<Unit, Unit> CopySelectedAsPlainTextCommand { get; }
 
     public ReactiveCommand<Unit, Unit> PasteSelectedCommand { get; }
 
@@ -2830,6 +2838,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 SelectedClip = clip;
             }
 
+            // Selection kicks hydration off but does not wait for it, and a list
+            // row carries no content_bytes. Reading FullContent before those
+            // arrive yields the plain-text fallback for a rich clip and no image
+            // at all - so copy has to wait for them rather than hope.
+            await clip.EnsureContentHydratedAsync();
             // Armed immediately before each write rather than once up front.
             // The gate is one-shot: arming it and then failing leaves it armed,
             // and the next thing the user copies for real is silently dropped
@@ -2896,8 +2909,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         try
         {
+            // Clip.Content, not FullContent. FullContent is the *raw* display
+            // string, and GetRawContentDisplay returns the decoded HTML or RTF
+            // markup ahead of the text for any rich clip - so this used to put
+            // "<html><body><!--StartFragment--><p style=..." on the clipboard
+            // under a command whose entire purpose is to strip formatting.
+            // The global PasteAsPlainText hotkey had it right all along.
+            // Rendering is only a fallback for a rich clip with no text field.
+            // (features-opus P4 / features-sol P3)
+            var plainText = string.IsNullOrEmpty(clip.Clip.Content)
+                ? ClipDisplayFormatter.RenderRichContent(clip.FullContent)
+                : clip.Clip.Content;
+
             _clipboardMonitorService.SuppressNext();
-            await _systemInteractionService.CopyTextAsync(clip.FullContent);
+            await _systemInteractionService.CopyTextAsync(plainText);
             StatusText = AppText.FormatCopiedClip("plain text");
             TrackPasteInBackground(clip.Clip.Id);
         }
@@ -4563,10 +4588,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        // Only re-present when the clip actually gained content. Hydration only
-        // ever does anything for images, so for text and rich text this used to
-        // rebuild the whole preview a second time with identical inputs -
-        // BuildRenderedText over the full content again, on every arrow key.
+        // Only re-present when the clip actually gained content. Hydration does
+        // nothing for a plain-text clip, so for those this used to rebuild the
+        // whole preview a second time with identical inputs - BuildRenderedText
+        // over the full content again, on every arrow key. It does now fire for
+        // rich text as well as images, because both keep their payload in
+        // content_bytes and the list omits that column.
         if (!await clip.EnsureContentHydratedAsync())
         {
             return;
