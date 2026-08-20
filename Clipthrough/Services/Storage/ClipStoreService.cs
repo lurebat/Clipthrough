@@ -1808,14 +1808,45 @@ public sealed class ClipStoreService : IClipStoreService
 
         var tokens = searchText
             .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return tokens.Length > 0 && tokens.All(static t => t.Length >= 3);
+        return tokens.Length > 0 && tokens.All(static t => TrigramIndexableLength(t) >= 3);
     }
 
+    /// <summary>
+    /// Length of <paramref name="token"/> in the units SQLite's trigram tokenizer
+    /// actually indexes: Unicode code points, not UTF-16 code units.
+    /// </summary>
+    /// <remarks>
+    /// <c>string.Length</c> counts UTF-16 code units, so a token like "\U0001F600a"
+    /// - one emoji plus one letter, two characters - measures 3 and was routed to
+    /// the FTS path. The trigram index holds no two-character trigram for it, so
+    /// the search returned nothing even when a clip contained that exact text.
+    /// Counting code points routes it to the substring path instead, which finds
+    /// it.
+    ///
+    /// Code points rather than grapheme clusters on purpose: the trigram
+    /// tokenizer splits on code points, so a decomposed accent is two units to
+    /// SQLite whatever it looks like on screen. Matching what the index does is
+    /// the property that matters here, not what a human would call one character.
+    /// </remarks>
+    private static int TrigramIndexableLength(string token)
+    {
+        var count = 0;
+        for (var i = 0; i < token.Length; i++)
+        {
+            // A surrogate pair is one code point; count only its leading half.
+            if (!char.IsLowSurrogate(token[i]))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
     private static string BuildFtsExpression(string searchText, bool useFuzzy = false)
     {
         var tokens = searchText
             .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(static t => t.Length >= 3)
+            .Where(static t => TrigramIndexableLength(t) >= 3)
             .ToArray();
 
         if (tokens.Length == 0)

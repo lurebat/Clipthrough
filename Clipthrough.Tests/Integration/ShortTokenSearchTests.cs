@@ -84,6 +84,36 @@ public sealed class ShortTokenSearchTests
     }
 
     /// <summary>
+    /// A term that is short in characters but long in UTF-16 code units must be
+    /// treated as short.
+    /// </summary>
+    /// <remarks>
+    /// Review round 2, bugs-sol F2. string.Length counts UTF-16 code units, so an
+    /// emoji plus a letter - two characters - measured 3 and took the FTS path.
+    /// The trigram index holds no two-character trigram for it, so the search
+    /// found nothing even though a clip contained that exact text.
+    ///
+    /// This is the case the original ASCII-only tests could not reach: every
+    /// token in them had the same length either way, so they could not tell the
+    /// two measures apart.
+    /// </remarks>
+    [Fact]
+    public async Task ATermThatIsShortInCharactersButLongInCodeUnitsStillMatches()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        // One emoji (a surrogate pair, 2 code units) plus one letter = 2
+        // characters but string.Length 3.
+        const string needle = "\U0001F600a";
+        await CaptureAsync(scope, $"ticket {needle} complete");
+        await CaptureAsync(scope, "ticket unrelated complete");
+
+        var hits = await SearchAsync(scope, needle);
+
+        Assert.Equal([$"ticket {needle} complete"], hits);
+    }
+    /// <summary>
     /// A query that is nothing but short tokens has to work too. This already
     /// went down the substring path, and must keep doing so.
     /// </summary>
