@@ -757,7 +757,7 @@ public partial class App : Application
                         return;
                     }
                     output = Clipthrough.Services.TextTransformationService.Apply(tx, input);
-                    isHtmlOutput = tx == TextTransformation.BoxTableToHtml;
+                    isHtmlOutput = Clipthrough.Services.TextTransformationService.ProducesHtml(tx);
                     break;
                 case CustomHotkeyKind.AiPreset:
                 {

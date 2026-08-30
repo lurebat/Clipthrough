@@ -3382,7 +3382,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var producesHtml = transformation == TextTransformation.BoxTableToHtml;
+        var producesHtml = TextTransformationService.ProducesHtml(transformation);
         var label = GetTextTransformationLabel(transformation);
         StatusText = $"Applying {label}…";
         try

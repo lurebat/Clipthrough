@@ -35,6 +35,8 @@ All values live in the `Clipthrough.Models.TextTransformation` enum and are appl
 | Encoding   | `Base64Encode`              |                                                               |
 | Encoding   | `Base64Decode`              | Tolerates missing padding; returns input on bad payload       |
 | Tables     | `BoxTableToHtml`            | See below                                                     |
+| Convert    | `HtmlToMarkdown`            | Markup -> Markdown, via VellumText. Non-markup is returned unchanged. |
+| Convert    | `MarkdownToHtml`            | Markdown -> markup, via VellumText. Produces HTML.            |
 
 ### `BoxTableToHtml` semantics
 
@@ -68,7 +70,12 @@ The transform menu auto-collapses single-entry groups into top-level items, so a
 
 When exactly one target is transformed (single selected clip or a selected text slice), the result is also placed on the OS clipboard:
 
-- HTML-producing transforms (currently `BoxTableToHtml`) → `ISystemInteractionService.CopyRichContentAsync(html, plainFallback, ClipContentFormat.Html)` (writes CF_HTML on Windows).
+- HTML-producing transforms -> `ISystemInteractionService.CopyRichContentAsync(html, plainFallback, ClipContentFormat.Html)` (writes CF_HTML on Windows).
+
+  **Which transforms those are is `TextTransformationService.ProducesHtml`, and nowhere else.** Two call sites - the
+  transform command and the custom-hotkey path - used to each carry `== BoxTableToHtml` written out by hand, so adding an
+  HTML-producing transform meant remembering both. Forgetting one writes markup to the clipboard as plain text, silently.
+  Add to that predicate, not to a comparison.
 - All others → `CopyTextAsync(result)`.
 - Always preceded by `_clipboardMonitorService.SuppressNext()` so the new clip isn't captured twice.
 

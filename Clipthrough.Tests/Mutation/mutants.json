@@ -2590,5 +2590,37 @@
     "find": "            return notificationMessage is NinSelect or NinKeySelect or NinBalloonUserClick or WmLButtonUp;",
     "replace": "            return notificationMessage is NinSelect or NinBalloonUserClick or WmLButtonUp || notificationMessage == NinKeySelect + 0xFFFF;",
     "filter": "FullyQualifiedName~TrayActivationNotificationTests"
+  },
+  {
+    "id": "markdown-to-html-is-not-treated-as-markup",
+    "why": "Forgets MarkdownToHtml in the HTML-producing set, which is what happens when the predicate is a comparison repeated per call site rather than one list. The transform then writes markup to the clipboard as plain text, so pasting into Word yields angle brackets instead of formatting.",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "find": "    public static bool ProducesHtml(Models.TextTransformation transformation)\n        => transformation is Models.TextTransformation.BoxTableToHtml\n            or Models.TextTransformation.MarkdownToHtml;",
+    "replace": "    public static bool ProducesHtml(Models.TextTransformation transformation)\n        => transformation is Models.TextTransformation.BoxTableToHtml;",
+    "filter": "FullyQualifiedName~MarkdownTransformationTests"
+  },
+  {
+    "id": "html-to-markdown-claims-to-produce-markup",
+    "why": "Adds the Markdown-producing direction to the HTML set. Its output is plain text, so this would persist Markdown as ContentFormat.Html and write it to the clipboard as rich content - the over-broad error, and invisible without a test that names both directions.",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "find": "    public static bool ProducesHtml(Models.TextTransformation transformation)\n        => transformation is Models.TextTransformation.BoxTableToHtml\n            or Models.TextTransformation.MarkdownToHtml;",
+    "replace": "    public static bool ProducesHtml(Models.TextTransformation transformation)\n        => transformation is Models.TextTransformation.BoxTableToHtml\n            or Models.TextTransformation.MarkdownToHtml or Models.TextTransformation.HtmlToMarkdown;",
+    "filter": "FullyQualifiedName~MarkdownTransformationTests"
+  },
+  {
+    "id": "html-to-markdown-mangles-plain-text",
+    "why": "Converts everything rather than only markup, so ordinary prose containing angle brackets is run through the importer and comes back escaped - \"a < b\" becomes \"a \\\\< b\". This is the bug the first version of the probe actually had.",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "find": "        if (!LooksLikeHtml(input))",
+    "replace": "        if (LooksLikeHtml(input) && !LooksLikeHtml(input))",
+    "filter": "FullyQualifiedName~MarkdownTransformationTests"
+  },
+  {
+    "id": "html-detection-treats-generics-as-markup",
+    "why": "Replaces the shared predicate with a loose \"any tag-shaped thing\" probe. List<string> and Template<int> then read as HTML, so HTML-to-Markdown runs copied source code through an importer and returns it escaped. Source code is a large share of what a clipboard manager holds, and this is the bug the first version of this probe actually had.",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "find": "        => Platform.RichClipboardFormatting.LooksLikeHtml(input);",
+    "replace": "        => System.Text.RegularExpressions.Regex.IsMatch(input, @\"<[a-zA-Z/][^>]*>\");",
+    "filter": "FullyQualifiedName~MarkdownTransformationTests"
   }
 ]

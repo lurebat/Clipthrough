@@ -11,6 +11,23 @@ public static partial class TextTransformationService
 {
     private const int TabWidth = 4;
 
+    /// <summary>
+    /// True when a transformation's output is HTML markup rather than plain text,
+    /// so callers write it to the clipboard as rich content and persist it as
+    /// <see cref="Models.ClipContentFormat.Html"/>.
+    /// </summary>
+    /// <remarks>
+    /// One predicate rather than a comparison repeated at each call site. Two
+    /// places decided this independently - the transform command path and the
+    /// custom-hotkey path - and each had <c>== BoxTableToHtml</c> written out by
+    /// hand, so adding an HTML-producing transform meant remembering both. That
+    /// is the shape of defect this repository has been bitten by twice: two
+    /// sources of truth that agree until someone adds a case to one of them.
+    /// </remarks>
+    public static bool ProducesHtml(Models.TextTransformation transformation)
+        => transformation is Models.TextTransformation.BoxTableToHtml
+            or Models.TextTransformation.MarkdownToHtml;
+
     public static string Apply(Models.TextTransformation transformation, string input, string? delimiter = null)
     {
         if (string.IsNullOrEmpty(input))
@@ -40,6 +57,8 @@ public static partial class TextTransformationService
             Models.TextTransformation.RemoveEmptyLines => RemoveEmptyLines(input),
             Models.TextTransformation.RemoveDuplicateLines => RemoveDuplicateLines(input),
             Models.TextTransformation.BoxTableToHtml => BoxTableToHtml(input),
+            Models.TextTransformation.HtmlToMarkdown => HtmlToMarkdown(input),
+            Models.TextTransformation.MarkdownToHtml => MarkdownToHtml(input),
             Models.TextTransformation.JsonQuote => JsonQuote(input),
             Models.TextTransformation.JsonUnquote => JsonUnquote(input),
             Models.TextTransformation.JsonMinify => JsonReformat(input, indented: false),
@@ -227,6 +246,94 @@ public static partial class TextTransformationService
         var seen = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
         return string.Join('\n', lines.Where(line => seen.Add(line)));
     }
+
+    /// <summary>
+    /// Converts HTML markup to Markdown, for pasting web or Office content into
+    /// something that speaks Markdown - an issue tracker, a chat client, a
+    /// README.
+    /// </summary>
+    /// <remarks>
+    /// Delegates to VellumText, which owns both halves of the conversion. Its
+    /// HTML importer enforces a link-scheme allow-list and strips script and
+    /// style bodies, so markup arriving from an arbitrary web page is sanitised
+    /// on the way in rather than here.
+    ///
+    /// Input that is not HTML is returned unchanged rather than mangled: a plain
+    /// sentence has no markup to convert, and running it through an importer
+    /// would escape characters the user typed on purpose.
+    /// </remarks>
+    private static string HtmlToMarkdown(string input)
+    {
+        if (!LooksLikeHtml(input))
+        {
+            return input;
+        }
+
+        try
+        {
+            var document = VellumText.Interop.Html.HtmlFormat.Instance.Import(input).Doc;
+            var markdown = VellumText.Interop.Markdown.MarkdownFormat.Instance.Export(document);
+            return string.IsNullOrWhiteSpace(markdown) ? input : markdown;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"HTML to Markdown conversion failed; leaving the text unchanged: {ex.Message}");
+            return input;
+        }
+    }
+
+    /// <summary>
+    /// Converts Markdown to HTML, so notes written in Markdown can be pasted into
+    /// Outlook, Word or any editor that takes rich text.
+    /// </summary>
+    /// <remarks>
+    /// Script and style bodies embedded in the Markdown do not reach the output.
+    /// <strong>The guarantor is VellumText's HTML sanitizer, not the
+    /// <c>AllowRawHtml</c> option.</strong> That was checked rather than assumed:
+    /// flipping the option to <c>true</c> left the output equally clean, because
+    /// raw HTML blocks are routed through the same tokenizer that handles a
+    /// pasted HTML fragment.
+    ///
+    /// The default (<c>AllowRawHtml = false</c>) is left alone anyway, since a
+    /// clipboard payload is arbitrary text and this output goes to the clipboard
+    /// as rich content that another application renders. But it is defence in
+    /// depth, not the load-bearing part, and a comment claiming otherwise would
+    /// send the next reader to the wrong place when it matters.
+    /// </remarks>
+    private static string MarkdownToHtml(string input)
+    {
+        try
+        {
+            var document = VellumText.Interop.Markdown.MarkdownFormat.Instance.Import(input).Doc;
+            var html = VellumText.Interop.Html.HtmlFormat.Instance.Export(document);
+            return string.IsNullOrWhiteSpace(html) ? input : html;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"Markdown to HTML conversion failed; leaving the text unchanged: {ex.Message}");
+            return input;
+        }
+    }
+
+    /// <summary>
+    /// Cheap structural check for "this looks like markup at all", used to leave
+    /// plain text alone rather than round-tripping it through an HTML importer.
+    /// </summary>
+    /// <remarks>
+    /// Delegates to <see cref="Platform.RichClipboardFormatting.LooksLikeHtml"/>
+    /// rather than carrying its own probe. An opening tag on its own is not
+    /// enough evidence: <c>List&lt;string&gt;</c> and <c>Template&lt;int&gt; t;</c>
+    /// both contain something tag-shaped, and copied source code is a large
+    /// share of what a clipboard manager holds. That predicate already requires
+    /// a closing tag, a self-closing tag, a void element or a DOCTYPE, which is
+    /// something prose does not produce by accident.
+    ///
+    /// This started life as a private regex here and got it wrong in exactly the
+    /// way that comment warns about - which is the argument for one
+    /// implementation rather than two agreeing ones.
+    /// </remarks>
+    private static bool LooksLikeHtml(string input)
+        => Platform.RichClipboardFormatting.LooksLikeHtml(input);
 
     private static string BoxTableToHtml(string input)
     {

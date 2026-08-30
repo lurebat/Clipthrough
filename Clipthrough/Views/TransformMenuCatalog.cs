@@ -62,6 +62,8 @@ internal static class TransformMenuCatalog
         ("Encoding", "Base64 decode", TextTransformation.Base64Decode),
         ("Cleanup", "Clean terminal formatting", TextTransformation.CleanTerminalFormatting),
         ("Convert", "Text table \u2192 HTML", TextTransformation.BoxTableToHtml),
+        ("Convert", "HTML \u2192 Markdown", TextTransformation.HtmlToMarkdown),
+        ("Convert", "Markdown \u2192 HTML", TextTransformation.MarkdownToHtml),
     };
 
     /// <summary>

@@ -401,6 +401,14 @@
                                                   IsVisible="{Binding CanTransform}"
                                                   Command="{Binding ApplyTextTransformationCommand}"
                                                   CommandParameter="{x:Static models:TextTransformation.BoxTableToHtml}" />
+                                        <MenuItem Header="HTML → Markdown"
+                                                  IsVisible="{Binding CanTransform}"
+                                                  Command="{Binding ApplyTextTransformationCommand}"
+                                                  CommandParameter="{x:Static models:TextTransformation.HtmlToMarkdown}" />
+                                        <MenuItem Header="Markdown → HTML"
+                                                  IsVisible="{Binding CanTransform}"
+                                                  Command="{Binding ApplyTextTransformationCommand}"
+                                                  CommandParameter="{x:Static models:TextTransformation.MarkdownToHtml}" />
                                         <MenuItem Header="AI"
                                                   ItemsSource="{Binding #ClipsListBox.DataContext.VisibleAiMenuEntries}"
                                                   IsVisible="{Binding #ClipsListBox.DataContext.IsAiMenuVisible}">

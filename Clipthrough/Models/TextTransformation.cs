@@ -31,4 +31,6 @@ public enum TextTransformation
     Base64Encode,
     Base64Decode,
     CleanTerminalFormatting,
+    HtmlToMarkdown,
+    MarkdownToHtml,
 }
