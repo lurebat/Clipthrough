@@ -2339,13 +2339,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// flags the diff sees a "change" and replaces the row with the pre-write
     /// entry — silently rolling the UI back. <see cref="PerformRefreshAsync"/>
     /// uses the counters below to detect and re-read such snapshots.
+    ///
+    /// The write is awaited directly: <see cref="ClipStoreService"/> moves its
+    /// own body to the thread pool, so wrapping it here only bought a second
+    /// hop. The counters, and the order they move in, are the reason this
+    /// method exists — see
+    /// <c>docs/solutions/stale-refresh-clobbers-optimistic-state.md</c>.
     /// </summary>
     private async Task RunClipMutationAsync(Func<Task> write)
     {
         Interlocked.Increment(ref _pendingClipMutations);
         try
         {
-            await Task.Run(write);
+            await write();
         }
         finally
         {
@@ -2551,12 +2557,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         private static readonly HashSet<long> EmptyIds = [];
     }
 
-    private Task<FusedSearchResult> SearchClipsAsync(ClipSearchFilters filters, bool useSemanticClipSearch)
-        => Task.Run(async () =>
-        {
-            var result = await _clipStoreService.SearchAsync(filters).ConfigureAwait(false);
-            return await ApplySemanticFusionAsync(filters, result, useSemanticClipSearch).ConfigureAwait(false);
-        });
+    private async Task<FusedSearchResult> SearchClipsAsync(ClipSearchFilters filters, bool useSemanticClipSearch)
+    {
+        var result = await _clipStoreService.SearchAsync(filters).ConfigureAwait(false);
+
+        // The store moves its own body to the pool, so the search is already off
+        // the UI thread and does not want wrapping again. The fusion does: it
+        // runs vector similarity and rank fusion, and awaiting an already
+        // completed task resumes inline on the caller - so a search that
+        // finished quickly would otherwise land that work on the UI thread.
+        return await Task.Run(() => ApplySemanticFusionAsync(filters, result, useSemanticClipSearch)).ConfigureAwait(false);
+    }
 
     private async Task<FusedSearchResult> ApplySemanticFusionAsync(ClipSearchFilters filters, ClipSearchResult ftsResult, bool useSemanticClipSearch)
     {
@@ -3094,7 +3105,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         try
         {
-            var source = await Task.Run(() => _clipStoreService.GetByIdAsync(sourceId));
+            var source = await _clipStoreService.GetByIdAsync(sourceId);
             if (source is null)
             {
                 StatusText = $"Clip #{sourceId} no longer exists.";
@@ -3184,7 +3195,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         using var bitmapStream = new MemoryStream(editedBytes, writable: false);
         using var bitmap = new Bitmap(bitmapStream);
 
-        var capturedClip = await Task.Run(() => _clipStoreService.CaptureAsync(new ClipCaptureRequest
+        var capturedClip = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
         {
             ContentBytes = editedBytes,
             ContentText = string.IsNullOrWhiteSpace(clip.FullContent) ? null : clip.FullContent,
@@ -3194,7 +3205,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SourceAppPath = Environment.ProcessPath,
             ImageWidth = bitmap.PixelSize.Width,
             ImageHeight = bitmap.PixelSize.Height,
-        }));
+        });
 
         _clipboardMonitorService.SuppressNext();
         await _systemInteractionService.CopyBitmapAsync(bitmap);
@@ -3349,7 +3360,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (!string.IsNullOrEmpty(text))
         {
             var bytes = System.Text.Encoding.UTF8.GetBytes(text);
-            captured = await Task.Run(() => _clipStoreService.CaptureAsync(new ClipCaptureRequest
+            captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
             {
                 ContentBytes = bytes,
                 ContentText = text,
@@ -3360,7 +3371,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 SourceAppIconBytes = SelectedClip.SourceAppIconBytes,
                 SourceWindowTitle = SelectedClip.Clip.SourceWindowTitle,
                 IncrementExistingCopyCount = false,
-            }));
+            });
         }
 
         _editedClipBaseline = text;
@@ -3445,7 +3456,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
             var isHtml = transformation == TextTransformation.BoxTableToHtml;
-            var captured = await Task.Run(() => _clipStoreService.CaptureAsync(new ClipCaptureRequest
+            var captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
             {
                 ContentBytes = textBytes,
                 ContentText = result,
@@ -3459,7 +3470,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 SourceClipId = clip.Clip.Id,
                 TransformKind = $"builtin:{transformation}",
                 SkipPostInsertMaintenance = true,
-            }));
+            });
             var copyFailure = await CopyTransformResultToClipboardAsync(result, isHtml ? ClipContentFormat.Html : ClipContentFormat.PlainText);
             if (copyFailure is null)
             {
@@ -3591,7 +3602,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
             var isHtml = outputFormat == ClipContentFormat.Html;
-            var captured = await Task.Run(() => _clipStoreService.CaptureAsync(new ClipCaptureRequest
+            var captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
             {
                 ContentBytes = textBytes,
                 ContentText = result,
@@ -3605,7 +3616,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 SourceClipId = target.Clip.Id,
                 TransformKind = transformKind,
                 SkipPostInsertMaintenance = true,
-            }));
+            });
             if (captured is not null)
             {
                 lastCreatedId = captured.Id;
@@ -3671,7 +3682,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        await Task.Run(() => _clipStoreService.MarkOcrForRerunAsync(clip.Clip.Id));
+        await _clipStoreService.MarkOcrForRerunAsync(clip.Clip.Id);
         StatusText = "Queued OCR…";
         _backgroundOcrQueue.Enqueue(clip.Clip.Id);
     }
@@ -3748,7 +3759,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         try
         {
-            var coverage = await Task.Run(() => _clipStoreService.GetOcrCoverageAsync());
+            var coverage = await _clipStoreService.GetOcrCoverageAsync();
             if (coverage.EligibleTotal <= 0)
             {
                 OcrCoverageText = "No images to OCR yet";
@@ -3842,7 +3853,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         try
         {
-            await Task.Run(() => _clipStoreService.CaptureAsync(request));
+            await _clipStoreService.CaptureAsync(request);
             _editedClipBaseline = _editedClipText;
         }
         catch (Exception ex)
@@ -5415,7 +5426,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 }
 
                 var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
-                var captured = await Task.Run(() => _clipStoreService.CaptureAsync(new ClipCaptureRequest
+                var captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
                 {
                     ContentBytes = textBytes,
                     ContentText = result,
@@ -5429,7 +5440,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     SourceClipId = target.Clip.Id,
                     TransformKind = transformKind,
                     SkipPostInsertMaintenance = true,
-                }));
+                });
                 if (captured is not null)
                 {
                     lastCreatedId = captured.Id;
@@ -5534,7 +5545,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
 
             var textBytes = System.Text.Encoding.UTF8.GetBytes(text);
-            var captured = await Task.Run(() => _clipStoreService.CaptureAsync(new ClipCaptureRequest
+            var captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
             {
                 ContentBytes = textBytes,
                 ContentText = text,
@@ -5548,7 +5559,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 SourceClipId = clip.Clip.Id,
                 TransformKind = transformKind,
                 SkipPostInsertMaintenance = true,
-            }));
+            });
 
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
@@ -5907,7 +5918,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 if (languagesChanged)
                 {
-                    await Task.Run(() => _clipStoreService.MarkAllSucceededForRerunAsync());
+                    await _clipStoreService.MarkAllSucceededForRerunAsync();
                 }
                 _ = Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync());
             }
@@ -6182,17 +6193,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // SQLCipher key derivation and the FTS5 index header are all hot by
         // the time the visible refresh runs. Without this, the first
         // SearchAsync after startup paid all three costs on the UI thread.
-        await Task.Run(async () =>
+        try
         {
-            try
-            {
-                await _clipStoreService.PrewarmAsync().ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                Trace.TraceWarning($"Database prewarm failed: {ex.Message}");
-            }
-        }).ConfigureAwait(false);
+            await _clipStoreService.PrewarmAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Database prewarm failed: {ex.Message}");
+        }
         Trace.TraceInformation($"[startup-timing] prewarm @ {sw.ElapsedMilliseconds}ms");
 
         _isDatabaseReady = true;
@@ -6285,7 +6293,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         try
         {
-            var classified = await Task.Run(() => _clipStoreService.ApplyPendingSensitivityAsync());
+            var classified = await _clipStoreService.ApplyPendingSensitivityAsync();
             if (classified > 0)
             {
                 await RefreshAsync();
@@ -6666,7 +6674,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var maintenanceResult = await Task.Run(async () => await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false)).ConfigureAwait(false);
+        var maintenanceResult = await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);
         if (!forceRefresh && maintenanceResult.PurgedClipCount == 0)
         {
             return;
@@ -6929,7 +6937,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ExportClipAsync,
             TogglePinClipAsync,
             ApplyTransformationToSingleClipAsync,
-            id => Task.Run(() => _clipStoreService.GetByIdAsync(id)),
+            id => _clipStoreService.GetByIdAsync(id),
             LoadSourceAppIconAsync)
         {
             IsChecked = checkedIds?.Contains(clip.Id) == true
@@ -6966,7 +6974,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         if (string.IsNullOrWhiteSpace(key))
         {
-            return Task.Run(() => _clipStoreService.GetSourceAppIconAsync(clipId));
+            return _clipStoreService.GetSourceAppIconAsync(clipId);
         }
 
         lock (_sourceAppIconCache)
@@ -6976,7 +6984,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 return pending;
             }
 
-            var load = Task.Run(() => _clipStoreService.GetSourceAppIconAsync(clipId));
+            var load = _clipStoreService.GetSourceAppIconAsync(clipId);
 
             // Published before the eviction hook is attached, so a load that finishes
             // immediately cannot remove itself from the cache before it is in it.
@@ -7405,7 +7413,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             try
             {
-                var clip = await Task.Run(() => _clipStoreService.CaptureFastAsync(request));
+                var clip = await _clipStoreService.CaptureFastAsync(request);
                 if (clip is null)
                 {
                     continue;

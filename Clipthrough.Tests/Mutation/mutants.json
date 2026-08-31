@@ -2654,5 +2654,13 @@
     "find": "    public Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default)\n        => RunOffCallerAsync(ct => GetOcrCoverageCoreAsync(ct), cancellationToken);",
     "replace": "    public async Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default)\n        => await GetOcrCoverageCoreAsync(cancellationToken);",
     "filter": "FullyQualifiedName~ClipStoreThreadingTests"
+  },
+  {
+    "id": "clip-mutation-version-stops-moving",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "RunClipMutationAsync exists for these counters, not for its thread hop - the hop moved into ClipStoreService and the counters did not. A refresh that read the database before a write must notice the write landed, or the stale snapshot is applied over it and silently reverts the row. With the version frozen, a write that completes before the parked search resumes is invisible to both staleness checks.",
+    "find": "            Interlocked.Increment(ref _clipMutationVersion);\n            Interlocked.Decrement(ref _pendingClipMutations);",
+    "replace": "            Interlocked.Add(ref _clipMutationVersion, 0);\n            Interlocked.Decrement(ref _pendingClipMutations);",
+    "filter": "FavoriteCheckedClips_SurvivesRefreshSnapshotTakenBeforeTheWrite"
   }
 ]
