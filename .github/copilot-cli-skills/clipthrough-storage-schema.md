@@ -18,7 +18,7 @@ Use this when adding columns, indexes, queries, or full-text-search behavior. It
 
 ## UI threading rule
 
-All `IClipStoreService` calls from ViewModel command handlers must be wrapped in `Task.Run(() => _clipStoreService.XxxAsync(...))`. COM clipboard reads (e.g. `Clipboard.GetDataAsync`) MUST stay on the UI thread — only offload the DB write portion. When fixing a UI-freeze bug, audit all call sites of the affected service method first (`grep _clipStoreService\. MainWindowViewModel.cs`).
+`ClipStoreService` moves its own body to the thread pool — SQLite has no async I/O, so every method would otherwise run to completion on its caller. Just `await` store calls; do not wrap them in `Task.Run`. `ClipStoreThreadingTests` fails if a method stops delegating to `RunOffCallerAsync` or becomes `async` again. COM clipboard reads (e.g. `Clipboard.GetDataAsync`) MUST stay on the UI thread. Work that is *not* a store call is not covered — `ISensitivityService` and `ISearchHistoryService` use their own connection factory — so a mixed block still needs a `Task.Run` around the uncovered part. See `docs/solutions/storage-calls-hop-off-the-caller.md`.
 
 ## Schema (current)
 

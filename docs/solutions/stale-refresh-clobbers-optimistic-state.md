@@ -72,9 +72,13 @@ to comparing ids, for the same orphaning reason.
 
 ## Prevention
 
-- Route **every** clip-state write through `RunClipMutationAsync`. A raw
-  `Task.Run(() => _clipStoreService.Set…)` reintroduces the rollback, because
-  the refresh has no way to know the snapshot went stale.
+- Route **every** clip-state write through `RunClipMutationAsync`. Calling
+  `_clipStoreService.Set…` directly reintroduces the rollback, because the
+  refresh has no way to know the snapshot went stale. Note that the store now
+  hops off the caller itself, so a direct call *looks* correct and is not —
+  the counters, not the thread, are what this method is for.
+  `clip-mutation-version-stops-moving` fails the regression test below if the
+  version counter stops moving.
 - Any new field added to `ClipsAreMateriallyEqual` widens this hazard — it is
   the predicate that decides whether a refresh replaces a row.
 - Regression test: `FavoriteCheckedClips_SurvivesRefreshSnapshotTakenBeforeTheWrite`

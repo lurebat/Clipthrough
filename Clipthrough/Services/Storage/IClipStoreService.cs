@@ -6,6 +6,23 @@ using Clipthrough.Models;
 
 namespace Clipthrough.Services;
 
+/// <summary>
+/// The clip library.
+///
+/// <para>
+/// <b>Implementations must not run their work on the calling thread.</b> SQLite
+/// has no asynchronous I/O, so a body that simply awaits the ADO.NET methods
+/// runs start to finish on whoever called it — and these methods are called
+/// from UI-thread command handlers. <see cref="ClipStoreService"/> satisfies
+/// this by giving every method a <c>Task.Run</c> hop; callers therefore just
+/// <c>await</c> and must not add one of their own.
+/// </para>
+/// <para>
+/// Test doubles that complete synchronously are fine: nothing blocks, so there
+/// is nothing to move. The contract binds implementations that actually touch
+/// the database.
+/// </para>
+/// </summary>
 public interface IClipStoreService
 {
     /// <summary>
