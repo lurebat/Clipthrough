@@ -266,7 +266,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                     // under us — that write would be lost or hit a half-swapped file.
                     return;
                 }
-                var capturedClip = await Task.Run(() => _clipStoreService.CaptureFastAsync(captureRequest));
+                var capturedClip = await _clipStoreService.CaptureFastAsync(captureRequest);
                 if (capturedClip is not null)
                 {
                     Trace.TraceInformation($"Clipboard fast capture completed in {captureStopwatch.ElapsedMilliseconds} ms for clip {capturedClip.Id}.");
@@ -511,7 +511,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                     return;
                 }
 
-                var updated = await Task.Run(() => _clipStoreService.UpdateDeferredContentAsync(capturedClip.Id, deferredContent));
+                var updated = await _clipStoreService.UpdateDeferredContentAsync(capturedClip.Id, deferredContent);
                 PublishUpdatedClip(updated);
             }
 
@@ -520,13 +520,13 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                 return;
             }
 
-            var sensitivityUpdated = await Task.Run(() => _clipStoreService.ApplySensitivityAsync(capturedClip.Id));
+            var sensitivityUpdated = await _clipStoreService.ApplySensitivityAsync(capturedClip.Id);
             PublishUpdatedClip(sensitivityUpdated);
 
             var iconBytes = await Task.Run(() => _sourceApplicationResolver.TryResolveIcon(capturedClip.SourceAppPath));
             if (iconBytes is { Length: > 0 } && !_isDisposed)
             {
-                var iconUpdated = await Task.Run(() => _clipStoreService.UpdateSourceAppIconAsync(capturedClip.Id, iconBytes));
+                var iconUpdated = await _clipStoreService.UpdateSourceAppIconAsync(capturedClip.Id, iconBytes);
                 PublishUpdatedClip(iconUpdated);
             }
 
@@ -535,7 +535,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                 return;
             }
 
-            await Task.Run(() => _clipStoreService.ApplyMaintenanceAsync());
+            await _clipStoreService.ApplyMaintenanceAsync();
             Trace.TraceInformation($"Clipboard background enrichment completed in {enrichmentStopwatch.ElapsedMilliseconds} ms for clip {capturedClip.Id}.");
         }
         catch (OperationCanceledException)

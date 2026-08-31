@@ -724,8 +724,8 @@
     "why": "Drops the disposal guard from the fire-and-forget enrichment, so a clip captured just before shutdown keeps writing into a database that is closing or being rekeyed.",
     "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
     "filter": "Enrichment_AbandonsItsRemainingWorkOnceDisposed",
-    "find": "            if (_isDisposed)\n            {\n                return;\n            }\n\n            var sensitivityUpdated = await Task.Run(() => _clipStoreService.ApplySensitivityAsync(capturedClip.Id));",
-    "replace": "            var sensitivityUpdated = await Task.Run(() => _clipStoreService.ApplySensitivityAsync(capturedClip.Id));"
+    "find": "            if (_isDisposed)\n            {\n                return;\n            }\n\n            var sensitivityUpdated = await _clipStoreService.ApplySensitivityAsync(capturedClip.Id);",
+    "replace": "            var sensitivityUpdated = await _clipStoreService.ApplySensitivityAsync(capturedClip.Id);"
   },
   {
     "id": "favorites-default-returns-to-the-builtin-gesture",
