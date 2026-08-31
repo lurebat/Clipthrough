@@ -2638,5 +2638,21 @@
     "find": "                var byScore = b.Score.CompareTo(a.Score);\n                return byScore != 0 ? byScore : b.ClipId.CompareTo(a.ClipId);",
     "replace": "                var byScore = b.Score.CompareTo(a.Score);\n                return byScore != 0 ? byScore : 0;",
     "filter": "FullyQualifiedName~SemanticSearchServiceTests"
+  },
+  {
+    "id": "clip-store-runs-inline",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "SQLite has no async I/O, so a store body runs to completion on whoever called it. Without the hop every one of the 37 methods freezes the UI thread for the duration of its query - the exact freeze the 38 caller-side Task.Run wraps used to prevent.",
+    "find": "    private static Task<T> RunOffCallerAsync<T>(Func<CancellationToken, Task<T>> body, CancellationToken cancellationToken)\n        => Task.Run(() => body(cancellationToken), cancellationToken);",
+    "replace": "    private static Task<T> RunOffCallerAsync<T>(Func<CancellationToken, Task<T>> body, CancellationToken cancellationToken)\n        => body(cancellationToken);",
+    "filter": "FullyQualifiedName~ClipStoreThreadingTests"
+  },
+  {
+    "id": "clip-store-method-reverts-to-inline-async",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Catches a partial revert rather than a change to the shared helper: one method going back to `public async` runs its whole body on the caller while the other 36 stay correct. Also proves the AsyncStateMachineAttribute assertion is load-bearing - this mutant still reaches the Core method, so a bare `calls Task.Run` scan would not notice.",
+    "find": "    public Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default)\n        => RunOffCallerAsync(ct => GetOcrCoverageCoreAsync(ct), cancellationToken);",
+    "replace": "    public async Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default)\n        => await GetOcrCoverageCoreAsync(cancellationToken);",
+    "filter": "FullyQualifiedName~ClipStoreThreadingTests"
   }
 ]

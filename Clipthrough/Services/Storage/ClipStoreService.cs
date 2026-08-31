@@ -160,7 +160,40 @@ public sealed class ClipStoreService : IClipStoreService
 
     private void InvalidateStatsCache() => Interlocked.Increment(ref _statsVersion);
 
-    public async Task<ClipEntry?> CaptureAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Runs a store body on the thread pool and hands the caller back a task.
+    ///
+    /// SQLite has no asynchronous I/O. Microsoft's guidance for this provider is
+    /// explicit - "Async ADO.NET methods will execute synchronously in
+    /// Microsoft.Data.Sqlite. Avoid calling them." - so every method below runs
+    /// start to finish on whatever thread invoked it, and awaiting one from the
+    /// UI thread freezes the window for the duration of the query.
+    ///
+    /// That used to be each caller's job: 38 call sites wrapped their own
+    /// <c>Task.Run</c>, and the rule survived only as a line in a documentation
+    /// file that a new call site could silently miss. Putting the hop here makes
+    /// the guarantee structural - a new method gets it by construction, and
+    /// callers simply await.
+    ///
+    /// This is permanent, not a workaround: the constraint is in SQLite itself,
+    /// below the .NET binding, so no provider upgrade removes it. See
+    /// <c>docs/solutions/storage-calls-hop-off-the-caller.md</c>.
+    ///
+    /// Every public method is therefore a one-line wrapper over a private
+    /// <c>*CoreAsync</c> body. Internal callers use the <c>*CoreAsync</c> form
+    /// directly, so the hop is never paid twice.
+    /// </summary>
+    private static Task<T> RunOffCallerAsync<T>(Func<CancellationToken, Task<T>> body, CancellationToken cancellationToken)
+        => Task.Run(() => body(cancellationToken), cancellationToken);
+
+    /// <inheritdoc cref="RunOffCallerAsync{T}(Func{CancellationToken, Task{T}}, CancellationToken)" />
+    private static Task RunOffCallerAsync(Func<CancellationToken, Task> body, CancellationToken cancellationToken)
+        => Task.Run(() => body(cancellationToken), cancellationToken);
+
+    public Task<ClipEntry?> CaptureAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => CaptureCoreAsync(request, ct), cancellationToken);
+
+    private async Task<ClipEntry?> CaptureCoreAsync(ClipCaptureRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -183,7 +216,10 @@ public sealed class ClipStoreService : IClipStoreService
         return await InsertClipAsync(request, cancellationToken);
     }
 
-    public async Task<ClipEntry?> CaptureFastAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default)
+    public Task<ClipEntry?> CaptureFastAsync(ClipCaptureRequest request, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => CaptureFastCoreAsync(request, ct), cancellationToken);
+
+    private async Task<ClipEntry?> CaptureFastCoreAsync(ClipCaptureRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -206,13 +242,16 @@ public sealed class ClipStoreService : IClipStoreService
         return await InsertClipAsync(request, cancellationToken, scanSensitivity: false, applyMaintenance: false);
     }
 
-    public async Task<ClipEntry?> UpdateDeferredContentAsync(long clipId, ClipCaptureRequest request, CancellationToken cancellationToken = default)
+    public Task<ClipEntry?> UpdateDeferredContentAsync(long clipId, ClipCaptureRequest request, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => UpdateDeferredContentCoreAsync(clipId, request, ct), cancellationToken);
+
+    private async Task<ClipEntry?> UpdateDeferredContentCoreAsync(long clipId, ClipCaptureRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         if (request.ContentBytes.Length == 0 || request.ContentBytes.Length > _settingsService.Current.MaxClipSizeBytes)
         {
-            return await GetByIdAsync(clipId, cancellationToken);
+            return await GetByIdCoreAsync(clipId, cancellationToken);
         }
 
         var contentText = BuildStoredContentText(request);
@@ -258,12 +297,15 @@ public sealed class ClipStoreService : IClipStoreService
         return await GetClipByIdAsync(connection, clipId, cancellationToken);
     }
 
-    public async Task<ClipEntry?> UpdateSourceAppIconAsync(long clipId, byte[] iconBytes, CancellationToken cancellationToken = default)
+    public Task<ClipEntry?> UpdateSourceAppIconAsync(long clipId, byte[] iconBytes, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => UpdateSourceAppIconCoreAsync(clipId, iconBytes, ct), cancellationToken);
+
+    private async Task<ClipEntry?> UpdateSourceAppIconCoreAsync(long clipId, byte[] iconBytes, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(iconBytes);
         if (iconBytes.Length == 0)
         {
-            return await GetByIdAsync(clipId, cancellationToken);
+            return await GetByIdCoreAsync(clipId, cancellationToken);
         }
 
         await using var connection = _connectionFactory.CreateConnection();
@@ -290,7 +332,10 @@ public sealed class ClipStoreService : IClipStoreService
     /// </para>
     /// </summary>
     /// <returns>The number of clips that were classified.</returns>
-    public async Task<int> ApplyPendingSensitivityAsync(CancellationToken cancellationToken = default)
+    public Task<int> ApplyPendingSensitivityAsync(CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => ApplyPendingSensitivityCoreAsync(ct), cancellationToken);
+
+    private async Task<int> ApplyPendingSensitivityCoreAsync(CancellationToken cancellationToken)
     {
         List<long> pending;
         await using (var connection = _connectionFactory.CreateConnection())
@@ -320,7 +365,7 @@ public sealed class ClipStoreService : IClipStoreService
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                await ApplySensitivityAsync(clipId, cancellationToken);
+                await ApplySensitivityCoreAsync(clipId, cancellationToken);
                 classified++;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -333,7 +378,10 @@ public sealed class ClipStoreService : IClipStoreService
         return classified;
     }
 
-    public async Task<ClipEntry?> ApplySensitivityAsync(long clipId, CancellationToken cancellationToken = default)
+    public Task<ClipEntry?> ApplySensitivityAsync(long clipId, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => ApplySensitivityCoreAsync(clipId, ct), cancellationToken);
+
+    private async Task<ClipEntry?> ApplySensitivityCoreAsync(long clipId, CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -407,7 +455,10 @@ public sealed class ClipStoreService : IClipStoreService
         return await GetClipByIdAsync(connection, clipId, cancellationToken);
     }
 
-    public async Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default)
+    public Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => SearchCoreAsync(filters, ct), cancellationToken);
+
+    private async Task<ClipSearchResult> SearchCoreAsync(ClipSearchFilters filters, CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -480,7 +531,10 @@ public sealed class ClipStoreService : IClipStoreService
         };
     }
 
-    public async Task SetFavoriteAsync(long clipId, bool isFavorite, CancellationToken cancellationToken = default)
+    public Task SetFavoriteAsync(long clipId, bool isFavorite, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => SetFavoriteCoreAsync(clipId, isFavorite, ct), cancellationToken);
+
+    private async Task SetFavoriteCoreAsync(long clipId, bool isFavorite, CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -492,7 +546,10 @@ public sealed class ClipStoreService : IClipStoreService
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    public async Task SetPinnedAsync(long clipId, bool isPinned, CancellationToken cancellationToken = default)
+    public Task SetPinnedAsync(long clipId, bool isPinned, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => SetPinnedCoreAsync(clipId, isPinned, ct), cancellationToken);
+
+    private async Task SetPinnedCoreAsync(long clipId, bool isPinned, CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -508,7 +565,10 @@ public sealed class ClipStoreService : IClipStoreService
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    public async Task DeleteAsync(long clipId, CancellationToken cancellationToken = default)
+    public Task DeleteAsync(long clipId, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => DeleteCoreAsync(clipId, ct), cancellationToken);
+
+    private async Task DeleteCoreAsync(long clipId, CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -525,7 +585,10 @@ public sealed class ClipStoreService : IClipStoreService
         }
     }
 
-    public async Task ClearSensitivityAsync(long clipId, CancellationToken cancellationToken = default)
+    public Task ClearSensitivityAsync(long clipId, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => ClearSensitivityCoreAsync(clipId, ct), cancellationToken);
+
+    private async Task ClearSensitivityCoreAsync(long clipId, CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -551,7 +614,10 @@ public sealed class ClipStoreService : IClipStoreService
         InvalidateStatsCache();
     }
 
-    public async Task SetSensitiveAsync(long clipId, bool isSensitive, CancellationToken cancellationToken = default)
+    public Task SetSensitiveAsync(long clipId, bool isSensitive, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => SetSensitiveCoreAsync(clipId, isSensitive, ct), cancellationToken);
+
+    private async Task SetSensitiveCoreAsync(long clipId, bool isSensitive, CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -592,7 +658,10 @@ public sealed class ClipStoreService : IClipStoreService
         InvalidateStatsCache();
     }
 
-    public async Task MarkPastedAsync(long clipId, CancellationToken cancellationToken = default)
+    public Task MarkPastedAsync(long clipId, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => MarkPastedCoreAsync(clipId, ct), cancellationToken);
+
+    private async Task MarkPastedCoreAsync(long clipId, CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -613,7 +682,10 @@ public sealed class ClipStoreService : IClipStoreService
         InvalidateStatsCache();
     }
 
-    public async Task<bool> TryClaimForOcrAsync(long clipId, CancellationToken cancellationToken = default)
+    public Task<bool> TryClaimForOcrAsync(long clipId, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => TryClaimForOcrCoreAsync(clipId, ct), cancellationToken);
+
+    private async Task<bool> TryClaimForOcrCoreAsync(long clipId, CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -632,7 +704,10 @@ public sealed class ClipStoreService : IClipStoreService
         return rows > 0;
     }
 
-    public async Task<bool> SetOcrResultAsync(long clipId, string ocrText, CancellationToken cancellationToken = default)
+    public Task<bool> SetOcrResultAsync(long clipId, string ocrText, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => SetOcrResultCoreAsync(clipId, ocrText, ct), cancellationToken);
+
+    private async Task<bool> SetOcrResultCoreAsync(long clipId, string ocrText, CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -678,7 +753,10 @@ public sealed class ClipStoreService : IClipStoreService
         return rows > 0;
     }
 
-    public async Task<bool> SetOcrFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default)
+    public Task<bool> SetOcrFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => SetOcrFailureCoreAsync(clipId, error, ct), cancellationToken);
+
+    private async Task<bool> SetOcrFailureCoreAsync(long clipId, string? error, CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -698,7 +776,10 @@ public sealed class ClipStoreService : IClipStoreService
         return rows > 0;
     }
 
-    public async Task<IReadOnlyList<long>> GetPendingOcrClipIdsAsync(CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<long>> GetPendingOcrClipIdsAsync(CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => GetPendingOcrClipIdsCoreAsync(ct), cancellationToken);
+
+    private async Task<IReadOnlyList<long>> GetPendingOcrClipIdsCoreAsync(CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -722,7 +803,10 @@ public sealed class ClipStoreService : IClipStoreService
     }
 
     /// <inheritdoc />
-    public async Task<int> ResetStalledOcrClaimsAsync(CancellationToken cancellationToken = default)
+    public Task<int> ResetStalledOcrClaimsAsync(CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => ResetStalledOcrClaimsCoreAsync(ct), cancellationToken);
+
+    private async Task<int> ResetStalledOcrClaimsCoreAsync(CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -732,7 +816,10 @@ public sealed class ClipStoreService : IClipStoreService
         return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    public async Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default)
+    public Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => GetOcrCoverageCoreAsync(ct), cancellationToken);
+
+    private async Task<OcrCoverage> GetOcrCoverageCoreAsync(CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -764,7 +851,10 @@ public sealed class ClipStoreService : IClipStoreService
             reader.GetInt64(4));
     }
 
-    public async Task<bool> MarkOcrForRerunAsync(long clipId, CancellationToken cancellationToken = default)
+    public Task<bool> MarkOcrForRerunAsync(long clipId, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => MarkOcrForRerunCoreAsync(clipId, ct), cancellationToken);
+
+    private async Task<bool> MarkOcrForRerunCoreAsync(long clipId, CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -783,7 +873,10 @@ public sealed class ClipStoreService : IClipStoreService
         return rows > 0;
     }
 
-    public async Task<IReadOnlyList<long>> MarkAllSucceededForRerunAsync(CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<long>> MarkAllSucceededForRerunAsync(CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => MarkAllSucceededForRerunCoreAsync(ct), cancellationToken);
+
+    private async Task<IReadOnlyList<long>> MarkAllSucceededForRerunCoreAsync(CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -806,7 +899,10 @@ public sealed class ClipStoreService : IClipStoreService
         return ids;
     }
 
-    public async Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default)
+    public Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => ApplyMaintenanceCoreAsync(ct), cancellationToken);
+
+    private async Task<ClipMaintenanceResult> ApplyMaintenanceCoreAsync(CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -921,7 +1017,10 @@ public sealed class ClipStoreService : IClipStoreService
         }
     }
 
-    public async Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default)
+    public Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => RebuildSensitivityMatchesCoreAsync(ct), cancellationToken);
+
+    private async Task RebuildSensitivityMatchesCoreAsync(CancellationToken cancellationToken)
     {
         await _sensitivityService.ReloadAsync(cancellationToken);
 
@@ -1020,7 +1119,10 @@ public sealed class ClipStoreService : IClipStoreService
         InvalidateStatsCache();
     }
 
-    public async Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default)
+    public Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => GetByIdCoreAsync(clipId, ct), cancellationToken);
+
+    private async Task<ClipEntry?> GetByIdCoreAsync(long clipId, CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -1043,7 +1145,10 @@ public sealed class ClipStoreService : IClipStoreService
         return ReadClip(reader);
     }
 
-    public async Task<byte[]?> GetSourceAppIconAsync(long clipId, CancellationToken cancellationToken = default)
+    public Task<byte[]?> GetSourceAppIconAsync(long clipId, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => GetSourceAppIconCoreAsync(clipId, ct), cancellationToken);
+
+    private async Task<byte[]?> GetSourceAppIconCoreAsync(long clipId, CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -1056,7 +1161,10 @@ public sealed class ClipStoreService : IClipStoreService
         return value as byte[];
     }
 
-    public async Task<IReadOnlyList<ClipEntry>> GetByIdsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<ClipEntry>> GetByIdsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => GetByIdsCoreAsync(clipIds, ct), cancellationToken);
+
+    private async Task<IReadOnlyList<ClipEntry>> GetByIdsCoreAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken)
     {
         if (clipIds is null || clipIds.Count == 0)
         {
@@ -1102,7 +1210,10 @@ public sealed class ClipStoreService : IClipStoreService
         return ordered;
     }
 
-    public async Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default)
+    public Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => GetClipAtOffsetCoreAsync(offset, ct), cancellationToken);
+
+    private async Task<ClipEntry?> GetClipAtOffsetCoreAsync(int offset, CancellationToken cancellationToken)
     {
         if (offset < 0)
         {
@@ -1130,7 +1241,10 @@ public sealed class ClipStoreService : IClipStoreService
         return ReadClip(reader);
     }
 
-    public async Task<BulkCaptureResult> CaptureBatchAsync(IReadOnlyList<ClipCaptureRequest> requests, CancellationToken cancellationToken = default)
+    public Task<BulkCaptureResult> CaptureBatchAsync(IReadOnlyList<ClipCaptureRequest> requests, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => CaptureBatchCoreAsync(requests, ct), cancellationToken);
+
+    private async Task<BulkCaptureResult> CaptureBatchCoreAsync(IReadOnlyList<ClipCaptureRequest> requests, CancellationToken cancellationToken)
     {
         if (requests.Count == 0)
             return new BulkCaptureResult(0, 0);
@@ -1364,7 +1478,7 @@ public sealed class ClipStoreService : IClipStoreService
         InvalidateStatsCache();
         if (applyMaintenance && !request.SkipPostInsertMaintenance)
         {
-            await ApplyMaintenanceAsync(cancellationToken);
+            await ApplyMaintenanceCoreAsync(cancellationToken);
         }
         return await GetClipByIdAsync(connection, clipId, cancellationToken);
     }
@@ -2485,7 +2599,10 @@ public sealed class ClipStoreService : IClipStoreService
     // A RerunAll resets the counter to give every clip a fresh set of attempts.
     private const int MaxEmbeddingAttempts = 3;
 
-    public async Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => ClaimPendingEmbeddingsCoreAsync(batchSize, ct), cancellationToken);
+
+    private async Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsCoreAsync(int batchSize, CancellationToken cancellationToken)
     {
         if (batchSize <= 0) return Array.Empty<ClipEmbeddingCandidate>();
 
@@ -2543,7 +2660,10 @@ public sealed class ClipStoreService : IClipStoreService
     }
 
     /// <inheritdoc />
-    public async Task<int> ResetStalledEmbeddingClaimsAsync(CancellationToken cancellationToken = default)
+    public Task<int> ResetStalledEmbeddingClaimsAsync(CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => ResetStalledEmbeddingClaimsCoreAsync(ct), cancellationToken);
+
+    private async Task<int> ResetStalledEmbeddingClaimsCoreAsync(CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -2554,7 +2674,10 @@ public sealed class ClipStoreService : IClipStoreService
     }
 
     /// <inheritdoc />
-    public async Task ReleaseEmbeddingClaimsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default)
+    public Task ReleaseEmbeddingClaimsAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => ReleaseEmbeddingClaimsCoreAsync(clipIds, ct), cancellationToken);
+
+    private async Task ReleaseEmbeddingClaimsCoreAsync(IReadOnlyList<long> clipIds, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(clipIds);
         if (clipIds.Count == 0) return;
@@ -2576,7 +2699,10 @@ public sealed class ClipStoreService : IClipStoreService
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    public async Task SaveEmbeddingBatchAsync(IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion, CancellationToken cancellationToken = default)
+    public Task SaveEmbeddingBatchAsync(IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => SaveEmbeddingBatchCoreAsync(records, modelVersion, ct), cancellationToken);
+
+    private async Task SaveEmbeddingBatchCoreAsync(IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(records);
         ArgumentException.ThrowIfNullOrWhiteSpace(modelVersion);
@@ -2634,7 +2760,10 @@ public sealed class ClipStoreService : IClipStoreService
         await transaction.CommitAsync(cancellationToken);
     }
 
-    public async Task<bool> SetEmbeddingFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default)
+    public Task<bool> SetEmbeddingFailureAsync(long clipId, string? error, CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => SetEmbeddingFailureCoreAsync(clipId, error, ct), cancellationToken);
+
+    private async Task<bool> SetEmbeddingFailureCoreAsync(long clipId, string? error, CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -2648,7 +2777,10 @@ public sealed class ClipStoreService : IClipStoreService
         return rows > 0;
     }
 
-    public async Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => MarkAllEmbeddingsForRerunCoreAsync(ct), cancellationToken);
+
+    private async Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunCoreAsync(CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -2683,7 +2815,10 @@ public sealed class ClipStoreService : IClipStoreService
         return ids;
     }
 
-    public async Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default)
+    public Task<EmbeddingCoverage> GetEmbeddingCoverageAsync(CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => GetEmbeddingCoverageCoreAsync(ct), cancellationToken);
+
+    private async Task<EmbeddingCoverage> GetEmbeddingCoverageCoreAsync(CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -2709,7 +2844,10 @@ public sealed class ClipStoreService : IClipStoreService
         return new EmbeddingCoverage(Get(0), Get(1), Get(2), Get(3), Get(4));
     }
 
-    public async Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsAsync(CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => LoadAllEmbeddingsCoreAsync(ct), cancellationToken);
+
+    private async Task<IReadOnlyList<ClipEmbedding>> LoadAllEmbeddingsCoreAsync(CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -2738,7 +2876,10 @@ public sealed class ClipStoreService : IClipStoreService
         return result;
     }
 
-    public async Task PrewarmAsync(CancellationToken cancellationToken = default)
+    public Task PrewarmAsync(CancellationToken cancellationToken = default)
+        => RunOffCallerAsync(ct => PrewarmCoreAsync(ct), cancellationToken);
+
+    private async Task PrewarmCoreAsync(CancellationToken cancellationToken)
     {
         // Cheap-but-comprehensive warmup. The three queries touch:
         //   1. the clips table b-tree (paged in by COUNT)
