@@ -410,8 +410,13 @@ public sealed class SemanticSearchService : ISemanticSearchService
     /// application already shows clips in. Without it <see cref="Array.Sort{T}(T[], Comparison{T})"/>
     /// is unstable over a heap whose arrangement depends on arrival order, so the same query
     /// against the same corpus could return equal-scoring clips in a different order each time -
-    /// a list that reshuffles under the user for no reason they can see. It also made the
-    /// ranking test fail intermittently, which is how this was noticed.
+    /// a list that reshuffles under the user for no reason they can see.
+    ///
+    /// Covered by <c>QueryAsync_OrdersExactlyTiedClipsDeterministically</c>, which builds an
+    /// exact tie deliberately: every clip embeds to the same vector, so the scores are
+    /// bit-identical. A corpus of distinct phrases only ever produces near-ties, and those are
+    /// decided by the last bits of a float rather than by this comparison - an earlier attempt
+    /// at that test proved nothing for exactly that reason.
     ///
     /// The tie-break makes the *ordering* deterministic, not the *selection*: when more clips
     /// tie for the last place than there is capacity, which of them survives still depends on

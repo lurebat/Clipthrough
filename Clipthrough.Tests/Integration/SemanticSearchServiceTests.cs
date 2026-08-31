@@ -954,6 +954,104 @@ public sealed class SemanticSearchServiceTests
     }
 
     /// <summary>
+    /// Clips whose scores are exactly equal must come back in a fixed order, and the
+    /// same one every time.
+    /// </summary>
+    /// <remarks>
+    /// Without a tie-break Array.Sort is unstable over a heap whose arrangement
+    /// depends on the order candidates arrived in, so an identical query against an
+    /// identical corpus could reshuffle the results under the user for no reason they
+    /// can see. The code used to document ties as "broken arbitrarily".
+    ///
+    /// The tie is constructed rather than hoped for: ConstantEmbeddingService maps
+    /// every text to the same unit vector, so every clip scores bit-identically. A
+    /// corpus of distinct phrases has near-ties at best, and those are decided by the
+    /// last bits of a float rather than by this comparison - which is exactly why an
+    /// earlier attempt at this test proved nothing.
+    /// </remarks>
+    [Fact]
+    public async Task QueryAsync_OrdersExactlyTiedClipsDeterministically()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 8192 });
+
+        var ids = new List<long>();
+        for (var i = 0; i < 6; i++)
+        {
+            // Distinct text so the hash index does not deduplicate them; the
+            // embedding below maps every text to one vector regardless.
+            var text = $"identical phrase {i}";
+            var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = text,
+                ContentBytes = Encoding.UTF8.GetBytes(text),
+                SourceApp = "Test",
+            });
+
+            Assert.NotNull(clip);
+            ids.Add(clip!.Id);
+        }
+
+        var embedding = new ConstantEmbeddingService(16);
+        var indicator = new Clipthrough.Services.BackgroundJobIndicator();
+        var worker = new EmbeddingWorker(scope.ClipStoreService, embedding, indicator);
+        worker.Start();
+        await WaitForBatchAsync(worker);
+        await worker.StopAsync();
+
+        var semantic = new SemanticSearchService(scope.ClipStoreService, embedding);
+        await semantic.RefreshCacheAsync();
+        Assert.Equal(ids.Count, semantic.CachedCount);
+
+        var first = await semantic.QueryAsync("identical phrase", ids.Count);
+
+        // The premise. Without an exact tie this test is about the ranking around
+        // the tie-break rather than about the tie-break.
+        Assert.Single(first.Select(r => r.Score).Distinct());
+
+        // Newest first, matching the order every other list in the application uses.
+        Assert.Equal(ids.OrderByDescending(id => id), first.Select(r => r.ClipId));
+
+        // And stable across repeats, which is the property a user actually sees.
+        for (var repeat = 0; repeat < 3; repeat++)
+        {
+            var again = await semantic.QueryAsync("identical phrase", ids.Count);
+            Assert.Equal(first.Select(r => r.ClipId), again.Select(r => r.ClipId));
+        }
+    }
+
+    /// <summary>
+    /// Every text maps to the same unit vector, so every clip scores bit-identically
+    /// against any query. That is the only way to exercise the tie-break itself
+    /// rather than the float noise that decides near-ties.
+    /// </summary>
+    private sealed class ConstantEmbeddingService(int dims) : IEmbeddingService
+    {
+        public int Dimensions => dims;
+        public bool IsReady => true;
+
+        private float[] Vector()
+        {
+            var vec = new float[dims];
+            var value = 1f / MathF.Sqrt(dims);
+            for (var i = 0; i < dims; i++)
+            {
+                vec[i] = value;
+            }
+
+            return vec;
+        }
+
+        public Task<float[]> EmbedAsync(string text, CancellationToken ct = default)
+            => Task.FromResult(Vector());
+
+        public Task<IReadOnlyList<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<float[]>>(texts.Select(_ => Vector()).ToArray());
+    }
+    /// <summary>
     /// Vectors shorter than one SIMD register skip the widened loop entirely, so the scalar
     /// tail has to carry the whole dot product. Three dimensions only admit eight distinct
     /// sign patterns, which makes exact score ties likely - hence a three-clip corpus and

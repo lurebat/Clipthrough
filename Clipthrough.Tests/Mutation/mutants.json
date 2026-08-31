@@ -2622,5 +2622,21 @@
     "find": "        => Platform.RichClipboardFormatting.LooksLikeHtml(input);",
     "replace": "        => System.Text.RegularExpressions.Regex.IsMatch(input, @\"<[a-zA-Z/][^>]*>\");",
     "filter": "FullyQualifiedName~MarkdownTransformationTests"
+  },
+  {
+    "id": "semantic-ranking-breaks-ties-arbitrarily",
+    "why": "Reverses the id tie-break, so exactly-tied clips come back oldest-first instead of newest-first. The unguarded version of this was ties resolved by heap arrival order, which meant an identical query against an identical corpus could reshuffle the results under the user.",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "find": "                var byScore = b.Score.CompareTo(a.Score);\n                return byScore != 0 ? byScore : b.ClipId.CompareTo(a.ClipId);",
+    "replace": "                var byScore = b.Score.CompareTo(a.Score);\n                return byScore != 0 ? byScore : a.ClipId.CompareTo(b.ClipId);",
+    "filter": "FullyQualifiedName~SemanticSearchServiceTests"
+  },
+  {
+    "id": "semantic-ranking-has-no-tie-break-at-all",
+    "why": "Removes the tie-break entirely, restoring the documented \"ties are broken arbitrarily\" behaviour: Array.Sort is unstable over a heap whose arrangement depends on arrival order, so equal-scoring clips come back in whatever order the cache happened to offer them.",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "find": "                var byScore = b.Score.CompareTo(a.Score);\n                return byScore != 0 ? byScore : b.ClipId.CompareTo(a.ClipId);",
+    "replace": "                var byScore = b.Score.CompareTo(a.Score);\n                return byScore != 0 ? byScore : 0;",
+    "filter": "FullyQualifiedName~SemanticSearchServiceTests"
   }
 ]
