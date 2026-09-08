@@ -102,6 +102,104 @@ public sealed class TextTransformationServiceTests
     }
 
     [Fact]
+    public void WhitespaceToJsonArray_SplitsOnSpacesNotJustNewlines()
+    {
+        var result = TextTransformationService.Apply(TextTransformation.WhitespaceToJsonArray, "hello world foo");
+        Assert.Equal("[\"hello\",\"world\",\"foo\"]", result);
+    }
+
+    /// <summary>
+    /// A run of whitespace is one separator, not several. Splitting naively
+    /// would emit an empty string for every extra space.
+    /// </summary>
+    [Theory]
+    [InlineData("a  b")]
+    [InlineData("a\t\tb")]
+    [InlineData("a \t b")]
+    [InlineData("a\n\nb")]
+    [InlineData("  a b  ")]
+    [InlineData("\na b\n")]
+    public void WhitespaceToJsonArray_CollapsesRunsAndTrimsEnds(string input)
+    {
+        var result = TextTransformationService.Apply(TextTransformation.WhitespaceToJsonArray, input);
+        Assert.Equal("[\"a\",\"b\"]", result);
+    }
+
+    /// <summary>
+    /// Tabs, spaces and both newline conventions are all separators, so a table
+    /// column pasted out of a terminal or a spreadsheet needs no cleanup first.
+    /// </summary>
+    [Fact]
+    public void WhitespaceToJsonArray_TreatsEveryWhitespaceKindAsASeparator()
+    {
+        var result = TextTransformationService.Apply(TextTransformation.WhitespaceToJsonArray, "a b\tc\r\nd\re\u00a0f");
+        Assert.Equal("[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\"]", result);
+    }
+
+    /// <summary>
+    /// The distinguishing case, built so the two transforms disagree. Without
+    /// it every test here would pass with either one wired to the menu entry -
+    /// a fixture where two sources of truth agree cannot tell them apart.
+    /// </summary>
+    [Fact]
+    public void WhitespaceToJsonArray_DiffersFromLinesToJsonArrayOnTheSameInput()
+    {
+        const string input = "one two\nthree";
+
+        var byWhitespace = TextTransformationService.Apply(TextTransformation.WhitespaceToJsonArray, input);
+        var byLine = TextTransformationService.Apply(TextTransformation.LinesToJsonArray, input);
+
+        Assert.Equal("[\"one\",\"two\",\"three\"]", byWhitespace);
+
+        // The line transform keeps "one two" whole, which is the whole reason
+        // the new one exists. Asserting it pins the difference from both sides.
+        Assert.Equal("[\"one two\",\"three\"]", byLine);
+        Assert.NotEqual(byLine, byWhitespace);
+    }
+
+    /// <summary>
+    /// A blank line is content the user typed; an empty token between two
+    /// spaces is an artifact of the separator. The two transforms treat them
+    /// differently on purpose.
+    /// </summary>
+    [Fact]
+    public void WhitespaceToJsonArray_DropsEmptyEntriesWhereLinesKeepsThem()
+    {
+        const string input = "a\n\nb";
+
+        Assert.Equal("[\"a\",\"b\"]", TextTransformationService.Apply(TextTransformation.WhitespaceToJsonArray, input));
+        Assert.Equal("[\"a\",\"\",\"b\"]", TextTransformationService.Apply(TextTransformation.LinesToJsonArray, input));
+    }
+
+    /// <summary>
+    /// Asserts the output parses, rather than only that it looks right. A
+    /// string comparison would accept malformed JSON that happened to match.
+    /// </summary>
+    [Fact]
+    public void WhitespaceToJsonArray_ProducesJsonThatRoundTrips()
+    {
+        var result = TextTransformationService.Apply(TextTransformation.WhitespaceToJsonArray, "alpha \"quoted\" c:\\path");
+
+        var parsed = System.Text.Json.JsonSerializer.Deserialize<string[]>(result);
+        Assert.NotNull(parsed);
+        Assert.Equal(["alpha", "\"quoted\"", "c:\\path"], parsed);
+    }
+
+    /// <summary>
+    /// Whitespace-only input has no tokens, so an empty array is the honest
+    /// answer. Empty input is returned untouched by Apply itself, before any
+    /// transform runs.
+    /// </summary>
+    [Theory]
+    [InlineData("   ", "[]")]
+    [InlineData("\n\t \r\n", "[]")]
+    [InlineData("", "")]
+    public void WhitespaceToJsonArray_HandlesInputWithNoTokens(string input, string expected)
+    {
+        Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.WhitespaceToJsonArray, input));
+    }
+
+    [Fact]
     public void LinesToJsonArray_EscapesSpecialCharacters()
     {
         var input = "hello \"world\"\nfoo\\bar";

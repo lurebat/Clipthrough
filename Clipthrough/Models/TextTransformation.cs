@@ -16,6 +16,7 @@ public enum TextTransformation
     SpacesToTabs,
     NormalizeEol,
     LinesToJsonArray,
+    WhitespaceToJsonArray,
     JoinWithDelimiter,
     SortLines,
     ReverseLines,

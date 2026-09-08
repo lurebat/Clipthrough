@@ -2662,5 +2662,21 @@
     "find": "            Interlocked.Increment(ref _clipMutationVersion);\n            Interlocked.Decrement(ref _pendingClipMutations);",
     "replace": "            Interlocked.Add(ref _clipMutationVersion, 0);\n            Interlocked.Decrement(ref _pendingClipMutations);",
     "filter": "FavoriteCheckedClips_SurvivesRefreshSnapshotTakenBeforeTheWrite"
+  },
+  {
+    "id": "whitespace-json-keeps-empty-entries",
+    "why": "Drops RemoveEmptyEntries, so a run of whitespace emits an empty string per extra separator: \"a  b\" becomes three values and any leading or trailing whitespace adds more. Nobody typing two spaces meant an empty value.",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "find": "        var tokens = input.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);",
+    "replace": "        var tokens = input.Split((char[]?)null, StringSplitOptions.None);",
+    "filter": "FullyQualifiedName~WhitespaceToJsonArray"
+  },
+  {
+    "id": "whitespace-json-splits-only-on-newlines",
+    "why": "Splits on newlines alone, making the transform a duplicate of LinesToJsonArray. The suite would stay green without a fixture where the two disagree, which is why one is built deliberately.",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "find": "        var tokens = input.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);",
+    "replace": "        var tokens = input.Split('\\n', StringSplitOptions.RemoveEmptyEntries);",
+    "filter": "FullyQualifiedName~WhitespaceToJsonArray"
   }
 ]

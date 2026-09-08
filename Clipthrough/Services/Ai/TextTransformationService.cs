@@ -51,6 +51,7 @@ public static partial class TextTransformationService
             Models.TextTransformation.SpacesToTabs => ConvertLeadingSpacesToTabs(input),
             Models.TextTransformation.NormalizeEol => NormalizeEol(input),
             Models.TextTransformation.LinesToJsonArray => LinesToJsonArray(input),
+            Models.TextTransformation.WhitespaceToJsonArray => WhitespaceToJsonArray(input),
             Models.TextTransformation.JoinWithDelimiter => JoinWithDelimiter(input, delimiter ?? ", "),
             Models.TextTransformation.SortLines => SortLines(input),
             Models.TextTransformation.ReverseLines => ReverseLines(input),
@@ -204,6 +205,29 @@ public static partial class TextTransformationService
     {
         var lines = SplitLines(NormalizeEol(input));
         return JsonSerializer.Serialize(lines);
+    }
+
+    /// <summary>
+    /// Splits on runs of whitespace rather than only newlines, so a
+    /// space-separated or tab-separated list becomes a JSON array without
+    /// having to be one-per-line first.
+    /// </summary>
+    /// <remarks>
+    /// Empty entries are dropped, which is the one place this deliberately
+    /// differs from <see cref="LinesToJsonArray"/>. That one keeps a blank line
+    /// as <c>""</c>, because a blank line is something the user typed and may
+    /// mean. Here an empty token is an artifact of the delimiter - two spaces
+    /// in a row, or a trailing newline - and nobody typing "a  b" meant three
+    /// values.
+    ///
+    /// <c>Split</c> with a null separator uses <see cref="char.IsWhiteSpace"/>,
+    /// so this also covers tabs, CR/LF in any combination, and the non-breaking
+    /// space that arrives with text copied out of a web page.
+    /// </remarks>
+    private static string WhitespaceToJsonArray(string input)
+    {
+        var tokens = input.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        return JsonSerializer.Serialize(tokens);
     }
 
     private static string JoinWithDelimiter(string input, string delimiter)

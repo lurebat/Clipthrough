@@ -377,6 +377,9 @@
                                             <MenuItem Header="Lines → JSON array"
                                                       Command="{Binding ApplyTextTransformationCommand}"
                                                       CommandParameter="{x:Static models:TextTransformation.LinesToJsonArray}" />
+                                            <MenuItem Header="Whitespace → JSON array"
+                                                      Command="{Binding ApplyTextTransformationCommand}"
+                                                      CommandParameter="{x:Static models:TextTransformation.WhitespaceToJsonArray}" />
                                         </MenuItem>
                                         <MenuItem Header="Encoding"
                                                   IsVisible="{Binding CanTransform}">

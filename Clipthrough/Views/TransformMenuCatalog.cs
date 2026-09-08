@@ -56,6 +56,7 @@ internal static class TransformMenuCatalog
         ("JSON", "JSON minify", TextTransformation.JsonMinify),
         ("JSON", "JSON pretty", TextTransformation.JsonPretty),
         ("JSON", "Lines \u2192 JSON array", TextTransformation.LinesToJsonArray),
+        ("JSON", "Whitespace \u2192 JSON array", TextTransformation.WhitespaceToJsonArray),
         ("Encoding", "URL encode", TextTransformation.UrlEncode),
         ("Encoding", "URL decode", TextTransformation.UrlDecode),
         ("Encoding", "Base64 encode", TextTransformation.Base64Encode),

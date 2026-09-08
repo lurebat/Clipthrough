@@ -26,6 +26,7 @@ All values live in the `Clipthrough.Models.TextTransformation` enum and are appl
 | Lines      | `RemoveEmptyLines`          |                                                               |
 | Lines      | `RemoveDuplicateLines`      | Keeps first occurrence                                        |
 | Lines      | `LinesToJsonArray`          | One line → one JSON string element                            |
+| Lines      | `WhitespaceToJsonArray`     | One whitespace-delimited token → one JSON string element. Runs of whitespace are a single separator and empty entries are dropped, unlike `LinesToJsonArray`, which keeps a blank line as `""`. |
 | Lines      | `JoinWithDelimiter`         | Default `, `; configurable in code only                       |
 | Encoding   | `JsonQuote`                 | Wraps the input as a JSON string literal                      |
 | Encoding   | `JsonUnquote`               | Forgiving: accepts `"a\nb"`, `a\nb`, or `  "a\nb"  `          |
