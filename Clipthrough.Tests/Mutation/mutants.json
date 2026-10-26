@@ -2710,5 +2710,29 @@
     "find": "    private const int BroadSearchMatchThreshold = 200;\n",
     "replace": "    private const int BroadSearchMatchThreshold = 2000;\n",
     "filter": "FullyQualifiedName~SearchPlanTests.ATermMatchingFiveHundredClips_TakesTheOrderedIndexPlan"
+  },
+  {
+    "id": "prefiltered-search-skips-the-exact-match",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-07. The trigram prefilter is a case-insensitive substring superset; without the exact matcher a case-sensitive or whole-word search returns rows that do not match.",
+    "find": "                if (!MatchesSearch(SearchableFields.Read(reader), filters, matchers))\n",
+    "replace": "                if (prefilter is null && !MatchesSearch(SearchableFields.Read(reader), filters, matchers))\n",
+    "filter": "FullyQualifiedName~InMemorySearchPrefilterTests.PrefilteredSearch_ReturnsExactlyTheHandWrittenMatches"
+  },
+  {
+    "id": "in-memory-search-never-prefiltered",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-07. Without the prefilter a case-sensitive, whole-word or wildcard search reads every clip: 2.6-3.2 s and ~250 MB at 60k, 15.9 s encrypted.",
+    "find": "        if (terms.Length == 0 || terms.Any(static t => TrigramIndexableLength(t) < 3))\n",
+    "replace": "        if (terms.Length >= 0 || terms.Any(static t => TrigramIndexableLength(t) < 3))\n",
+    "filter": "FullyQualifiedName~InMemorySearchPrefilterTests"
+  },
+  {
+    "id": "prefilter-admits-sub-trigram-terms",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-07. The trigram index holds nothing for a term under three code points, so prefiltering on one would drop every real match.",
+    "find": "        if (terms.Length == 0 || terms.Any(static t => TrigramIndexableLength(t) < 3))\n",
+    "replace": "        if (terms.Length == 0 || terms.Any(static t => TrigramIndexableLength(t) < 1))\n",
+    "filter": "FullyQualifiedName~InMemorySearchPrefilterTests.NoPrefilter_WhenATermIsShorterThanATrigram"
   }
 ]

@@ -1483,6 +1483,40 @@ public sealed class ClipStoreService : IClipStoreService
         return await GetClipByIdAsync(connection, clipId, cancellationToken);
     }
 
+    /// <summary>
+    /// An FTS expression whose matches are a superset of what the in-memory
+    /// matcher accepts, or null when there is none (F-07).
+    /// </summary>
+    /// <remarks>
+    /// The trigram index folds case and matches any substring of the five
+    /// indexed columns, so a row that matches a case-sensitive, whole-word or
+    /// wildcard search necessarily contains each term (or, for a wildcard, each
+    /// literal run between <c>*</c> and <c>?</c>) case-insensitively somewhere in
+    /// those columns. Requiring all of them in FTS therefore never drops a match;
+    /// the exact matcher still runs on every candidate.
+    ///
+    /// Every term has to be three code points or longer: the index holds no
+    /// shorter trigram, so a shorter term would match nothing and drop real
+    /// matches. Regex is never prefiltered - a pattern has no reliable literal
+    /// terms - and its cost is bounded by the regex engine choice instead.
+    /// </remarks>
+    internal static string? BuildPrefilterExpression(ClipSearchFilters filters)
+    {
+        if (filters.UseRegex || string.IsNullOrWhiteSpace(filters.SearchText))
+        {
+            return null;
+        }
+
+        var terms = filters.UseWildcard
+            ? filters.SearchText.Split(['*', '?'], StringSplitOptions.RemoveEmptyEntries)
+            : filters.SearchText.Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (terms.Length == 0 || terms.Any(static t => TrigramIndexableLength(t) < 3))
+        {
+            return null;
+        }
+
+        return string.Join(" AND ", terms.Select(static t => "\"" + t.Replace("\"", "\"\"", StringComparison.Ordinal) + "\""));
+    }
     private async Task<ClipSearchResult> SearchInMemoryAsync(SqliteConnection connection, ClipSearchFilters filters, CancellationToken cancellationToken)
     {
         // Build the matcher set for this search ONCE here — not per row. (U13)
@@ -1492,6 +1526,12 @@ public sealed class ClipStoreService : IClipStoreService
 
         var items = new List<ClipEntry>(filters.Limit);
         var whereClauses = BuildWhereClauses(filters, hasSearch: false);
+        var prefilter = BuildPrefilterExpression(filters);
+        if (prefilter is not null)
+        {
+            whereClauses.Add("c.id IN (SELECT rowid FROM clips_fts WHERE clips_fts MATCH $prefilter)");
+        }
+
         var whereClause = whereClauses.Count > 0 ? $"WHERE {string.Join(" AND ", whereClauses)}" : string.Empty;
         var totalMatchingCount = 0;
         // Stop counting at Offset+Limit+1 so we know there are more without a full table scan. (U15)
@@ -1511,6 +1551,10 @@ public sealed class ClipStoreService : IClipStoreService
                 {BuildOrderClause(filters.SortOption)};
                 """;
             AddSearchParameters(queryCommand, filters, hasSearch: false);
+            if (prefilter is not null)
+            {
+                queryCommand.Parameters.AddWithValue("$prefilter", prefilter);
+            }
 
             await using var reader = await queryCommand.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
