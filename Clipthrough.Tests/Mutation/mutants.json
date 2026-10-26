@@ -987,8 +987,8 @@
     "id": "embedding-cache-grows-to-exact-size",
     "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
     "why": "Without spare capacity every batch of 32 reallocates and copies the whole cache, which is the quadratic backfill the review measured at 223 GiB of memcpy over a 100k library.",
-    "find": "                var capacity = GrowCapacity(existing.Ids.Length, newCount, dim);",
-    "replace": "                var capacity = newCount;",
+    "find": "                var capacity = GrowCapacity(existing.Ids.Length, newLive, dim);",
+    "replace": "                var capacity = newLive;",
     "filter": "AppendEmbeddingsAsync_DoesNotReallocateTheCachePerBatch"
   },
   {
@@ -1690,9 +1690,9 @@
   {
     "id": "cache-removal-leaves-a-stale-slot-map",
     "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
-    "why": "Compacting the vectors without rebuilding the slot map points each shifted id at another clip's vector - search then answers with the wrong clip rather than merely losing one.",
-    "find": "            _slotById = slots;\n            Volatile.Write(ref _cache, new CacheSnapshot(newIds, newVectors, survivors, dim));",
-    "replace": "            Volatile.Write(ref _cache, new CacheSnapshot(newIds, newVectors, survivors, dim));",
+    "why": "A removal that leaves the id in the slot map treats re-embedding that clip as an update to a dead slot, so its new vector is lost or written over another clip's.",
+    "find": "                newIds[_slotById[id]] = Tombstone;\n                _slotById.Remove(id);\n",
+    "replace": "                newIds[_slotById[id]] = Tombstone;\n",
     "filter": "FullyQualifiedName~SemanticSearchServiceTests"
   },
   {
@@ -2806,5 +2806,21 @@
     "find": "                WHERE is_sensitive IS NOT sensitivity_is_manual\n",
     "replace": "                WHERE 1 = 1\n",
     "filter": "FullyQualifiedName~LongWriteLockTests.ARebuildThatChangesNoVerdict_WritesNoClipRow"
+  },
+  {
+    "id": "semantic-removal-copies-the-vectors",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "why": "F-27. Copying every surviving vector per removal cost 25 ms and 90 MB of LOH at 60k x 384, once per capture at the library cap.",
+    "find": "            Volatile.Write(ref _cache, new CacheSnapshot(newIds, existing.Vectors, existing.Count, existing.Dim, live));\n",
+    "replace": "            Volatile.Write(ref _cache, new CacheSnapshot(newIds, (float[])existing.Vectors.Clone(), existing.Count, existing.Dim, live));\n",
+    "filter": "FullyQualifiedName~SemanticSearchServiceTests.RemovingAClip_KeepsTheSameVectorArray"
+  },
+  {
+    "id": "semantic-query-scores-tombstones",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "why": "F-27. A tombstoned slot still holds the removed clip's vector; scoring it returns a hit for a clip that is gone.",
+    "find": "            if (ids[i] == Tombstone)\n            {\n                continue;\n            }\n\n            selector.Offer(ids[i], Dot(vectors.Slice(i * dim, dim), queryVector));\n",
+    "replace": "            selector.Offer(ids[i], Dot(vectors.Slice(i * dim, dim), queryVector));\n",
+    "filter": "FullyQualifiedName~SemanticSearchServiceTests.RemovingAClip_KeepsTheSameVectorArray"
   }
 ]
