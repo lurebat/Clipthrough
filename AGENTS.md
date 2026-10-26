@@ -95,6 +95,25 @@ with `NETSDK1005`. When the lock does bite, MSBuild can leave the previous
 assembly in place, so the tests silently run the old build; treat an
 unexpectedly passing run after a lock error as untrustworthy.
 
+## Benchmarks
+
+`Clipthrough.Tests/Benchmarks/` holds the realistic-size fixture (`PerfLibrary`:
+60k clips, about 1 GB, 700 images, a long tail of multi-megabyte text) and the
+probes that measure search, capture, startup queries, the embedding claim and
+the semantic cache against it. They are `[BenchmarkFact]`s, skipped unless
+`CLIPTHROUGH_BENCH=1`, so the default run and CI never seed the library.
+
+```
+$env:CLIPTHROUGH_BENCH = '1'
+# optional: CLIPTHROUGH_BENCH_DIR, CLIPTHROUGH_BENCH_CLIPS, CLIPTHROUGH_BENCH_IMAGES,
+#           CLIPTHROUGH_BENCH_PASSWORD (set it for the encrypted variant)
+dotnet test .\Clipthrough.Tests\Clipthrough.Tests.csproj --filter "FullyQualifiedName~Benchmarks"
+```
+
+The library is seeded once and reused (delete its `.seeded` marker to reseed);
+results are appended to `results.txt` beside it. A performance change reports
+before and after numbers from the same machine, run while it is otherwise
+idle - numbers from a loaded machine are not comparable to anything.
 ## Testing expectations
 
 - **Pure logic** (formatting, parsing, fuzzy matching, text transformation): unit tests in the service's test class.
