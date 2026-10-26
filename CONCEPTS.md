@@ -55,10 +55,12 @@ content bytes, optional plain-text rendering, metadata, and flags.
 **CaptureFastAsync** — Variant of `CaptureAsync` that skips the FTS5 `INSERT`
 on duplicate content (used by the high-frequency clipboard monitor loop).
 
-**SuppressNext** — A one-shot flag on `IClipboardMonitorService`. Set before
-programmatically placing content on the clipboard (e.g. after a transform) so
-the subsequent `ClipboardChanged` event is ignored and the clip is not captured
-twice.
+**SuppressNext** — Called on `IClipboardMonitorService` before
+programmatically placing content on the clipboard (e.g. after a transform),
+with the text being written. The next `ClipboardChanged` event is ignored
+without reading the clipboard, and for the rest of the suppression window any
+event whose text matches is recognised as a re-publish of our own write (Remote
+Desktop raises one per write) and not captured. Different content is captured.
 
 **DragDropService** — Handles file and text drops onto the popup window. Calls
 `CaptureBatchAsync` so multiple dropped files land as individual clips in a

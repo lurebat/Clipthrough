@@ -886,7 +886,7 @@ public sealed class StorageOptionsServicePhase2Tests : IDisposable
 
         public Task StopAsync() { IsRunning = false; return Task.CompletedTask; }
 
-        public void SuppressNext() { }
+        public void SuppressNext(string? content = null) { }
 
         public void CancelSuppressNext() { }
     }

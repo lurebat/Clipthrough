@@ -696,7 +696,7 @@ public partial class App : Application
             // Deliberately NOT the shared writer: this hotkey exists to strip
             // formatting, so it copies the plain-text Content field whatever the
             // clip stored. Armed immediately before the write.
-            _clipboardMonitorService.SuppressNext();
+            _clipboardMonitorService.SuppressNext(clip.Content);
             await _systemInteractionService.CopyTextAsync(clip.Content);
             await _clipStoreService.MarkPastedAsync(clip.Id);
             await Task.Delay(PasteSettleDelayMs);

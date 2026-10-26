@@ -261,7 +261,13 @@ internal sealed class TestClipboardMonitorService : IClipboardMonitorService
     /// </summary>
     public int PendingSuppressions { get; private set; }
 
-    public void SuppressNext() => PendingSuppressions++;
+    public string? LastSuppressedContent { get; private set; }
+
+    public void SuppressNext(string? content = null)
+    {
+        PendingSuppressions++;
+        LastSuppressedContent = content;
+    }
 
     /// <summary>Mirrors the real gate: a withdrawn suppression is no longer pending.</summary>
     public void CancelSuppressNext()

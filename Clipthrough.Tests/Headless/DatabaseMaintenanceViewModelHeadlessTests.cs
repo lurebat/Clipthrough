@@ -89,7 +89,7 @@ public sealed class DatabaseMaintenanceViewModelHeadlessTests
         public void Stop() { StopCount++; IsRunning = false; }
         public int StopAsyncCount;
         public Task StopAsync() { StopAsyncCount++; IsRunning = false; return Task.CompletedTask; }
-        public void SuppressNext() { }
+        public void SuppressNext(string? content = null) { }
 
         public void CancelSuppressNext() { }
     }

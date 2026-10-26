@@ -24,7 +24,7 @@ For `format == ClipContentFormat.Html`, `CopyRichContentAsync`:
 3. Otherwise it wraps the markup with `BuildCfHtml(html)` so the byte offsets in the CF_HTML header are correct. This is what makes Word/Outlook/Teams accept the paste as a real HTML document.
 4. Always also writes the plain-text fallback so apps that don't understand HTML still get sensible text.
 
-When you also want to insert the result into the active app, call `_clipboardMonitorService.SuppressNext()` **before** the write so the monitor doesn't immediately re-capture it as a new clip.
+When you also want to insert the result into the active app, call `_clipboardMonitorService.SuppressNext(text)` **before** the write, passing the text written, so the monitor doesn't re-capture it as a new clip - neither the immediate notification nor a re-publish of the same text (Remote Desktop's rdpclip raises one 100-300 ms later).
 
 ## Capturing the foreground app before showing the window
 

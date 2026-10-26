@@ -78,7 +78,7 @@ When exactly one target is transformed (single selected clip or a selected text 
   HTML-producing transform meant remembering both. Forgetting one writes markup to the clipboard as plain text, silently.
   Add to that predicate, not to a comparison.
 - All others → `CopyTextAsync(result)`.
-- Always preceded by `_clipboardMonitorService.SuppressNext()` so the new clip isn't captured twice.
+- Always preceded by `_clipboardMonitorService.SuppressNext(text)`, with the text written, so the new clip isn't captured twice (suppression matches content; see CONCEPTS.md).
 
 Multi-clip batch transforms intentionally skip auto-copy — only the final clip would be on the clipboard anyway, and the user almost certainly wants to leave their clipboard alone.
 
@@ -113,6 +113,6 @@ record CustomHotkeyBinding {
 | `prompt`   | Free-form prompt text                           | Runs `IAiTransformService.TransformAsync(value, latestClip)` directly — handy for one-off prompts without creating a preset. |
 | `aiprompt` | `<kind>[\|<prefill>]` (`<kind>` ∈ `auto`, `text`, `image-to-text`, `image-to-image`) | Opens the AI prompt dialog with the requested kind selected. Anything after the first `\|` is loaded into the prompt textbox so the user can edit/extend before submitting. `auto` (default) lets the VM pick the kind based on the active clip. |
 
-After producing `output`, the handler calls `_clipboardMonitorService.SuppressNext()`, copies via `CopyTextAsync`, and (when `PasteAfter` is true) simulates Ctrl+V after a short delay. The `aiprompt` kind is an exception: it just opens the dialog and ignores `PasteAfter` (the dialog's own submit path produces the new clip).
+After producing `output`, the handler (`HotkeyClipActions.TransformAndCopyAsync`) calls `_clipboardMonitorService.SuppressNext(output)`, copies via `CopyTextAsync`, and (when `PasteAfter` is true) simulates Ctrl+V after a short delay. The `aiprompt` kind is an exception: it just opens the dialog and ignores `PasteAfter` (the dialog's own submit path produces the new clip).
 
 The `Target` string is currently entered free-form in **Settings → Custom hotkey actions** (placed alongside the Local/Global hotkey sections). If you add a new kind, update both `ExecuteCustomHotkey` and the help text in `Clipthrough/Views/SettingsWindow.axaml`.

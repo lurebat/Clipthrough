@@ -3006,7 +3006,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (clip.Clip.ContentType == ContentType.RichText)
             {
                 var renderedText = SelectedClipRenderedText;
-                _clipboardMonitorService.SuppressNext();
+                _clipboardMonitorService.SuppressNext(renderedText);
                 await _systemInteractionService.CopyRichContentAsync(clip.FullContent, renderedText, clip.Clip.ContentFormat);
                 StatusText = AppText.FormatCopiedClip(clip.DisplayContentType.ToLower(AppText.CurrentCulture));
                 PublishSensitiveCopyNotificationIfNeeded(clip);
@@ -3019,7 +3019,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 ? string.Join(Environment.NewLine, SelectedClipFiles.Select(static file => file.FilePath))
                 : clip.FullContent;
 
-            _clipboardMonitorService.SuppressNext();
+            _clipboardMonitorService.SuppressNext(contentToCopy);
             await _systemInteractionService.CopyTextAsync(contentToCopy);
             StatusText = isFileList
                 ? AppText.FormatCopiedFileList(SelectedClipFiles.Count)
@@ -3058,7 +3058,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 ? ClipDisplayFormatter.RenderRichContent(clip.FullContent)
                 : clip.Clip.Content;
 
-            _clipboardMonitorService.SuppressNext();
+            _clipboardMonitorService.SuppressNext(plainText);
             await _systemInteractionService.CopyTextAsync(plainText);
             StatusText = AppText.FormatCopiedClip("plain text");
             TrackPasteInBackground(clip.Clip.Id);
@@ -3108,7 +3108,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);
-        _clipboardMonitorService.SuppressNext();
+        _clipboardMonitorService.SuppressNext(exportResult.PrimaryPath);
         await _systemInteractionService.CopyTextAsync(exportResult.PrimaryPath);
         await _systemInteractionService.OpenPathAsync(exportResult.PrimaryPath);
         StatusText = AppText.FormatExportedClipStatus(exportResult.PrimaryPath);
@@ -3181,7 +3181,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         try
         {
-            _clipboardMonitorService.SuppressNext();
+            _clipboardMonitorService.SuppressNext(title);
             await _systemInteractionService.CopyTextAsync(title);
             StatusText = "Copied window title";
         }
@@ -3449,12 +3449,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (copyAsRichContent)
         {
             var renderedText = ClipDisplayFormatter.RenderRichContent(text);
-            _clipboardMonitorService.SuppressNext();
+            _clipboardMonitorService.SuppressNext(renderedText);
             await _systemInteractionService.CopyRichContentAsync(text, renderedText, SelectedClip.Clip.ContentFormat);
         }
         else
         {
-            _clipboardMonitorService.SuppressNext();
+            _clipboardMonitorService.SuppressNext(text);
             await _systemInteractionService.CopyTextAsync(text);
         }
 
@@ -3580,12 +3580,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (format == ClipContentFormat.Html)
             {
                 var plain = ClipDisplayFormatter.RenderRichContent(result);
-                _clipboardMonitorService.SuppressNext();
+                _clipboardMonitorService.SuppressNext(plain);
                 await _systemInteractionService.CopyRichContentAsync(result, plain, ClipContentFormat.Html);
             }
             else
             {
-                _clipboardMonitorService.SuppressNext();
+                _clipboardMonitorService.SuppressNext(result);
                 await _systemInteractionService.CopyTextAsync(result);
             }
 

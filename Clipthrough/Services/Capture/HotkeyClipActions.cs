@@ -149,14 +149,15 @@ internal static class HotkeyClipActions
             SkipPostInsertMaintenance = true,
         });
 
-        monitor.SuppressNext();
         if (isHtmlOutput)
         {
             var plain = Presentation.ClipDisplayFormatter.RenderRichContent(output);
+            monitor.SuppressNext(plain);
             await interaction.CopyRichContentAsync(output, plain, ClipContentFormat.Html);
         }
         else
         {
+            monitor.SuppressNext(output);
             await interaction.CopyTextAsync(output);
         }
 

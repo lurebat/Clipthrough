@@ -73,7 +73,14 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
 
     public IObservable<bool> CaptureBusy => _captureBusy.AsObservable();
 
-    public void SuppressNext() => _suppressionGate.Arm();
+    public void SuppressNext(string? content = null) => _suppressionGate.Arm(content);
+
+    /// <summary>
+    /// True when <paramref name="request"/> carries the text Clipthrough itself
+    /// just wrote: a redirector re-publishing our write, not a copy by the user.
+    /// </summary>
+    internal bool IsOwnRepublish(ClipCaptureRequest request)
+        => request.ContentType != ContentType.Image && _suppressionGate.IsRecentSelfWrite(request.ContentText);
 
     public void CancelSuppressNext() => _suppressionGate.Disarm();
 
@@ -258,6 +265,17 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                 }
 
                 var (captureRequest, deferredContent) = captureResult.Value;
+                if (IsOwnRepublish(captureRequest))
+                {
+                    // The first notification for our own write was suppressed
+                    // before reading; this is the same content raised again
+                    // (rdpclip over Remote Desktop does it 100-300 ms later).
+                    // Capturing it would bump the clip's copy count and move it
+                    // to the top under a step-paste in progress (F-52).
+                    Trace.TraceInformation($"Clipboard change from '{captureRequest.SourceApp}' repeats what Clipthrough just wrote; not capturing it again.");
+                    return;
+                }
+
                 if (!_isStarted || _isDisposed)
                 {
                     // The monitor was stopped (e.g. a database maintenance op began)

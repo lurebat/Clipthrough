@@ -2870,5 +2870,29 @@
     "find": "                _fullContent = null;\n                _previewThumbnailLoaded = false;",
     "replace": "                _previewThumbnailLoaded = false;",
     "filter": "FullyQualifiedName~AfterARestart_TheAutoSelectedRichClipPreviewsItsMarkup"
+  },
+  {
+    "id": "suppression-forgets-content",
+    "file": "Clipthrough/Services/Capture/ClipboardSuppressionGate.cs",
+    "why": "F-52. Count-only suppression swallows one notification per write; a redirector re-publishing the write (rdpclip over Remote Desktop) raises a second, so every paste is captured again and step-paste reorders the list.",
+    "find": "        return hash is not null\n            && _clock() <= expiresAt\n            && string.Equals(hash, Hash(content), StringComparison.Ordinal);",
+    "replace": "        return hash is not null && hash is null && _clock() <= expiresAt;",
+    "filter": "FullyQualifiedName~ClipboardSuppressionGateTests|FullyQualifiedName~ClipboardRepublishTests"
+  },
+  {
+    "id": "suppression-content-never-expires",
+    "file": "Clipthrough/Services/Capture/ClipboardSuppressionGate.cs",
+    "why": "F-52. The remembered self-write must expire with the window; otherwise the user re-copying the same text later is silently not captured.",
+    "find": "        return hash is not null\n            && _clock() <= expiresAt\n            && string.Equals(hash, Hash(content), StringComparison.Ordinal);",
+    "replace": "        return hash is not null\n            && expiresAt == expiresAt\n            && string.Equals(hash, Hash(content), StringComparison.Ordinal);",
+    "filter": "FullyQualifiedName~ClipboardSuppressionGateTests.TheSameContentAfterTheWindow"
+  },
+  {
+    "id": "writer-arms-without-content",
+    "file": "Clipthrough/Services/System/ClipClipboardWriter.cs",
+    "why": "F-52. The shared writer is how most pastes reach the clipboard; arming without the text written leaves their re-publish unrecognised.",
+    "find": "        monitor.SuppressNext(content);",
+    "replace": "        monitor.SuppressNext(content is null ? null : null);",
+    "filter": "FullyQualifiedName~ClipClipboardWriterTests.TheSuppressionCarriesTheTextBeingWritten"
   }
 ]

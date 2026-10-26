@@ -31,6 +31,12 @@ internal sealed class ClipboardSuppressionGate
     private int _pending;
     private long _expiresAt;
 
+    // The last text the application wrote, hashed, and until when a
+    // notification carrying it counts as our own. Guarded by _contentLock.
+    private readonly object _contentLock = new();
+    private string? _selfWriteHash;
+    private long _selfWriteExpiresAt;
+
     public ClipboardSuppressionGate(TimeSpan? window = null, Func<long>? clock = null)
     {
         _windowMilliseconds = (long)(window ?? DefaultWindow).TotalMilliseconds;
@@ -38,11 +44,23 @@ internal sealed class ClipboardSuppressionGate
     }
 
     /// <summary>Records that the application is about to write to the clipboard.</summary>
-    public void Arm()
+    /// <param name="content">The text being written, when there is any.</param>
+    public void Arm(string? content = null)
     {
         // The deadline is refreshed before the count rises so a notification arriving
         // concurrently can never observe a pending suppression against a stale deadline.
-        Interlocked.Exchange(ref _expiresAt, _clock() + _windowMilliseconds);
+        var expiresAt = _clock() + _windowMilliseconds;
+        Interlocked.Exchange(ref _expiresAt, expiresAt);
+        if (!string.IsNullOrEmpty(content))
+        {
+            var hash = Hash(content);
+            lock (_contentLock)
+            {
+                _selfWriteHash = hash;
+                _selfWriteExpiresAt = expiresAt;
+            }
+        }
+
         Interlocked.Increment(ref _pending);
     }
 
@@ -71,6 +89,12 @@ internal sealed class ClipboardSuppressionGate
         {
             Interlocked.Add(ref _pending, drained - 1);
         }
+
+        // Nothing was written, so nothing can be re-published.
+        lock (_contentLock)
+        {
+            _selfWriteHash = null;
+        }
     }
 
     /// <summary>
@@ -87,4 +111,44 @@ internal sealed class ClipboardSuppressionGate
 
         return _clock() <= Interlocked.Read(ref _expiresAt);
     }
+
+    /// <summary>
+    /// True when <paramref name="content"/> is what the application itself wrote
+    /// within the window, so a further notification carrying it is a re-publish
+    /// of our own write rather than a copy the user made.
+    /// </summary>
+    /// <remarks>
+    /// Matching on content rather than counting notifications is what survives
+    /// a clipboard redirector. Over Remote Desktop, rdpclip re-publishes every
+    /// write and raises a second notification well after the monitor's
+    /// coalescing; one Arm swallowed only the first, so every paste was
+    /// captured again (F-52). Content that differs is never suppressed, even
+    /// inside the window - a real copy the user makes is not lost to this.
+    /// </remarks>
+    public bool IsRecentSelfWrite(string? content)
+    {
+        if (string.IsNullOrEmpty(content))
+        {
+            return false;
+        }
+
+        string? hash;
+        long expiresAt;
+        lock (_contentLock)
+        {
+            hash = _selfWriteHash;
+            expiresAt = _selfWriteExpiresAt;
+        }
+
+        return hash is not null
+            && _clock() <= expiresAt
+            && string.Equals(hash, Hash(content), StringComparison.Ordinal);
+    }
+
+    // Line endings are normalised because a redirector may re-publish text
+    // with CRLF where we wrote LF. A hash rather than the text itself, so the
+    // gate does not hold a second copy of a possibly sensitive clip.
+    private static string Hash(string content)
+        => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(content.Replace("\r\n", "\n", StringComparison.Ordinal))));
 }

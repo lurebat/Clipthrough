@@ -201,4 +201,23 @@ public sealed class ClipClipboardWriterTests
         Assert.Null(interaction.LastCopiedText);
         Assert.Equal(0, monitor.PendingSuppressions);
     }
+
+    /// <summary>
+    /// The suppression is armed with the text being written, so a redirector
+    /// re-publishing it (Remote Desktop) is recognised as our own write rather
+    /// than captured again (F-52). For rich text that is the plain text written
+    /// beside the markup, which is what a re-read of the clipboard yields.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task TheSuppressionCarriesTheTextBeingWritten()
+    {
+        var (interaction, monitor) = Fresh();
+        Assert.True(await ClipClipboardWriter.TryCopyAsync(Clip(ContentType.Text, "beta"), interaction, monitor, maxImageBytes: null));
+        Assert.Equal("beta", monitor.LastSuppressedContent);
+
+        var html = "<p>Hello <b>rich</b></p>";
+        Assert.True(await ClipClipboardWriter.TryCopyAsync(Clip(ContentType.RichText, html, format: ClipContentFormat.Html), interaction, monitor, maxImageBytes: null));
+        Assert.Equal(interaction.LastCopiedRichPlainText, monitor.LastSuppressedContent);
+        Assert.False(string.IsNullOrEmpty(monitor.LastSuppressedContent));
+    }
 }
