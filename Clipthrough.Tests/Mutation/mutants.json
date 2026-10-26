@@ -2718,5 +2718,21 @@
     "find": "            builder.Append(Array.IndexOf(invalidChars, character) >= 0 ? '_' : character);\n",
     "replace": "            builder.Append(Array.IndexOf(invalidChars, character) < -1 ? '_' : character);\n",
     "filter": "FullyQualifiedName~ClipExportContainmentTests"
+  },
+  {
+    "id": "clipangel-blob-cap-removed",
+    "file": "Clipthrough/Services/Storage/ClipAngelImportService.cs",
+    "why": "F-34. Closed finding #19 capped each imported blob at 32 MB so a hostile or malformed ClipAngel file cannot exhaust memory; raising the cap a thousandfold survived all 721 tests in the audit.",
+    "find": "CASE WHEN typeof(Binary) = 'blob' AND LENGTH(Binary) > {MaxImportBlobSizeBytes}",
+    "replace": "CASE WHEN typeof(Binary) = 'blob' AND LENGTH(Binary) > {MaxImportBlobSizeBytes * 1000}",
+    "filter": "FullyQualifiedName~ClipAngelImportServiceTests.APlainDatabase_ImportsEachKindOfRow_AndDropsTheOverCapBlob"
+  },
+  {
+    "id": "clipangel-decrypted-copy-left-in-temp",
+    "file": "Clipthrough/Services/Storage/ClipAngelImportService.cs",
+    "why": "F-34 (found by its tests). A pooled connection keeps the decrypted copy open, TryDelete fails silently, and a plaintext copy of the ClipAngel history stays in %TEMP%.",
+    "find": "        const int batchSize = 200;\n\n        try\n        {\n            // Pooling off: a pooled connection keeps the decrypted copy open after\n            // Dispose, TryDelete then fails silently, and a plaintext copy of the\n            // user's ClipAngel history is left in %TEMP% (found by F-34's tests).\n            await using var conn = new SqliteConnection($\"Data Source={temp};Mode=ReadOnly;Pooling=False\");\n",
+    "replace": "        const int batchSize = 200;\n\n        try\n        {\n            // Pooling off: a pooled connection keeps the decrypted copy open after\n            // Dispose, TryDelete then fails silently, and a plaintext copy of the\n            // user's ClipAngel history is left in %TEMP% (found by F-34's tests).\n            await using var conn = new SqliteConnection($\"Data Source={temp};Mode=ReadOnly;Pooling=True\");\n",
+    "filter": "FullyQualifiedName~ClipAngelImportServiceTests"
   }
 ]
