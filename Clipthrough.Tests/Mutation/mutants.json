@@ -2686,5 +2686,21 @@
     "find": "        while (viewModel.IsLoadingDatabase || viewModel.DatabaseStartupTask is { IsCompleted: false })\n",
     "replace": "        while ((viewModel.IsLoadingDatabase || viewModel.DatabaseStartupTask is { IsCompleted: false }) && deadline < DateTime.MinValue)\n",
     "filter": "FullyQualifiedName~TheStartupHelper_ReturnsOnlyOnceTheDatabaseIsOpen_EvenWhenOpeningIsSlow"
+  },
+  {
+    "id": "copilot-token-written-unprotected",
+    "file": "Clipthrough/Services/Ai/CopilotAuthService.cs",
+    "why": "F-31. The GitHub token behind Copilot must reach disk only through DPAPI; survived all 721 tests in the audit because nothing could construct the persisting service safely.",
+    "find": "            File.WriteAllBytes(_tokenPath, protectedBytes);\n",
+    "replace": "            File.WriteAllBytes(_tokenPath, protectedBytes.Length >= 0 ? raw : protectedBytes);\n",
+    "filter": "FullyQualifiedName~CopilotAuthServicePersistenceTests"
+  },
+  {
+    "id": "copilot-signout-leaves-token",
+    "file": "Clipthrough/Services/Ai/CopilotAuthService.cs",
+    "why": "F-31. Signing out must delete the persisted token, or the next launch signs straight back in.",
+    "find": "                if (File.Exists(_tokenPath)) File.Delete(_tokenPath);\n",
+    "replace": "                if (File.Exists(_tokenPath) && _tokenPath.Length < 0) File.Delete(_tokenPath);\n",
+    "filter": "FullyQualifiedName~CopilotAuthServicePersistenceTests"
   }
 ]
