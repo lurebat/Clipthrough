@@ -13,13 +13,24 @@ public sealed class ClipExportService : IClipExportService
 {
     private static readonly JsonSerializerOptions s_jsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
+    private readonly string _exportRoot;
+
+    public ClipExportService()
+        : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Clipthrough Exports"))
+    {
+    }
+
+    /// <summary>Exports under <paramref name="exportRoot"/>; lets tests check containment (F-33).</summary>
+    internal ClipExportService(string exportRoot)
+    {
+        _exportRoot = exportRoot;
+    }
+
     public async Task<ClipExportResult> ExportAsync(ClipEntry clip, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(clip);
 
-        var exportRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-            "Clipthrough Exports");
+        var exportRoot = _exportRoot;
         var clipName = BuildClipFileName(clip);
         var folderName = $"{SanitizePathSegment(clipName)}-{clip.Id}-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}";
         var exportDirectory = Path.Combine(exportRoot, folderName);

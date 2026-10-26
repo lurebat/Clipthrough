@@ -2710,5 +2710,13 @@
     "find": "            return (CopilotBaseUrl, token, model, imageModel, true);\n",
     "replace": "            return (CopilotBaseUrl.Length > 0 ? ResolveOpenAiConfig().BaseUrl : CopilotBaseUrl, token, model, imageModel, true);\n",
     "filter": "FullyQualifiedName~AiTransformServiceTests"
+  },
+  {
+    "id": "export-sanitizer-disabled",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "F-33. The export folder and file names come from the clip's first line; without the sanitiser a line like ..\\..\\x chooses where the files are written.",
+    "find": "            builder.Append(Array.IndexOf(invalidChars, character) >= 0 ? '_' : character);\n",
+    "replace": "            builder.Append(Array.IndexOf(invalidChars, character) < -1 ? '_' : character);\n",
+    "filter": "FullyQualifiedName~ClipExportContainmentTests"
   }
 ]
