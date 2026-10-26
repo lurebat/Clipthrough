@@ -632,6 +632,11 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
                 }
 
                 Clip = full;
+                // FullContent is memoised, and the selected-clip preview reads it
+                // the moment a clip is selected - before these bytes arrive. Left
+                // cached, a rich clip kept the plain-text fallback for good: the
+                // clip a restart selects showed one flattened paragraph (F-50).
+                _fullContent = null;
                 _previewThumbnailLoaded = false;
                 this.RaisePropertyChanged(nameof(PreviewThumbnailImage));
                 _fullImageLoaded = false;

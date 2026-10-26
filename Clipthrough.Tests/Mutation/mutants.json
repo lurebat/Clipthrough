@@ -2862,5 +2862,13 @@
     "find": "            if (refusal is not null)\n            {\n                StatusText = refusal;\n            }",
     "replace": "            if (refusal is not null)\n            {\n                _ = refusal;\n            }",
     "filter": "FullyQualifiedName~RowTransform_MarkdownToHtmlOnTooDeepInput"
+  },
+  {
+    "id": "hydration-keeps-stale-full-content",
+    "file": "Clipthrough/ViewModels/ClipItemViewModel.cs",
+    "why": "F-50. FullContent is memoised and read on selection before hydration lands; without clearing it, a rich clip keeps its plain-text fallback, so the clip a restart selects previews as one flattened paragraph.",
+    "find": "                _fullContent = null;\n                _previewThumbnailLoaded = false;",
+    "replace": "                _previewThumbnailLoaded = false;",
+    "filter": "FullyQualifiedName~AfterARestart_TheAutoSelectedRichClipPreviewsItsMarkup"
   }
 ]
