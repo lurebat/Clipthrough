@@ -111,4 +111,63 @@ public sealed partial class MainWindowViewModelHeadlessTests
         Assert.Null(await scope.ClipStoreService.GetByIdAsync(gone.Id));
         Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(recaptured!.Id));
     }
+
+    /// <summary>
+    /// The user was told "Clip deleted". Quitting inside the undo window used
+    /// to cancel the delete, so the clip - a password, say - was back on the
+    /// next launch and in every backup after (F-14). Pending deletes now
+    /// commit on exit (OD-8a, S41).
+    /// </summary>
+    [AvaloniaFact]
+    public async Task DeleteThenQuitWithinUndoWindow_DeletesTheClip()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        await CaptureTextClipAsync(scope.ClipStoreService, "keep me");
+        await CaptureTextClipAsync(scope.ClipStoreService, "my secret password 123");
+
+        var viewModel = await CreateLoadedViewModelAsync(scope, new TestClipboardMonitorService(), expectedClips: 2);
+        var target = viewModel.Clips.Single(c => c.Clip.Content == "my secret password 123");
+        var keep = viewModel.Clips.Single(c => c.Clip.Content == "keep me").Id;
+        viewModel.SelectedClip = target;
+        var deleting = viewModel.DeleteSelectedCommand.Execute().ToTask();
+        Dispatcher.UIThread.RunJobs();
+        Assert.DoesNotContain(viewModel.Clips, c => c.Id == target.Id);
+
+        // MainWindow.OnClosed disposes the view model.
+        viewModel.Dispose();
+        await deleting;
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Null(await scope.ClipStoreService.GetByIdAsync(target.Id));
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(keep));
+    }
+
+    /// <summary>
+    /// Undo still wins: a delete the user took back before quitting stays
+    /// taken back.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task DeleteUndoThenQuit_KeepsTheClip()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        await CaptureTextClipAsync(scope.ClipStoreService, "changed my mind");
+
+        var viewModel = await CreateLoadedViewModelAsync(scope, new TestClipboardMonitorService(), expectedClips: 1);
+        var target = viewModel.Clips[0];
+        viewModel.SelectedClip = target;
+        var deleting = viewModel.DeleteSelectedCommand.Execute().ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        var undo = scope.NotificationService.LastNotification!.Actions.Single();
+        await undo.ExecuteAsync();
+        await deleting;
+        Dispatcher.UIThread.RunJobs();
+
+        viewModel.Dispose();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(target.Id));
+    }
 }

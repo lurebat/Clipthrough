@@ -2126,7 +2126,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         _isDisposed = true;
-        CancelAllPendingDeletes();
+        CommitPendingDeletesOnExit();
         _clipboardMonitorService.Stop();
         _settingsService.SettingsChanged -= OnSettingsChanged;
         _jobIndicator.Changed -= OnJobIndicatorChanged;
@@ -3992,6 +3992,48 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (_pendingDeletes.Remove(clipId))
         {
             _hiddenPendingDeletes.Remove(clipId);
+        }
+    }
+
+    private static readonly TimeSpan PendingDeleteFlushTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Quitting inside the undo window commits the pending deletes (OD-8a, S41).
+    /// The user was told "Clip deleted"; cancelling instead - the old behaviour -
+    /// brought the clip back on the next launch and into every backup (F-14).
+    /// </summary>
+    /// <remarks>
+    /// Blocking, bounded, and off the UI thread, like FlushCurrentFilterState:
+    /// Dispose is synchronous and the process may be about to end. The undo
+    /// timers are cancelled first so the soft-delete tasks finish without
+    /// committing a second time.
+    /// </remarks>
+    private void CommitPendingDeletesOnExit()
+    {
+        var ids = _pendingDeletes.Keys.ToArray();
+        CancelAllPendingDeletes();
+        if (ids.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var commit = Task.Run(async () =>
+            {
+                foreach (var id in ids)
+                {
+                    await _clipStoreService.DeleteAsync(id);
+                }
+            });
+            if (!commit.Wait(PendingDeleteFlushTimeout))
+            {
+                Trace.TraceWarning($"Committing {ids.Length} pending delete(s) on exit timed out; they may still be in the database.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Committing pending deletes on exit failed: {ex.Message}");
         }
     }
 

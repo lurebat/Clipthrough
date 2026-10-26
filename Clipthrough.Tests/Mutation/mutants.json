@@ -979,8 +979,8 @@
     "id": "view-model-dispose-runs-twice",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "Dispose runs from Window.Closed and blocks on a settings flush with a timeout. Losing the idempotence guard makes a second call pay that wait again during shutdown.",
-    "find": "        if (_isDisposed)\n        {\n            return;\n        }\n\n        _isDisposed = true;\n        CancelAllPendingDeletes();",
-    "replace": "        _isDisposed = true;\n        CancelAllPendingDeletes();",
+    "find": "        if (_isDisposed)\n        {\n            return;\n        }\n\n        _isDisposed = true;\n        CommitPendingDeletesOnExit();",
+    "replace": "        _isDisposed = true;\n        CommitPendingDeletesOnExit();",
     "filter": "Dispose_IsIdempotent"
   },
   {
@@ -2718,5 +2718,13 @@
     "find": "        WithdrawPendingDelete(clip.Id);\n\n        if (!TryGetOptimisticInsertIndex(clip, out var targetIndex))",
     "replace": "        _ = clip.Id;\n\n        if (!TryGetOptimisticInsertIndex(clip, out var targetIndex))",
     "filter": "FullyQualifiedName~RecopyDuringUndoWindow"
+  },
+  {
+    "id": "exit-cancels-pending-deletes",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-14 / S41. Cancelling instead of committing pending deletes on exit brings a clip the user was told was deleted - a password, say - back on the next launch and into every backup.",
+    "find": "        _isDisposed = true;\n        CommitPendingDeletesOnExit();",
+    "replace": "        _isDisposed = true;\n        CommitPendingDeletesOnExit();",
+    "filter": "FullyQualifiedName~DeleteThenQuitWithinUndoWindow"
   }
 ]
