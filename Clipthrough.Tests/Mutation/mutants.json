@@ -2702,5 +2702,13 @@
     "find": "                if (File.Exists(_tokenPath)) File.Delete(_tokenPath);\n",
     "replace": "                if (File.Exists(_tokenPath) && _tokenPath.Length < 0) File.Delete(_tokenPath);\n",
     "filter": "FullyQualifiedName~CopilotAuthServicePersistenceTests"
+  },
+  {
+    "id": "copilot-token-sent-to-custom-base-url",
+    "file": "Clipthrough/Services/Ai/AiTransformService.cs",
+    "why": "F-32. The Copilot session token must only ever go to api.githubcopilot.com; sending it to the user-configured OpenAI base URL leaks it to any host the settings name.",
+    "find": "            return (CopilotBaseUrl, token, model, imageModel, true);\n",
+    "replace": "            return (CopilotBaseUrl.Length > 0 ? ResolveOpenAiConfig().BaseUrl : CopilotBaseUrl, token, model, imageModel, true);\n",
+    "filter": "FullyQualifiedName~AiTransformServiceTests"
   }
 ]
