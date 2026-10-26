@@ -2766,5 +2766,29 @@
     "find": "          OR old.source_url IS NOT new.source_url\n",
     "replace": "",
     "filter": "FullyQualifiedName~FtsUpdateTriggerTests.ChangingAnIndexedColumn_StillReindexesIt"
+  },
+  {
+    "id": "coverage-refreshes-stack-up",
+    "file": "Clipthrough/ViewModels/CoalescingRefresh.cs",
+    "why": "F-25. Each coverage refresh is a full-library aggregate (3.5 s at 60k, 17.8 s encrypted) fired per queue event; overlapping triggers must not stack identical queries.",
+    "find": "            if (state == RunningWithPending\n                || Interlocked.CompareExchange(ref _state, RunningWithPending, Running) == Running)\n            {\n                return;\n            }\n",
+    "replace": "            if (state == RunningWithPending && state == Idle)\n            {\n                return;\n            }\n\n            break;\n",
+    "filter": "FullyQualifiedName~CoalescingRefreshTests.TriggersDuringARefresh_CollapseIntoOneTrailingRun"
+  },
+  {
+    "id": "no-pending-sensitivity-index",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "F-25. Without it the startup sensitivity recovery reads every clip: 2.9 s at 60k with nothing pending, 16 s encrypted.",
+    "find": "            WHERE sensitivity_scanned_at IS NULL;\n",
+    "replace": "            WHERE sensitivity_scanned_at IS NOT NULL;\n",
+    "filter": "FullyQualifiedName~StartupScanIndexTests.PendingSensitivityRecovery_ReadsOnlyUnscannedRows"
+  },
+  {
+    "id": "no-ocr-coverage-index",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "F-25. Without it OCR coverage reads ocr_status from each image row, after the payload: 1.9 s at 60k, 9.9 s encrypted.",
+    "find": "            WHERE content_type = 'image' AND content_bytes IS NOT NULL;\n",
+    "replace": "            WHERE content_type = 'files' AND content_bytes IS NOT NULL;\n",
+    "filter": "FullyQualifiedName~StartupScanIndexTests.OcrCoverage_IsAnsweredFromTheImageIndex"
   }
 ]

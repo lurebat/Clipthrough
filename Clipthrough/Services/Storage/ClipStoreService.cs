@@ -342,7 +342,7 @@ public sealed class ClipStoreService : IClipStoreService
         {
             await connection.OpenAsync(cancellationToken);
             await using var command = connection.CreateCommand();
-            command.CommandText = "SELECT id FROM clips WHERE sensitivity_scanned_at IS NULL ORDER BY id;";
+            command.CommandText = PendingSensitivitySql;
 
             pending = [];
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -816,6 +816,20 @@ public sealed class ClipStoreService : IClipStoreService
         return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    internal const string PendingSensitivitySql = "SELECT id FROM clips WHERE sensitivity_scanned_at IS NULL ORDER BY id;";
+
+    internal const string OcrCoverageSql = """
+        SELECT
+            COUNT(*) AS eligible_total,
+            COALESCE(SUM(CASE WHEN ocr_status = 'succeeded' THEN 1 ELSE 0 END), 0) AS succeeded_count,
+            COALESCE(SUM(CASE WHEN ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'rerun' THEN 1 ELSE 0 END), 0) AS pending_count,
+            COALESCE(SUM(CASE WHEN ocr_status = 'running' THEN 1 ELSE 0 END), 0) AS running_count,
+            COALESCE(SUM(CASE WHEN ocr_status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_count
+        FROM clips
+        WHERE content_type = 'image'
+          AND content_bytes IS NOT NULL;
+        """;
+
     public Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default)
         => RunOffCallerAsync(ct => GetOcrCoverageCoreAsync(ct), cancellationToken);
 
@@ -825,17 +839,8 @@ public sealed class ClipStoreService : IClipStoreService
         await connection.OpenAsync(cancellationToken);
 
         await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT
-                COUNT(*) AS eligible_total,
-                COALESCE(SUM(CASE WHEN ocr_status = 'succeeded' THEN 1 ELSE 0 END), 0) AS succeeded_count,
-                COALESCE(SUM(CASE WHEN ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'rerun' THEN 1 ELSE 0 END), 0) AS pending_count,
-                COALESCE(SUM(CASE WHEN ocr_status = 'running' THEN 1 ELSE 0 END), 0) AS running_count,
-                COALESCE(SUM(CASE WHEN ocr_status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_count
-            FROM clips
-            WHERE content_type = 'image'
-              AND content_bytes IS NOT NULL;
-            """;
+        command.CommandText = OcrCoverageSql;
+
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))

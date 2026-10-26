@@ -227,6 +227,23 @@ public sealed class DatabaseInitializer
             id ASC
         );
 
+        -- Startup and coverage scans (F-25). With nothing pending they still read
+        -- every clip: the sensitivity recovery 2.9 s and the OCR coverage
+        -- aggregate 1.9 s at 60k clips, 16 s and 9.9 s encrypted. Each partial
+        -- index holds only the rows its query counts. The OCR one leads with
+        -- content_type so the planner takes it over idx_clips_content_type, and
+        -- carries ocr_status, which the row stores after the payload - reading it
+        -- there walked each image's overflow chain. The row is still visited for
+        -- the content_bytes IS NOT NULL term (the bundled SQLite does not treat
+        -- the plan as covering); PerfProbes P3 measures what that costs.
+        -- Both WHERE clauses match the queries' own terms exactly
+        -- (ClipStoreService.PendingSensitivitySql / OcrCoverageSql); SQLite
+        -- only uses a partial index whose condition the query implies.
+        CREATE INDEX IF NOT EXISTS idx_clips_sensitivity_pending ON clips(id)
+            WHERE sensitivity_scanned_at IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_clips_ocr_images ON clips(content_type, ocr_status)
+            WHERE content_type = 'image' AND content_bytes IS NOT NULL;
+
         -- Retention purges, which run after every capture. Both lifetime deletes
         -- filter on exactly this pair.
         --

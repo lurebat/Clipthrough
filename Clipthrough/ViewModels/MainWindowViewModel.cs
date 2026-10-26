@@ -3705,7 +3705,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool IsOcrCoverageVisible => _ocrService.IsAvailable && !string.IsNullOrEmpty(OcrCoverageText);
 
-    private async Task RefreshSemanticCoverageAsync()
+    private CoalescingRefresh? _semanticCoverageRefresh;
+    private CoalescingRefresh? _ocrCoverageRefresh;
+
+    // Both chips refresh per OCR queue event or embedding batch, and each refresh
+    // is a full-library aggregate; overlapping triggers collapse into one
+    // trailing run instead of stacking identical queries (F-25).
+    private Task RefreshSemanticCoverageAsync()
+        => (_semanticCoverageRefresh ??= new CoalescingRefresh(RefreshSemanticCoverageCoreAsync)).RunAsync();
+
+    private Task RefreshOcrCoverageAsync()
+        => (_ocrCoverageRefresh ??= new CoalescingRefresh(RefreshOcrCoverageCoreAsync)).RunAsync();
+
+    private async Task RefreshSemanticCoverageCoreAsync()
     {
         if (_embeddingWorker is null)
         {
@@ -3748,7 +3760,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(IsSemanticCoverageVisible));
     }
 
-    private async Task RefreshOcrCoverageAsync()
+    private async Task RefreshOcrCoverageCoreAsync()
     {
         if (!_ocrService.IsAvailable)
         {
