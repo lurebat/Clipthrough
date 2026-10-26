@@ -28,6 +28,17 @@ public static partial class TextTransformationService
         => transformation is Models.TextTransformation.BoxTableToHtml
             or Models.TextTransformation.MarkdownToHtml;
 
+    /// <summary>
+    /// Whether text transforms apply to <paramref name="clip"/>: text, rich
+    /// text and file lists with content. Not images - an image clip's text is
+    /// the title of the window it was copied from, not anything the user wants
+    /// transformed or pasted (F-12). The row menu and the global hotkeys both
+    /// ask here, so they cannot disagree about which clips qualify.
+    /// </summary>
+    public static bool CanTransform(Models.ClipEntry clip)
+        => clip.ContentType is Models.ContentType.Text or Models.ContentType.RichText or Models.ContentType.Files
+            && !string.IsNullOrEmpty(clip.Content);
+
     public static string Apply(Models.TextTransformation transformation, string input, string? delimiter = null)
     {
         if (string.IsNullOrEmpty(input))

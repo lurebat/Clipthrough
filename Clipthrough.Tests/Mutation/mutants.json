@@ -2694,5 +2694,21 @@
     "find": "                explicitTarget: explicitTarget);",
     "replace": "                explicitTarget: explicitTarget is null ? null : null);",
     "filter": "FullyQualifiedName~RowTransform_AppliesToTheClickedRowOnly"
+  },
+  {
+    "id": "custom-hotkey-ignores-eligibility",
+    "file": "Clipthrough/Services/Capture/HotkeyClipActions.cs",
+    "why": "F-12. Without the transform eligibility check a custom hotkey transforms an image clip's text - the title of the window it was copied from - puts it on the clipboard over the image and pastes it into the user's document.",
+    "find": "        if (!TextTransformationService.CanTransform(clip))",
+    "replace": "        if (string.IsNullOrEmpty(clip.Content))",
+    "filter": "FullyQualifiedName~HotkeyClipActionsTests.CustomTransformHotkey_OnAnImageClip"
+  },
+  {
+    "id": "step-paste-copies-content-as-text",
+    "file": "Clipthrough/Services/Capture/HotkeyClipActions.cs",
+    "why": "F-12. Step-paste copying clip.Content as text pastes an image's source window title instead of the picture, flattens rich text, and marks the clip pasted even when nothing reached the clipboard.",
+    "find": "        if (!await ClipClipboardWriter.TryCopyAsync(clip, interaction, monitor, maxImageBytes))\n        {\n            return StepPasteOutcome.NotCopied;\n        }",
+    "replace": "        monitor.SuppressNext();\n        if (!string.IsNullOrEmpty(clip.Content))\n        {\n            await interaction.CopyTextAsync(clip.Content);\n        }",
+    "filter": "FullyQualifiedName~HotkeyClipActionsTests.StepPaste_|FullyQualifiedName~ClipboardPipelineGuardTests"
   }
 ]

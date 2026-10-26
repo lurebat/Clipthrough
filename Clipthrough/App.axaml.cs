@@ -742,77 +742,19 @@ public partial class App : Application
             {
                 clip = await _clipStoreService.GetClipAtOffsetAsync(0);
             }
-            if (clip is null || string.IsNullOrEmpty(clip.Content)) return;
+            if (clip is null) return;
 
-            var input = clip.Content;
-            string output;
-            var isHtmlOutput = false;
-
-            switch (parsed.Kind)
+            if (!await HotkeyClipActions.TransformAndCopyAsync(
+                    clip,
+                    parsed,
+                    binding.Gesture,
+                    _clipStoreService,
+                    _systemInteractionService,
+                    _clipboardMonitorService,
+                    _aiTransformService,
+                    _settingsService?.Current.AiPresets ?? Array.Empty<AiPreset>()))
             {
-                case CustomHotkeyKind.BuiltIn:
-                    if (!Enum.TryParse<TextTransformation>(name, ignoreCase: true, out var tx) || tx == TextTransformation.None)
-                    {
-                        Trace.TraceWarning($"Custom hotkey '{binding.Gesture}': unknown builtin transform '{name}'");
-                        return;
-                    }
-                    output = Clipthrough.Services.TextTransformationService.Apply(tx, input);
-                    isHtmlOutput = Clipthrough.Services.TextTransformationService.ProducesHtml(tx);
-                    break;
-                case CustomHotkeyKind.AiPreset:
-                {
-                    if (_aiTransformService is null || !_aiTransformService.IsConfigured) return;
-                    var preset = _settingsService?.Current.AiPresets.FirstOrDefault(p =>
-                        string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
-                    if (preset is null)
-                    {
-                        Trace.TraceWarning($"Custom hotkey '{binding.Gesture}': AI preset '{name}' not found");
-                        return;
-                    }
-                    output = await _aiTransformService.TransformAsync(preset.Prompt, input);
-                    break;
-                }
-                case CustomHotkeyKind.InlinePrompt:
-                {
-                    if (_aiTransformService is null || !_aiTransformService.IsConfigured) return;
-                    if (string.IsNullOrWhiteSpace(name)) return;
-                    output = await _aiTransformService.TransformAsync(name, input);
-                    break;
-                }
-                default:
-                    Trace.TraceWarning($"Custom hotkey '{binding.Gesture}': unknown target kind '{parsed.Token}'");
-                    return;
-            }
-
-            if (string.IsNullOrEmpty(output)) return;
-
-            // Persist the transformed result as a new clip
-            var outputBytes = System.Text.Encoding.UTF8.GetBytes(output);
-            await _clipStoreService.CaptureAsync(new ClipCaptureRequest
-            {
-                ContentBytes = outputBytes,
-                ContentText = output,
-                ContentType = isHtmlOutput ? ContentType.RichText : ContentType.Text,
-                ContentFormat = isHtmlOutput ? ClipContentFormat.Html : ClipContentFormat.PlainText,
-                SourceApp = clip.SourceApp,
-                SourceAppPath = clip.SourceAppPath,
-                SourceAppIconBytes = clip.SourceAppIconBytes,
-                SourceWindowTitle = clip.SourceWindowTitle,
-                IncrementExistingCopyCount = false,
-                SourceClipId = clip.Id,
-                TransformKind = $"{parsed.Token}:{name}",
-                SkipPostInsertMaintenance = true,
-            });
-
-            _clipboardMonitorService.SuppressNext();
-            if (isHtmlOutput)
-            {
-                var plain = Presentation.ClipDisplayFormatter.RenderRichContent(output);
-                await _systemInteractionService.CopyRichContentAsync(output, plain, ClipContentFormat.Html);
-            }
-            else
-            {
-                await _systemInteractionService.CopyTextAsync(output);
+                return;
             }
             if (binding.PasteAfter)
             {
@@ -936,21 +878,23 @@ public partial class App : Application
 
         try
         {
-            var clip = await _clipStoreService.GetClipAtOffsetAsync(offset);
-            if (clip is null)
+            var outcome = await HotkeyClipActions.CopyClipAtOffsetAsync(
+                offset,
+                _clipStoreService,
+                _systemInteractionService,
+                _clipboardMonitorService,
+                _settingsService?.Current.MaxClipSizeBytes);
+            if (outcome == HotkeyClipActions.StepPasteOutcome.NoClip)
             {
                 _incrementalPasteOffset = Math.Max(0, offset - 1);
                 return;
             }
 
-            _clipboardMonitorService.SuppressNext();
-
-            if (!string.IsNullOrEmpty(clip.Content))
+            if (outcome != HotkeyClipActions.StepPasteOutcome.Copied)
             {
-                await _systemInteractionService.CopyTextAsync(clip.Content);
+                Trace.TraceWarning($"Incremental paste: the clip at offset {offset} could not be copied; not pasting.");
+                return;
             }
-
-            await _clipStoreService.MarkPastedAsync(clip.Id);
 
             // Give the target window a moment to become ready and the clipboard
             // change to propagate before we synthesize the paste keystroke.

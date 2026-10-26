@@ -362,9 +362,7 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     public bool IsImageClip => Clip.ContentType == ContentType.Image;
 
-    public bool CanTransform =>
-        (IsTextClip || Clip.ContentType == ContentType.Files)
-        && !string.IsNullOrEmpty(Clip.Content);
+    public bool CanTransform => TextTransformationService.CanTransform(Clip);
 
     // For image clips, ContentBytes may be null on metadata-only list reads (U12); use
     // ContentType to decide availability — full bytes load when the clip is opened. (U12)

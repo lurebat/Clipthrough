@@ -67,4 +67,62 @@ public sealed class ClipboardPipelineGuardTests
         Assert.Matches(HtmlByComparison, "var isHtml = transformation is Models.TextTransformation.BoxTableToHtml;");
         Assert.DoesNotMatch(HtmlByComparison, "TextTransformation.BoxTableToHtml => \"text table -> HTML\",");
     }
+
+    private static readonly Regex ClipContentCopiedAsText = new(
+        @"CopyTextAsync\(\s*\w+\.Content\s*\)",
+        RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// A stored clip goes to the clipboard through ClipClipboardWriter, which
+    /// writes it in its captured format and reports whether it got there.
+    /// Copying <c>clip.Content</c> as text instead pasted an image's source
+    /// window title and flattened rich text (F-12, and the PasteAndDelete
+    /// defect before it). The one deliberate exception is the paste-as-plain-
+    /// text hotkey, whose whole purpose is to drop the format.
+    /// </summary>
+    [Fact]
+    public void StoredClipsReachTheClipboardOnlyThroughTheSharedWriter()
+    {
+        var root = SourceRoot();
+        var offenders = Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
+            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
+                && !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(Path.GetFileName(path), "ClipClipboardWriter.cs", StringComparison.Ordinal))
+            .SelectMany(path =>
+            {
+                var text = File.ReadAllText(path);
+                return ClipContentCopiedAsText.Matches(text)
+                    .Where(match => !IsInsidePasteAsPlainText(path, text, match.Index))
+                    .Select(match => $"{Path.GetRelativePath(root, path)}: {match.Value}");
+            })
+            .ToArray();
+
+        Assert.True(
+            offenders.Length == 0,
+            "Copy stored clips with ClipClipboardWriter.TryCopyAsync:\n" + string.Join("\n", offenders));
+    }
+
+    private static bool IsInsidePasteAsPlainText(string path, string text, int index)
+    {
+        if (!string.Equals(Path.GetFileName(path), "App.axaml.cs", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var start = text.IndexOf("void PasteAsPlainText(", StringComparison.Ordinal);
+        if (start < 0 || index < start)
+        {
+            return false;
+        }
+
+        var next = text.IndexOf("\n    private ", start, StringComparison.Ordinal);
+        return next < 0 || index < next;
+    }
+
+    [Fact]
+    public void TheWriterGuardRecognisesARawContentCopy()
+    {
+        Assert.Matches(ClipContentCopiedAsText, "await _systemInteractionService.CopyTextAsync(clip.Content);");
+        Assert.DoesNotMatch(ClipContentCopiedAsText, "await interaction.CopyTextAsync(output);");
+    }
 }
