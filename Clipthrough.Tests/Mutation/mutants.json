@@ -2686,5 +2686,13 @@
     "find": "            await _systemInteractionService.OpenUrlAsync(url);\n            StatusText = $\"Opened {url}\";",
     "replace": "            await _systemInteractionService.OpenPathAsync(url);\n            StatusText = $\"Opened {url}\";",
     "filter": "FullyQualifiedName~OpenSourceUrl_UsesTheSchemeCheckedOpener"
+  },
+  {
+    "id": "update-feed-pinned-to-host-only",
+    "file": "Clipthrough/Services/System/UpdateService.cs",
+    "why": "F-38. A host-only allow-list accepts any GitHub account's releases as the update feed; the pin has to be to this repository's path.",
+    "find": "        if (!s_allowedFeedPrefixes.Any(prefix => (normalized + \"/\").StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))",
+    "replace": "        if (!s_allowedFeedPrefixes.Any(prefix => string.Equals(new Uri(prefix).Host, uri.Host, StringComparison.OrdinalIgnoreCase)))",
+    "filter": "FullyQualifiedName~UpdateServiceTests.ResolveFeedUrl_AFeedOutsideThisRepositoryIsRejected"
   }
 ]
