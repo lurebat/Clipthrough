@@ -94,6 +94,7 @@ Measured at 20k clips, Alphabetical went 118 ms (no new indexes) -> 206 ms
 (three of the four) -> 0.2 ms (all four).
 
 - `idx_clips_default_order` — `(pinned_at IS NULL, pinned_at DESC, COALESCE(last_copied_at, captured_at) DESC, id DESC)`. **The primary list-view ordering**; serves `MostRecent` and `BestMatching`.
+- `idx_clips_type_default_order` — `(content_type, pinned_at IS NULL, pinned_at DESC, COALESCE(last_copied_at, captured_at) DESC, id DESC)`. Serves the type dropdown with `MostRecent` and nothing typed (F-09). With a type filter the other sorts also start here and sort the remainder; benchmark them (PerfProbes P1) rather than assume.
 - `idx_clips_oldest_order` — same, ASC. Serves `OldestFirst`.
 - `idx_clips_paste_order` — `(..., paste_count DESC, id DESC)`. Serves `MostPasted`.
 - `idx_clips_size_order` — `(..., byte_size DESC, id DESC)`. Serves `LargestFirst`.

@@ -2694,5 +2694,13 @@
     "find": "        var candidates = new List<ClipEmbeddingCandidate>(batchSize);\n",
     "replace": "        await using var early = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);\n        var candidates = new List<ClipEmbeddingCandidate>(batchSize);\n",
     "filter": "FullyQualifiedName~EmbeddingClaimIndexTests.AClaimWithNothingPending_DoesNotWaitForTheWriteLock"
+  },
+  {
+    "id": "no-type-prefixed-recency-index",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "F-09. Without a type-prefixed index the type dropdown sorts every clip of that type: 1.5-1.7 s at 60k, 9.7 s encrypted.",
+    "find": "        CREATE INDEX IF NOT EXISTS idx_clips_type_default_order ON clips(\n            content_type,\n",
+    "replace": "        CREATE INDEX IF NOT EXISTS idx_clips_type_default_order ON clips(\n            byte_size,\n",
+    "filter": "FullyQualifiedName~TypeFilter_MostRecent_WalksATypePrefixedIndexWithoutSorting"
   }
 ]

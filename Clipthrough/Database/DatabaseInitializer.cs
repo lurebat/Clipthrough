@@ -159,6 +159,27 @@ public sealed class DatabaseInitializer
             COALESCE(last_copied_at, captured_at) DESC,
             id DESC
         );
+        -- The type dropdown with nothing typed (F-09). Every index above leads
+        -- with the pinned prefix, so "content_type = ?" could only go through
+        -- idx_clips_content_type and then sort every clip of that type, reading
+        -- each image's payload on the way: 1.5-1.7 s at 60k clips, 9.7 s
+        -- encrypted. Leading with the type turns the filter into a range of
+        -- this index already in MostRecent order.
+        --
+        -- The other sorts with a type filter now start here too (EXPLAIN:
+        -- "USE TEMP B-TREE FOR RIGHT PART OF ORDER BY") instead of from
+        -- idx_clips_content_type. Both read every row of the type; this one in
+        -- recency order rather than rowid order, and the two are close to the
+        -- same order because ids are assigned at capture. That is the pattern
+        -- the complete-set note warns about, so the type-filtered sorts are
+        -- benchmarked (PerfProbes P1) rather than assumed equal.
+        CREATE INDEX IF NOT EXISTS idx_clips_type_default_order ON clips(
+            content_type,
+            (pinned_at IS NULL),
+            pinned_at DESC,
+            COALESCE(last_copied_at, captured_at) DESC,
+            id DESC
+        );
         CREATE INDEX IF NOT EXISTS idx_clips_oldest_order ON clips(
             (pinned_at IS NULL),
             pinned_at DESC,

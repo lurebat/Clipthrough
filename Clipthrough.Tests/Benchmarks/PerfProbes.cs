@@ -111,6 +111,11 @@ public sealed class PerfProbes
         await Run("blank Alphabetical", new ClipSearchFilters { SortOption = ClipSortOption.Alphabetical });
         await Run("blank Image filter", new ClipSearchFilters { ContentTypes = [ContentType.Image] });
         await Run("blank Text filter", new ClipSearchFilters { ContentTypes = [ContentType.Text] });
+        await Run("blank Image filter Alphabetical", new ClipSearchFilters { ContentTypes = [ContentType.Image], SortOption = ClipSortOption.Alphabetical });
+        await Run("blank Text filter Alphabetical", new ClipSearchFilters { ContentTypes = [ContentType.Text], SortOption = ClipSortOption.Alphabetical });
+        await Run("blank Text filter MostPasted", new ClipSearchFilters { ContentTypes = [ContentType.Text], SortOption = ClipSortOption.MostPasted });
+        await Run("blank Text filter LargestFirst", new ClipSearchFilters { ContentTypes = [ContentType.Text], SortOption = ClipSortOption.LargestFirst });
+        await Run("blank Text filter OldestFirst", new ClipSearchFilters { ContentTypes = [ContentType.Text], SortOption = ClipSortOption.OldestFirst });
         await Run("FTS common 'invoice'", new ClipSearchFilters { SearchText = "invoice" });
         await Run("FTS 2 words 'invoice meeting'", new ClipSearchFilters { SearchText = "invoice meeting" });
         await Run("FTS no-match 'qqzzxx'", new ClipSearchFilters { SearchText = "qqzzxx" });
