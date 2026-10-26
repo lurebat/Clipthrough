@@ -46,12 +46,10 @@ public static class AppText
         [nameof(CheckForUpdateMenuHeader)] = "_Check for updates",
         [nameof(CheckForUpdateButtonLabel)] = "Check for updates",
         [nameof(CheckingForUpdateStatus)] = "Checking for updates...",
-        [nameof(UpdateAvailableTitle)] = "Update available",
         [nameof(UpdateCheckCompleteTitle)] = "Update check complete",
         [nameof(UpdateCheckCompleteStatus)] = "Update check complete.",
         [nameof(UpdateCheckFailedTitle)] = "Update check failed",
         [nameof(SettingsTitleText)] = "Settings",
-        [nameof(SettingsDescriptionText)] = "Adjust shortcuts, tray behavior, storage, sensitivity rules, retention, and archive capacity.",
         [nameof(SettingsLocalHotkeysTitle)] = "Local shortcuts",
         [nameof(SettingsGlobalHotkeyTitle)] = "Global shortcuts",
         [nameof(SettingsStorageTitle)] = "Database storage",
@@ -125,7 +123,6 @@ public static class AppText
         [nameof(CompareNeedsDiffToolStatus)] = "Set an external diff tool path in Settings to compare clips.",
         [nameof(CompareOpenedStatus)] = "Opened diff tool for comparison.",
         [nameof(SettingsThemeModeLabel)] = "Theme",
-        [nameof(SettingsSearchSortByDateLabel)] = "Sort search results by date instead of relevance",
         [nameof(OpenedInEditorStatus)] = "Opened in editor",
         [nameof(SettingsHintText)] = "Enter shortcuts in forms like Ctrl+Shift+R, Ctrl+Shift+F, or F8. Disable any shortcut you do not want active. Startup registration applies on Windows.",
         [nameof(SettingsStorageHintText)] = "The path is stored outside the clip database so you can move or encrypt it. Leave the password empty to keep SQLite unencrypted.",
@@ -135,9 +132,6 @@ public static class AppText
         [nameof(SettingsConfirmEncryptionPasswordConfirm)] = "Save plaintext",
         [nameof(SettingsConfirmEncryptionPasswordCancel)] = "Cancel",
         [nameof(StartupErrorTitle)] = "Clipthrough could not start",
-        [nameof(StartupErrorBody)] = "The clip library failed to load. Your data may be intact - check the log for details.",
-        [nameof(StartupErrorOpenLogs)] = "Open logs folder",
-        [nameof(StartupErrorOpenDatabase)] = "Open database folder",
         [nameof(WelcomeTitleText)] = "Welcome to Clipthrough",
         [nameof(WelcomeDescriptionText)] = "Set up your clipboard library before the app starts capturing. You can change these options later in Settings.",
         [nameof(WelcomeSaveButtonLabel)] = "Create library",
@@ -158,8 +152,6 @@ public static class AppText
         [nameof(NotAvailable)] = "—",
         [nameof(LoadingStatus)] = "Loading…",
         [nameof(WaitingForFirstCapture)] = "Waiting for first capture",
-        [nameof(RemoveFavorite)] = "Remove Favorite",
-        [nameof(AddFavorite)] = "Add Favorite",
         [nameof(SensitiveClipCopiedTitle)] = "Sensitive clip copied",
         [nameof(SensitiveClipCopiedMessage)] = "This clip matched one or more sensitivity rules. Review it before sharing.",
         [nameof(UnmarkSensitiveButtonLabel)] = "Unsevere",
@@ -240,11 +232,9 @@ public static class AppText
         [nameof(ClipCaptureFailedTitle)] = "Clip capture failed",
         [nameof(SettingsLoadFailedTitle)] = "Settings could not be read",
         [nameof(StorageLoadFailedTitle)] = "Library location could not be read",
-        [nameof(ClipCaptureFailedUnsupportedPayload)] = "The clipboard payload was not a supported text, rich text, image, or file format.",
         [nameof(ClipCaptureFailedEmptyPayload)] = "The clipboard payload was empty.",
         [nameof(ClipDragImportTitle)] = "Imported by drag",
         [nameof(ClipDragImportBadgeLabel)] = "Dropped",
-        [nameof(ClipDragImportDropHint)] = "Drop files, images, or text to import",
         ["ContentType.Text"] = "Text",
         ["ContentType.Image"] = "Image",
         ["ContentType.RichText"] = "Rich text",
@@ -369,12 +359,10 @@ public static class AppText
     public static string CheckForUpdateMenuHeader => Text(nameof(CheckForUpdateMenuHeader));
     public static string CheckForUpdateButtonLabel => Text(nameof(CheckForUpdateButtonLabel));
     public static string CheckingForUpdateStatus => Text(nameof(CheckingForUpdateStatus));
-    public static string UpdateAvailableTitle => Text(nameof(UpdateAvailableTitle));
     public static string UpdateCheckCompleteTitle => Text(nameof(UpdateCheckCompleteTitle));
     public static string UpdateCheckCompleteStatus => Text(nameof(UpdateCheckCompleteStatus));
     public static string UpdateCheckFailedTitle => Text(nameof(UpdateCheckFailedTitle));
     public static string SettingsTitleText => Text(nameof(SettingsTitleText));
-    public static string SettingsDescriptionText => Text(nameof(SettingsDescriptionText));
     public static string SettingsLocalHotkeysTitle => Text(nameof(SettingsLocalHotkeysTitle));
     public static string SettingsGlobalHotkeyTitle => Text(nameof(SettingsGlobalHotkeyTitle));
     public static string SettingsStorageTitle => Text(nameof(SettingsStorageTitle));
@@ -454,7 +442,6 @@ public static class AppText
     public static string CompareNeedsDiffToolStatus => Text(nameof(CompareNeedsDiffToolStatus));
     public static string CompareOpenedStatus => Text(nameof(CompareOpenedStatus));
     public static string SettingsThemeModeLabel => Text(nameof(SettingsThemeModeLabel));
-    public static string SettingsSearchSortByDateLabel => Text(nameof(SettingsSearchSortByDateLabel));
     public static string OpenedInEditorStatus => Text(nameof(OpenedInEditorStatus));
     public static string SettingsHintText => Text(nameof(SettingsHintText));
     public static string SettingsStorageHintText => Text(nameof(SettingsStorageHintText));
@@ -464,9 +451,6 @@ public static class AppText
     public static string SettingsConfirmEncryptionPasswordConfirm => Text(nameof(SettingsConfirmEncryptionPasswordConfirm));
     public static string SettingsConfirmEncryptionPasswordCancel => Text(nameof(SettingsConfirmEncryptionPasswordCancel));
     public static string StartupErrorTitle => Text(nameof(StartupErrorTitle));
-    public static string StartupErrorBody => Text(nameof(StartupErrorBody));
-    public static string StartupErrorOpenLogs => Text(nameof(StartupErrorOpenLogs));
-    public static string StartupErrorOpenDatabase => Text(nameof(StartupErrorOpenDatabase));
     public static string WelcomeTitleText => Text(nameof(WelcomeTitleText));
     public static string WelcomeDescriptionText => Text(nameof(WelcomeDescriptionText));
     public static string WelcomeSaveButtonLabel => Text(nameof(WelcomeSaveButtonLabel));
@@ -487,8 +471,6 @@ public static class AppText
     public static string NotAvailable => Text(nameof(NotAvailable));
     public static string LoadingStatus => Text(nameof(LoadingStatus));
     public static string WaitingForFirstCapture => Text(nameof(WaitingForFirstCapture));
-    public static string RemoveFavorite => Text(nameof(RemoveFavorite));
-    public static string AddFavorite => Text(nameof(AddFavorite));
     public static string SensitiveClipCopiedTitle => Text(nameof(SensitiveClipCopiedTitle));
     public static string SensitiveClipCopiedMessage => Text(nameof(SensitiveClipCopiedMessage));
     public static string UnmarkSensitiveButtonLabel => Text(nameof(UnmarkSensitiveButtonLabel));
@@ -589,8 +571,6 @@ public static class AppText
 
     public static string ClipDragImportBadgeLabel => Text(nameof(ClipDragImportBadgeLabel));
 
-    public static string ClipDragImportDropHint => Text(nameof(ClipDragImportDropHint));
-    public static string ClipCaptureFailedUnsupportedPayload => Text(nameof(ClipCaptureFailedUnsupportedPayload));
     public static string ClipCaptureFailedEmptyPayload => Text(nameof(ClipCaptureFailedEmptyPayload));
 
     public static void SetCulture(CultureInfo culture)

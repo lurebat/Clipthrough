@@ -49,7 +49,6 @@ public partial class App : Application
     private IAppNotificationService? _notificationService;
     private IUpdateService? _updateService;
     private IAiTransformService? _aiTransformService;
-    private Clipthrough.Services.Search.IEmbeddingWorker? _embeddingWorker;
     private Clipthrough.Services.Search.ISemanticIndexCoordinator? _semanticIndexCoordinator;
     private IDisposable? _notificationSubscription;
     private bool _isExitRequested;
@@ -110,8 +109,7 @@ public partial class App : Application
                 .ObserveOn(RxSchedulers.MainThreadScheduler)
                 .Subscribe(OnNotificationPublished);
 
-            _embeddingWorker = Services.GetRequiredService<Clipthrough.Services.Search.IEmbeddingWorker>();
-            // Don't start the embedding worker here — it's started in StartDatabaseAsync
+                // Don't start the embedding worker here — it's started in StartDatabaseAsync
             // after the DB is initialized and password is set. Connecting the pipeline is
             // independent of that: the coordinator only relays events.
             _semanticIndexCoordinator = Services.GetRequiredService<Clipthrough.Services.Search.ISemanticIndexCoordinator>();
@@ -244,7 +242,6 @@ public partial class App : Application
         services.AddSingleton<IClipStoreService, ClipStoreService>();
         services.AddSingleton<IDatabaseBackupService, DatabaseBackupService>();
         services.AddSingleton<IClipAngelImportService, ClipAngelImportService>();
-        services.AddSingleton<IClipSampleDataService, ClipSampleDataService>();
         services.AddSingleton<IClipboardMonitorService, ClipboardMonitorService>();
         services.AddSingleton<IDragDropService, DragDropService>();
         services.AddSingleton<ICopilotAuthService, CopilotAuthService>();

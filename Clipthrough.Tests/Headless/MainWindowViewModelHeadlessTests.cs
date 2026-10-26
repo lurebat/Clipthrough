@@ -67,7 +67,6 @@ public sealed partial class MainWindowViewModelHeadlessTests
         using var viewModel = new MainWindowViewModel(
             clipStore,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -284,7 +283,6 @@ public sealed partial class MainWindowViewModelHeadlessTests
         using var viewModel = new MainWindowViewModel(
             gatedStore,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -1751,7 +1749,6 @@ public sealed partial class MainWindowViewModelHeadlessTests
         return new MainWindowViewModel(
             clipStore ?? scope.ClipStoreService,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,

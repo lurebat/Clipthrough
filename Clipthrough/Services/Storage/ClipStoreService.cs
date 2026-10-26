@@ -2187,20 +2187,6 @@ public sealed class ClipStoreService : IClipStoreService
         }
     }
 
-    private static async Task<int> ExecuteCountAsync(SqliteConnection connection, string sql, ClipSearchFilters filters, bool hasSearch, CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        if (hasSearch && !filters.UseRegex)
-        {
-            command.Parameters.AddWithValue("$search", BuildFtsExpression(filters.SearchText, filters.UseFuzzy));
-        }
-
-        AddContentTypeParameters(command, filters);
-
-        var scalar = await command.ExecuteScalarAsync(cancellationToken);
-        return Convert.ToInt32(scalar, CultureInfo.InvariantCulture);
-    }
 
     private static void AddContentTypeParameters(SqliteCommand command, ClipSearchFilters filters)
     {
@@ -2258,22 +2244,6 @@ public sealed class ClipStoreService : IClipStoreService
         return scalar is DBNull or null ? null : Convert.ToString(scalar, CultureInfo.InvariantCulture);
     }
 
-    private static async Task<string?> ExecuteScalarStringAsync(
-        SqliteConnection connection,
-        string sql,
-        CancellationToken cancellationToken,
-        params (string Name, object Value)[] parameters)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        foreach (var (name, value) in parameters)
-        {
-            command.Parameters.AddWithValue(name, value);
-        }
-
-        var scalar = await command.ExecuteScalarAsync(cancellationToken);
-        return scalar is DBNull or null ? null : Convert.ToString(scalar, CultureInfo.InvariantCulture);
-    }
 
     /// <summary>
     /// Pinning or favoriting a clip is an explicit "keep this" from the user, so

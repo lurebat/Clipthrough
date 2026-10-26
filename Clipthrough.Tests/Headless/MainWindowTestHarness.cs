@@ -84,7 +84,6 @@ internal sealed class MainWindowTestHarness : IDisposable
         var viewModel = new MainWindowViewModel(
             scope.ClipStoreService,
             new TestClipboardMonitorService(),
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,

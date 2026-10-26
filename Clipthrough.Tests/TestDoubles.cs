@@ -279,10 +279,6 @@ internal sealed class TestClipboardMonitorService : IClipboardMonitorService
     public void SetCaptureBusy(bool isBusy) => _captureBusy.OnNext(isBusy);
 }
 
-internal sealed class TestClipSampleDataService : IClipSampleDataService
-{
-    public Task SeedAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-}
 
 internal sealed class TestNotificationService : IAppNotificationService
 {

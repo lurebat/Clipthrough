@@ -48,7 +48,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly IClipStoreService _clipStoreService;
     private readonly IClipAngelImportService _clipAngelImportService;
     private readonly IClipboardMonitorService _clipboardMonitorService;
-    private readonly IClipSampleDataService _clipSampleDataService;
     private readonly ISettingsService _settingsService;
     private readonly ISystemInteractionService _systemInteractionService;
     private readonly IStorageOptionsService _storageOptionsService;
@@ -193,12 +192,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _editedClipSelectionLength;
     private long? _checkedSelectionAnchorId;
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, IClipAngelImportService? clipAngelImportService = null, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null, Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null, ICopilotAuthService? copilotAuthService = null, IUpdateService? updateService = null, IDatabaseBackupService? databaseBackupService = null, IDragDropService? dragDropService = null)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, IClipAngelImportService? clipAngelImportService = null, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null, Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null, ICopilotAuthService? copilotAuthService = null, IUpdateService? updateService = null, IDatabaseBackupService? databaseBackupService = null, IDragDropService? dragDropService = null)
     {
         _clipStoreService = clipStoreService;
         _clipAngelImportService = clipAngelImportService ?? new ClipAngelImportService(clipStoreService);
         _clipboardMonitorService = clipboardMonitorService;
-        _clipSampleDataService = clipSampleDataService;
         _settingsService = settingsService;
         _systemInteractionService = systemInteractionService;
         _storageOptionsService = storageOptionsService;
@@ -296,7 +294,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         JumpToTopCommand = ReactiveCommand.Create(() => { if (Clips.Count > 0) SelectedClip = Clips[0]; });
         OpenHelpCommand = ReactiveCommand.Create(OpenHelp);
         OpenAboutCommand = ReactiveCommand.Create(OpenAbout);
-        Maintenance = new DatabaseMaintenanceViewModel(databaseBackupService ?? new DatabaseBackupService(storageOptionsService, null, null, null), _storageOptionsService, _systemInteractionService, _notificationService, _clipboardMonitorService, _backgroundOcrQueue, _embeddingWorker, ReportError);
+        Maintenance = new DatabaseMaintenanceViewModel(databaseBackupService ?? new DatabaseBackupService(storageOptionsService, null, null, null), _storageOptionsService, _systemInteractionService, _notificationService, ReportError);
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
         SaveSettingsCommand = ReactiveCommand.CreateFromTask(SaveSettingsAsync);
         BrowseDatabasePathCommand = ReactiveCommand.CreateFromTask<Window?>(BrowseDatabasePathAsync);
