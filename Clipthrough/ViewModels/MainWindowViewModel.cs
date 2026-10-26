@@ -3058,7 +3058,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         try
         {
-            await _systemInteractionService.OpenPathAsync(url);
+            // OpenUrlAsync, not OpenPathAsync: a source URL comes from captured
+            // or imported content, and OpenPathAsync ShellExecutes anything - a
+            // \\host\share path leaked NetNTLM over SMB, a .cmd ran - while
+            // never opening an actual web link (F-20). OpenUrlAsync admits
+            // http, https and mailto only.
+            await _systemInteractionService.OpenUrlAsync(url);
             StatusText = $"Opened {url}";
         }
         catch (Exception ex)

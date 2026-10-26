@@ -421,14 +421,22 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
         return Task.CompletedTask;
     }
 
+    /// <summary>How many times OpenPathAsync ran - it ShellExecutes anything.</summary>
+    public int OpenPathCount { get; private set; }
+
+    /// <summary>The last URL given to OpenUrlAsync, the scheme-checked opener.</summary>
+    public string? LastOpenedUrl { get; private set; }
+
     public Task OpenPathAsync(string path)
     {
+        OpenPathCount++;
         LastOpenedPath = path;
         return Task.CompletedTask;
     }
 
     public Task OpenUrlAsync(string url)
     {
+        LastOpenedUrl = url;
         LastOpenedPath = url;
         return Task.CompletedTask;
     }

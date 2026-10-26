@@ -2678,5 +2678,13 @@
     "find": "        var tokens = input.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);",
     "replace": "        var tokens = input.Split('\\n', StringSplitOptions.RemoveEmptyEntries);",
     "filter": "FullyQualifiedName~WhitespaceToJsonArray"
+  },
+  {
+    "id": "source-url-opened-as-a-path",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-20. Opening a clip's source URL with OpenPathAsync ShellExecutes whatever the content says - a UNC path leaks NetNTLM, a local script runs - and never opens a real https link.",
+    "find": "            await _systemInteractionService.OpenUrlAsync(url);\n            StatusText = $\"Opened {url}\";",
+    "replace": "            await _systemInteractionService.OpenPathAsync(url);\n            StatusText = $\"Opened {url}\";",
+    "filter": "FullyQualifiedName~OpenSourceUrl_UsesTheSchemeCheckedOpener"
   }
 ]
