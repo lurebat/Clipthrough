@@ -125,6 +125,7 @@ public static class AppText
         [nameof(CompareNeedsDiffToolStatus)] = "Set an external diff tool path in Settings to compare clips.",
         [nameof(CompareOpenedStatus)] = "Opened diff tool for comparison.",
         [nameof(SettingsThemeModeLabel)] = "Theme",
+        [nameof(ClipAngelImportUnexpectedSchema)] = "This ClipAngel database was not imported: its structure is not what ClipAngel writes (Clips is not a plain table, or the file contains views or triggers).",
         [nameof(SettingsSearchSortByDateLabel)] = "Sort search results by date instead of relevance",
         [nameof(OpenedInEditorStatus)] = "Opened in editor",
         [nameof(SettingsHintText)] = "Enter shortcuts in forms like Ctrl+Shift+R, Ctrl+Shift+F, or F8. Disable any shortcut you do not want active. Startup registration applies on Windows.",
@@ -449,6 +450,7 @@ public static class AppText
     public static string CompareNeedsDiffToolStatus => Text(nameof(CompareNeedsDiffToolStatus));
     public static string CompareOpenedStatus => Text(nameof(CompareOpenedStatus));
     public static string SettingsThemeModeLabel => Text(nameof(SettingsThemeModeLabel));
+    public static string ClipAngelImportUnexpectedSchema => Text(nameof(ClipAngelImportUnexpectedSchema));
     public static string SettingsSearchSortByDateLabel => Text(nameof(SettingsSearchSortByDateLabel));
     public static string OpenedInEditorStatus => Text(nameof(OpenedInEditorStatus));
     public static string SettingsHintText => Text(nameof(SettingsHintText));

@@ -2694,5 +2694,21 @@
     "find": "        if (!s_allowedFeedPrefixes.Any(prefix => (normalized + \"/\").StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))",
     "replace": "        if (!s_allowedFeedPrefixes.Any(prefix => string.Equals(new Uri(prefix).Host, uri.Host, StringComparison.OrdinalIgnoreCase)))",
     "filter": "FullyQualifiedName~UpdateServiceTests.ResolveFeedUrl_AFeedOutsideThisRepositoryIsRejected"
+  },
+  {
+    "id": "clipangel-accepts-any-clips-object",
+    "file": "Clipthrough/Services/Storage/ClipAngelImportService.cs",
+    "why": "F-21. Without requiring Clips to be a real table, a crafted file decides what the import reads - a view runs the author's SQL on the bundled SQLite.",
+    "find": "            if (!string.Equals(clipsType, \"table\", StringComparison.Ordinal) || viewsAndTriggers != 0)",
+    "replace": "            if (clipsType == \"view\" && viewsAndTriggers != 0)",
+    "filter": "FullyQualifiedName~ClipAngelImportHardeningTests"
+  },
+  {
+    "id": "clipangel-allows-views-and-triggers",
+    "file": "Clipthrough/Services/Storage/ClipAngelImportService.cs",
+    "why": "F-21. A real ClipAngel database has no views or triggers; allowing them lets attacker-written SQL run during the import.",
+    "find": "            if (!string.Equals(clipsType, \"table\", StringComparison.Ordinal) || viewsAndTriggers != 0)",
+    "replace": "            if (!string.Equals(clipsType, \"table\", StringComparison.Ordinal) || viewsAndTriggers < 0)",
+    "filter": "FullyQualifiedName~ClipAngelImportHardeningTests.ATriggerAnywhereInTheSchema"
   }
 ]

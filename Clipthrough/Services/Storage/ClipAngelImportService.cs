@@ -41,17 +41,8 @@ public sealed class ClipAngelImportService : IClipAngelImportService
         var temp = await DecryptToTempAsync(dbPath, cancellationToken).ConfigureAwait(false);
         try
         {
-            await using var conn = new SqliteConnection($"Data Source={temp};Mode=ReadOnly");
-            conn.StateChange += (_, e) =>
-            {
-                if (e.CurrentState == System.Data.ConnectionState.Open)
-                {
-                    using var cmd = conn.CreateCommand();
-                    cmd.CommandText = "PRAGMA busy_timeout = 5000;";
-                    cmd.ExecuteNonQuery();
-                }
-            };
-            await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await using var conn = await OpenValidatedAsync(temp, cancellationToken).ConfigureAwait(false);
+
 
             int total;
             await using (var cmd = conn.CreateCommand())
@@ -110,17 +101,8 @@ public sealed class ClipAngelImportService : IClipAngelImportService
 
         try
         {
-            await using var conn = new SqliteConnection($"Data Source={temp};Mode=ReadOnly");
-            conn.StateChange += (_, e) =>
-            {
-                if (e.CurrentState == System.Data.ConnectionState.Open)
-                {
-                    using var cmd = conn.CreateCommand();
-                    cmd.CommandText = "PRAGMA busy_timeout = 5000;";
-                    cmd.ExecuteNonQuery();
-                }
-            };
-            await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await using var conn = await OpenValidatedAsync(temp, cancellationToken).ConfigureAwait(false);
+
 
             int total;
             await using (var count = conn.CreateCommand())
@@ -338,6 +320,55 @@ public sealed class ClipAngelImportService : IClipAngelImportService
     // ----------------------------- Decryption -----------------------------
 
     [SupportedOSPlatform("windows")]
+    /// <summary>
+    /// Opens the decrypted ClipAngel database for reading, and refuses it unless
+    /// <c>Clips</c> is a real table and the schema holds no views or triggers.
+    /// </summary>
+    /// <remarks>
+    /// The file comes from whoever handed it to the user, and its encryption
+    /// uses a password hard-coded in ClipAngel, so anyone can author one. A
+    /// <c>Clips</c> view ran SQL of the author's choosing on every query here -
+    /// on the bundled SQLite 3.39.2, below the CVE-2025-6965 fix - and decided
+    /// every imported field, a source URL included (F-21). A real ClipAngel
+    /// database has neither views nor triggers. <c>trusted_schema = OFF</c>
+    /// keeps schema-defined SQL from calling functions with side effects, and
+    /// <c>query_only</c> keeps the connection from writing anything at all.
+    /// </remarks>
+    private static async Task<SqliteConnection> OpenValidatedAsync(string path, CancellationToken cancellationToken)
+    {
+        var conn = new SqliteConnection($"Data Source={path};Mode=ReadOnly;Pooling=False");
+        try
+        {
+            await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await using (var pragmas = conn.CreateCommand())
+            {
+                pragmas.CommandText = "PRAGMA busy_timeout = 5000; PRAGMA trusted_schema = OFF; PRAGMA query_only = ON;";
+                await pragmas.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            string? clipsType;
+            long viewsAndTriggers;
+            await using (var schema = conn.CreateCommand())
+            {
+                schema.CommandText = "SELECT type FROM sqlite_schema WHERE name = 'Clips' COLLATE NOCASE;";
+                clipsType = await schema.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as string;
+                schema.CommandText = "SELECT COUNT(*) FROM sqlite_schema WHERE type IN ('view', 'trigger');";
+                viewsAndTriggers = Convert.ToInt64(await schema.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) ?? 0L, CultureInfo.InvariantCulture);
+            }
+
+            if (!string.Equals(clipsType, "table", StringComparison.Ordinal) || viewsAndTriggers != 0)
+            {
+                throw new InvalidDataException(Localization.AppText.ClipAngelImportUnexpectedSchema);
+            }
+
+            return conn;
+        }
+        catch
+        {
+            await conn.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
     private static async Task<string> DecryptToTempAsync(string src, CancellationToken cancellationToken)
     {
         if (!File.Exists(src))
@@ -411,7 +442,7 @@ public sealed class ClipAngelImportService : IClipAngelImportService
     }
 
     [SupportedOSPlatform("windows")]
-    private static byte[] Rc4DecryptPage(byte[] page)
+    internal static byte[] Rc4DecryptPage(byte[] page)
     {
         // Mirrors the SDS 1.0.79 codec: CryptDeriveKey(CALG_RC4, SHA1(password))
         // under Microsoft Enhanced Cryptographic Provider v1.0 (PROV_RSA_FULL).
