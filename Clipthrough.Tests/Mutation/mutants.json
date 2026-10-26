@@ -2750,5 +2750,13 @@
     "find": "                    t = t.Replace(token, value, StringComparison.Ordinal);\n",
     "replace": "                    t = value.Length < 0 ? t.Replace(token, value, StringComparison.Ordinal) : t;\n",
     "filter": "FullyQualifiedName~SystemInteractionHelpersTests"
+  },
+  {
+    "id": "search-history-unbounded",
+    "file": "Clipthrough/Services/Search/SearchHistoryService.cs",
+    "why": "F-45. Search history is capped at the newest 50 queries; the existing tests saved at most three, so removing the cap survived every test.",
+    "find": "        pruneCommand.Parameters.AddWithValue(\"$limit\", MaxHistoryEntries);\n",
+    "replace": "        pruneCommand.Parameters.AddWithValue(\"$limit\", MaxHistoryEntries * 1000);\n",
+    "filter": "FullyQualifiedName~SearchHistoryCapTests"
   }
 ]
