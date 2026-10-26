@@ -81,7 +81,12 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
             // even while other connections are reading or writing.
             var tempPath = todayPath + ".tmp";
             await Task.Run(
-                () => SqliteDatabaseCopier.CopyDatabase(dbPath, _storageOptionsService.Current.DatabasePassword, tempPath),
+                () =>
+                {
+                    var password = _storageOptionsService.Current.DatabasePassword;
+                    SqliteDatabaseCopier.CopyDatabase(dbPath, password, tempPath);
+                    PurgeSensitiveClips(tempPath, password);
+                },
                 cancellationToken).ConfigureAwait(false);
             File.Move(tempPath, todayPath, overwrite: true);
             Trace.TraceInformation($"Database backup written: {todayPath}");
@@ -92,6 +97,86 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         {
             Trace.TraceWarning($"Database backup failed: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Removes sensitive clips - with their full-text entries, vectors and
+    /// rule matches - from a backup copy before it is kept (F-19, OD-4a).
+    ///
+    /// A backup is retained for a week, so a sensitive clip copied into one
+    /// outlived its lifetime there no matter when the live library expired it.
+    /// Restoring a backup therefore brings back no sensitive clips; that is the
+    /// owner's choice recorded as OD-4a.
+    ///
+    /// Deleting the rows is not enough on its own: their bytes stay in free
+    /// pages and the full-text index keeps the original segments until a merge.
+    /// So the index is optimized and the file vacuumed whenever anything was
+    /// removed. A copy whose schema has no <c>is_sensitive</c> column is left
+    /// alone.
+    /// </summary>
+    internal static int PurgeSensitiveClips(string path, string? password)
+    {
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = SqliteOpenMode.ReadWrite,
+            Pooling = false,
+            // The schema's ON DELETE CASCADE is what removes the vectors and
+            // rule matches; SQLite only honours it with foreign keys on.
+            ForeignKeys = true,
+        };
+        if (!string.IsNullOrEmpty(password))
+        {
+            builder.Password = password;
+        }
+
+        using var connection = new SqliteConnection(builder.ToString());
+        connection.StateChange += ApplyBusyTimeoutOnOpen;
+        connection.Open();
+
+        if (!HasColumn(connection, "clips", "is_sensitive"))
+        {
+            return 0;
+        }
+
+        var removed = Execute(connection, "DELETE FROM clips WHERE is_sensitive = 1;");
+
+        if (removed > 0)
+        {
+            if (HasTable(connection, "clips_fts"))
+            {
+                Execute(connection, "INSERT INTO clips_fts(clips_fts) VALUES('optimize');");
+            }
+
+            Execute(connection, "VACUUM;");
+            Trace.TraceInformation($"Removed {removed} sensitive clip(s) from the backup copy.");
+        }
+
+        return removed;
+    }
+
+    private static int Execute(SqliteConnection connection, string sql)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return command.ExecuteNonQuery();
+    }
+
+    private static bool HasTable(SqliteConnection connection, string table)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM sqlite_master WHERE name = $name AND type = 'table';";
+        command.Parameters.AddWithValue("$name", table);
+        return command.ExecuteScalar() is not null;
+    }
+
+    private static bool HasColumn(SqliteConnection connection, string table, string column)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM pragma_table_info($table) WHERE name = $column;";
+        command.Parameters.AddWithValue("$table", table);
+        command.Parameters.AddWithValue("$column", column);
+        return command.ExecuteScalar() is not null;
     }
 
     private static void ApplyBusyTimeoutOnOpen(object? sender, StateChangeEventArgs e)

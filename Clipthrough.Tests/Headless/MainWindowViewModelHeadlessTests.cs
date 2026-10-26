@@ -1721,7 +1721,8 @@ public sealed partial class MainWindowViewModelHeadlessTests
         Clipthrough.Services.IOcrService? ocrService = null,
         IClipStoreService? clipStore = null,
         Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null,
-        Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null)
+        Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null,
+        Clipthrough.Services.IDatabaseBackupService? databaseBackupService = null)
     {
         return new MainWindowViewModel(
             clipStore ?? scope.ClipStoreService,
@@ -1743,6 +1744,7 @@ public sealed partial class MainWindowViewModelHeadlessTests
             scope.DatabaseInitializer,
             semanticSearchService: semanticSearchService,
             embeddingWorker: embeddingWorker,
+            databaseBackupService: databaseBackupService,
             dragDropService: dragDropService);
     }
 

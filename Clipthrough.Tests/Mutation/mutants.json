@@ -252,8 +252,8 @@
     "why": "Reverts the daily backup to a raw file copy. A checkpoint that cannot finish leaves committed frames in the WAL, and the copied .db then opens as 'database disk image is malformed' - an unopenable backup nobody notices until they need it.",
     "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
     "filter": "DatabaseBackupServiceTests",
-    "find": "                () => SqliteDatabaseCopier.CopyDatabase(dbPath, _storageOptionsService.Current.DatabasePassword, tempPath),",
-    "replace": "                () => File.Copy(dbPath, tempPath, overwrite: true),"
+    "find": "                    SqliteDatabaseCopier.CopyDatabase(dbPath, password, tempPath);",
+    "replace": "                    File.Copy(dbPath, tempPath, overwrite: true);"
   },
   {
     "id": "move-copies-the-file-instead-of-the-database",
@@ -2782,5 +2782,37 @@
     "find": "        if (SelectedClip.Clip.IsSensitive\n            && (ConfirmAsync is null\n",
     "replace": "        if (SelectedClip.Clip.IsSensitive && !SelectedClip.Clip.IsSensitive\n            && (ConfirmAsync is null\n",
     "filter": "FullyQualifiedName~ExportingASensitiveClip_AsksFirst|FullyQualifiedName~ExportingASensitiveClip_WithNoWayToAsk"
+  },
+  {
+    "id": "backups-keep-sensitive-clips",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "F-19 / OD-4a. A backup is kept for a week; a sensitive clip copied into it outlives its lifetime there.",
+    "find": "                    PurgeSensitiveClips(tempPath, password);\n",
+    "replace": "                    _ = password;\n",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests"
+  },
+  {
+    "id": "backup-purge-leaves-free-pages",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "F-19. Deleted rows stay readable in free pages and in un-merged FTS segments until the copy is optimized and vacuumed.",
+    "find": "        if (removed > 0)\n        {\n            if (HasTable(connection, \"clips_fts\"))\n",
+    "replace": "        if (removed < 0)\n        {\n            if (HasTable(connection, \"clips_fts\"))\n",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.TheDailyBackup_HoldsNoSensitiveClip"
+  },
+  {
+    "id": "backup-purge-keeps-vectors",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "F-19. The vector and rule matches go by the schema's ON DELETE CASCADE, which SQLite ignores unless the connection turns foreign keys on.",
+    "find": "            ForeignKeys = true,\n        };\n        if (!string.IsNullOrEmpty(password))\n        {\n            builder.Password = password;\n        }\n\n        using var connection = new SqliteConnection(builder.ToString());\n        connection.StateChange += ApplyBusyTimeoutOnOpen;\n",
+    "replace": "            ForeignKeys = false,\n        };\n        if (!string.IsNullOrEmpty(password))\n        {\n            builder.Password = password;\n        }\n\n        using var connection = new SqliteConnection(builder.ToString());\n        connection.StateChange += ApplyBusyTimeoutOnOpen;\n",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.TheDailyBackup_HoldsNoSensitiveClip"
+  },
+  {
+    "id": "startup-backup-precedes-expiry",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-19 / OD-4a. The startup backup ran before the first expiry, copying clips that outlived their lifetime while the app was closed.",
+    "find": "                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n",
+    "replace": "                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n",
+    "filter": "FullyQualifiedName~StartupExpiresSensitiveClips_BeforeTakingTheDailyBackup"
   }
 ]

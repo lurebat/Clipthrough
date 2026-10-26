@@ -6245,6 +6245,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             try
             {
+                // Expire first (OD-4a). Otherwise a sensitive clip that outlived
+                // its lifetime while the app was closed is copied into a backup
+                // that is kept for a week, before the maintenance loop's first
+                // tick a minute later removes it from the live library.
+                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);
                 await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);
             }
             catch (Exception ex)
