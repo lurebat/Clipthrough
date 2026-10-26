@@ -25,6 +25,7 @@ using Clipthrough.Localization;
 using Clipthrough.Models;
 using Clipthrough.Presentation;
 using Clipthrough.Services;
+using Clipthrough.Services.Search;
 using ReactiveUI;
 
 namespace Clipthrough.ViewModels;
@@ -167,6 +168,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _settingsRememberDatabasePassword;
     private Task _queuedRefreshTask = Task.CompletedTask;
     private long? _queuedRefreshPreferredSelectionId;
+
+    // The search the running refresh is waiting on, so a refresh queued for a
+    // different query can stop it. Guarded by _refreshQueueLock.
+    private CancellationTokenSource? _inFlightSearchCts;
+    private ClipSearchFilters? _inFlightSearchFilters;
+    private bool _inFlightSearchSemantic;
     private int _pendingClipMutations;
     private long _clipMutationVersion;
 
@@ -382,7 +389,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     .Select(static _ => Unit.Default))
                 .Skip(1)
                 .Throttle(TimeSpan.FromMilliseconds(300), RxSchedulers.MainThreadScheduler)
-                .InvokeCommand(RefreshCommand));
+                // Straight into the refresh queue, not through RefreshCommand: a
+                // ReactiveCommand cannot execute while it is already executing, so
+                // a query change during a running refresh was dropped rather than
+                // queued, and a slow search left the list on a query the user had
+                // already moved on from (F-11). The queue coalesces, and cancels a
+                // search its new query supersedes.
+                .Subscribe(unit => { _ = RefreshReportingErrorsAsync(); }, ex => ReportError("Search refresh subscription", ex)));
 
         _subscriptions.Add(
             _clipboardMonitorService.CapturedClips
@@ -2118,6 +2131,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string SettingsThemeModeLabel => AppText.SettingsThemeModeLabel;
 
+    public string SettingsRegexBacktrackingLabel => AppText.SettingsRegexBacktrackingLabel;
+
+    public string SettingsRegexBacktrackingHint => AppText.SettingsRegexBacktrackingHint;
+
     public void Dispose()
     {
         if (_isDisposed)
@@ -2286,6 +2303,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private Task RefreshAsync() => QueueRefreshAsync(null);
 
+    private async Task RefreshReportingErrorsAsync()
+    {
+        try
+        {
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            ReportError("Refresh", ex);
+        }
+    }
+
     private Task RefreshAsync(long? preferredSelectionId) => QueueRefreshAsync(preferredSelectionId);
 
     private Task QueueRefreshAsync(long? preferredSelectionId)
@@ -2302,8 +2331,36 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 _queuedRefreshTask = ProcessQueuedRefreshesAsync();
             }
+            else
+            {
+                CancelSupersededSearch();
+            }
 
             return _queuedRefreshTask;
+        }
+    }
+
+    /// <summary>
+    /// Stops the in-flight search when the query on screen is no longer the one
+    /// it answers. Refreshes run one at a time, so before this a slow search -
+    /// a full scan, or a regex that never finished (F-11) - held every later
+    /// refresh behind it, including clearing the search box. A refresh queued
+    /// for the same query (a capture, a write) lets the search finish instead,
+    /// so a steady stream of those cannot starve it.
+    /// </summary>
+    /// <remarks>Caller holds _refreshQueueLock.</remarks>
+    private void CancelSupersededSearch()
+    {
+        if (_inFlightSearchCts is null
+            || _inFlightSearchFilters is null
+            || !Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+        {
+            return;
+        }
+
+        if (!SameResultSet(_inFlightSearchFilters, BuildFilters(offset: 0), _inFlightSearchSemantic, UseSemanticClipSearch))
+        {
+            _inFlightSearchCts.Cancel();
         }
     }
 
@@ -2402,7 +2459,53 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     return new RefreshRequest(BuildFilters(offset: 0, limit: limit), UseSemanticClipSearch);
                 });
                 if (sw is not null) Trace.TraceInformation($"[refresh-timing] built-request @ {sw.ElapsedMilliseconds}ms search='{request.Filters.SearchText}' semantic={request.UseSemanticClipSearch}");
-                fused = await SearchClipsAsync(request.Filters, request.UseSemanticClipSearch).ConfigureAwait(false);
+                using (var searchCts = new CancellationTokenSource())
+                {
+                    lock (_refreshQueueLock)
+                    {
+                        _inFlightSearchCts = searchCts;
+                        _inFlightSearchFilters = request.Filters;
+                        _inFlightSearchSemantic = request.UseSemanticClipSearch;
+                    }
+
+                    try
+                    {
+                        fused = await SearchClipsAsync(request.Filters, request.UseSemanticClipSearch, searchCts.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (searchCts.IsCancellationRequested)
+                    {
+                        // Superseded. The refresh that cancelled it is queued and
+                        // runs the current query; keep this one's selection intent.
+                        lock (_refreshQueueLock)
+                        {
+                            _hasQueuedRefresh = true;
+                            _queuedRefreshPreferredSelectionId ??= preferredSelectionId;
+                        }
+
+                        return;
+                    }
+                    catch (SearchPatternException ex)
+                    {
+                        // No trustworthy answer for this pattern. Keep the list as
+                        // it is and say why, rather than showing a partial result.
+                        var message = ex.Problem == SearchPatternProblem.NeedsBacktracking
+                            ? AppText.RegexNeedsBacktrackingStatus
+                            : AppText.RegexTooSlowStatus;
+                        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => StatusText = message);
+                        return;
+                    }
+                    finally
+                    {
+                        lock (_refreshQueueLock)
+                        {
+                            if (ReferenceEquals(_inFlightSearchCts, searchCts))
+                            {
+                                _inFlightSearchCts = null;
+                                _inFlightSearchFilters = null;
+                            }
+                        }
+                    }
+                }
                 if (sw is not null) Trace.TraceInformation($"[refresh-timing] db-search-complete @ {sw.ElapsedMilliseconds}ms items={fused.Result.Items.Count} total={fused.Result.TotalMatchingCount}");
 
                 versionAtCheck = Interlocked.Read(ref _clipMutationVersion);
@@ -2557,9 +2660,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         private static readonly HashSet<long> EmptyIds = [];
     }
 
-    private async Task<FusedSearchResult> SearchClipsAsync(ClipSearchFilters filters, bool useSemanticClipSearch)
+    private async Task<FusedSearchResult> SearchClipsAsync(ClipSearchFilters filters, bool useSemanticClipSearch, CancellationToken cancellationToken = default)
     {
-        var result = await _clipStoreService.SearchAsync(filters).ConfigureAwait(false);
+        var result = await _clipStoreService.SearchAsync(filters, cancellationToken).ConfigureAwait(false);
 
         // The store moves its own body to the pool, so the search is already off
         // the UI thread and does not want wrapping again. The fusion does: it
@@ -4063,6 +4166,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SensitiveOnly = ShowSensitiveOnly,
         PastedOnly = ShowPastedOnly,
         UseRegex = UseRegexSearch,
+        RegexEngine = _settingsService.Current.RegexSearchEngine,
         CaseSensitive = CaseSensitiveSearch,
         UseWildcard = UseWildcardSearch,
         WholeWord = WholeWordSearch,
@@ -4090,6 +4194,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             || a.SensitiveOnly != b.SensitiveOnly
             || a.PastedOnly != b.PastedOnly
             || a.UseRegex != b.UseRegex
+            || (a.UseRegex && a.RegexEngine != b.RegexEngine)
             || a.CaseSensitive != b.CaseSensitive
             || a.UseWildcard != b.UseWildcard
             || a.WholeWord != b.WholeWord
@@ -5844,6 +5949,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             MaxEntryCount = maxEntryCount,
             EnableSemanticSearch = SettingsEnableSemanticSearch,
             UseFuzzySettingsSearch = Settings.UseFuzzySearch,
+            RegexSearchEngine = Settings.RegexSearchEngine,
         };
 
         SecretPersistenceException? secretFailure = null;
@@ -6030,11 +6136,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         SelectedCustomHotkeyDraft = SettingsCustomHotkeyDrafts.FirstOrDefault();
         Settings.UseFuzzySearch = settings.UseFuzzySettingsSearch;
+        Settings.RegexSearchEngine = settings.RegexSearchEngine;
         SettingsEnableSemanticSearch = settings.EnableSemanticSearch;
         IsDatabasePasswordVisible = false;
         RebuildCustomHotkeyTargetSuggestions();
     }
 
+
+    private RegexSearchEngine _lastRegexSearchEngine = AppSettings.Default.RegexSearchEngine;
 
     private void OnSettingsChanged(object? sender, AppSettings settings)
     {
@@ -6055,6 +6164,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             UseSemanticClipSearch = true;
         }
         _wasSemanticSearchEnabled = settings.EnableSemanticSearch;
+
+        // A regex search on screen was answered by the old engine; run it again.
+        if (UseRegexSearch && !string.IsNullOrEmpty(SearchText) && settings.RegexSearchEngine != _lastRegexSearchEngine)
+        {
+            _ = RefreshAsync();
+        }
+        _lastRegexSearchEngine = settings.RegexSearchEngine;
 
         SyncAiPresets(settings);
         RebuildCustomHotkeyTargetSuggestions();

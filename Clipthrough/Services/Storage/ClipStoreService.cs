@@ -15,6 +15,7 @@ using Clipthrough.Database;
 using Clipthrough.Localization;
 using Clipthrough.Models;
 using Clipthrough.Presentation;
+using Clipthrough.Services.Search;
 using Microsoft.Data.Sqlite;
 
 namespace Clipthrough.Services;
@@ -1502,46 +1503,55 @@ public sealed class ClipStoreService : IClipStoreService
         // Stop counting at Offset+Limit+1 so we know there are more without a full table scan. (U15)
         var countCap = filters.Offset + filters.Limit + 1;
 
-        await using (var queryCommand = connection.CreateCommand())
+        try
         {
-            // Use metadata-only columns (no content_bytes / source_app_icon BLOBs). (U12)
-            // Ordering has exactly one authority - BuildOrderClause. This path
-            // used to hardcode the MostRecent clause, so the sort dropdown
-            // silently stopped working the moment the user ticked Regex or Case
-            // (which is what diverts us here in the first place).
-            queryCommand.CommandText = $"""
-                SELECT {ClipListSelectColumns}
-                FROM clips c
-                {whereClause}
-                {BuildOrderClause(filters.SortOption)};
-                """;
-            AddSearchParameters(queryCommand, filters, hasSearch: false);
-
-            await using var reader = await queryCommand.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
+            await using (var queryCommand = connection.CreateCommand())
             {
-                // Match against the five searched columns first. Only a row that survives
-                // is worth turning into a ClipEntry - the other twenty-five columns and
-                // five timestamp parses are pure waste for a row we are about to drop.
-                if (!MatchesSearch(SearchableFields.Read(reader), filters, matchers))
-                {
-                    continue;
-                }
+                // Use metadata-only columns (no content_bytes / source_app_icon BLOBs). (U12)
+                // Ordering has exactly one authority - BuildOrderClause. This path
+                // used to hardcode the MostRecent clause, so the sort dropdown
+                // silently stopped working the moment the user ticked Regex or Case
+                // (which is what diverts us here in the first place).
+                queryCommand.CommandText = $"""
+                    SELECT {ClipListSelectColumns}
+                    FROM clips c
+                    {whereClause}
+                    {BuildOrderClause(filters.SortOption)};
+                    """;
+                AddSearchParameters(queryCommand, filters, hasSearch: false);
 
-                totalMatchingCount++;
-                if (totalMatchingCount <= filters.Offset)
+                await using var reader = await queryCommand.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
                 {
-                    continue;
-                }
+                    // Match against the five searched columns first. Only a row that survives
+                    // is worth turning into a ClipEntry - the other twenty-five columns and
+                    // five timestamp parses are pure waste for a row we are about to drop.
+                    if (!MatchesSearch(SearchableFields.Read(reader), filters, matchers))
+                    {
+                        continue;
+                    }
 
-                if (items.Count < filters.Limit)
-                {
-                    items.Add(ReadClipMeta(reader));
-                }
+                    totalMatchingCount++;
+                    if (totalMatchingCount <= filters.Offset)
+                    {
+                        continue;
+                    }
 
-                // Stop scanning once we've confirmed "at least one more beyond this page". (U15)
-                if (totalMatchingCount >= countCap) break;
+                    if (items.Count < filters.Limit)
+                    {
+                        items.Add(ReadClipMeta(reader));
+                    }
+
+                    // Stop scanning once we've confirmed "at least one more beyond this page". (U15)
+                    if (totalMatchingCount >= countCap) break;
+                }
             }
+        }
+        catch (RegexMatchTimeoutException ex)
+        {
+            // A partial scan is not an answer: stop and say so, so the caller
+            // keeps what it shows instead of displaying a truncated list.
+            throw new SearchPatternException(SearchPatternProblem.TooSlow, ex);
         }
 
         await LoadSensitivityMatchesAsync(connection, items, cancellationToken);
@@ -1664,7 +1674,7 @@ public sealed class ClipStoreService : IClipStoreService
     {
         if (filters.UseRegex)
         {
-            return [BuildSearchRegex(filters.SearchText, filters.CaseSensitive)];
+            return [BuildSearchRegex(filters.SearchText, filters.CaseSensitive, filters.RegexEngine)];
         }
 
         if (filters.UseWildcard)
@@ -2522,8 +2532,38 @@ public sealed class ClipStoreService : IClipStoreService
         return Convert.ToHexString(bytes);
     }
 
-    private static Regex BuildSearchRegex(string searchText, bool caseSensitive)
-        => new(searchText, (caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase) | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    /// <summary>
+    /// The backtracking engine's per-match budget. A pattern with nested
+    /// quantifiers against a long near-miss used to run for good, spinning a
+    /// core and parking every later refresh behind it (F-11).
+    /// </summary>
+    internal static readonly TimeSpan BacktrackingRegexTimeout = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>
+    /// Builds the user's regex on the engine they chose (OD-7, S38). The
+    /// default, NonBacktracking, runs in linear time, so no pattern can hang a
+    /// search; it rejects backreferences, lookarounds and atomic groups at
+    /// construction, which is reported as needing the other engine rather than
+    /// as an invalid pattern. Backtracking supports everything, bounded by
+    /// <see cref="BacktrackingRegexTimeout"/>.
+    /// </summary>
+    private static Regex BuildSearchRegex(string searchText, bool caseSensitive, RegexSearchEngine engine)
+    {
+        var options = (caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase) | RegexOptions.CultureInvariant;
+        if (engine == RegexSearchEngine.Backtracking)
+        {
+            return new Regex(searchText, options | RegexOptions.Compiled, BacktrackingRegexTimeout);
+        }
+
+        try
+        {
+            return new Regex(searchText, options | RegexOptions.NonBacktracking);
+        }
+        catch (NotSupportedException ex)
+        {
+            throw new SearchPatternException(SearchPatternProblem.NeedsBacktracking, ex);
+        }
+    }
 
     /// <summary>Checks all five columns indexed by FTS: content, source_app, source_window_title, source_url, ocr_text. (U13)</summary>
     private static bool IsRegexMatch(in SearchableFields row, Regex regex)

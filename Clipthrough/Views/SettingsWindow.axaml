@@ -690,6 +690,10 @@
                                     ToolTip.Tip="Flag every clip for re-embedding. The worker will reprocess them in the background."
                                     Command="{Binding RerunAllEmbeddingsCommand}" />
                         </StackPanel>
+                        <CheckBox Content="{Binding SettingsRegexBacktrackingLabel}"
+                                  IsChecked="{Binding Settings.UseBacktrackingRegex, Mode=TwoWay}" />
+                        <TextBlock Classes="body-muted" TextWrapping="Wrap"
+                                   Text="{Binding SettingsRegexBacktrackingHint}" />
                     </StackPanel>
                 </Expander>
 

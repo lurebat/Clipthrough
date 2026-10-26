@@ -8,6 +8,7 @@ Clipthrough is an Avalonia desktop clipboard history app focused on rich clipboa
 - In-place rich-text editing plus an embedded image editor before copying as a new clip
 - Source application name and window title capture
 - FTS5 full-text search with fuzzy option, favorites, sensitivity tagging, and clip pinning
+- **Regex search** runs on .NET's non-backtracking engine by default, so no pattern can hang the list. Patterns that need backreferences or lookarounds report so; turn on **Settings → Search → Use the backtracking regex engine** for them. That engine stops a search that runs too long and says "pattern too slow" instead of freezing.
 - **Excluded applications** — list apps in Settings whose clipboard writes are never captured. Entries match a process name, executable file name, full path, or a `*`/`?` wildcard (e.g. `1Password`, `KeePass.exe`, `*bitwarden*`, `C:\Program Files\Acme\*`). The check runs before Clipthrough reads the clipboard, so an excluded app's payload never enters the process. Best effort: a clipboard change Windows reports no owner for is still captured — apps needing a hard guarantee should publish the standard `Clipboard Viewer Ignore` format, which Clipthrough always honors.
 - Per-session log window with a filterable activity trail
 - Configurable local hotkeys (recorded in the settings window) and global hotkeys for paste cycling
