@@ -2694,5 +2694,37 @@
     "find": "            if (_isPasswordPromptOpen == value)\n            {\n                return;\n            }\n\n            this.RaiseAndSetIfChanged(ref _isPasswordPromptOpen, value);",
     "replace": "            if (!this.RaiseAndSetIfChanged(ref _isPasswordPromptOpen, value))\n            {\n                return;\n            }",
     "filter": "FullyQualifiedName~MainWorkspaceVisibilityHeadlessTests.UnlockingWithTheCorrectPassword_ShowsTheWorkspace"
+  },
+  {
+    "id": "welcome-keeps-the-workspace-min-width",
+    "why": "Applies the workspace's 1100 DIP minimum to the welcome screen again. On a work area narrower than that, even a maximized window is laid out at 1100 DIP and Create library is drawn off-screen (audit F-49).",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "find": "            <Setter Property=\"MinWidth\" Value=\"480\" />",
+    "replace": "            <Setter Property=\"MinWidth\" Value=\"1100\" />",
+    "filter": "FullyQualifiedName~WelcomeNarrowWorkAreaHeadlessTests.OnANarrowWorkArea_CreateLibraryIsOnScreenAndTabReachable"
+  },
+  {
+    "id": "welcome-content-stops-tracking-the-viewport",
+    "why": "Without a finite width the sideways-scrolling welcome content is measured at infinity, wrapped text stops wrapping, and it scrolls sideways (2010 DIP in a 1282 DIP viewport) even at the default window size.",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "find": "                          Width=\"{Binding $parent[ScrollViewer].Viewport.Width}\">",
+    "replace": "                          >",
+    "filter": "FullyQualifiedName~WelcomeNarrowWorkAreaHeadlessTests.AtTheDefaultSize_TheWelcomeContentDoesNotScrollSideways"
+  },
+  {
+    "id": "workspace-loses-its-min-width",
+    "why": "The narrow minimum is for the full-window overlays only. Letting it reach the workspace would allow the window to shrink below what the clip list and preview need, clipping them.",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "find": "            <Setter Property=\"MinWidth\" Value=\"1100\" />",
+    "replace": "            <Setter Property=\"MinWidth\" Value=\"480\" />",
+    "filter": "FullyQualifiedName~WelcomeNarrowWorkAreaHeadlessTests.TheWorkspaceKeepsItsMinimumWidth"
+  },
+  {
+    "id": "window-open-ignores-a-narrow-working-area",
+    "why": "Keeps the requested 1360 DIP width on a narrower working area. Windows clamps the window, but the first layout follows the requested width, so the welcome screen opens laid out wider than the window and Create library is off-screen until the user resizes (audit F-49, seen live at 576 DIP).",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "find": "        var width = Math.Min(clientSize.Width, (workingArea.Width / scaling) - extraWidth);",
+    "replace": "        var width = Math.Max(clientSize.Width, (workingArea.Width / scaling) - extraWidth);",
+    "filter": "FullyQualifiedName~MainWindowWorkingAreaFitTests"
   }
 ]

@@ -18,8 +18,24 @@
         Title="{Binding WindowTitle}"
         Width="1360"
         Height="860"
-        MinWidth="1100"
-        MinHeight="640">
+        Classes.workspace="{Binding IsMainWorkspaceVisible}">
+
+    <Window.Styles>
+        <!--
+          The workspace needs 1100 DIP; the full-window overlays (welcome,
+          password prompt) do not. Applying the workspace minimum to them meant
+          a work area narrower than that - 1920x1080 at 200%, a portrait
+          monitor - laid even a maximized window out at 1100 DIP and drew
+          "Create library" off-screen. (audit F-49)
+        -->
+        <Style Selector="Window">
+            <Setter Property="MinWidth" Value="480" />
+            <Setter Property="MinHeight" Value="640" />
+        </Style>
+        <Style Selector="Window.workspace">
+            <Setter Property="MinWidth" Value="1100" />
+        </Style>
+    </Window.Styles>
 
     <Window.KeyBindings>
         <KeyBinding Gesture="Ctrl+I" Command="{Binding OpenAiPromptCommand}" />
@@ -1321,10 +1337,20 @@
                                TextWrapping="Wrap" />
                 </StackPanel>
 
+                <!--
+                  Scrolls sideways too: on a narrow work area the content keeps
+                  the 1024 DIP it had at the old 1100 window minimum instead of
+                  being squeezed beside the fixed left column. Above that it
+                  tracks the viewport, so text still wraps and nothing scrolls
+                  at ordinary sizes. The footer stays outside, so "Create
+                  library" is always within the window. (audit F-49)
+                -->
                 <ScrollViewer Grid.Row="1"
-                              HorizontalScrollBarVisibility="Disabled">
+                              HorizontalScrollBarVisibility="Auto">
                     <Grid ColumnDefinitions="340,*"
-                          ColumnSpacing="24">
+                          ColumnSpacing="24"
+                          MinWidth="1024"
+                          Width="{Binding $parent[ScrollViewer].Viewport.Width}">
                         <StackPanel Spacing="14">
                             <Border Classes="surface-panel"
                                     Padding="18">
