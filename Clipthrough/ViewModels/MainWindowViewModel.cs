@@ -1227,6 +1227,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string SettingsExcludedAppsWatermark => AppText.SettingsExcludedAppsWatermark;
     public string SettingsExcludedAppsCaveat => AppText.SettingsExcludedAppsCaveat;
 
+    public string SettingsHonorClipboardHistoryOptOutLabel => AppText.SettingsHonorClipboardHistoryOptOutLabel;
+
     public string SettingsClipLimitLabel => AppText.SettingsClipLimitLabel;
 
     public string SettingsDatabasePathLabel => AppText.SettingsDatabasePathLabel;
@@ -5797,6 +5799,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             EnablePasteAsPlainTextHotkey = Settings.EnablePasteAsPlainTextHotkey,
             PasteAsPlainTextHotkey = normalizedExtended["paste-as-plain-text"],
             ExcludedCaptureApps = Services.CaptureExclusionPolicy.ParsePatterns(Settings.ExcludedCaptureAppsText),
+            HonorClipboardHistoryOptOut = Settings.HonorClipboardHistoryOptOut,
             ExternalEditorPath = Settings.ExternalEditorPath.Trim(),
             ExternalImageEditorPath = Settings.ExternalImageEditorPath.Trim(),
             ExternalDiffToolPath = Settings.ExternalDiffToolPath.Trim(),
@@ -5994,6 +5997,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.EnablePasteAsPlainTextHotkey = settings.EnablePasteAsPlainTextHotkey;
         Settings.PasteAsPlainTextHotkey = settings.PasteAsPlainTextHotkey;
         Settings.ExcludedCaptureAppsText = Services.CaptureExclusionPolicy.FormatPatterns(settings.ExcludedCaptureApps);
+        Settings.HonorClipboardHistoryOptOut = settings.HonorClipboardHistoryOptOut;
         Settings.ExternalEditorPath = settings.ExternalEditorPath;
         Settings.ExternalImageEditorPath = settings.ExternalImageEditorPath;
         Settings.ExternalDiffToolPath = settings.ExternalDiffToolPath;

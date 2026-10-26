@@ -2710,5 +2710,29 @@
     "find": "            if (!string.Equals(clipsType, \"table\", StringComparison.Ordinal) || viewsAndTriggers != 0)",
     "replace": "            if (!string.Equals(clipsType, \"table\", StringComparison.Ordinal) || viewsAndTriggers < 0)",
     "filter": "FullyQualifiedName~ClipAngelImportHardeningTests.ATriggerAnywhereInTheSchema"
+  },
+  {
+    "id": "history-opt-out-format-ignored",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "why": "F-03. Without honouring CanIncludeInClipboardHistory = 0, passwords copied from Chrome, Edge and Bitwarden are captured, indexed and kept.",
+    "find": "        return BitConverter.ToInt32(value, 0) == 0;",
+    "replace": "        return value.Length < 0;",
+    "filter": "FullyQualifiedName~ClipboardHistoryOptOutTests"
+  },
+  {
+    "id": "history-opt-out-setting-ignored",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "why": "OD-10b / S39. The opt-out is behind a setting; ignoring it removes the user's way to turn the behaviour off.",
+    "find": "        if (!honorHistoryOptOut\n",
+    "replace": "        if (honorHistoryOptOut && !honorHistoryOptOut\n",
+    "filter": "FullyQualifiedName~ClipboardHistoryOptOutTests.OptedOutContent_IsCaptured_WhenTheSettingIsOff"
+  },
+  {
+    "id": "history-opt-out-setting-not-saved",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "OD-10b. A setting the dialog shows but never saves leaves the user believing they turned the opt-out off.",
+    "find": "            HonorClipboardHistoryOptOut = Settings.HonorClipboardHistoryOptOut,\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~TheHistoryOptOutSetting_IsSaved"
   }
 ]

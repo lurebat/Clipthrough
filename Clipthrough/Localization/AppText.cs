@@ -62,7 +62,8 @@ public static class AppText
         [nameof(SettingsExcludedAppsTitle)] = "Excluded applications",
         [nameof(SettingsExcludedAppsDescription)] = "Clipboard changes produced by these applications are never captured - nothing is read, stored, or indexed. One entry per line. An entry can be a process name (1Password), an executable file name (KeePass.exe), a full path, or a wildcard pattern such as *vault* or C:\\Program Files\\Acme\\*.",
         [nameof(SettingsExcludedAppsWatermark)] = "1Password\nKeePass.exe\n*bitwarden*",
-        [nameof(SettingsExcludedAppsCaveat)] = "Best effort: Clipthrough can only exclude an application it can identify. When Windows does not report an owner for a clipboard change - a hidden helper window, a process that has already exited, or a protected process - the clip is captured, because silently discarding every unattributable clip would lose far more history than it protects. Applications that need a hard guarantee should publish the standard 'Clipboard Viewer Ignore' format, which Clipthrough always honors regardless of this list.",
+        [nameof(SettingsExcludedAppsCaveat)] = "Best effort: Clipthrough can only exclude an application it can identify. When Windows does not report an owner for a clipboard change - a hidden helper window, a process that has already exited, or a protected process - the clip is captured, because silently discarding every unattributable clip would lose far more history than it protects. Applications that need a hard guarantee should publish the standard 'Clipboard Viewer Ignore' format, which Clipthrough always honors regardless of this list. Content marked 'CanIncludeInClipboardHistory = 0' - what Chrome, Edge and Bitwarden publish for passwords - is also skipped while the option below is on.",
+        [nameof(SettingsHonorClipboardHistoryOptOutLabel)] = "Skip content its source marks as not for clipboard history (browser and password-manager passwords)",
         [nameof(SettingsClipLimitLabel)] = "Max clip size (KB)",
         [nameof(SettingsDatabasePathLabel)] = "Database path",
         [nameof(SettingsDatabasePasswordLabel)] = "Encryption password",
@@ -382,6 +383,7 @@ public static class AppText
     public static string SettingsExcludedAppsDescription => Text(nameof(SettingsExcludedAppsDescription));
     public static string SettingsExcludedAppsWatermark => Text(nameof(SettingsExcludedAppsWatermark));
     public static string SettingsExcludedAppsCaveat => Text(nameof(SettingsExcludedAppsCaveat));
+    public static string SettingsHonorClipboardHistoryOptOutLabel => Text(nameof(SettingsHonorClipboardHistoryOptOutLabel));
     public static string SettingsClipLimitLabel => Text(nameof(SettingsClipLimitLabel));
     public static string SettingsDatabasePathLabel => Text(nameof(SettingsDatabasePathLabel));
     public static string SettingsDatabasePasswordLabel => Text(nameof(SettingsDatabasePasswordLabel));
