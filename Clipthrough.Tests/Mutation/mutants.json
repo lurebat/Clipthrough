@@ -2734,5 +2734,21 @@
     "find": "        const int batchSize = 200;\n\n        try\n        {\n            // Pooling off: a pooled connection keeps the decrypted copy open after\n            // Dispose, TryDelete then fails silently, and a plaintext copy of the\n            // user's ClipAngel history is left in %TEMP% (found by F-34's tests).\n            await using var conn = new SqliteConnection($\"Data Source={temp};Mode=ReadOnly;Pooling=False\");\n",
     "replace": "        const int batchSize = 200;\n\n        try\n        {\n            // Pooling off: a pooled connection keeps the decrypted copy open after\n            // Dispose, TryDelete then fails silently, and a plaintext copy of the\n            // user's ClipAngel history is left in %TEMP% (found by F-34's tests).\n            await using var conn = new SqliteConnection($\"Data Source={temp};Mode=ReadOnly;Pooling=True\");\n",
     "filter": "FullyQualifiedName~ClipAngelImportServiceTests"
+  },
+  {
+    "id": "openurl-accepts-file-scheme",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "F-44. OpenUrlAsync must ShellExecute only web and mail URLs; a file: or UNC URL would launch local programs or leak NetNTLM over SMB.",
+    "find": "            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeMailto))\n",
+    "replace": "            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeMailto && uri.Scheme != Uri.UriSchemeFile))\n",
+    "filter": "FullyQualifiedName~SystemInteractionHelpersTests"
+  },
+  {
+    "id": "command-template-ignores-placeholders",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "F-44. A diff/editor template's {left}/{right} must become the files to open; ignoring them launches the tool on the literal placeholders.",
+    "find": "                    t = t.Replace(token, value, StringComparison.Ordinal);\n",
+    "replace": "                    t = value.Length < 0 ? t.Replace(token, value, StringComparison.Ordinal) : t;\n",
+    "filter": "FullyQualifiedName~SystemInteractionHelpersTests"
   }
 ]
