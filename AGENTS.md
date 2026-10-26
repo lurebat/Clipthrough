@@ -77,6 +77,12 @@ a bug in the test named; see
 time on it. Run them locally if you are specifically touching view code, and
 re-run before believing a single red result.
 
+CI does run them, in a separate step: `.github/scripts/Invoke-HeadlessTests.ps1`.
+An assertion failure fails the build at once; only a run whose every failure is
+a `[Test Case Cleanup Failure]` is retried, once, and only for those tests. Run
+the same script locally to reproduce what CI decides, or pass `-ClassifyOnly`
+an existing TRX to see how its failures would be treated.
+
 If Clipthrough is running it holds a lock on its own output, and any build that
 needs to copy a changed assembly into it fails with `MSB3027` / `MSB3021` on
 `ShareX.ImageEditor.dll`. (A build with nothing to copy still succeeds, so the

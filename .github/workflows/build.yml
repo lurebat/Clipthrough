@@ -44,6 +44,13 @@ jobs:
           --collect:"XPlat Code Coverage"
           --results-directory TestResults
 
+      # The headless tests carry about a quarter of the mutation guards. A
+      # cleanup failure (work outliving a previous test) is re-run once; an
+      # assertion failure fails the build. See the script for the rules.
+      - name: Headless tests
+        shell: pwsh
+        run: ./.github/scripts/Invoke-HeadlessTests.ps1 -Configuration Release -NoBuild -ResultsDirectory TestResults
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7
