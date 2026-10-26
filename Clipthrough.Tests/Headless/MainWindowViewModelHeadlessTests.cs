@@ -243,6 +243,77 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.Equal($"C:\\TEMP\\ALPHA.TXT{Environment.NewLine}D:\\DATA\\BETA.TXT", systemInteraction.LastCopiedText);
     }
 
+    /// <summary>
+    /// The right-click Transform menu runs on the clicked row rather than the
+    /// selection, through its own command. It decided "is this HTML?" by
+    /// comparing against BoxTableToHtml alone, so Markdown → HTML from a row
+    /// stored the CF_HTML document as plain text and put it on the clipboard as
+    /// text: pasting gave the raw header and markup (F-04).
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RowTransform_MarkdownToHtml_StoresAndCopiesHtml()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var clip = await CaptureTextClipAsync(scope.ClipStoreService, "# Title\n\nSome **bold** text.");
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        var row = viewModel.Clips.Single(c => c.Clip.Id == clip.Id);
+        await row.ApplyTextTransformationCommand.Execute(TextTransformation.MarkdownToHtml).ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(ClipContentFormat.Html, systemInteraction.LastCopiedRichContentFormat);
+        Assert.Contains("<h1", systemInteraction.LastCopiedRichContent, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(systemInteraction.LastCopiedText);
+
+        var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        var stored = Assert.Single(all.Items, c => c.SourceClipId == clip.Id);
+        Assert.Equal(ClipContentFormat.Html, stored.ContentFormat);
+        Assert.Equal(ContentType.RichText, stored.ContentType);
+        Assert.Equal("builtin:MarkdownToHtml", stored.TransformKind);
+    }
+
+    /// <summary>
+    /// The row path must keep transforming the clicked row - not the selection
+    /// and not the checked clips - now that it shares the menu path's pipeline.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RowTransform_AppliesToTheClickedRowOnly()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var clicked = await CaptureTextClipAsync(scope.ClipStoreService, "clicked row");
+        clipboardMonitor.Emit(clicked);
+        var selected = await CaptureTextClipAsync(scope.ClipStoreService, "selected row");
+        clipboardMonitor.Emit(selected);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(selected.Id, viewModel.SelectedClip?.Id);
+        viewModel.Clips.Single(c => c.Clip.Id == selected.Id).IsChecked = true;
+
+        var row = viewModel.Clips.Single(c => c.Clip.Id == clicked.Id);
+        await row.ApplyTextTransformationCommand.Execute(TextTransformation.UpperCase).ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("CLICKED ROW", systemInteraction.LastCopiedText);
+        var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        Assert.Single(all.Items, c => c.SourceClipId is not null);
+    }
+
     [AvaloniaFact]
     public async Task SelectAllAndFavoriteSelected_UpdateAllCheckedClips()
     {

@@ -2678,5 +2678,21 @@
     "find": "        var tokens = input.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);",
     "replace": "        var tokens = input.Split('\\n', StringSplitOptions.RemoveEmptyEntries);",
     "filter": "FullyQualifiedName~WhitespaceToJsonArray"
+  },
+  {
+    "id": "transform-html-decided-by-one-transform",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-04. Deciding HTML output by comparing against BoxTableToHtml alone stores Markdown -> HTML as plain text and puts the raw CF_HTML document on the clipboard as text.",
+    "find": "        var producesHtml = TextTransformationService.ProducesHtml(transformation);",
+    "replace": "        var producesHtml = transformation == TextTransformation.BoxTableToHtml;",
+    "filter": "FullyQualifiedName~RowTransform_MarkdownToHtml_StoresAndCopiesHtml"
+  },
+  {
+    "id": "row-transform-uses-the-selection",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "The row context menu applies to the row it was opened on. Dropping the explicit target makes it transform the selection or the checked clips instead - a different clip than the one the user right-clicked.",
+    "find": "                explicitTarget: explicitTarget);",
+    "replace": "                explicitTarget: explicitTarget is null ? null : null);",
+    "filter": "FullyQualifiedName~RowTransform_AppliesToTheClickedRowOnly"
   }
 ]

@@ -3386,7 +3386,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public async Task CommitEditedClipOnFocusLossAsync() => await CommitEditedClipOnSelectionChangeAsync();
 
-    private async Task ApplyTextTransformationAsync(TextTransformation transformation)
+    private Task ApplyTextTransformationAsync(TextTransformation transformation)
+        => ApplyTextTransformationAsync(transformation, explicitTarget: null);
+
+    /// <summary>
+    /// The one built-in transform pipeline. The Edit menu and toolbar pass no
+    /// target (checked clips, else the selection or its selected slice); the
+    /// row context menu passes the clicked row. Keeping a single body is what
+    /// stops the paths drifting apart again: the row path used to decide
+    /// "is this HTML?" on its own and got Markdown → HTML wrong (F-04).
+    /// </summary>
+    private async Task ApplyTextTransformationAsync(TextTransformation transformation, ClipItemViewModel? explicitTarget)
     {
         if (transformation == TextTransformation.None)
         {
@@ -3407,7 +3417,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 noChangeNotificationTitle: producesHtml ? "Text table → HTML made no changes" : null,
                 noChangeNotificationMessage: producesHtml
                     ? "The selected text did not contain a supported table, so nothing was changed."
-                    : null);
+                    : null,
+                explicitTarget: explicitTarget);
         }
         catch (Exception ex)
         {
@@ -3430,67 +3441,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var source = GetTransformSourceText(clip);
-        if (string.IsNullOrEmpty(source))
+        if (string.IsNullOrEmpty(GetTransformSourceText(clip)))
         {
             StatusText = "Selected clip has no text or file paths to transform";
             return;
         }
 
-        var label = GetTextTransformationLabel(transformation);
-        StatusText = $"Applying {label}…";
-        try
-        {
-            var result = TextTransformationService.Apply(transformation, source);
-            if (string.Equals(result, source, StringComparison.Ordinal))
-            {
-                StatusText = $"{label} produced no change";
-                if (transformation == TextTransformation.BoxTableToHtml)
-                {
-                    _notificationService.PublishWarning(
-                        "Text table → HTML made no changes",
-                        "The selected text did not contain a supported table, so nothing was changed.");
-                }
-                return;
-            }
-
-            var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
-            var isHtml = transformation == TextTransformation.BoxTableToHtml;
-            var captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
-            {
-                ContentBytes = textBytes,
-                ContentText = result,
-                ContentType = isHtml ? ContentType.RichText : ContentType.Text,
-                ContentFormat = isHtml ? ClipContentFormat.Html : ClipContentFormat.PlainText,
-                SourceApp = clip.SourceApp,
-                SourceAppPath = clip.Clip.SourceAppPath,
-                SourceAppIconBytes = clip.SourceAppIconBytes,
-                SourceWindowTitle = clip.Clip.SourceWindowTitle,
-                IncrementExistingCopyCount = false,
-                SourceClipId = clip.Clip.Id,
-                TransformKind = $"builtin:{transformation}",
-                SkipPostInsertMaintenance = true,
-            });
-            var copyFailure = await CopyTransformResultToClipboardAsync(result, isHtml ? ClipContentFormat.Html : ClipContentFormat.PlainText);
-            if (copyFailure is null)
-            {
-                StatusText = "Transformed and copied to clipboard";
-            }
-            else
-            {
-                StatusText = $"Transformed, but copy failed: {copyFailure}";
-                _notificationService.PublishWarning("Transform copy failed", copyFailure);
-            }
-            await RefreshAsync(captured?.Id);
-        }
-        catch (Exception ex)
-        {
-            Trace.TraceWarning($"ApplyTransformationToSingleClip '{label}' failed: {ex}");
-            StatusText = $"Failed to apply {label}: {ex.Message}";
-            _notificationService.PublishError($"Failed to apply {label}", ex.Message);
-        }
+        await ApplyTextTransformationAsync(transformation, clip);
     }
-
     private async Task<string?> CopyTransformResultToClipboardAsync(string result, ClipContentFormat format)
     {
         if (string.IsNullOrEmpty(result))
@@ -3546,17 +3504,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         string? transformKind = null,
         ClipContentFormat outputFormat = ClipContentFormat.PlainText,
         string? noChangeNotificationTitle = null,
-        string? noChangeNotificationMessage = null)
+        string? noChangeNotificationMessage = null,
+        ClipItemViewModel? explicitTarget = null)
     {
-        var checkedClips = Clips.Where(static c => c.IsChecked).ToList();
-        var useSelectionSlice = checkedClips.Count == 0
+        // An explicit target (the row a context menu was opened on) replaces the
+        // checked-clips / selection rule, and never uses a selection slice.
+        var checkedClips = explicitTarget is null ? Clips.Where(static c => c.IsChecked).ToList() : new List<ClipItemViewModel>();
+        var useSelectionSlice = explicitTarget is null
+            && checkedClips.Count == 0
             && SelectedClip is not null
             && EditedClipSelectionLength > 0
             && EditedClipSelectionStart >= 0
             && EditedClipSelectionStart + EditedClipSelectionLength <= (EditedClipText?.Length ?? 0);
 
-        var targets = checkedClips.Count > 0
-            ? checkedClips
+        var targets = explicitTarget is not null ? new List<ClipItemViewModel> { explicitTarget }
+            : checkedClips.Count > 0 ? checkedClips
             : SelectedClip is not null ? new List<ClipItemViewModel> { SelectedClip } : new List<ClipItemViewModel>();
 
         var transformed = 0;
