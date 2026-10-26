@@ -30,6 +30,7 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
     private readonly IClipboardMonitorService? _clipboardMonitor;
     private readonly IBackgroundOcrQueue? _ocrQueue;
     private readonly IEmbeddingWorker? _embeddingWorker;
+    private readonly ISettingsService? _settingsService;
     private readonly int _retention;
 
     /// <summary>
@@ -42,12 +43,14 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         IClipboardMonitorService? clipboardMonitor,
         IBackgroundOcrQueue? ocrQueue,
         IEmbeddingWorker? embeddingWorker,
-        int retention = DefaultRetention)
+        int retention = DefaultRetention,
+        ISettingsService? settingsService = null)
     {
         _storageOptionsService = storageOptionsService;
         _clipboardMonitor = clipboardMonitor;
         _ocrQueue = ocrQueue;
         _embeddingWorker = embeddingWorker;
+        _settingsService = settingsService;
         _retention = retention < 1 ? 1 : retention;
     }
 
@@ -85,7 +88,13 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
                 {
                     var password = _storageOptionsService.Current.DatabasePassword;
                     SqliteDatabaseCopier.CopyDatabase(dbPath, password, tempPath);
-                    PurgeSensitiveClips(tempPath, password);
+                    // Owner decision on OD-4a: the purge serves the lifetime
+                    // promise. With the lifetime off sensitive clips are kept
+                    // like any other, so a restored backup brings them back.
+                    if (_settingsService?.Current.EnableSensitiveClipLifetime == true)
+                    {
+                        PurgeSensitiveClips(tempPath, password);
+                    }
                 },
                 cancellationToken).ConfigureAwait(false);
             File.Move(tempPath, todayPath, overwrite: true);
@@ -102,11 +111,12 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
     /// <summary>
     /// Removes sensitive clips - with their full-text entries, vectors and
     /// rule matches - from a backup copy before it is kept (F-19, OD-4a).
+    /// Called only while the sensitive-clip lifetime is on.
     ///
     /// A backup is retained for a week, so a sensitive clip copied into one
     /// outlived its lifetime there no matter when the live library expired it.
-    /// Restoring a backup therefore brings back no sensitive clips; that is the
-    /// owner's choice recorded as OD-4a.
+    /// With the lifetime on, restoring a backup therefore brings back no
+    /// sensitive clips; that is the owner's choice recorded as OD-4a.
     ///
     /// Deleting the rows is not enough on its own: their bytes stay in free
     /// pages and the full-text index keeps the original segments until a merge.

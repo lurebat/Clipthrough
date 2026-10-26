@@ -2797,7 +2797,7 @@
     "why": "F-19. Deleted rows stay readable in free pages and in un-merged FTS segments until the copy is optimized and vacuumed.",
     "find": "        if (removed > 0)\n        {\n            if (HasTable(connection, \"clips_fts\"))\n",
     "replace": "        if (removed < 0)\n        {\n            if (HasTable(connection, \"clips_fts\"))\n",
-    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.TheDailyBackup_HoldsNoSensitiveClip"
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WithTheLifetimeOn_TheDailyBackup_HoldsNoSensitiveClip"
   },
   {
     "id": "backup-purge-keeps-vectors",
@@ -2805,7 +2805,7 @@
     "why": "F-19. The vector and rule matches go by the schema's ON DELETE CASCADE, which SQLite ignores unless the connection turns foreign keys on.",
     "find": "            ForeignKeys = true,\n        };\n        if (!string.IsNullOrEmpty(password))\n        {\n            builder.Password = password;\n        }\n\n        using var connection = new SqliteConnection(builder.ToString());\n        connection.StateChange += ApplyBusyTimeoutOnOpen;\n",
     "replace": "            ForeignKeys = false,\n        };\n        if (!string.IsNullOrEmpty(password))\n        {\n            builder.Password = password;\n        }\n\n        using var connection = new SqliteConnection(builder.ToString());\n        connection.StateChange += ApplyBusyTimeoutOnOpen;\n",
-    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.TheDailyBackup_HoldsNoSensitiveClip"
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WithTheLifetimeOn_TheDailyBackup_HoldsNoSensitiveClip"
   },
   {
     "id": "startup-backup-precedes-expiry",
@@ -2814,5 +2814,13 @@
     "find": "                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n",
     "replace": "                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n",
     "filter": "FullyQualifiedName~StartupExpiresSensitiveClips_BeforeTakingTheDailyBackup"
+  },
+  {
+    "id": "backup-purge-ignores-the-lifetime-setting",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "OD-4a owner decision. With the sensitive lifetime off the user keeps sensitive clips; purging them from backups would lose them on restore.",
+    "find": "                    if (_settingsService?.Current.EnableSensitiveClipLifetime == true)\n",
+    "replace": "                    if (_settingsService?.Current.EnableSensitiveClipLifetime == true || _settingsService?.Current.EnableSensitiveClipLifetime != true)\n",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WithTheLifetimeOff_TheDailyBackup_KeepsSensitiveClips"
   }
 ]

@@ -14,7 +14,7 @@ namespace Clipthrough.Tests.Unit;
 /// F-19 / OD-4a, backup half. A daily backup is kept for a week, so a
 /// sensitive clip copied into one outlived its lifetime there: the audit probe
 /// found the expired secret in the backup after the live library had expired
-/// it. Backups now carry no sensitive clips at all.
+/// it. While the lifetime setting is on, backups carry no sensitive clips.
 /// </summary>
 public sealed class BackupSensitivePurgeTests
 {
@@ -62,16 +62,26 @@ public sealed class BackupSensitivePurgeTests
         return command.ExecuteScalar();
     }
 
+    private static string BackupPath(TemporaryDatabaseScope scope)
+        => Directory.GetFiles(Path.Combine(Path.GetDirectoryName(scope.DatabasePath)!, "backups"), "*.db").Single();
+
+    private static async Task BackUpAsync(TemporaryDatabaseScope scope, bool lifetimeOn)
+    {
+        scope.SettingsService.SetCurrent(AppSettings.Default with { EnableSensitiveClipLifetime = lifetimeOn });
+        await new DatabaseBackupService(scope.StorageOptionsService, null, null, null, settingsService: scope.SettingsService)
+            .EnsureDailyBackupAsync();
+        SqliteConnection.ClearAllPools();
+    }
+
     [Fact]
-    public async Task TheDailyBackup_HoldsNoSensitiveClip_InRowsIndexVectorsOrFreePages()
+    public async Task WithTheLifetimeOn_TheDailyBackup_HoldsNoSensitiveClip_InRowsIndexVectorsOrFreePages()
     {
         using var scope = new TemporaryDatabaseScope();
         var (sensitiveId, ordinaryId) = await SeedAsync(scope);
 
-        await new DatabaseBackupService(scope.StorageOptionsService, null, null, null).EnsureDailyBackupAsync();
-        SqliteConnection.ClearAllPools();
+        await BackUpAsync(scope, lifetimeOn: true);
 
-        var backup = Directory.GetFiles(Path.Combine(Path.GetDirectoryName(scope.DatabasePath)!, "backups"), "*.db").Single();
+        var backup = BackupPath(scope);
         Assert.Equal(0L, Scalar(backup, $"SELECT count(*) FROM clips WHERE id = {sensitiveId};"));
         Assert.Equal(0L, Scalar(backup, $"SELECT count(*) FROM clip_embeddings WHERE clip_id = {sensitiveId};"));
         Assert.Equal(0L, Scalar(backup, $"SELECT count(*) FROM clips_fts WHERE clips_fts MATCH '\"{Secret}\"';"));
@@ -82,6 +92,25 @@ public sealed class BackupSensitivePurgeTests
         Assert.Equal(1L, Scalar(backup, $"SELECT count(*) FROM clips WHERE id = {ordinaryId};"));
         Assert.Equal(1L, Scalar(backup, "SELECT count(*) FROM clips_fts WHERE clips_fts MATCH '\"ordinary clip\"';"));
         Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(sensitiveId));
+    }
+
+    /// <summary>
+    /// Owner decision on OD-4a: the purge serves the lifetime promise, so with
+    /// the lifetime off sensitive clips are kept like any other and a restored
+    /// backup brings them back.
+    /// </summary>
+    [Fact]
+    public async Task WithTheLifetimeOff_TheDailyBackup_KeepsSensitiveClips()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        var (sensitiveId, _) = await SeedAsync(scope);
+
+        await BackUpAsync(scope, lifetimeOn: false);
+
+        var backup = BackupPath(scope);
+        Assert.Equal(1L, Scalar(backup, $"SELECT count(*) FROM clips WHERE id = {sensitiveId};"));
+        Assert.Equal(1L, Scalar(backup, $"SELECT count(*) FROM clip_embeddings WHERE clip_id = {sensitiveId};"));
+        Assert.Equal(1L, Scalar(backup, $"SELECT count(*) FROM clips_fts WHERE clips_fts MATCH '\"{Secret}\"';"));
     }
 
     [Fact]
