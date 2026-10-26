@@ -193,4 +193,49 @@ public sealed class StorageLifecycleTests : IDisposable
         File.Copy(stashedWal, recovered + "-wal");
         Assert.Equal("stale-target", ReadRows(recovered, null));
     }
+
+    // ─── Rekey password whitespace (F-02, OD-12a) ─────────────────────────────
+
+    /// <summary>
+    /// The session and every later unlock trim the password, so the file has to
+    /// be keyed with the trimmed value. Before the fix it was keyed with the raw
+    /// one, verified with the raw one, and every later open used the trimmed
+    /// one: "Incorrect password" forever.
+    /// </summary>
+    [Fact]
+    public async Task Rekey_NewPasswordWithEdgeWhitespace_OpensWithTheKeyTheSessionUses()
+    {
+        var dbPath = Path.Combine(_root, "clipthrough.db");
+        Exec(dbPath, "old-pw", "CREATE TABLE clips (v TEXT); INSERT INTO clips VALUES ('kept');");
+        var storage = NewStorage(dbPath);
+        storage.SetInMemoryPassword("old-pw");
+
+        const string typed = "correct horse ";
+        await storage.RekeyAsync("old-pw", typed, rememberNewPassword: false);
+        SqliteConnection.ClearAllPools();
+
+        Assert.Equal("correct horse", storage.Current.DatabasePassword);
+        Assert.True(
+            StorageOptionsService.CanOpenWithPassword(dbPath, storage.Current.DatabasePassword),
+            "The rekeyed database does not open with the key the running session uses.");
+
+        // The next launch's unlock prompt: the user types exactly what they chose.
+        var nextLaunch = NewStorage(dbPath);
+        nextLaunch.SetInMemoryPassword(typed);
+        Assert.Equal("kept", ReadRows(dbPath, nextLaunch.Current.DatabasePassword));
+    }
+
+    [Fact]
+    public async Task Rekey_CurrentPasswordWithEdgeWhitespace_IsTrimmedLikeEveryOtherEntry()
+    {
+        var dbPath = Path.Combine(_root, "clipthrough.db");
+        Exec(dbPath, "old-pw", "CREATE TABLE clips (v TEXT); INSERT INTO clips VALUES ('kept');");
+        var storage = NewStorage(dbPath);
+        storage.SetInMemoryPassword("old-pw");
+
+        await storage.RekeyAsync(" old-pw ", "new-pw", rememberNewPassword: false);
+        SqliteConnection.ClearAllPools();
+
+        Assert.Equal("kept", ReadRows(dbPath, "new-pw"));
+    }
 }

@@ -183,6 +183,8 @@ public static class AppText
         [nameof(SettingsInvalidMaxLibrarySize)] = "Enter an archive size between 1 and 1048576 MB.",
         [nameof(SettingsInvalidMaxEntryCount)] = "Enter a max entry count between 1 and 5000000.",
         [nameof(SettingsPasswordMismatch)] = "Passwords do not match.",
+        [nameof(RekeyPasswordMismatch)] = "New password and confirmation do not match.",
+        [nameof(RekeyPasswordEdgeWhitespace)] = "The new password starts or ends with a space or other whitespace. Remove it: Clipthrough ignores leading and trailing whitespace when you unlock, so the database could never be opened with it.",
         [nameof(UnlockIncorrectPassword)] = "Incorrect password. Please try again.",
         [nameof(UnlockDatabaseUnreadable)] = "The database could not be opened. It may have been moved, deleted, or is in use by another program.",
         [nameof(SettingsInvalidRuleName)] = "Each sensitivity rule needs a name.",
@@ -518,6 +520,8 @@ public static class AppText
     public static string SettingsInvalidMaxLibrarySize => Text(nameof(SettingsInvalidMaxLibrarySize));
     public static string SettingsInvalidMaxEntryCount => Text(nameof(SettingsInvalidMaxEntryCount));
     public static string SettingsPasswordMismatch => Text(nameof(SettingsPasswordMismatch));
+    public static string RekeyPasswordMismatch => Text(nameof(RekeyPasswordMismatch));
+    public static string RekeyPasswordEdgeWhitespace => Text(nameof(RekeyPasswordEdgeWhitespace));
     public static string UnlockIncorrectPassword => Text(nameof(UnlockIncorrectPassword));
     public static string UnlockDatabaseUnreadable => Text(nameof(UnlockDatabaseUnreadable));
     public static string SettingsInvalidRuleName => Text(nameof(SettingsInvalidRuleName));

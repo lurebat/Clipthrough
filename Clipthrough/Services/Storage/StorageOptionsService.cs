@@ -371,6 +371,15 @@ public sealed class StorageOptionsService : IStorageOptionsService
     /// </summary>
     public async Task RekeyAsync(string currentPassword, string newPassword, bool rememberNewPassword, CancellationToken cancellationToken = default)
     {
+        // Both passwords go through the rule every unlock applies. Keying the
+        // file with the raw value - say, a pasted passphrase ending in a space -
+        // and then running the session on the trimmed one locked the user out
+        // of their whole history for good (F-02). The dialog refuses edge
+        // whitespace up front (S42); this keeps the service consistent with it
+        // for every other caller.
+        var currentKey = StorageOptions.NormalizePassword(currentPassword);
+        var newKey = StorageOptions.NormalizePassword(newPassword);
+
         await _gate.WaitAsync(cancellationToken);
         try
         {
@@ -383,7 +392,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
             }
 
             // Step 1: Verify the current password opens the DB before touching anything.
-            var openWith = current with { DatabasePassword = currentPassword ?? string.Empty };
+            var openWith = current with { DatabasePassword = currentKey };
             try
             {
                 await using var probe = OpenConnection(openWith);
@@ -406,7 +415,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
             // that malformed file would become the user's database.
             SqliteConnection.ClearAllPools();
             var tempPath = dbPath + ".rekeying-" + Guid.NewGuid().ToString("N");
-            SqliteDatabaseCopier.CopyDatabase(dbPath, currentPassword, tempPath);
+            SqliteDatabaseCopier.CopyDatabase(dbPath, currentKey, tempPath);
 
             try
             {
@@ -414,22 +423,23 @@ public sealed class StorageOptionsService : IStorageOptionsService
                 var tempOptions = current with
                 {
                     DatabasePath = tempPath,
-                    DatabasePassword = currentPassword ?? string.Empty,
+                    DatabasePassword = currentKey,
                 };
 
                 await using (var conn = OpenConnection(tempOptions))
                 {
                     await conn.OpenAsync(cancellationToken);
                     await using var cmd = conn.CreateCommand();
-                    cmd.CommandText = $"PRAGMA rekey = '{EscapeSqlLiteral(newPassword ?? string.Empty)}';";
+                    cmd.CommandText = $"PRAGMA rekey = '{EscapeSqlLiteral(newKey)}';";
                     await cmd.ExecuteNonQueryAsync(cancellationToken);
                 }
 
                 // Flush pooled connections to the temp file before verifying.
                 SqliteConnection.ClearAllPools();
 
-                // Step 5: Verify the rekeyed copy opens with the new password.
-                if (!CanOpenWithPassword(tempPath, newPassword ?? string.Empty))
+                // Step 5: Verify the rekeyed copy opens with the key the session
+                // will use from here on - not merely with what was passed in.
+                if (!CanOpenWithPassword(tempPath, newKey))
                 {
                     throw new InvalidOperationException(
                         "Rekey verification failed: the rekeyed copy does not open with the new password.");
@@ -449,7 +459,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
                 var updated = (current with
                 {
-                    DatabasePassword = newPassword ?? string.Empty,
+                    DatabasePassword = newKey,
                     RememberPassword = rememberNewPassword,
                 }).Normalize();
 

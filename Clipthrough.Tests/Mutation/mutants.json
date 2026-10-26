@@ -2686,5 +2686,21 @@
     "find": "                foreach (var suffix in new[] { string.Empty, \"-wal\", \"-shm\" })\n                {\n                    var existing = newPath + suffix;",
     "replace": "                foreach (var suffix in new[] { string.Empty })\n                {\n                    var existing = newPath + suffix;",
     "filter": "FullyQualifiedName~StorageLifecycleTests.PathMove_"
+  },
+  {
+    "id": "rekey-keys-with-raw-password",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "F-02. Keying and verifying with the raw new password while the session (and every later unlock) uses the trimmed one locks the user out of the whole history after a rekey to a passphrase ending in a space.",
+    "find": "        var newKey = StorageOptions.NormalizePassword(newPassword);",
+    "replace": "        var newKey = newPassword ?? string.Empty;",
+    "filter": "FullyQualifiedName~StorageLifecycleTests.Rekey_NewPasswordWithEdgeWhitespace"
+  },
+  {
+    "id": "rekey-dialog-accepts-edge-whitespace",
+    "file": "Clipthrough/Views/RekeyDialog.axaml.cs",
+    "why": "OD-12a / S42. The dialog must refuse a new password with leading or trailing whitespace instead of letting the service trim it silently, so the key on disk is always exactly what the user typed.",
+    "find": "            && (char.IsWhiteSpace(newPassword[0]) || char.IsWhiteSpace(newPassword[^1])))",
+    "replace": "            && (char.IsWhiteSpace(newPassword[0]) && !char.IsWhiteSpace(newPassword[0])))",
+    "filter": "FullyQualifiedName~RekeyDialogValidationTests"
   }
 ]
