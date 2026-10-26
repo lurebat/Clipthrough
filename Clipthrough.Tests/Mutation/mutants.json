@@ -500,7 +500,7 @@
     "why": "Drops the embedding purge from the sensitivity rebuild. A clip the user's new rules just classified as sensitive keeps the vector derived from its secret, and keeps counting as embedded.",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "filter": "RebuildSensitivityMatches_ReconcilesEmbeddingStateInBothDirections",
-    "find": "                DELETE FROM clip_embeddings WHERE clip_id IN (SELECT id FROM clips WHERE is_sensitive = 1);\n                UPDATE clips SET embedding_status = 'excluded' WHERE is_sensitive = 1;\n",
+    "find": "                DELETE FROM clip_embeddings WHERE clip_id IN (SELECT id FROM clips WHERE is_sensitive = 1);\n                UPDATE clips SET embedding_status = 'excluded' WHERE is_sensitive = 1 AND embedding_status IS NOT 'excluded';\n",
     "replace": ""
   },
   {
@@ -532,8 +532,8 @@
     "why": "Makes the rebuild blanket-clear is_sensitive instead of preserving hand-marked clips. Any sensitivity rule change silently declassifies every clip the user marked by hand, and the reconcile block below then hands those secrets to the embedding worker.",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "filter": "RebuildSensitivityMatches_KeepsHandMarkedClipsSensitiveAndUnembedded",
-    "find": "            resetSensitiveCommand.CommandText = \"UPDATE clips SET is_sensitive = sensitivity_is_manual;\";",
-    "replace": "            resetSensitiveCommand.CommandText = \"UPDATE clips SET is_sensitive = 0;\";"
+    "find": "                UPDATE clips SET is_sensitive = sensitivity_is_manual\n                WHERE is_sensitive IS NOT sensitivity_is_manual\n",
+    "replace": "                UPDATE clips SET is_sensitive = 0\n                WHERE is_sensitive IS NOT 0\n"
   },
   {
     "id": "manual-sensitivity-not-recorded",
@@ -2790,5 +2790,21 @@
     "find": "            WHERE content_type = 'image' AND content_bytes IS NOT NULL;\n",
     "replace": "            WHERE content_type = 'files' AND content_bytes IS NOT NULL;\n",
     "filter": "FullyQualifiedName~StartupScanIndexTests.OcrCoverage_IsAnsweredFromTheImageIndex"
+  },
+  {
+    "id": "rerun-all-in-one-transaction",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-24. One transaction over the library held the write lock for 74 s at 60k clips; a capture issued meanwhile failed and was lost.",
+    "find": "        var batchSize = Math.Max(1, RerunBatchSize);\n",
+    "replace": "        var batchSize = RerunBatchSize > 0 ? int.MaxValue : RerunBatchSize;\n",
+    "filter": "FullyQualifiedName~LongWriteLockTests.ACaptureDuringRerunAll_CommitsBetweenBatches"
+  },
+  {
+    "id": "sensitivity-rebuild-rewrites-every-row",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-24. Resetting the flag on every row rewrote each record, payload included: 15 s and 277 MB of write lock per rule save at 60k.",
+    "find": "                WHERE is_sensitive IS NOT sensitivity_is_manual\n",
+    "replace": "                WHERE 1 = 1\n",
+    "filter": "FullyQualifiedName~LongWriteLockTests.ARebuildThatChangesNoVerdict_WritesNoClipRow"
   }
 ]

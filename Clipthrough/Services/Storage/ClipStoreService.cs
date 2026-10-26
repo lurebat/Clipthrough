@@ -1082,25 +1082,47 @@ public sealed class ClipStoreService : IClipStoreService
             await deleteMatchesCommand.ExecuteNonQueryAsync(cancellationToken);
         }
 
+        // Write only the rows whose verdict changes (F-24). The blanket
+        // "SET is_sensitive = sensitivity_is_manual" rewrote every clip - its
+        // whole record, payload included - on every rule save: 15 s and 277 MB
+        // of write lock at 60k clips, to change a handful of flags at most.
+        await using (var matchedTable = connection.CreateCommand())
+        {
+            matchedTable.Transaction = transaction;
+            matchedTable.CommandText = "CREATE TEMP TABLE IF NOT EXISTS rebuild_matched (id INTEGER PRIMARY KEY); DELETE FROM temp.rebuild_matched;";
+            await matchedTable.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var insertMatched = connection.CreateCommand())
+        {
+            insertMatched.Transaction = transaction;
+            insertMatched.CommandText = "INSERT INTO temp.rebuild_matched (id) VALUES ($id);";
+            var matchedId = insertMatched.Parameters.Add("$id", SqliteType.Integer);
+            foreach (var (clipId, _) in matched)
+            {
+                matchedId.Value = clipId;
+                await insertMatched.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
+
         await using (var resetSensitiveCommand = connection.CreateCommand())
         {
             resetSensitiveCommand.Transaction = transaction;
-            resetSensitiveCommand.CommandText = "UPDATE clips SET is_sensitive = sensitivity_is_manual;";
+            resetSensitiveCommand.CommandText = """
+                UPDATE clips SET is_sensitive = sensitivity_is_manual
+                WHERE is_sensitive IS NOT sensitivity_is_manual
+                  AND id NOT IN (SELECT id FROM temp.rebuild_matched);
+                UPDATE clips SET is_sensitive = 1
+                WHERE is_sensitive IS NOT 1
+                  AND id IN (SELECT id FROM temp.rebuild_matched);
+                DROP TABLE temp.rebuild_matched;
+                """;
             await resetSensitiveCommand.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        await using (var updateCommand = connection.CreateCommand())
+        foreach (var (clipId, matches) in matched)
         {
-            updateCommand.Transaction = transaction;
-            updateCommand.CommandText = "UPDATE clips SET is_sensitive = 1 WHERE id = $id;";
-            var updateId = updateCommand.Parameters.Add("$id", SqliteType.Integer);
-
-            foreach (var (clipId, matches) in matched)
-            {
-                updateId.Value = clipId;
-                await updateCommand.ExecuteNonQueryAsync(cancellationToken);
-                await AddSensitivityMatchesAsync(connection, transaction, clipId, matches, cancellationToken);
-            }
+            await AddSensitivityMatchesAsync(connection, transaction, clipId, matches, cancellationToken);
         }
 
         // Reconcile embedding state with the sensitivity verdicts we just rewrote.
@@ -1114,7 +1136,7 @@ public sealed class ClipStoreService : IClipStoreService
             reconcile.Transaction = transaction;
             reconcile.CommandText = """
                 DELETE FROM clip_embeddings WHERE clip_id IN (SELECT id FROM clips WHERE is_sensitive = 1);
-                UPDATE clips SET embedding_status = 'excluded' WHERE is_sensitive = 1;
+                UPDATE clips SET embedding_status = 'excluded' WHERE is_sensitive = 1 AND embedding_status IS NOT 'excluded';
                 UPDATE clips SET embedding_status = NULL, embedding_attempts = 0 WHERE is_sensitive = 0 AND embedding_status = 'excluded';
                 """;
             await reconcile.ExecuteNonQueryAsync(cancellationToken);
@@ -2857,6 +2879,12 @@ public sealed class ClipStoreService : IClipStoreService
         return rows > 0;
     }
 
+    /// <summary>Clips per rerun-all transaction (F-24). Settable for tests.</summary>
+    internal int RerunBatchSize { get; set; } = 2000;
+
+    /// <summary>Test hook: runs after each rerun-all batch commits, while the write lock is free.</summary>
+    internal Func<Task>? AfterRerunBatchCommitted { get; set; }
+
     public Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default)
         => RunOffCallerAsync(ct => MarkAllEmbeddingsForRerunCoreAsync(ct), cancellationToken);
 
@@ -2865,33 +2893,66 @@ public sealed class ClipStoreService : IClipStoreService
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
-
-        await using (var purge = connection.CreateCommand())
+        long minId;
+        long maxId;
+        await using (var bounds = connection.CreateCommand())
         {
-            purge.Transaction = transaction;
-            purge.CommandText = "DELETE FROM clip_embeddings;";
-            await purge.ExecuteNonQueryAsync(cancellationToken);
+            bounds.CommandText = "SELECT COALESCE(MIN(id), 0), COALESCE(MAX(id), -1) FROM clips;";
+            await using var reader = await bounds.ExecuteReaderAsync(cancellationToken);
+            await reader.ReadAsync(cancellationToken);
+            minId = reader.GetInt64(0);
+            maxId = reader.GetInt64(1);
         }
 
+        // One short transaction per id range rather than one over the library
+        // (F-24): that held the write lock for 74 s at 60k clips, and a capture
+        // issued meanwhile failed after busy_timeout and was lost. Clips captured
+        // after the bounds were read are new and unembedded anyway. A rerun cut
+        // short leaves the earlier ranges marked, which re-running completes.
+        var batchSize = Math.Max(1, RerunBatchSize);
         var ids = new List<long>();
-        await using (var update = connection.CreateCommand())
+        for (var low = minId; low <= maxId; low += batchSize)
         {
-            update.Transaction = transaction;
-            update.CommandText = $"""
-                UPDATE clips
-                SET embedding_status = 'rerun', embedding_attempts = 0
-                WHERE {EmbeddingEligibilityClause}
-                RETURNING id;
-                """;
-            await using var reader = await update.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
+            var high = low + batchSize - 1;
+            await using (var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken))
             {
-                ids.Add(reader.GetInt64(0));
+                await using (var purge = connection.CreateCommand())
+                {
+                    purge.Transaction = transaction;
+                    purge.CommandText = "DELETE FROM clip_embeddings WHERE clip_id BETWEEN $low AND $high;";
+                    purge.Parameters.AddWithValue("$low", low);
+                    purge.Parameters.AddWithValue("$high", high);
+                    await purge.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                await using (var update = connection.CreateCommand())
+                {
+                    update.Transaction = transaction;
+                    update.CommandText = $"""
+                        UPDATE clips
+                        SET embedding_status = 'rerun', embedding_attempts = 0
+                        WHERE id BETWEEN $low AND $high
+                          AND {EmbeddingEligibilityClause}
+                        RETURNING id;
+                        """;
+                    update.Parameters.AddWithValue("$low", low);
+                    update.Parameters.AddWithValue("$high", high);
+                    await using var reader = await update.ExecuteReaderAsync(cancellationToken);
+                    while (await reader.ReadAsync(cancellationToken))
+                    {
+                        ids.Add(reader.GetInt64(0));
+                    }
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            if (AfterRerunBatchCommitted is { } afterBatch)
+            {
+                await afterBatch().ConfigureAwait(false);
             }
         }
 
-        await transaction.CommitAsync(cancellationToken);
         return ids;
     }
 
