@@ -61,7 +61,7 @@ Add these to the repo's settled decisions (AGENTS.md or a docs/solutions note) w
 | OD-1 | (a) Separate payload table plus deduplicated `app_icons`, migrated once, resumably | Phase E is in scope as U-E1; it depends on Phase D |
 | OD-2 | (b) Start evaluating a replacement encrypted-SQLite package now, as its own unit with on-disk compatibility verification; ship U-C5 meanwhile | New unit U-C8 (evaluation only). Adopting a package is a later unit that needs its own approval (new dependency) |
 | OD-3 | (a) Editor and Compare write to a per-session temp folder that is deleted afterwards, with no `metadata.json`. Explicit Export stays in Documents but asks for confirmation on sensitive clips | U-C3 as written |
-| OD-4 | (a) Run expiry before the startup backup; purge sensitive rows from backup copies; add `secure_delete` after measuring its cost on the Phase D fixture | U-C4 split into U-C4a (expiry order and purge) and U-C4b (`secure_delete`, depends on U-D0) |
+| OD-4 | (a) Run expiry before the startup backup; purge sensitive rows from backup copies **only while the sensitive-lifetime setting is on** (refined by the owner during Phase C: with it off, backups keep sensitive clips); add `secure_delete` after measuring its cost on the Phase D fixture | U-C4 split into U-C4a (expiry order and purge) and U-C4b (`secure_delete`, depends on U-D0) |
 | OD-5 | (a) Pin the feed to the repo now; decide on signing separately | U-C7 is the pin only. Signing is out of scope (S37) |
 | OD-6 | (a) Separate headless CI step that re-runs only cleanup failures; F-30 comes first | U-F1 is a hard prerequisite of U-F2 |
 | OD-7 | NonBacktracking is the default, with a setting to switch to backtracking. Backtracking keeps the 250 ms timeout and the "pattern too slow" status (owner's own option) | U-B6 reworked: engine setting, tests for both engines; S38 |
@@ -289,8 +289,9 @@ Guard R3: a lifecycle matrix test class.
 - Mutant: point the root back at `MyDocuments`.
 
 **U-C4a (F-19, OD-4a) — expired sensitive clips in backups**
-- Change: run the sensitive-lifetime expiry before the startup daily backup. Purge `is_sensitive = 1` rows, with their FTS rows and vectors, from each backup copy before it is finalised.
+- Change: run the sensitive-lifetime expiry before the startup daily backup. While the sensitive-lifetime setting is on, purge `is_sensitive = 1` rows, with their FTS rows and vectors, from each backup copy before it is finalised. With the setting off, backups keep sensitive clips (owner decision, Phase C).
 - Test: invert `Probe_ExpiredSensitiveClipSurvivesInBackupAndFreePages` for the backup half.
+- Test (owner decision): with the lifetime off, the backup retains sensitive clips; with it on, they are purged. Mutant: drop the condition.
 - Mutant: skip the backup purge.
 
 **U-C4b (F-19, OD-4a) — `secure_delete` (depends on U-D0)**
