@@ -32,6 +32,8 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
 
     public bool HasSavedConfig => _hasSavedConfig;
 
+    public string? LoadFault { get; set; }
+
     public bool DatabaseExists => File.Exists(Current.DatabasePath);
 
     /// <summary>

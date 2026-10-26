@@ -399,4 +399,67 @@ public sealed class StorageLifecycleTests : IDisposable
         SqliteConnection.ClearAllPools();
         Assert.Equal(Marker, ReadRows(dbPath, "new-pass"));
     }
+
+    // ─── storage.json writes (F-22) ───────────────────────────────────────────
+
+    /// <summary>
+    /// A crash, power loss or full disk during a storage save leaves a torn
+    /// storage.json. Before the fix the next start silently opened the default
+    /// library, dropped the remembered password, kept no copy of the file, and
+    /// the next save overwrote the evidence.
+    /// </summary>
+    [Fact]
+    public void TornStorageJson_IsSetAsideAndReported()
+    {
+        var customPath = Path.Combine(_root, "elsewhere", "clipthrough.db");
+        NewStorage(customPath);
+        var full = File.ReadAllText(_configPath);
+        var torn = full[..(full.Length / 2)];
+        File.WriteAllText(_configPath, torn);
+
+        var storage = new StorageOptionsService(new FakeDataProtectionService(), _configPath);
+
+        Assert.False(string.IsNullOrEmpty(storage.LoadFault), "A torn storage.json was recovered from silently.");
+        var quarantined = Assert.Single(Directory.GetFiles(_root, "storage.json.corrupt-*"));
+        Assert.Equal(torn, File.ReadAllText(quarantined));
+        Assert.Contains(Path.GetFileName(quarantined), storage.LoadFault, StringComparison.Ordinal);
+
+        // Out of the way, so the next save cannot overwrite it and the first-run
+        // flow lets the user point the app back at their library.
+        Assert.False(storage.HasSavedConfig);
+    }
+
+    [Fact]
+    public void ReadableStorageJson_ReportsNoFault()
+    {
+        NewStorage(Path.Combine(_root, "clipthrough.db"));
+        var storage = new StorageOptionsService(new FakeDataProtectionService(), _configPath);
+        Assert.Null(storage.LoadFault);
+    }
+
+    /// <summary>
+    /// Saving has to write a new file and rename it over storage.json, never
+    /// rewrite storage.json in place: an in-place write that dies part-way is
+    /// exactly the torn file above. A second hard link to the old file tells
+    /// the two apart deterministically - an in-place write changes what it
+    /// points at, a rename does not.
+    /// </summary>
+    [Fact]
+    public async Task SavingStorage_ReplacesStorageJsonInsteadOfRewritingIt()
+    {
+        var dbPath = Path.Combine(_root, "clipthrough.db");
+        var storage = NewStorage(dbPath);
+        var before = File.ReadAllText(_configPath);
+        var link = Path.Combine(_root, "storage-link.json");
+        Assert.True(CreateHardLink(link, _configPath, IntPtr.Zero), "Setup: could not create a hard link.");
+
+        await storage.SaveAsync(new StorageOptions { DatabasePath = dbPath, RememberPassword = true });
+
+        Assert.Contains("\"rememberPassword\": true", File.ReadAllText(_configPath), StringComparison.Ordinal);
+        Assert.Equal(before, File.ReadAllText(link));
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool CreateHardLink(string lpFileName, string lpExistingFileName, IntPtr lpSecurityAttributes);
 }

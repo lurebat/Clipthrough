@@ -2181,6 +2181,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 StatusText = settingsFault;
             }
 
+            // The same for storage.json, whose silent fallback is worse: the
+            // default library instead of the user's (F-22).
+            if (_storageOptionsService.LoadFault is { Length: > 0 } storageFault)
+            {
+                _notificationService.PublishError(AppText.StorageLoadFailedTitle, storageFault);
+                StatusText = storageFault;
+            }
+
             var draftSettings = _settingsService.HasSavedSettings ? _settingsService.Current : AppSettings.Default;
             LoadSettingsDraft(draftSettings);
             ApplyPersistedFilters(draftSettings, notify: true);

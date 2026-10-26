@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Clipthrough.Localization;
 using Clipthrough.Models;
 using Clipthrough.Services.Search;
 using Microsoft.Data.Sqlite;
@@ -71,6 +72,9 @@ public sealed class StorageOptionsService : IStorageOptionsService
     public StorageOptions Current { get; private set; }
 
     public bool HasSavedConfig => File.Exists(_configPath);
+
+    /// <inheritdoc />
+    public string? LoadFault { get; private set; }
 
     public bool DatabaseExists => File.Exists(Current.DatabasePath);
 
@@ -672,10 +676,38 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
             return options;
         }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        catch (JsonException ex)
         {
+            // Unreadable content - typically a save torn by a crash, a power
+            // loss or a full disk. The only recovery available is the default
+            // library, so the user must hear about it, and the file must be set
+            // aside before the next save overwrites the evidence (F-22).
+            LoadFault = QuarantineUnreadableConfig(ex);
+            return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Deliberately not quarantined: a locked or briefly unreadable file
+            // is usually transient, and moving it aside would lose a config
+            // that was never corrupt.
             Trace.TraceWarning($"Storage settings load failed: {ex.Message}");
             return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize());
+        }
+    }
+
+    private string QuarantineUnreadableConfig(JsonException ex)
+    {
+        var fileName = Path.GetFileName(_configPath);
+        try
+        {
+            var quarantinePath = AtomicFile.Quarantine(_configPath);
+            Trace.TraceError($"Storage settings could not be parsed and were moved to '{quarantinePath}': {ex.Message}");
+            return AppText.FormatStorageLoadFault(fileName, Path.GetFileName(quarantinePath));
+        }
+        catch (Exception moveFailure) when (moveFailure is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceError($"Storage settings could not be parsed, and moving them aside failed: {moveFailure.Message}");
+            return AppText.FormatStorageLoadFaultNotMoved(fileName);
         }
     }
 
@@ -692,7 +724,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
             Directory.CreateDirectory(directory);
 
             var document = BuildDocument(options);
-            File.WriteAllText(_configPath, JsonSerializer.Serialize(document, JsonOptions));
+            AtomicFile.WriteAllText(_configPath, JsonSerializer.Serialize(document, JsonOptions));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -768,7 +800,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
         Directory.CreateDirectory(directory);
 
         var document = BuildDocument(options);
-        await File.WriteAllTextAsync(_configPath, JsonSerializer.Serialize(document, JsonOptions), cancellationToken);
+        await AtomicFile.WriteAllTextAsync(_configPath, JsonSerializer.Serialize(document, JsonOptions), cancellationToken);
     }
 
     /// <summary>

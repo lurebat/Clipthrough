@@ -2523,8 +2523,8 @@
     "id": "settings-are-written-straight-over-the-live-file",
     "why": "Puts back the direct write. A crash or a full disk part-way through leaves settings.json truncated, and the recovery path for an unreadable settings file is a silent fallback rather than an error.",
     "file": "Clipthrough/Services/Storage/SettingsService.cs",
-    "find": "        var tempPath = _settingsPath + \".tmp\";\n        await File.WriteAllTextAsync(tempPath, json, cancellationToken);\n        File.Move(tempPath, _settingsPath, overwrite: true);",
-    "replace": "        var tempPath = _settingsPath + \".tmp\";\n        await File.WriteAllTextAsync(tempPath.Length > 0 ? _settingsPath : tempPath, json, cancellationToken);",
+    "find": "        await AtomicFile.WriteAllTextAsync(_settingsPath, json, cancellationToken);",
+    "replace": "        await File.WriteAllTextAsync(_settingsPath, json, cancellationToken);",
     "filter": "FullyQualifiedName~SettingsFileIntegrityTests"
   },
   {
@@ -2718,5 +2718,29 @@
     "find": "                await Task.Run(() => DatabaseBackupService.RekeyBackups(dbPath, currentKey, newKey), CancellationToken.None);",
     "replace": "                await Task.CompletedTask;",
     "filter": "FullyQualifiedName~StorageLifecycleTests.Rekey_BackupTakenBefore|FullyQualifiedName~StorageLifecycleTests.Rekey_PlaintextBackup"
+  },
+  {
+    "id": "storage-json-written-in-place",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "F-22. Rewriting storage.json in place truncates it first, so a crash, power loss or full disk mid-save leaves a torn file and the next start opens the default library instead of the user's.",
+    "find": "        await AtomicFile.WriteAllTextAsync(_configPath, JsonSerializer.Serialize(document, JsonOptions), cancellationToken);",
+    "replace": "        await File.WriteAllTextAsync(_configPath, JsonSerializer.Serialize(document, JsonOptions), cancellationToken);",
+    "filter": "FullyQualifiedName~StorageLifecycleTests.SavingStorage_"
+  },
+  {
+    "id": "torn-storage-json-recovered-silently",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "F-22. A torn storage.json must be set aside and reported; falling back to the default library silently drops the remembered password, keeps no copy, and lets the next save overwrite the evidence.",
+    "find": "            LoadFault = QuarantineUnreadableConfig(ex);",
+    "replace": "            Trace.TraceWarning($\"Storage settings load failed: {ex.Message}\");",
+    "filter": "FullyQualifiedName~StorageLifecycleTests.TornStorageJson"
+  },
+  {
+    "id": "storage-load-fault-not-shown",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-22. The storage load fault is only worth recording if the user is told: otherwise they are on the default library with no idea why their history is gone.",
+    "find": "                _notificationService.PublishError(AppText.StorageLoadFailedTitle, storageFault);",
+    "replace": "                Trace.TraceWarning(storageFault);",
+    "filter": "FullyQualifiedName~InitializeAsync_WhenStorageConfigWasUnreadable_TellsTheUser"
   }
 ]
