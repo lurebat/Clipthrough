@@ -2830,5 +2830,13 @@
     "find": "                        && parsed.Offset != TimeSpan.Zero)\n",
     "replace": "                        && parsed.Offset != TimeSpan.Zero && parsed.Offset == TimeSpan.Zero)\n",
     "filter": "FullyQualifiedName~ImportedTimestampTests"
+  },
+  {
+    "id": "search-history-recorded-on-every-refresh",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-36 / OD-9b. Recording on refresh stores every pause-separated prefix of a query; history is recorded only when the user commits to a search.",
+    "find": "            if (sw is not null) Trace.TraceInformation($\"[refresh-timing] ui-applied={applied} @ {sw.ElapsedMilliseconds}ms\");\n",
+    "replace": "            if (sw is not null) Trace.TraceInformation($\"[refresh-timing] ui-applied={applied} @ {sw.ElapsedMilliseconds}ms\");\n            if (applied && !string.IsNullOrWhiteSpace(request.Filters.SearchText))\n            {\n                await _searchHistoryService.SaveSearchAsync(request.Filters.SearchText).ConfigureAwait(false);\n            }\n",
+    "filter": "FullyQualifiedName~TypingWithPauses_RecordsNothing"
   }
 ]

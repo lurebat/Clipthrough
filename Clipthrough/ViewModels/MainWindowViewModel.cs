@@ -2478,11 +2478,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             });
 
             if (sw is not null) Trace.TraceInformation($"[refresh-timing] ui-applied={applied} @ {sw.ElapsedMilliseconds}ms");
-
-            if (applied && !string.IsNullOrWhiteSpace(request.Filters.SearchText))
-            {
-                await _searchHistoryService.SaveSearchAsync(request.Filters.SearchText).ConfigureAwait(false);
-            }
         }
         finally
         {
@@ -2837,6 +2832,39 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await ToggleFavoriteStateAsync(clip);
     }
 
+    private string? _lastCommittedSearch;
+
+    /// <summary>
+    /// Records the current query in search history (F-36, OD-9b). Called only
+    /// when the user commits to a search - Enter in the search box, choosing a
+    /// result (copy, paste, open), or moving from the search box into the list
+    /// with the keyboard - never when a refresh lands. Recording on refresh
+    /// stored every pause-separated prefix: "inv", "invoice 2", "invoice 2024".
+    /// Once per query; an empty query is never recorded.
+    /// </summary>
+    internal Task CommitSearchQueryAsync()
+    {
+        var query = SearchText?.Trim();
+        if (string.IsNullOrEmpty(query) || string.Equals(query, _lastCommittedSearch, StringComparison.Ordinal))
+        {
+            return Task.CompletedTask;
+        }
+
+        _lastCommittedSearch = query;
+        // ISearchHistoryService has its own connection and no off-thread hop.
+        return Task.Run(async () =>
+        {
+            try
+            {
+                await _searchHistoryService.SaveSearchAsync(query).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Trace.TraceWarning($"Recording the search failed: {ex.Message}");
+            }
+        });
+    }
+
     private async Task CopySelectedAsync()
     {
         _ = await TryCopySelectedAsync();
@@ -2877,6 +2905,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 SelectedClip = clip;
             }
+
+            // Choosing a result commits the search that found it (OD-9b).
+            _ = CommitSearchQueryAsync();
 
             // Selection kicks hydration off but does not wait for it, and a list
             // row carries no content_bytes. Reading FullContent before those
@@ -3040,6 +3071,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        _ = CommitSearchQueryAsync();
         var editorPath = ResolveExternalEditorPath(SelectedClip);
         if (!string.IsNullOrWhiteSpace(editorPath) && !System.IO.File.Exists(ExtractExecutablePath(editorPath)))
         {
