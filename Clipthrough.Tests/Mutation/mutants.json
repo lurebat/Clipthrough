@@ -2734,5 +2734,21 @@
     "find": "        if (terms.Length == 0 || terms.Any(static t => TrigramIndexableLength(t) < 3))\n",
     "replace": "        if (terms.Length == 0 || terms.Any(static t => TrigramIndexableLength(t) < 1))\n",
     "filter": "FullyQualifiedName~InMemorySearchPrefilterTests.NoPrefilter_WhenATermIsShorterThanATrigram"
+  },
+  {
+    "id": "list-row-formats-the-whole-clip",
+    "file": "Clipthrough/Presentation/ClipDisplayFormatter.cs",
+    "why": "F-10. Formatting a row split and collapsed the whole text on the UI thread to show 140 characters: 40 ms / 20.7 MB per 1.9 MB clip.",
+    "find": "        if (content is { Length: > DisplayPrefixLength } && TryBuildFromPrefix(content, contentType, out var bounded))\n",
+    "replace": "        if (content is { Length: > int.MaxValue - DisplayPrefixLength } && TryBuildFromPrefix(content, contentType, out var bounded))\n",
+    "filter": "FullyQualifiedName~ClipDisplayFormatterPrefixTests.ATwoMegabyteClip_IsFormattedWithoutTouchingAllOfIt"
+  },
+  {
+    "id": "list-row-prefix-trusted-when-it-cannot-decide",
+    "file": "Clipthrough/Presentation/ClipDisplayFormatter.cs",
+    "why": "F-10. A prefix too short to decide the snippet would show a row that differs from the clip's own text.",
+    "find": "        if (CollapseWhitespace(prefix).Length <= 140)\n",
+    "replace": "        if (CollapseWhitespace(prefix).Length <= 0)\n",
+    "filter": "FullyQualifiedName~ClipDisplayFormatterPrefixTests.WhenAPrefixCannotDecide"
   }
 ]
