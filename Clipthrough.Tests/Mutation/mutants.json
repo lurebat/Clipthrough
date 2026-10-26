@@ -2702,5 +2702,13 @@
     "find": "        CREATE INDEX IF NOT EXISTS idx_clips_type_default_order ON clips(\n            content_type,\n",
     "replace": "        CREATE INDEX IF NOT EXISTS idx_clips_type_default_order ON clips(\n            byte_size,\n",
     "filter": "FullyQualifiedName~TypeFilter_MostRecent_WalksATypePrefixedIndexWithoutSorting"
+  },
+  {
+    "id": "broad-search-threshold-tuned-on-empty-rows",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-08. At 2000, terms matching 500-2,000 real clips sort every match: 0.6-0.75 s at 60k (4.2 s encrypted at 10k) against 53-126 ms on the ordered index.",
+    "find": "    private const int BroadSearchMatchThreshold = 200;\n",
+    "replace": "    private const int BroadSearchMatchThreshold = 2000;\n",
+    "filter": "FullyQualifiedName~SearchPlanTests.ATermMatchingFiveHundredClips_TakesTheOrderedIndexPlan"
   }
 ]

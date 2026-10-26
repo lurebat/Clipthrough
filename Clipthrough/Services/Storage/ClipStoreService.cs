@@ -1778,13 +1778,15 @@ public sealed class ClipStoreService : IClipStoreService
     }
 
     /// <summary>
-    /// Above this many matches, walking the ordered index beats sorting the matches.
-    /// The crossover is where the two per-row costs meet: an index-only membership
-    /// probe is ~0.3 us against ~15 us to fetch a clips row (they carry content and
-    /// the source-app icon inline) and sort it, so a few thousand matches is the
-    /// point at which sorting them all costs more than reading the whole index.
+    /// At or above this many matches, walking the ordered index beats sorting the
+    /// matches. It was 2000, tuned on rows with no payload; on the U-D0 library,
+    /// whose rows carry their content, bytes and icon inline, fetching and sorting
+    /// a match costs far more than the ~15 us that tuning assumed. Measured there
+    /// at 60k clips (F-08): 516 matches sorted 570-649 ms vs 126 ms walking the
+    /// index; ~1,500 matches 705-752 ms vs 53 ms. 200 follows the audit's
+    /// 100-200 estimate; PerfProbes P1 re-measures it.
     /// </summary>
-    private const int BroadSearchMatchThreshold = 2000;
+    private const int BroadSearchMatchThreshold = 200;
 
     /// <summary>
     /// Builds the SQL WHERE clauses for a filter set. The structural subset

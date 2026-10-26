@@ -119,6 +119,23 @@ public class SearchPlanTests
         Assert.Contains(slowPlan, s => s.Contains("USE TEMP B-TREE FOR ORDER BY", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// F-08. The threshold was tuned on rows with no payload. With real clips -
+    /// content, content_bytes and an icon inline - sorting 516 matches took
+    /// 570-649 ms at 60k clips against 126 ms walking the ordered index, and a
+    /// 1,500-match term 705-752 ms against 53 ms. A term matching a few hundred
+    /// clips is broad.
+    /// </summary>
+    [Fact]
+    public async Task ATermMatchingFiveHundredClips_TakesTheOrderedIndexPlan()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        await SeedAsync(scope, commonRows: 500, rareRows: 10);
+
+        Assert.True(await IsBroadAsync(scope, CommonToken));
+    }
+
     [Fact]
     public async Task NarrowSearch_IsNotTreatedAsBroad()
     {
