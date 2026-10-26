@@ -2710,5 +2710,13 @@
     "find": "        if (currentKey.Length == 0 || newKey.Length == 0)\n        {\n            File.Delete(destinationPath);",
     "replace": "        if (currentKey.Length < 0 && newKey.Length < 0)\n        {\n            File.Delete(destinationPath);",
     "filter": "FullyQualifiedName~StorageLifecycleTests.Rekey_PlaintextLibrary|FullyQualifiedName~StorageLifecycleTests.Rekey_EncryptedLibrary"
+  },
+  {
+    "id": "rekey-skips-backups",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "F-15. Without re-keying the backups, every restore point Settings lists from before a rekey (or before encryption was turned on) fails with 'unreadable or requires a different password', and turning encryption on leaves the history in plaintext beside it.",
+    "find": "                await Task.Run(() => DatabaseBackupService.RekeyBackups(dbPath, currentKey, newKey), CancellationToken.None);",
+    "replace": "                await Task.CompletedTask;",
+    "filter": "FullyQualifiedName~StorageLifecycleTests.Rekey_BackupTakenBefore|FullyQualifiedName~StorageLifecycleTests.Rekey_PlaintextBackup"
   }
 ]

@@ -346,4 +346,57 @@ public sealed class StorageLifecycleTests : IDisposable
         var found = await store.SearchAsync(new ClipSearchFilters { SearchText = Marker });
         Assert.Equal(1, found.TotalMatchingCount);
     }
+
+    // ─── Backups across a rekey (F-15) ────────────────────────────────────────
+
+    /// <summary>
+    /// Settings lists every backup as a restore point. Before the fix each one
+    /// taken before a rekey failed with "unreadable or requires a different
+    /// password", and the rekey day had no restorable backup at all.
+    /// </summary>
+    [Fact]
+    public async Task Rekey_BackupTakenBefore_StillRestores()
+    {
+        var dbPath = Path.Combine(_root, "clipthrough.db");
+        Exec(dbPath, "old-pass", "PRAGMA journal_mode=WAL; CREATE TABLE clips (v TEXT); INSERT INTO clips VALUES ('yesterday');");
+        var storage = NewStorage(dbPath);
+        storage.SetInMemoryPassword("old-pass");
+        var backups = new DatabaseBackupService(storage, null, null, null);
+        await backups.EnsureDailyBackupAsync();
+        var listed = Assert.Single(backups.ListBackups());
+
+        Exec(dbPath, "old-pass", "INSERT INTO clips VALUES ('today');");
+        await storage.RekeyAsync("old-pass", "new-pass", rememberNewPassword: false);
+        SqliteConnection.ClearAllPools();
+
+        Assert.Equal(listed.Path, Assert.Single(backups.ListBackups()).Path);
+        await backups.RestoreAsync(listed.Path);
+        SqliteConnection.ClearAllPools();
+
+        Assert.Equal("yesterday", ReadRows(dbPath, "new-pass"));
+    }
+
+    /// <summary>
+    /// Turning encryption on must not leave yesterday's history readable in
+    /// plaintext beside it, and that backup must still restore.
+    /// </summary>
+    [Fact]
+    public async Task Rekey_PlaintextBackupTakenBeforeEncrypting_IsEncryptedAndRestores()
+    {
+        var dbPath = Path.Combine(_root, "clipthrough.db");
+        Exec(dbPath, null, "PRAGMA journal_mode=WAL; CREATE TABLE clips (v TEXT); INSERT INTO clips VALUES ('" + Marker + "');");
+        var storage = NewStorage(dbPath);
+        var backups = new DatabaseBackupService(storage, null, null, null);
+        await backups.EnsureDailyBackupAsync();
+        var listed = Assert.Single(backups.ListBackups());
+        Assert.True(FileContains(listed.Path, Marker), "Setup: the backup should start out plaintext.");
+
+        await storage.RekeyAsync(string.Empty, "new-pass", rememberNewPassword: false);
+        SqliteConnection.ClearAllPools();
+
+        Assert.False(FileContains(listed.Path, Marker), "The pre-encryption backup is still plaintext.");
+        await backups.RestoreAsync(listed.Path);
+        SqliteConnection.ClearAllPools();
+        Assert.Equal(Marker, ReadRows(dbPath, "new-pass"));
+    }
 }

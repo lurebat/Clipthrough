@@ -109,6 +109,91 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
     private const string BackupNamePattern = BackupNamePrefix + "*" + BackupNameSuffix;
 
     /// <summary>
+    /// Re-keys every backup beside <paramref name="dbPath"/> after the live
+    /// database moved from <paramref name="previousKey"/> to
+    /// <paramref name="newKey"/>, so each restore point Settings lists still
+    /// restores. Restore requires a backup to open with the live key; before
+    /// this, every backup taken before a rekey - or before encryption was
+    /// turned on - was listed and could not be restored (F-15). Turning
+    /// encryption on also no longer leaves the history in plaintext beside it.
+    /// </summary>
+    /// <remarks>
+    /// Each backup is rewritten to a temp file, verified, then renamed over the
+    /// original, so a failure leaves that backup as it was. Best effort per
+    /// file: the live rekey has already succeeded and must not be undone by a
+    /// backup that cannot be read. A backup that opens with neither key - an
+    /// older key from before an earlier rekey - is left alone and traced.
+    /// Synchronous and slow (a key derivation per open, a full copy per file):
+    /// call it off the UI thread.
+    /// </remarks>
+    internal static void RekeyBackups(string dbPath, string previousKey, string newKey)
+    {
+        var backupDir = Path.Combine(Path.GetDirectoryName(dbPath)!, "backups");
+        if (!Directory.Exists(backupDir))
+        {
+            return;
+        }
+
+        string[] files;
+        try
+        {
+            files = Directory.GetFiles(backupDir, BackupNamePattern);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceWarning($"Could not list backups to re-key: {ex.Message}");
+            return;
+        }
+
+        foreach (var backup in files)
+        {
+            var tempPath = backup + ".rekeying-" + Guid.NewGuid().ToString("N");
+            try
+            {
+                if (StorageOptionsService.CanOpenWithPassword(backup, newKey))
+                {
+                    continue;
+                }
+
+                // A backup the live database could restore before the rekey
+                // opens with the previous key, or - per ValidateBackupReadable -
+                // with none at all.
+                string? sourceKey = StorageOptionsService.CanOpenWithPassword(backup, previousKey) ? previousKey
+                    : previousKey.Length > 0 && StorageOptionsService.CanOpenWithPassword(backup, string.Empty) ? string.Empty
+                    : null;
+                if (sourceKey is null)
+                {
+                    Trace.TraceWarning($"Backup '{Path.GetFileName(backup)}' opens with neither the previous nor the new key; left as it is.");
+                    continue;
+                }
+
+                StorageOptionsService.WriteRekeyedCopy(backup, sourceKey, newKey, tempPath);
+                if (!StorageOptionsService.CanOpenWithPassword(tempPath, newKey))
+                {
+                    throw new InvalidOperationException("the re-keyed copy does not open with the new key");
+                }
+
+                // CanOpenWithPassword pools its connection; a pooled handle on
+                // the backup would make the rename below fail.
+                SqliteConnection.ClearAllPools();
+                File.Move(tempPath, backup, overwrite: true);
+                Trace.TraceInformation($"Backup '{Path.GetFileName(backup)}' re-keyed to match the database.");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException or InvalidOperationException)
+            {
+                Trace.TraceWarning($"Could not re-key backup '{Path.GetFileName(backup)}': {ex.Message}");
+            }
+            finally
+            {
+                if (File.Exists(tempPath))
+                {
+                    try { File.Delete(tempPath); } catch { /* best effort */ }
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// The day a backup covers, taken from its name.
     ///
     /// <see cref="EnsureDailyBackupAsync"/> already treats the file name as the

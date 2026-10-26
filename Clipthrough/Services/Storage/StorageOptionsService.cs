@@ -448,6 +448,11 @@ public sealed class StorageOptionsService : IStorageOptionsService
                 // workers restarted on scope dispose) use the new key.
                 Current = updated;
 
+                // Step 7b: Bring the backups along, or every restore point taken
+                // before today stops restoring (F-15). Per-file best effort, and
+                // not cancellable: the live file is already rekeyed.
+                await Task.Run(() => DatabaseBackupService.RekeyBackups(dbPath, currentKey, newKey), CancellationToken.None);
+
                 // Step 8: Persist the remembered password last. If this throws the
                 // DB is already rekeyed and Current is correct for this session.
                 await SaveToDiskAsync(updated, cancellationToken);
