@@ -95,6 +95,12 @@ internal static class HotkeyClipActions
                     Trace.TraceWarning($"Custom hotkey '{gesture}': unknown builtin transform '{name}'");
                     return false;
                 }
+                if (TextTransformationService.RefusalReason(tx, input) is { } refusal)
+                {
+                    Trace.TraceWarning($"Custom hotkey '{gesture}': {refusal}");
+                    return false;
+                }
+
                 output = TextTransformationService.Apply(tx, input);
                 isHtmlOutput = TextTransformationService.ProducesHtml(tx);
                 break;

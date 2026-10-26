@@ -36,8 +36,8 @@ All values live in the `Clipthrough.Models.TextTransformation` enum and are appl
 | Encoding   | `Base64Encode`              |                                                               |
 | Encoding   | `Base64Decode`              | Tolerates missing padding; returns input on bad payload       |
 | Tables     | `BoxTableToHtml`            | See below                                                     |
-| Convert    | `HtmlToMarkdown`            | Markup -> Markdown, via VellumText. Non-markup is returned unchanged. |
-| Convert    | `MarkdownToHtml`            | Markdown -> markup, via VellumText. Produces HTML.            |
+| Convert    | `HtmlToMarkdown`            | Markup -> Markdown, via VellumText. Non-markup, and markup nested too deeply or with a >10,000-char unbroken run (`ImportGuards`), is returned unchanged. |
+| Convert    | `MarkdownToHtml`            | Markdown -> markup, via VellumText. Produces HTML. Input past `ImportGuards` is returned unchanged: deep nesting overflows the importer's stack (F-48). `RefusalReason` says why. |
 
 ### `BoxTableToHtml` semantics
 

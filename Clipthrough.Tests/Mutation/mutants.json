@@ -2091,7 +2091,7 @@
     "id": "rich-preview-renders-unbreakable-runs-as-a-document",
     "file": "Clipthrough/Controls/RichDocumentView.cs",
     "why": "Avalonia line breaking is quadratic in the length of a run with no break opportunity - 80,000 chars took 3s where the same size as words took 97ms - so a copied base64 blob or minified script rendered as a document freezes the UI for minutes.",
-    "find": "    private const int MaxUnbrokenRunChars = 10_000;",
+    "find": "    private const int MaxUnbrokenRunChars = ImportGuards.MaxUnbrokenRunChars;",
     "replace": "    private const int MaxUnbrokenRunChars = int.MaxValue;",
     "filter": "FullyQualifiedName~RichDocumentView"
   },
@@ -2611,8 +2611,8 @@
     "id": "html-to-markdown-mangles-plain-text",
     "why": "Converts everything rather than only markup, so ordinary prose containing angle brackets is run through the importer and comes back escaped - \"a < b\" becomes \"a \\\\< b\". This is the bug the first version of the probe actually had.",
     "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
-    "find": "        if (!LooksLikeHtml(input))",
-    "replace": "        if (LooksLikeHtml(input) && !LooksLikeHtml(input))",
+    "find": "        if (!LooksLikeHtml(input) || !Presentation.ImportGuards.IsSafeToImport(input))",
+    "replace": "        if ((LooksLikeHtml(input) && !LooksLikeHtml(input)) || !Presentation.ImportGuards.IsSafeToImport(input))",
     "filter": "FullyQualifiedName~MarkdownTransformationTests"
   },
   {
@@ -2830,5 +2830,37 @@
     "find": "                if (!_lastImport.IsCompleted)",
     "replace": "                if (_lastImport.IsCompleted && !_lastImport.IsCompleted)",
     "filter": "FullyQualifiedName~RichDocumentImportHeadlessTests.SelectionChangesDuringASlowImport"
+  },
+  {
+    "id": "markdown-to-html-unguarded",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "why": "F-48. Without the pre-scan, Markdown -> HTML on 8 KB of '[' overflows the importer's stack: exit 0xC00000FD, which no handler can catch - the whole app dies.",
+    "find": "        if (!Presentation.ImportGuards.IsSafeToImport(input))\n        {\n            return input;\n        }\n\n        try",
+    "replace": "        if (input.Length < 0)\n        {\n            return input;\n        }\n\n        try",
+    "filter": "FullyQualifiedName~TransformCrashGuardTests.MarkdownToHtml_OnDeeplyNested"
+  },
+  {
+    "id": "import-guard-ignores-nesting",
+    "file": "Clipthrough/Presentation/ImportGuards.cs",
+    "why": "F-48. The unbroken-run rule alone does not bound depth: '[ ' repeated, or nested blockquotes, pass it and still recurse.",
+    "find": "            && NestingDepth(content, MaxNestingDepth) <= MaxNestingDepth;",
+    "replace": "            && MaxNestingDepth > 0;",
+    "filter": "FullyQualifiedName~TransformCrashGuardTests.RefusalReason"
+  },
+  {
+    "id": "nesting-scan-fooled-by-stray-end-tags",
+    "file": "Clipthrough/Presentation/ImportGuards.cs",
+    "why": "A parser ignores a stray end tag. Letting </p> cancel an open tag hides arbitrarily deep <template> nesting from the scan.",
+    "find": "                        if (i + 2 < content.Length && IsNestingElement(content, i + 2))",
+    "replace": "                        if (i + 2 < content.Length)",
+    "filter": "FullyQualifiedName~TransformCrashGuardTests.NestingDepth_IsNotFooledByStrayEndTags"
+  },
+  {
+    "id": "transform-refusal-not-reported",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-48. A converter that declined to run must say why; otherwise the user sees an unexplained no-op.",
+    "find": "            if (refusal is not null)\n            {\n                StatusText = refusal;\n            }",
+    "replace": "            if (refusal is not null)\n            {\n                _ = refusal;\n            }",
+    "filter": "FullyQualifiedName~RowTransform_MarkdownToHtmlOnTooDeepInput"
   }
 ]

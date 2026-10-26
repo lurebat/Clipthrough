@@ -282,6 +282,35 @@ public sealed partial class MainWindowViewModelHeadlessTests
     }
 
     /// <summary>
+    /// Input too deeply nested to convert safely (F-48) is left alone, and the
+    /// status says why rather than a bare "no change".
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RowTransform_MarkdownToHtmlOnTooDeepInput_SaysWhyAndCreatesNothing()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, new TestSessionLogService());
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var clip = await CaptureTextClipAsync(scope.ClipStoreService, new string('[', 8192));
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        var row = viewModel.Clips.Single(c => c.Clip.Id == clip.Id);
+        await row.ApplyTextTransformationCommand.Execute(TextTransformation.MarkdownToHtml).ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(AppText.TransformInputTooDeeplyNested, viewModel.StatusText);
+        Assert.Null(systemInteraction.LastCopiedRichContent);
+        var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        Assert.DoesNotContain(all.Items, c => c.SourceClipId == clip.Id);
+    }
+
+    /// <summary>
     /// The row path must keep transforming the clicked row - not the selection
     /// and not the checked clips - now that it shares the menu path's pipeline.
     /// </summary>

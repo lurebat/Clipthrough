@@ -3509,10 +3509,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var producesHtml = TextTransformationService.ProducesHtml(transformation);
         var label = GetTextTransformationLabel(transformation);
         StatusText = $"Applying {label}…";
+        string? refusal = null;
         try
         {
             await ApplyTransformToTargetsAsync(
-                (source, _) => Task.FromResult(TextTransformationService.Apply(transformation, source)),
+                (source, _) =>
+                {
+                    refusal ??= TextTransformationService.RefusalReason(transformation, source);
+                    return Task.FromResult(TextTransformationService.Apply(transformation, source));
+                },
                 label,
                 multiSummary: count => $"Applied {label} to {count} clips",
                 transformKind: $"builtin:{transformation}",
@@ -3522,6 +3527,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     ? "The selected text did not contain a supported table, so nothing was changed."
                     : null,
                 explicitTarget: explicitTarget);
+
+            // A converter that declined to run says why, rather than "no change".
+            if (refusal is not null)
+            {
+                StatusText = refusal;
+            }
         }
         catch (Exception ex)
         {

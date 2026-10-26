@@ -125,6 +125,7 @@ public static class AppText
         [nameof(CompareNeedsDiffToolStatus)] = "Set an external diff tool path in Settings to compare clips.",
         [nameof(CompareOpenedStatus)] = "Opened diff tool for comparison.",
         [nameof(SettingsThemeModeLabel)] = "Theme",
+        [nameof(TransformInputTooDeeplyNested)] = "Left unchanged: this text is nested too deeply, or has too long a run without spaces, to convert safely.",
         [nameof(SettingsRegexBacktrackingLabel)] = "Use the backtracking regex engine",
         [nameof(SettingsRegexBacktrackingHint)] = "Supports backreferences and lookarounds, but some patterns are slow; a search that runs too long is stopped. The default engine cannot hang.",
         [nameof(RegexNeedsBacktrackingStatus)] = "This pattern needs the backtracking regex engine (backreferences, lookarounds or atomic groups). Turn it on in Settings > Search.",
@@ -453,6 +454,7 @@ public static class AppText
     public static string CompareNeedsDiffToolStatus => Text(nameof(CompareNeedsDiffToolStatus));
     public static string CompareOpenedStatus => Text(nameof(CompareOpenedStatus));
     public static string SettingsThemeModeLabel => Text(nameof(SettingsThemeModeLabel));
+    public static string TransformInputTooDeeplyNested => Text(nameof(TransformInputTooDeeplyNested));
     public static string SettingsRegexBacktrackingLabel => Text(nameof(SettingsRegexBacktrackingLabel));
     public static string SettingsRegexBacktrackingHint => Text(nameof(SettingsRegexBacktrackingHint));
     public static string RegexNeedsBacktrackingStatus => Text(nameof(RegexNeedsBacktrackingStatus));

@@ -24,6 +24,21 @@ public static partial class TextTransformationService
     /// is the shape of defect this repository has been bitten by twice: two
     /// sources of truth that agree until someone adds a case to one of them.
     /// </remarks>
+    /// <summary>
+    /// Why <see cref="Apply"/> will leave <paramref name="input"/> unchanged
+    /// for <paramref name="transformation"/> without trying, or null when it
+    /// will try. The HTML/Markdown converters refuse input nested too deeply
+    /// or with too long an unbroken run, because the importer they use would
+    /// overflow the stack on it (F-48). Callers show this instead of a bare
+    /// "no change".
+    /// </summary>
+    public static string? RefusalReason(Models.TextTransformation transformation, string input)
+        => transformation is Models.TextTransformation.MarkdownToHtml or Models.TextTransformation.HtmlToMarkdown
+            && !string.IsNullOrEmpty(input)
+            && !Presentation.ImportGuards.IsSafeToImport(input)
+                ? Localization.AppText.TransformInputTooDeeplyNested
+                : null;
+
     public static bool ProducesHtml(Models.TextTransformation transformation)
         => transformation is Models.TextTransformation.BoxTableToHtml
             or Models.TextTransformation.MarkdownToHtml;
@@ -299,7 +314,12 @@ public static partial class TextTransformationService
     /// </remarks>
     private static string HtmlToMarkdown(string input)
     {
-        if (!LooksLikeHtml(input))
+        // The import guard is not load-bearing on VellumText 0.7.0: its HTML
+        // importer already returns deeply nested input unchanged rather than
+        // overflowing (measured: 20,000 nested elements, exit 0). It stays
+        // because the failure it prevents is a process kill, and the importer
+        // is about to change (the async-only API).
+        if (!LooksLikeHtml(input) || !Presentation.ImportGuards.IsSafeToImport(input))
         {
             return input;
         }
@@ -337,6 +357,13 @@ public static partial class TextTransformationService
     /// </remarks>
     private static string MarkdownToHtml(string input)
     {
+        // Deep nesting overflows the importer's stack, which no handler can
+        // catch: 8 KB of '[' killed the whole process (F-48).
+        if (!Presentation.ImportGuards.IsSafeToImport(input))
+        {
+            return input;
+        }
+
         try
         {
             var document = VellumText.Interop.Markdown.MarkdownFormat.Instance.Import(input).Doc;

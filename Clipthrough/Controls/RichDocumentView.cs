@@ -75,7 +75,7 @@ public sealed class RichDocumentView : UserControl
     // So a document is only built when the content actually has break opportunities;
     // otherwise it takes the same bounded plain-text path as an oversized clip. 10,000
     // chars sits an order of magnitude below where the curve turns painful.
-    private const int MaxUnbrokenRunChars = 10_000;
+    private const int MaxUnbrokenRunChars = ImportGuards.MaxUnbrokenRunChars;
 
     /// <summary>
     /// The most table cells an HTML preview may expand to, counting each cell as
@@ -134,28 +134,6 @@ public sealed class RichDocumentView : UserControl
         }
 
         return cells;
-    }
-
-    private static int LongestUnbrokenRun(string content)
-    {
-        var longest = 0;
-        var current = 0;
-        foreach (var c in content)
-        {
-            if (char.IsWhiteSpace(c))
-            {
-                current = 0;
-                continue;
-            }
-
-            current++;
-            if (current > longest)
-            {
-                longest = current;
-            }
-        }
-
-        return longest;
     }
 
     private readonly RichTextEditor _viewer;
@@ -389,7 +367,7 @@ public sealed class RichDocumentView : UserControl
             return;
         }
 
-        if (LongestUnbrokenRun(content) > MaxUnbrokenRunChars)
+        if (ImportGuards.LongestUnbrokenRun(content) > MaxUnbrokenRunChars)
         {
             Trace.TraceWarning(
                 "Rich content contains a very long run with no break opportunity; falling back to plain text.");
