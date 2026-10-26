@@ -243,7 +243,10 @@ public sealed class DatabaseInitializer
     /// no-ops on a current database but still pay several SQLite round trips
     /// each, which adds up to ~800ms on a cold OS file cache).
     /// </summary>
-    private const int CurrentSchemaVersion = 8;
+    /// <remarks>
+    /// 9: BackfillUtcTimestampsAsync (F-35).
+    /// </remarks>
+    private const int CurrentSchemaVersion = 9;
 
     private readonly SqliteConnectionFactory _connectionFactory;
     private readonly ISensitivityService _sensitivityService;
@@ -315,6 +318,8 @@ public sealed class DatabaseInitializer
             TraceStep(sw, "backfill-aggregation");
             await BackfillClipPayloadColumnsAsync(connection, cancellationToken);
             TraceStep(sw, "backfill-payload");
+            await BackfillUtcTimestampsAsync(connection, cancellationToken);
+            TraceStep(sw, "backfill-utc-timestamps");
             await DeduplicateClipsByHashAsync(connection, cancellationToken);
             TraceStep(sw, "dedupe-by-hash");
             await EnsureUniqueClipHashIndexAsync(connection, cancellationToken);
@@ -796,6 +801,78 @@ public sealed class DatabaseInitializer
                 WHERE id = new.id;
             END;
             """, cancellationToken);
+    }
+
+    /// <summary>
+    /// Rewrites clip timestamps stored with a non-zero UTC offset as UTC (F-35).
+    /// </summary>
+    /// <remarks>
+    /// Timestamps are round-trip ("O") text compared lexically, which orders
+    /// correctly only when every value is UTC. Capture always wrote UTC, but a
+    /// ClipAngel import kept each row's local offset, so imported clips sorted
+    /// and expired wrong by that offset until the store boundary converted them.
+    /// Idempotent: a value already at +00:00, and text with no offset at all,
+    /// parses with a zero offset and is left exactly as it is.
+    /// </remarks>
+    private static async Task BackfillUtcTimestampsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var updates = new List<(long Id, string?[] Values)>();
+        await using (var select = connection.CreateCommand())
+        {
+            select.CommandText = """
+                SELECT id, captured_at, first_copied_at, last_copied_at FROM clips
+                WHERE (captured_at IS NOT NULL AND captured_at NOT LIKE '%+00:00')
+                   OR (first_copied_at IS NOT NULL AND first_copied_at NOT LIKE '%+00:00')
+                   OR (last_copied_at IS NOT NULL AND last_copied_at NOT LIKE '%+00:00');
+                """;
+            await using var reader = await select.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var values = new string?[3];
+                var changed = false;
+                for (var i = 0; i < 3; i++)
+                {
+                    var raw = reader.IsDBNull(i + 1) ? null : reader.GetString(i + 1);
+                    values[i] = raw;
+                    if (raw is not null
+                        && DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed)
+                        && parsed.Offset != TimeSpan.Zero)
+                    {
+                        values[i] = parsed.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+                        changed = true;
+                    }
+                }
+
+                if (changed)
+                {
+                    updates.Add((reader.GetInt64(0), values));
+                }
+            }
+        }
+
+        if (updates.Count == 0)
+        {
+            return;
+        }
+
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await using var update = connection.CreateCommand();
+        update.Transaction = transaction;
+        update.CommandText = "UPDATE clips SET captured_at = $c, first_copied_at = $f, last_copied_at = $l WHERE id = $id;";
+        var id = update.Parameters.Add("$id", SqliteType.Integer);
+        var c = update.Parameters.Add("$c", SqliteType.Text);
+        var f = update.Parameters.Add("$f", SqliteType.Text);
+        var l = update.Parameters.Add("$l", SqliteType.Text);
+        foreach (var (clipId, values) in updates)
+        {
+            id.Value = clipId;
+            c.Value = (object?)values[0] ?? DBNull.Value;
+            f.Value = (object?)values[1] ?? DBNull.Value;
+            l.Value = (object?)values[2] ?? DBNull.Value;
+            await update.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private static async Task BackfillClipPayloadColumnsAsync(SqliteConnection connection, CancellationToken cancellationToken)
