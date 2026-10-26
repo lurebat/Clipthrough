@@ -77,6 +77,65 @@ public sealed class RichDocumentView : UserControl
     // chars sits an order of magnitude below where the curve turns painful.
     private const int MaxUnbrokenRunChars = 10_000;
 
+    /// <summary>
+    /// The most table cells an HTML preview may expand to, counting each cell as
+    /// colspan x rowspan. The size cap and the unbroken-run guard bound length;
+    /// this bounds structure. 1.2 KB of <c>&lt;td colspan=1000 rowspan=1000&gt;</c>
+    /// cells expanded to 32 million grid slots and took the app from 0.6 GB to
+    /// 3.7 GB, retained (F-47). An honest table under the 512 KB size cap has
+    /// well under 60,000 cells (a bare <c>&lt;td&gt;&lt;/td&gt;</c> is 9 chars),
+    /// so the cap only ever trips on spans.
+    /// </summary>
+    internal const long MaxTableCells = 200_000;
+
+    private const int MaxSpan = 65_534; // the HTML rowspan ceiling; colspan's is lower
+
+    private static readonly System.Text.RegularExpressions.Regex CellTag = new(
+        @"<t[dh]\b[^>]*>",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase
+            | System.Text.RegularExpressions.RegexOptions.CultureInvariant
+            | System.Text.RegularExpressions.RegexOptions.NonBacktracking);
+
+    private static readonly System.Text.RegularExpressions.Regex SpanAttribute = new(
+        @"\b(colspan|rowspan)\s*=\s*[""']?\s*(\d{1,9})",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase
+            | System.Text.RegularExpressions.RegexOptions.CultureInvariant
+            | System.Text.RegularExpressions.RegexOptions.NonBacktracking);
+
+    /// <summary>
+    /// Counts the grid slots the markup's table cells expand to, stopping as
+    /// soon as the count passes <paramref name="limit"/>.
+    /// </summary>
+    internal static long CountTableCells(string markup, long limit)
+    {
+        long cells = 0;
+        foreach (System.Text.RegularExpressions.ValueMatch cell in CellTag.EnumerateMatches(markup))
+        {
+            long colspan = 1, rowspan = 1;
+            var tag = markup.AsSpan(cell.Index, cell.Length).ToString();
+            foreach (System.Text.RegularExpressions.Match span in SpanAttribute.Matches(tag))
+            {
+                var value = Math.Clamp(long.Parse(span.Groups[2].ValueSpan, System.Globalization.CultureInfo.InvariantCulture), 1, MaxSpan);
+                if (span.Groups[1].ValueSpan.Equals("colspan", StringComparison.OrdinalIgnoreCase))
+                {
+                    colspan = value;
+                }
+                else
+                {
+                    rowspan = value;
+                }
+            }
+
+            cells += colspan * rowspan;
+            if (cells > limit)
+            {
+                return cells;
+            }
+        }
+
+        return cells;
+    }
+
     private static int LongestUnbrokenRun(string content)
     {
         var longest = 0;
@@ -115,6 +174,21 @@ public sealed class RichDocumentView : UserControl
     internal SelectableTextBlock FallbackText => _fallbackContent;
 
     internal TextBlock EmptyState => _emptyState;
+
+    /// <summary>
+    /// The importer, as a seam: tests count, block and order calls through it.
+    /// </summary>
+    internal Func<string, ClipContentFormat, DocumentNode> Importer { get; init; } = Import;
+
+    // Single flight (F-47). Markup and ContentFormat each start a render, so one
+    // selection changing both used to import twice; renders are now coalesced
+    // per dispatcher turn. The import that last ran is remembered so identical
+    // input reuses it, and so a new import waits for an abandoned one instead of
+    // running beside it: a timeout stops the preview waiting, not the importer.
+    private TaskCompletionSource? _scheduledRender;
+    private Task<DocumentNode> _lastImport = Task.FromResult(DocumentNode.Empty);
+    private string? _lastImportMarkup;
+    private ClipContentFormat _lastImportFormat;
 
     // Incremented per render so a slow import cannot overwrite the document belonging to
     // a clip the user has since moved off. Arrowing through the list starts a render per
@@ -272,7 +346,28 @@ public sealed class RichDocumentView : UserControl
         set => SetValue(ContentFormatProperty, value);
     }
 
-    private void StartRender() => _pendingRender = RenderContentAsync();
+    private void StartRender()
+    {
+        if (_scheduledRender is not null)
+        {
+            // Already scheduled for this turn; it reads the latest values.
+            return;
+        }
+
+        var scheduled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _scheduledRender = scheduled;
+        _pendingRender = scheduled.Task;
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            _scheduledRender = null;
+            RenderContentAsync().ContinueWith(
+                static (_, state) => ((TaskCompletionSource)state!).TrySetResult(),
+                scheduled,
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        });
+    }
 
     private async Task RenderContentAsync()
     {
@@ -302,13 +397,47 @@ public sealed class RichDocumentView : UserControl
             return;
         }
 
+        if (format == ClipContentFormat.Html && CountTableCells(content, MaxTableCells) > MaxTableCells)
+        {
+            Trace.TraceWarning(
+                $"Rich content tables expand to more than {MaxTableCells:N0} cells; falling back to plain text.");
+            ShowFallback(content);
+            return;
+        }
+
         DocumentNode document;
         try
         {
-            // Importers are pure and take no Avalonia dependency, so the parse is safe off
-            // the UI thread, and DocumentNode is immutable once built.
-            document = await Task.Run(() => Import(content, format)).WaitAsync(ImportTimeout)
-                .ConfigureAwait(true);
+            Task<DocumentNode> import;
+            if (string.Equals(_lastImportMarkup, content, StringComparison.Ordinal) && _lastImportFormat == format)
+            {
+                import = _lastImport;
+            }
+            else
+            {
+                if (!_lastImport.IsCompleted)
+                {
+                    // An earlier import is still running - abandoned by a timeout or
+                    // superseded. Starting another beside it is how memory compounded
+                    // per copy, so wait for it, then import only if this is still the
+                    // content on screen.
+                    try { await _lastImport.ConfigureAwait(true); } catch { /* its render reported it */ }
+                    if (Volatile.Read(ref _renderGeneration) != generation)
+                    {
+                        return;
+                    }
+                }
+
+                // Importers are pure and take no Avalonia dependency, so the parse is safe off
+                // the UI thread, and DocumentNode is immutable once built.
+                var importer = Importer;
+                import = Task.Run(() => importer(content, format));
+                _lastImport = import;
+                _lastImportMarkup = content;
+                _lastImportFormat = format;
+            }
+
+            document = await import.WaitAsync(ImportTimeout).ConfigureAwait(true);
         }
         catch (TimeoutException)
         {

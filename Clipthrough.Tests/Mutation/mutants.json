@@ -2798,5 +2798,37 @@
     "find": "                .Subscribe(unit => { _ = RefreshReportingErrorsAsync(); }, ex => ReportError(\"Search refresh subscription\", ex)));",
     "replace": "                .InvokeCommand(RefreshCommand));",
     "filter": "FullyQualifiedName~ASupersededSearch_IsCancelled"
+  },
+  {
+    "id": "preview-span-prescreen-removed",
+    "file": "Clipthrough/Controls/RichDocumentView.cs",
+    "why": "F-47. Without the structural pre-screen, 1.2 KB of colspan=1000 rowspan=1000 cells reaches the importer and expands to tens of millions of grid slots - gigabytes, retained.",
+    "find": "        if (format == ClipContentFormat.Html && CountTableCells(content, MaxTableCells) > MaxTableCells)",
+    "replace": "        if (format == ClipContentFormat.Html && CountTableCells(content, MaxTableCells) < 0)",
+    "filter": "FullyQualifiedName~RichDocumentImportHeadlessTests.ASpanBomb"
+  },
+  {
+    "id": "preview-import-not-reused",
+    "file": "Clipthrough/Controls/RichDocumentView.cs",
+    "why": "F-47. Identical content must reuse the import it already has; otherwise re-selecting a heavy clip pays the whole import again.",
+    "find": "            if (string.Equals(_lastImportMarkup, content, StringComparison.Ordinal) && _lastImportFormat == format)",
+    "replace": "            if (string.Equals(_lastImportMarkup, content, StringComparison.Ordinal) && _lastImportFormat != _lastImportFormat)",
+    "filter": "FullyQualifiedName~RichDocumentImportHeadlessTests.TheSameContentAgain"
+  },
+  {
+    "id": "preview-import-per-trigger",
+    "file": "Clipthrough/Controls/RichDocumentView.cs",
+    "why": "F-47. Markup and ContentFormat each start a render. Rendering on each trigger instead of once per turn imports the intermediate state too (new format, old markup) - an input reuse cannot catch - so one selection imports twice, the doubled import seen live.",
+    "find": "        if (_scheduledRender is not null)\n        {\n            // Already scheduled for this turn; it reads the latest values.\n            return;\n        }",
+    "replace": "        if (_scheduledRender is null)\n        {\n            _pendingRender = RenderContentAsync();\n            return;\n        }",
+    "filter": "FullyQualifiedName~RichDocumentImportHeadlessTests.OneSelectionChangingMarkupAndFormat"
+  },
+  {
+    "id": "preview-imports-run-side-by-side",
+    "file": "Clipthrough/Controls/RichDocumentView.cs",
+    "why": "F-47. A timed-out import keeps running; starting the next selection's import beside it is how memory compounded with every copy. At most one import may be in flight.",
+    "find": "                if (!_lastImport.IsCompleted)",
+    "replace": "                if (_lastImport.IsCompleted && !_lastImport.IsCompleted)",
+    "filter": "FullyQualifiedName~RichDocumentImportHeadlessTests.SelectionChangesDuringASlowImport"
   }
 ]
