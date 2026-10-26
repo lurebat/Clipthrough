@@ -2822,5 +2822,13 @@
     "find": "                    if (_settingsService?.Current.EnableSensitiveClipLifetime == true)\n",
     "replace": "                    if (_settingsService?.Current.EnableSensitiveClipLifetime == true || _settingsService?.Current.EnableSensitiveClipLifetime != true)\n",
     "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WithTheLifetimeOff_TheDailyBackup_KeepsSensitiveClips"
+  },
+  {
+    "id": "connection-factory-loses-the-cipher-key",
+    "file": "Clipthrough/Database/SqliteConnectionFactory.cs",
+    "why": "U-C8. Every installed encrypted library must open through the app's factory; a connection that misses the key (or, after a package swap, the cipher recipe) fails with error 26 and reads as a wrong password.",
+    "find": "            builder.Password = options.DatabasePassword;\n",
+    "replace": "            _ = options.DatabasePassword;\n",
+    "filter": "FullyQualifiedName~SqlCipherFixtureCompatibilityTests"
   }
 ]
