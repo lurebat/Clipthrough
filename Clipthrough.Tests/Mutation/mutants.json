@@ -276,8 +276,8 @@
     "why": "Leaves the connections in the pool, so the copied file is still held open and the caller's move or delete fails.",
     "file": "Clipthrough/Services/Storage/SqliteDatabaseCopier.cs",
     "filter": "DatabaseBackupServiceTests",
-    "find": "            Pooling = false,",
-    "replace": "            Pooling = true,"
+    "find": "Clipthrough.Database.SqliteConnectionFactory.Create(path, password, SqliteOpenMode.ReadWriteCreate, pooling: false);",
+    "replace": "Clipthrough.Database.SqliteConnectionFactory.Create(path, password, SqliteOpenMode.ReadWriteCreate, pooling: true);"
   },
   {
     "id": "database-copy-reuses-an-unopenable-destination",
@@ -2742,5 +2742,21 @@
     "find": "                _notificationService.PublishError(AppText.StorageLoadFailedTitle, storageFault);",
     "replace": "                Trace.TraceWarning(storageFault);",
     "filter": "FullyQualifiedName~InitializeAsync_WhenStorageConfigWasUnreadable_TellsTheUser"
+  },
+  {
+    "id": "busy-timeout-pragma-reimplemented",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "F-28 / guard R7. A second copy of the busy_timeout pragma is how the copies drifted before (f450d9a left it out and failed with 'database is locked'); the source scan must catch one reappearing.",
+    "find": "        await ExecuteNonQueryAsync(connection, \"PRAGMA journal_mode = WAL;\", cancellationToken);\n",
+    "replace": "        await ExecuteNonQueryAsync(connection, \"PRAGMA journal_mode = WAL;\", cancellationToken);\n        await ExecuteNonQueryAsync(connection, \"PRAGMA busy_timeout = 5000;\", cancellationToken);\n",
+    "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
+  },
+  {
+    "id": "connection-built-outside-the-factory",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "F-28 / guard R7. A connection built by hand skips the factory's busy_timeout; the source scan must catch one reappearing.",
+    "find": "            using var connection = Clipthrough.Database.SqliteConnectionFactory.Create(dbPath, password: null, SqliteOpenMode.ReadOnly);\n",
+    "replace": "            using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath, Mode = SqliteOpenMode.ReadOnly }.ToString());\n",
+    "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
   }
 ]

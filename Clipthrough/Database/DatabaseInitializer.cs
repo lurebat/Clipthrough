@@ -263,7 +263,7 @@ public sealed class DatabaseInitializer
 
         // WAL mode allows concurrent readers during writes — critical for responsiveness.
         await ExecuteNonQueryAsync(connection, "PRAGMA journal_mode = WAL;", cancellationToken);
-        await ExecuteNonQueryAsync(connection, "PRAGMA busy_timeout = 5000;", cancellationToken);
+
 
         // Only when something is about to rewrite pages. See
         // HasPendingStructuralWorkAsync - the check costs a full read of the

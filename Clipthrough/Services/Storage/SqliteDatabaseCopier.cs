@@ -62,21 +62,9 @@ internal static class SqliteDatabaseCopier
 
     private static SqliteConnection OpenConnection(string path, string? password)
     {
-        var builder = new SqliteConnectionStringBuilder
-        {
-            DataSource = path,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            // Without this the connection returns to the pool on Dispose and
-            // keeps the file open, which breaks the move/delete that follows.
-            Pooling = false,
-        };
-        if (!string.IsNullOrEmpty(password))
-        {
-            builder.Password = password;
-        }
-
-        var connection = new SqliteConnection(builder.ToString());
-        connection.StateChange += ApplyBusyTimeoutOnOpen;
+        // Unpooled: a pooled connection returns to the pool on Dispose and keeps
+        // the file open, which breaks the move/delete that follows.
+        var connection = Clipthrough.Database.SqliteConnectionFactory.Create(path, password, SqliteOpenMode.ReadWriteCreate, pooling: false);
         try
         {
             connection.Open();
@@ -104,13 +92,4 @@ internal static class SqliteDatabaseCopier
         }
     }
 
-    private static void ApplyBusyTimeoutOnOpen(object? sender, StateChangeEventArgs e)
-    {
-        if (e.CurrentState == ConnectionState.Open && sender is SqliteConnection connection)
-        {
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "PRAGMA busy_timeout = 5000;";
-            cmd.ExecuteNonQuery();
-        }
-    }
 }

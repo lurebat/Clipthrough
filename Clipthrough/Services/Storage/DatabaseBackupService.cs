@@ -94,15 +94,6 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         }
     }
 
-    private static void ApplyBusyTimeoutOnOpen(object? sender, StateChangeEventArgs e)
-    {
-        if (e.CurrentState == ConnectionState.Open && sender is SqliteConnection connection)
-        {
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "PRAGMA busy_timeout = 5000;";
-            cmd.ExecuteNonQuery();
-        }
-    }
 
     private const string BackupNamePrefix = "clipthrough-";
     private const string BackupNameSuffix = ".db";
