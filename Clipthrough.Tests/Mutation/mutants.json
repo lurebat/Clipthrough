@@ -2678,5 +2678,13 @@
     "find": "        var tokens = input.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);",
     "replace": "        var tokens = input.Split('\\n', StringSplitOptions.RemoveEmptyEntries);",
     "filter": "FullyQualifiedName~WhitespaceToJsonArray"
+  },
+  {
+    "id": "headless-startup-does-not-wait-for-the-database",
+    "file": "Clipthrough.Tests/Headless/HeadlessStartup.cs",
+    "why": "F-30. Tests that act before the background database start lands race it: a 1.5 s delay before _isDatabaseReady failed 11 of 65 view-model tests. Inverse check, run when this landed: with that delay injected into MainWindowViewModel and this helper intact, all 66 MainWindowViewModelHeadlessTests passed.",
+    "find": "        while (viewModel.IsLoadingDatabase || viewModel.DatabaseStartupTask is { IsCompleted: false })\n",
+    "replace": "        while ((viewModel.IsLoadingDatabase || viewModel.DatabaseStartupTask is { IsCompleted: false }) && deadline < DateTime.MinValue)\n",
+    "filter": "FullyQualifiedName~TheStartupHelper_ReturnsOnlyOnceTheDatabaseIsOpen_EvenWhenOpeningIsSlow"
   }
 ]

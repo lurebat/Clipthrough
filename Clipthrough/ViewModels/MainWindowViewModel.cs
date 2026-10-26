@@ -2225,13 +2225,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             StatusText = "Loading clipboard library\u2026";
             _isStarted = true;
 
-            _ = StartDatabaseInBackgroundAsync();
+            DatabaseStartupTask = StartDatabaseInBackgroundAsync();
         }
         finally
         {
             _isStartupInProgress = false;
         }
     }
+
+    /// <summary>
+    /// The latest background database start (from <see cref="InitializeAsync"/>,
+    /// library creation or unlock), which also starts the clipboard monitor and
+    /// workers. Null until one begins. Lets tests wait for the whole startup
+    /// rather than guess at it (F-30).
+    /// </summary>
+    internal Task? DatabaseStartupTask { get; private set; }
 
     private async Task StartDatabaseInBackgroundAsync()
     {
@@ -5873,7 +5881,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             StatusText = secretFailure is null
                 ? "Loading clipboard library\u2026"
                 : AppText.FormatSettingsSecretSaveFailed(secretFailure.SecretNameList);
-            _ = StartDatabaseInBackgroundAsync();
+            DatabaseStartupTask = StartDatabaseInBackgroundAsync();
             return;
         }
 
@@ -6498,7 +6506,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             IsLoadingDatabase = true;
             StatusText = "Loading clipboard library\u2026";
 
-            _ = StartDatabaseInBackgroundAsync();
+            DatabaseStartupTask = StartDatabaseInBackgroundAsync();
         }
         catch (Exception ex)
         {

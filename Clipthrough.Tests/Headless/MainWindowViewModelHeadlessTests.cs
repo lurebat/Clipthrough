@@ -24,7 +24,7 @@ using Xunit;
 
 namespace Clipthrough.Tests.Headless;
 
-public sealed class MainWindowViewModelHeadlessTests
+public sealed partial class MainWindowViewModelHeadlessTests
 {
     [AvaloniaFact]
     public async Task CapturedClipRefresh_SelectsNewestClip()
@@ -36,7 +36,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var firstClip = await CaptureTextClipAsync(scope.ClipStoreService, "first");
@@ -83,7 +83,8 @@ public sealed class MainWindowViewModelHeadlessTests
             new Clipthrough.Services.BackgroundJobIndicator(),
             scope.DatabaseInitializer);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
+        var searchesAfterStartup = clipStore.SearchCallCount;
 
         for (var i = 1; i <= 6; i++)
         {
@@ -104,9 +105,17 @@ public sealed class MainWindowViewModelHeadlessTests
         await Task.Delay(500);
         Dispatcher.UIThread.RunJobs();
 
-        Assert.Equal(6, viewModel.SelectedClip?.Id);
-        Assert.InRange(clipStore.SearchCallCount, 2, 4);
+        // Measured from the end of startup. The old absolute "2 to 4 searches,
+        // clip 6 selected" counted the startup refresh, which this test raced
+        // (F-30): under the default sort a capture is inserted in place with no
+        // search at all, and a hidden window selects nothing until it is shown.
+        Assert.Equal(6, viewModel.Clips[0].Clip.Id);
+        Assert.InRange(clipStore.SearchCallCount - searchesAfterStartup, 0, 3);
         Assert.Equal(1, clipStore.MaxConcurrentSearches);
+
+        viewModel.SetMainWindowVisible(true);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(6, viewModel.SelectedClip?.Id);
     }
 
     [AvaloniaFact]
@@ -118,7 +127,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var systemInteraction = new TestSystemInteractionService();
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         var pinned = new ClipEntry
         {
@@ -161,7 +170,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var systemInteraction = new TestSystemInteractionService();
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var clip = await CaptureImageClipAsync(scope.ClipStoreService, CreatePngBytes(0), "image");
@@ -183,7 +192,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var systemInteraction = new TestSystemInteractionService();
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var missingPath = Path.Combine(Path.GetTempPath(), "clipthrough-absent-" + Guid.NewGuid().ToString("N"));
@@ -227,7 +236,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var systemInteraction = new TestSystemInteractionService();
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var clip = await CaptureFilesClipAsync(scope.ClipStoreService, ["C:\\Temp\\alpha.txt", "D:\\Data\\beta.txt"]);
@@ -253,7 +262,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var firstClip = await CaptureTextClipAsync(scope.ClipStoreService, "first");
@@ -300,7 +309,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new Clipthrough.Services.BackgroundJobIndicator(),
             scope.DatabaseInitializer);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var firstClip = await CaptureTextClipAsync(scope.ClipStoreService, "first");
@@ -358,7 +367,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "original");
@@ -385,7 +394,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "original");
@@ -415,7 +424,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         const string originalMarkup = "<p><span style=\"color:#ff0000\">original</span></p>";
@@ -439,7 +448,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         const string rtf = @"{\rtf1\ansi{\colortbl ;\red255\green0\blue0;}\cf1 original}";
@@ -468,7 +477,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         const string originalMarkup = "<p><strong>original</strong></p>";
@@ -499,7 +508,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         const string rtf = @"{\rtf1\ansi{\colortbl ;\red255\green0\blue0;}\cf1 original}";
@@ -524,7 +533,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         var clip = CreateImageClipEntry(CreatePngBytes(unchecked((int)0xFFFF0000)), "original image");
         viewModel.SelectedClip = new ClipItemViewModel(clip);
@@ -555,7 +564,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         sessionLogService.Emit(new SessionLogEntry
         {
@@ -587,7 +596,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         Assert.True(viewModel.IsWelcomeOpen);
         Assert.Equal(AppText.WelcomeStatusText, viewModel.StatusText);
@@ -605,7 +614,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         Assert.False(viewModel.IsWelcomeOpen);
@@ -629,7 +638,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         Assert.True(viewModel.IsWelcomeOpen);
         Assert.Equal(AppText.WelcomeStatusText, viewModel.StatusText);
@@ -660,7 +669,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         Assert.True(viewModel.ShowFavoritesOnly);
         Assert.True(viewModel.ShowSensitiveOnly);
@@ -717,7 +726,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var systemInteraction = new TestSystemInteractionService();
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.OpenSettingsCommand.Execute().Subscribe();
         Dispatcher.UIThread.RunJobs();
@@ -927,7 +936,7 @@ public sealed class MainWindowViewModelHeadlessTests
             scope, clipboardMonitor, systemInteraction, sessionLogService,
             semanticSearchService: semantic, embeddingWorker: embeddingWorker);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         // InitializeAsync kicks the database open on a worker thread and returns.
         // SaveSettingsAsync short-circuits to "still loading" until that lands, so
@@ -975,7 +984,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.Settings.EnableToggleFavoritesHotkey = true;
         viewModel.Settings.ToggleFavoritesHotkey = "Ctrl+D";
@@ -1001,7 +1010,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.Settings.ExcludedCaptureAppsText = "1Password\n\n  *keepass*  \n";
         await viewModel.SaveSettingsCommand.Execute().ToTask();
@@ -1027,7 +1036,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         await viewModel.SaveSettingsCommand.Execute().ToTask();
 
         // Saving from the welcome screen kicks off StartDatabaseInBackgroundAsync,
@@ -1055,7 +1064,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "export me");
         clipboardMonitor.Emit(clip);
@@ -1077,7 +1086,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "favorite me");
@@ -1105,7 +1114,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "row favorite");
         clipboardMonitor.Emit(clip);
@@ -1130,7 +1139,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "favorite current");
@@ -1156,7 +1165,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "password=supersecret");
         clipboardMonitor.Emit(clip);
@@ -1202,7 +1211,7 @@ public sealed class MainWindowViewModelHeadlessTests
         using var viewModel = CreateViewModel(
             scope, clipboardMonitor, systemInteraction, sessionLogService, dragDropService: dragDrop);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         // Seed a rule that certainly matches the dropped payload, after VM
@@ -1263,7 +1272,7 @@ public sealed class MainWindowViewModelHeadlessTests
             backgroundOcrQueue: ocrQueue, dragDropService: dragDrop,
             ocrService: new TestOcrService(isAvailable: true));
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var imported = await viewModel.ImportDroppedDataAsync(new Avalonia.Input.DataTransfer(), null);
@@ -1306,7 +1315,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSessionLogService(),
             clipStore: pagedStore,
             semanticSearchService: semantic);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.UseSemanticClipSearch = true;
         viewModel.SearchText = "alpha";
@@ -1380,7 +1389,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSessionLogService(),
             clipStore: pagedStore,
             semanticSearchService: new StubSemanticSearchService(oldestId));
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.UseSemanticClipSearch = true;
         viewModel.SearchText = "alpha";
@@ -1456,7 +1465,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             semanticSearchService: new StubSemanticSearchService(semanticOnlyId));
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.UseSemanticClipSearch = true;
         viewModel.SearchText = "alpha";
@@ -1491,7 +1500,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             embeddingWorker: worker);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.StartBackgroundServices();
         Assert.False(worker.IsRunning);
@@ -1525,7 +1534,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             embeddingWorker: worker);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.StartBackgroundServices();
         Assert.True(worker.IsRunning);
@@ -1578,7 +1587,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             embeddingWorker: worker);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.Dispose();
         viewModel.StartBackgroundServices();
@@ -1605,7 +1614,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             embeddingWorker: worker);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.StartBackgroundServices();
 
@@ -1627,7 +1636,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestClipboardMonitorService(),
             new TestSystemInteractionService(),
             new TestSessionLogService());
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.Dispose();
         var savesAfterFirst = scope.SettingsService.SaveCallCount;
@@ -1676,7 +1685,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             clipStore: countingStore);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         for (var attempt = 0; attempt < 40 && viewModel.Clips.Count < rows; attempt++)
         {
@@ -2145,7 +2154,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             clipStore: blockingStore);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         for (var attempt = 0; attempt < 80 && viewModel.Clips.Count < 200; attempt++)
         {
@@ -2227,7 +2236,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestClipboardMonitorService(),
             new TestSystemInteractionService(),
             new TestSessionLogService());
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         for (var attempt = 0; attempt < 80 && viewModel.Clips.Count < 200; attempt++)
         {
@@ -2298,7 +2307,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             clipStore: pagedStore);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         for (var attempt = 0; attempt < 40 && viewModel.Clips.Count < 2; attempt++)
         {
@@ -2359,7 +2368,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             clipStore: pagedStore);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         for (var attempt = 0; attempt < 40 && viewModel.Clips.Count < 3; attempt++)
         {
@@ -2421,7 +2430,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             clipStore: pagedStore);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         for (var attempt = 0; attempt < 40 && viewModel.Clips.Count < 2; attempt++)
         {
@@ -2712,7 +2721,7 @@ public sealed class MainWindowViewModelHeadlessTests
         await CaptureTextClipAsync(scope.ClipStoreService, "ordinary clip");
         await scope.ClipStoreService.SetPinnedAsync(pinned.Id, true);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
         await PumpAsync(() => viewModel.Clips.Count >= 2);
 
@@ -2746,7 +2755,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var oldest = await CaptureTextClipAsync(scope.ClipStoreService, "oldest clip");
         await CaptureTextClipAsync(scope.ClipStoreService, "middle clip");
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         viewModel.SelectedSortOption = viewModel.SortOptions.Single(option => option.Value == ClipSortOption.OldestFirst);
@@ -2780,7 +2789,7 @@ public sealed class MainWindowViewModelHeadlessTests
         await CaptureTextClipAsync(scope.ClipStoreService, "ordinary clip");
         await scope.ClipStoreService.SetFavoriteAsync(favorite.Id, true);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         viewModel.ShowFavoritesOnly = true;
@@ -2845,7 +2854,7 @@ public sealed class MainWindowViewModelHeadlessTests
         await Task.Delay(15);
         await scope.ClipStoreService.SetPinnedAsync(pinnedSecond.Id, true);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
         await PumpAsync(() => viewModel.Clips.Count >= 2);
 
@@ -2907,7 +2916,7 @@ public sealed class MainWindowViewModelHeadlessTests
         {
             await CaptureTextClipAsync(scope.ClipStoreService, "oldest clip");
 
-            await viewModel.InitializeAsync();
+            await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
             viewModel.SetMainWindowVisible(true);
 
             // Oldest first makes every capture take the declined path, which is
@@ -3024,7 +3033,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         await CaptureTextClipAsync(scope.ClipStoreService, "oldest");
@@ -3102,7 +3111,7 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.Equal(AppSettings.MinMaxClipSizeBytes, scope.SettingsService.Current.MaxClipSizeBytes);
 
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         // Over the size limit rather than undecodable. TryLoadImage checks the
@@ -3200,7 +3209,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         // Initialize kicks off StartDatabaseInBackgroundAsync as fire-and-
         // forget. Spin briefly until the background task either succeeds
@@ -3301,7 +3310,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var systemInteraction = new TestSystemInteractionService();
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
         var pngBytes = CreatePngBytes(0);
         var clip = await CaptureImageClipAsync(scope.ClipStoreService, pngBytes, "test image");
@@ -3329,7 +3338,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var systemInteraction = new TestSystemInteractionService();
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
         var pngBytes = CreatePngBytes(0);
         var clip = await CaptureImageClipAsync(scope.ClipStoreService, pngBytes, "test image");
@@ -3349,7 +3358,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var systemInteraction = new TestSystemInteractionService();
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "hello world");
         clipboardMonitor.Emit(clip);
