@@ -2782,5 +2782,13 @@
     "find": "            if (embeddingWorker is IPausableWorker pausable)\n",
     "replace": "            if (embeddingWorker is IPausableWorker pausable && pausable is null)\n",
     "filter": "FullyQualifiedName~EmbeddingWorkerLifetimeTests"
+  },
+  {
+    "id": "dropped-image-stored-verbatim",
+    "file": "Clipthrough/Services/Capture/DragDropService.cs",
+    "why": "F-43. A dropped JPEG/GIF/WebP/BMP stored verbatim is then exported as .png and sent to the AI as image/png.",
+    "find": "                ContentBytes = png,\n",
+    "replace": "                ContentBytes = png.Length >= 0 ? bytes : png,\n",
+    "filter": "FullyQualifiedName~DragDropImageEncodingTests"
   }
 ]

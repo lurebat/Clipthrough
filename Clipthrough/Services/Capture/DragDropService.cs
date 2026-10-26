@@ -328,7 +328,7 @@ public sealed class DragDropService : IDragDropService
         };
     }
 
-    private static ClipCaptureRequest? TryBuildImageRequestFromFile(string path, ClipboardSourceApplicationInfo? sourceInfo)
+    internal static ClipCaptureRequest? TryBuildImageRequestFromFile(string path, ClipboardSourceApplicationInfo? sourceInfo)
     {
         try
         {
@@ -347,20 +347,52 @@ public sealed class DragDropService : IDragDropService
         }
     }
 
-    private static ClipCaptureRequest? TryBuildImageRequestFromBytes(byte[] bytes, ClipboardSourceApplicationInfo? sourceInfo, string? label = null)
+    private static ReadOnlySpan<byte> PngSignature => [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+
+    /// <summary>
+    /// Builds an image clip from a dropped file's bytes, stored as PNG (F-43).
+    /// </summary>
+    /// <remarks>
+    /// Every other image path stores PNG, and everything downstream assumes it:
+    /// export names the file .png, the AI request labels it image/png, drag-out
+    /// writes clip-N.png. A JPEG, GIF, WebP or BMP dropped from disk used to be
+    /// stored verbatim and then mislabelled everywhere. PNG input is kept
+    /// byte-for-byte; anything else is decoded and re-encoded. SkiaSharp
+    /// directly rather than Avalonia's Bitmap: it is the same decoder Avalonia
+    /// renders through, and it needs no UI platform, so a test can check the
+    /// bytes really are PNG.
+    /// </remarks>
+    internal static ClipCaptureRequest? TryBuildImageRequestFromBytes(byte[] bytes, ClipboardSourceApplicationInfo? sourceInfo, string? label = null)
     {
         try
         {
-            using var stream = new MemoryStream(bytes, writable: false);
-            using var bitmap = new Avalonia.Media.Imaging.Bitmap(stream);
+            using var decoded = SkiaSharp.SKBitmap.Decode(bytes);
+            if (decoded is null)
+            {
+                Trace.TraceWarning("Drag-in image decode failed: not a format SkiaSharp can read.");
+                return null;
+            }
+
+            byte[] png;
+            if (bytes.AsSpan().StartsWith(PngSignature))
+            {
+                png = bytes;
+            }
+            else
+            {
+                using var image = SkiaSharp.SKImage.FromBitmap(decoded);
+                using var encoded = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+                png = encoded.ToArray();
+            }
+
             return new ClipCaptureRequest
             {
                 ContentType = ContentType.Image,
                 ContentFormat = ClipContentFormat.Bitmap,
                 ContentText = label,
-                ContentBytes = bytes,
-                ImageWidth = bitmap.PixelSize.Width,
-                ImageHeight = bitmap.PixelSize.Height,
+                ContentBytes = png,
+                ImageWidth = decoded.Width,
+                ImageHeight = decoded.Height,
                 SourceApp = sourceInfo?.Name,
                 SourceAppPath = sourceInfo?.Path,
                 SourceAppIconBytes = sourceInfo?.IconBytes,
