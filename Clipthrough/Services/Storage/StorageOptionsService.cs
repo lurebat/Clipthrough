@@ -263,15 +263,6 @@ public sealed class StorageOptionsService : IStorageOptionsService
             // Release pooled handles on the source before reading it.
             SqliteConnection.ClearAllPools();
 
-            // If the destination already exists, keep a timestamped safety copy.
-            if (File.Exists(newPath))
-            {
-                var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
-                var safeguard = newPath + ".before-move-" + stamp;
-                File.Copy(newPath, safeguard, overwrite: false);
-                Trace.TraceInformation($"Existing target '{newPath}' backed up to '{safeguard}'.");
-            }
-
             // Copy source → temp (in the destination directory for same-volume rename).
             // Read through SQLite, not the file system: this copy becomes the
             // database and the source is deleted immediately afterwards, so a
@@ -279,11 +270,34 @@ public sealed class StorageOptionsService : IStorageOptionsService
             var tempPath = Path.Combine(Path.GetDirectoryName(newPath)!, Path.GetFileName(newPath) + ".moving-" + Guid.NewGuid().ToString("N"));
             SqliteDatabaseCopier.CopyDatabase(oldPath, previous.DatabasePassword, tempPath);
 
+            var stashed = new System.Collections.Generic.List<(string Live, string Stashed)>();
             try
             {
-                // Atomic rename: temp → newPath (overwrites any existing file).
+                // Whatever already sits at the target - a database that was not
+                // shut down cleanly, a cloud-synced copy - is set aside as a set:
+                // main file, -wal and -shm under one stamp. Renaming only the
+                // main file over it would leave its -wal beside the moved
+                // library, and SQLite replays that foreign WAL on the next open,
+                // replacing the user's history with the old target's. The same
+                // hazard RestoreCore guards against.
+                var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+                foreach (var suffix in new[] { string.Empty, "-wal", "-shm" })
+                {
+                    var existing = newPath + suffix;
+                    if (File.Exists(existing))
+                    {
+                        var safeguard = existing + ".before-move-" + stamp;
+                        File.Move(existing, safeguard);
+                        stashed.Add((existing, safeguard));
+                        Trace.TraceInformation($"Existing target file '{existing}' set aside as '{safeguard}'.");
+                    }
+                }
+
+                // Atomic rename: temp → newPath. Nothing is left at newPath now,
+                // but overwrite keeps a racing stray file from failing the move.
                 File.Move(tempPath, newPath, overwrite: true);
                 tempPath = null; // newPath owns it now — don't delete in finally.
+                stashed.Clear(); // The move landed; the set-aside files stay as the safeguard.
 
                 // Remove the source and its WAL/SHM sidecar files.
                 foreach (var suffix in new[] { string.Empty, "-wal", "-shm" })
@@ -307,6 +321,23 @@ public sealed class StorageOptionsService : IStorageOptionsService
                 if (tempPath is not null && File.Exists(tempPath))
                 {
                     try { File.Delete(tempPath); } catch { /* best effort */ }
+                }
+
+                // ...and put the displaced target back where it was, so a failed
+                // move changes nothing at either end.
+                foreach (var (live, safeguard) in stashed)
+                {
+                    try
+                    {
+                        if (!File.Exists(live))
+                        {
+                            File.Move(safeguard, live);
+                        }
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        Trace.TraceError($"Could not put '{safeguard}' back as '{live}' after a failed move: {ex.Message}");
+                    }
                 }
             }
         }

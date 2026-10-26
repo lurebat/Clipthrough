@@ -2678,5 +2678,13 @@
     "find": "        var tokens = input.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);",
     "replace": "        var tokens = input.Split('\\n', StringSplitOptions.RemoveEmptyEntries);",
     "filter": "FullyQualifiedName~WhitespaceToJsonArray"
+  },
+  {
+    "id": "move-leaves-target-sidecars",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "F-01. Setting aside only the target's main file leaves its -wal beside the moved library; SQLite replays the foreign WAL on the next open and the user's history reads back as the old target's rows, with the source already deleted.",
+    "find": "                foreach (var suffix in new[] { string.Empty, \"-wal\", \"-shm\" })\n                {\n                    var existing = newPath + suffix;",
+    "replace": "                foreach (var suffix in new[] { string.Empty })\n                {\n                    var existing = newPath + suffix;",
+    "filter": "FullyQualifiedName~StorageLifecycleTests.PathMove_"
   }
 ]
