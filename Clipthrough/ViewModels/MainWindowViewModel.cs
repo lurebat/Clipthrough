@@ -2999,10 +2999,34 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// Asks the user to confirm something (title, body, confirm label, cancel
+    /// label). Set by the window; null when no view is attached, in which case
+    /// a choice that needs confirming is declined.
+    /// </summary>
+    public Func<string, string, string, string, Task<bool>>? ConfirmAsync { get; set; }
+
     private async Task ExportSelectedAsync()
     {
         if (SelectedClip is null)
         {
+            return;
+        }
+
+        // Explicit Export writes a plaintext copy that outlives the clip -
+        // past its sensitive lifetime and outside database encryption, often
+        // into a OneDrive-synced folder. For a sensitive clip that is the
+        // user's call to make knowingly (OD-3a); without a way to ask, it is
+        // not made for them.
+        if (SelectedClip.Clip.IsSensitive
+            && (ConfirmAsync is null
+                || !await ConfirmAsync(
+                    AppText.ExportSensitiveConfirmTitle,
+                    AppText.ExportSensitiveConfirmBody,
+                    AppText.ExportSensitiveConfirmAccept,
+                    AppText.ExportSensitiveConfirmCancel)))
+        {
+            StatusText = AppText.ExportSensitiveCancelledStatus;
             return;
         }
 
@@ -3045,7 +3069,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);
+        var exportResult = await _clipExportService.ExportForToolAsync(SelectedClip.Clip);
         await _systemInteractionService.OpenInEditorAsync(exportResult.PrimaryPath, editorPath);
         StatusText = $"{AppText.OpenedInEditorStatus}: {Path.GetFileName(exportResult.PrimaryPath)}";
     }
@@ -3156,8 +3180,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var left = await _clipExportService.ExportAsync(checkedClips[0].Clip);
-        var right = await _clipExportService.ExportAsync(checkedClips[1].Clip);
+        var left = await _clipExportService.ExportForToolAsync(checkedClips[0].Clip);
+        var right = await _clipExportService.ExportForToolAsync(checkedClips[1].Clip);
 
         await _systemInteractionService.OpenInDiffToolAsync(left.PrimaryPath, right.PrimaryPath, diffToolPath);
         StatusText = AppText.CompareOpenedStatus;

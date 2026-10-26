@@ -126,6 +126,11 @@ public static class AppText
         [nameof(CompareNeedsDiffToolStatus)] = "Set an external diff tool path in Settings to compare clips.",
         [nameof(CompareOpenedStatus)] = "Opened diff tool for comparison.",
         [nameof(SettingsThemeModeLabel)] = "Theme",
+        [nameof(ExportSensitiveConfirmTitle)] = "Export a sensitive clip?",
+        [nameof(ExportSensitiveConfirmBody)] = "Export writes this clip as an unencrypted file in Documents\\Clipthrough Exports, which is often synced to OneDrive. The file stays after the clip expires or is deleted from Clipthrough.\n\nExport it anyway?",
+        [nameof(ExportSensitiveConfirmAccept)] = "Export",
+        [nameof(ExportSensitiveConfirmCancel)] = "Cancel",
+        [nameof(ExportSensitiveCancelledStatus)] = "Sensitive clip not exported",
         [nameof(ClipAngelImportUnexpectedSchema)] = "This ClipAngel database was not imported: its structure is not what ClipAngel writes (Clips is not a plain table, or the file contains views or triggers).",
         [nameof(SettingsSearchSortByDateLabel)] = "Sort search results by date instead of relevance",
         [nameof(OpenedInEditorStatus)] = "Opened in editor",
@@ -452,6 +457,11 @@ public static class AppText
     public static string CompareNeedsDiffToolStatus => Text(nameof(CompareNeedsDiffToolStatus));
     public static string CompareOpenedStatus => Text(nameof(CompareOpenedStatus));
     public static string SettingsThemeModeLabel => Text(nameof(SettingsThemeModeLabel));
+    public static string ExportSensitiveConfirmTitle => Text(nameof(ExportSensitiveConfirmTitle));
+    public static string ExportSensitiveConfirmBody => Text(nameof(ExportSensitiveConfirmBody));
+    public static string ExportSensitiveConfirmAccept => Text(nameof(ExportSensitiveConfirmAccept));
+    public static string ExportSensitiveConfirmCancel => Text(nameof(ExportSensitiveConfirmCancel));
+    public static string ExportSensitiveCancelledStatus => Text(nameof(ExportSensitiveCancelledStatus));
     public static string ClipAngelImportUnexpectedSchema => Text(nameof(ClipAngelImportUnexpectedSchema));
     public static string SettingsSearchSortByDateLabel => Text(nameof(SettingsSearchSortByDateLabel));
     public static string OpenedInEditorStatus => Text(nameof(OpenedInEditorStatus));

@@ -14,7 +14,7 @@ Clipthrough is an Avalonia desktop clipboard history app focused on rich clipboa
 - Configurable local hotkeys (recorded in the settings window) and global hotkeys for paste cycling
 - First-run welcome flow for storage path, password, and hotkey setup
 - SQLite database with optional encryption password, retention policies, and size caps
-- Clip export with original payload, rendered text, and metadata
+- Clip export with original payload, rendered text, and metadata (sensitive clips ask first; Open in editor and Compare use temporary working copies that are removed on exit)
 - Top menu bar and an in-app Help window
 - **AI transforms** — send text or image clips to any OpenAI-compatible chat-completions endpoint with a custom instruction or preset; results are saved as new clips (`Edit -> AI transform...`, `Ctrl+I`). Image presets support both image-to-text and image-to-image flows. Configure base URL, API key and model in Settings, or fall back to `OPENAI_BASE_URL` / `OPENAI_API_KEY` environment variables.
 - **Text transformations** — `Edit -> Transform` (and the per-clip context menu) groups built-ins into **Case**, **Whitespace**, **Lines**, plus a **Text table → HTML** action that converts box-drawing, Markdown pipe, and ASCII `+---+` tables (handles multiple tables and surrounding text) into HTML you can paste into Teams/Outlook with cell formatting preserved. Single-clip transforms automatically place the result on the OS clipboard so you can paste immediately.

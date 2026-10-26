@@ -2734,5 +2734,53 @@
     "find": "            HonorClipboardHistoryOptOut = Settings.HonorClipboardHistoryOptOut,\n",
     "replace": "",
     "filter": "FullyQualifiedName~TheHistoryOptOutSetting_IsSaved"
+  },
+  {
+    "id": "tool-copies-are-ordinary-exports",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "F-18. A tool copy written as a full export lands in Documents (often OneDrive-synced) with a metadata.json of the raw content, and outlives the session.",
+    "find": "        => ExportCoreAsync(clip, _sessionRoot, includeMetadata: false, cancellationToken);\n",
+    "replace": "        => ExportAsync(clip, cancellationToken);\n",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AToolCopy_LandsInTheSessionFolder"
+  },
+  {
+    "id": "tool-copies-survive-exit",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "F-18. Session working copies of possibly sensitive clips must not outlive the session.",
+    "find": "        TryDeleteDirectory(_sessionRoot);\n    }\n",
+    "replace": "        _ = _sessionRoot;\n    }\n",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AToolCopy_LandsInTheSessionFolder"
+  },
+  {
+    "id": "crashed-session-tool-copies-are-kept",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "F-18. A session that crashed never ran Dispose; the next start is the only chance to remove its copies.",
+    "find": "        RemoveAbandonedSessionFolders();\n",
+    "replace": "        if (_sessionRoot.Length < 0) RemoveAbandonedSessionFolders();\n",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AFolderLeftByAProcessThatIsGone"
+  },
+  {
+    "id": "open-in-editor-writes-an-export",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-18. Open in editor is a working copy, not an export the user asked to keep.",
+    "find": "        var exportResult = await _clipExportService.ExportForToolAsync(SelectedClip.Clip);\n",
+    "replace": "        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);\n",
+    "filter": "FullyQualifiedName~OpenInEditor_UsesASessionToolCopy"
+  },
+  {
+    "id": "compare-writes-an-export",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-18. Compare writes working copies of both clips, not exports.",
+    "find": "        var left = await _clipExportService.ExportForToolAsync(checkedClips[0].Clip);\n",
+    "replace": "        var left = await _clipExportService.ExportAsync(checkedClips[0].Clip);\n",
+    "filter": "FullyQualifiedName~Compare_UsesSessionToolCopies"
+  },
+  {
+    "id": "sensitive-export-is-not-confirmed",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-18 / OD-3a. Exporting a sensitive clip writes plaintext that outlives its lifetime; the user must choose it knowingly.",
+    "find": "        if (SelectedClip.Clip.IsSensitive\n            && (ConfirmAsync is null\n",
+    "replace": "        if (SelectedClip.Clip.IsSensitive && !SelectedClip.Clip.IsSensitive\n            && (ConfirmAsync is null\n",
+    "filter": "FullyQualifiedName~ExportingASensitiveClip_AsksFirst|FullyQualifiedName~ExportingASensitiveClip_WithNoWayToAsk"
   }
 ]

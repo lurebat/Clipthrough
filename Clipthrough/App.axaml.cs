@@ -372,6 +372,8 @@ public partial class App : Application
         _ = Services.GetService<IBackgroundOcrQueue>()?.StopAsync();
         _ = Services.GetService<Clipthrough.Services.Search.IEmbeddingWorker>()?.StopAsync();
         _updateService?.ApplyDownloadedUpdateOnExit();
+        // Removes this session's Open-in-editor / Compare working copies (OD-3a).
+        (Services.GetService<IClipExportService>() as IDisposable)?.Dispose();
         _trayIcon?.Dispose();
         _trayIcon = null;
 
