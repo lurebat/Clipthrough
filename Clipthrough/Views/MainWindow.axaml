@@ -1389,7 +1389,7 @@
                                                    FontSize="11" />
                                         <CheckBox Content="{Binding SettingsShowPasswordLabel}"
                                                   IsChecked="{Binding IsDatabasePasswordVisible}" />
-                                        <CheckBox Content="Remember password (saved as plaintext in storage.json)"
+                                        <CheckBox Content="{x:Static loc:AppText.SettingsRememberDatabasePassword}"
                                                   IsChecked="{Binding SettingsRememberDatabasePassword, Mode=TwoWay}"
                                                   IsVisible="{Binding SettingsDatabasePassword, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                                         <TextBlock Classes="body-muted"

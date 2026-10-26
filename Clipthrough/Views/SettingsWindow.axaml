@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Clipthrough.ViewModels"
         xmlns:ctrl="using:Clipthrough.Controls"
+        xmlns:loc="using:Clipthrough.Localization"
         x:Class="Clipthrough.Views.SettingsWindow"
         x:DataType="vm:MainWindowViewModel"
         x:CompileBindings="True"
@@ -286,7 +287,7 @@
                                      RevealPassword="{Binding IsDatabasePasswordVisible}" />
                             <CheckBox Content="{Binding SettingsShowPasswordLabel}"
                                       IsChecked="{Binding IsDatabasePasswordVisible}" />
-                            <CheckBox Content="Remember password (saved as plaintext in storage.json)"
+                            <CheckBox Content="{x:Static loc:AppText.SettingsRememberDatabasePassword}"
                                       IsChecked="{Binding SettingsRememberDatabasePassword, Mode=TwoWay}" />
                             <TextBlock Classes="body-muted"
                                        Foreground="{DynamicResource DangerBrush}"

@@ -19,8 +19,10 @@ namespace Clipthrough.Services;
 ///
 /// Snapshots are written next to the live database in a sibling
 /// <c>backups/</c> folder as <c>clipthrough-YYYYMMDD.db</c>. The file format
-/// is just a copy of the encrypted SQLite file (after WAL checkpoint) so it
-/// can be restored by simply replacing the live database.
+/// is a consistent copy of the (encrypted) database read through SQLite by
+/// <see cref="SqliteDatabaseCopier"/>, so commits still in the WAL are included
+/// while the app keeps running, and it can be restored by replacing the live
+/// database.
 /// </summary>
 public sealed class DatabaseBackupService : IDatabaseBackupService
 {

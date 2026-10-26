@@ -2838,5 +2838,45 @@
     "find": "            if (sw is not null) Trace.TraceInformation($\"[refresh-timing] ui-applied={applied} @ {sw.ElapsedMilliseconds}ms\");\n",
     "replace": "            if (sw is not null) Trace.TraceInformation($\"[refresh-timing] ui-applied={applied} @ {sw.ElapsedMilliseconds}ms\");\n            if (applied && !string.IsNullOrWhiteSpace(request.Filters.SearchText))\n            {\n                await _searchHistoryService.SaveSearchAsync(request.Filters.SearchText).ConfigureAwait(false);\n            }\n",
     "filter": "FullyQualifiedName~TypingWithPauses_RecordsNothing"
+  },
+  {
+    "id": "storage-doc-drops-a-clips-column",
+    "file": ".github/copilot-cli-skills/clipthrough-storage-schema.md",
+    "why": "F-42 / R4. The table had silently omitted four columns, among them sensitivity_scanned_at, the one an INSERT path must not forget. Every clips column must have a row.",
+    "find": "| `sensitivity_is_manual` | INTEGER | 0/1. The user marked or unmarked the clip by hand, so a rule change must not re-derive `is_sensitive`. |\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~EveryClipsColumn_IsDocumented_AndNothingElse"
+  },
+  {
+    "id": "storage-doc-ocr-status-says-done",
+    "file": ".github/copilot-cli-skills/clipthrough-storage-schema.md",
+    "why": "F-42 / R4. The doc said ocr_status was pending/done/failed; the code never writes 'done', so a query written from the doc matched nothing.",
+    "find": "| `ocr_status`          | TEXT    | NULL (never queued), `pending`, `running`, `succeeded`, `failed`, `rerun`. |",
+    "replace": "| `ocr_status`          | TEXT    | NULL (never queued), `pending`, `running`, `done`, `failed`, `rerun`. |",
+    "filter": "FullyQualifiedName~TheDocumentedStatusValues_AreTheOnesTheCodeUses"
+  },
+  {
+    "id": "agents-doc-names-a-missing-settings-interface",
+    "file": "AGENTS.md",
+    "why": "F-42 / R4. AGENTS.md named IAppSettingsService, Data/ClipSchema.cs and s_transformMenuEntries long after all three had gone; an agent followed them to code that was not there.",
+    "find": "- **Settings**: `ISettingsService` loads/saves",
+    "replace": "- **Settings**: `IAppSettingsService` loads/saves",
+    "filter": "FullyQualifiedName~AgentDocReferenceTests"
+  },
+  {
+    "id": "password-warning-claims-plaintext-storage",
+    "file": "Clipthrough/Localization/AppText.cs",
+    "why": "F-42. The remembered password is DPAPI-protected or not persisted at all; the label told users it was saved as plaintext, steering them away from a safe feature.",
+    "find": "\"⚠ Saved in storage.json encrypted for your Windows account (DPAPI) so the database can unlock on startup.",
+    "replace": "\"⚠ Saved as plaintext in storage.json encrypted for your Windows account (DPAPI) so the database can unlock on startup.",
+    "filter": "FullyQualifiedName~PasswordStorageLabelTests"
+  },
+  {
+    "id": "rekey-dialog-label-is-a-plaintext-literal",
+    "file": "Clipthrough/Views/RekeyDialog.axaml",
+    "why": "F-42. The three password labels were AXAML literals, which is how the false plaintext claim escaped the AppText rule; a literal must not come back.",
+    "find": "Content=\"{x:Static loc:AppText.RekeyRememberNewPassword}\" />",
+    "replace": "Content=\"Remember new password (saved as plaintext in storage.json)\" />",
+    "filter": "FullyQualifiedName~ThePasswordViews_HoldNoPlaintextClaimOfTheirOwn"
   }
 ]

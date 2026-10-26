@@ -19,7 +19,7 @@ shortcuts, and pluggable source attribution.
   - `Converters/` — `IValueConverter` implementations used in AXAML bindings.
   - `Styles/` — `ModernTheme.axaml` + class-based selectors.
   - `Localization/` — `AppText` static dictionary (single source of truth for user-visible strings).
-  - `Data/` — SQLite helpers, schema migrations.
+  - `Database/` — connection factory, schema and migrations (`DatabaseInitializer`).
 - `Clipthrough.Tests/` — xUnit test project
   - `TestDoubles.cs` — fakes/stubs for each service interface.
   - Service tests use real SQLite (in-memory or temp files).
@@ -32,14 +32,14 @@ shortcuts, and pluggable source attribution.
 - **DI**: services are registered in `App.axaml.cs` → `ConfigureServices()`. Add new services there.
 - **MVVM**: all UI state is on ViewModels. Views have minimal code-behind (only for window lifecycle, DataContext subscriptions, or interop that can't be bound).
 - **ReactiveUI**: commands are `ReactiveCommand` with explicit signatures (`ReactiveCommand<TParam, TResult>`). Async commands use `CreateFromTask`. Never use `ICommand` directly.
-- **Settings**: `IAppSettingsService` loads/saves the `AppSettings` record. The ViewModel exposes a mirror of each field with a `Settings*` prefix so editing can be transactional (Cancel reverts).
+- **Settings**: `ISettingsService` loads/saves the `AppSettings` record. The ViewModel exposes a mirror of each field with a `Settings*` prefix so editing can be transactional (Cancel reverts).
 - **Localization**: user-visible strings come from `AppText`. Add new entries to the dictionary in `AppText.cs`. Never hardcode strings in AXAML or VMs.
 - **Theming**: use class selectors (`Classes="surface-panel"`) from `ModernTheme.axaml`. Brushes come from `DynamicResource`s so they respect dark/light mode.
-- **Persistence**: schema changes go in `Data/ClipSchema.cs` with an idempotent migration (ADD COLUMN IF NOT EXISTS, etc.). Bump version only when required.
+- **Persistence**: schema changes go in `Database/DatabaseInitializer.cs` with an idempotent migration (ADD COLUMN IF NOT EXISTS, etc.). Bump version only when required.
 - **Hotkeys**: global hotkeys are registered via `ISystemInteractionService.TryRegisterGlobalHotKey` which on Windows uses `RegisterHotKey` + `Win32Properties.AddWndProcHookCallback`. Never hold a managed `WndProc` delegate yourself — use the Avalonia helper to avoid GC crashes.
 - **AI transforms** (`IAiTransformService` / `AiTransformService`): OpenAI-compatible chat-completions client. Base URL + API key + model come from `AppSettings.Ai*` with env-var fallback (`OPENAI_BASE_URL`, `OPENAI_API_KEY`). Service has a test-friendly ctor taking an `HttpClient`.
 - **Text transformations** (`TextTransformationService.Apply`): pure static function mapping `TextTransformation` → output. The `BoxTableToHtml` parser scans line-by-line, detects consecutive table-line blocks (box-drawing, Markdown `|---|`, or ASCII `+---+`), converts each to a `<table>`, and preserves surrounding text as escaped `<div>...<br>...</div>` blocks. Returns the original input verbatim if no table block is found.
-- **Transform menus** (top `Edit > Transform`, toolbar flyout, right-click context menu): driven by `s_transformMenuEntries` in `MainWindow.axaml.cs` keyed by `(Group, Header, TextTransformation)`. `BuildTransformMenuItems` groups by `Group`; groups with a single entry are flattened to top-level. The right-click context menu in `MainWindow.axaml` lists the same transforms statically, because it applies them to the clip that was right-clicked rather than to the current selection — a different command on a different view model, so it cannot be generated from the table. Adding a transform means editing both, but you no longer have to remember to: `TransformMenuParityHeadlessTests` fails when the two lists differ in membership or in wording, and when a new `TextTransformation` reaches neither. Withholding one on purpose is allowed and has to be named in that test's `withheld` set, which is also checked for staleness.
+- **Transform menus** (top `Edit > Transform`, toolbar flyout, right-click context menu): driven by `TransformMenuCatalog.Entries` in `Views/TransformMenuCatalog.cs` keyed by `(Group, Header, TextTransformation)`. `BuildTransformMenuItems` groups by `Group`; groups with a single entry are flattened to top-level. The right-click context menu in `MainWindow.axaml` lists the same transforms statically, because it applies them to the clip that was right-clicked rather than to the current selection — a different command on a different view model, so it cannot be generated from the table. Adding a transform means editing both, but you no longer have to remember to: `TransformMenuParityHeadlessTests` fails when the two lists differ in membership or in wording, and when a new `TextTransformation` reaches neither. Withholding one on purpose is allowed and has to be named in that test's `withheld` set, which is also checked for staleness.
 - **Auto-copy after transform**: `ApplyTransformToTargetsAsync` and `ApplyTransformationToSingleClipAsync` invoke `CopyTransformResultToClipboardAsync` whenever exactly one target was transformed (single clip or selection slice). HTML-output transforms write CF_HTML via `CopyRichContentAsync`; everything else uses `CopyTextAsync`. Always call `_clipboardMonitorService.SuppressNext()` first so the capture doesn't double-create the clip. Multi-clip transforms intentionally do NOT auto-copy.
 - **Custom hotkey bindings** (`Models/CustomHotkeyBinding.cs`, `Models/CustomHotkeyTarget.cs`, `App.axaml.cs#ExecuteCustomHotkey`): `Target` uses `kind:value` with **four** kinds — `builtin` (a `TextTransformation` member), `ai` (a saved preset name), `prompt` (an inline system prompt sent straight to `IAiTransformService.TransformAsync`, for one-offs with no preset), and `aiprompt` (opens the AI prompt dialog; needs no clip and pastes nothing). Parsing lives in `CustomHotkeyTarget.Parse` and is covered by `CustomHotkeyTargetTests`; only the **first** colon separates, because a prompt routinely contains one. The kind is lowercased and its token is preserved verbatim, since a transformed clip persists `TransformKind` as `token:value`. An unparseable target is silent by nature — the gesture is registered, the key is swallowed, nothing happens — so it is worth a test rather than a try.
 - **Image AI transforms**: image clips can use AI presets/prompts in both image-to-text and image-to-image modes. Keep prompt UX and command routing aligned with the selected clip type.
@@ -251,6 +251,41 @@ compilation for this reason; put scratch files in the session folder instead.
 - **Async void** is allowed only for event handlers. Prefer `async Task` everywhere else.
 - **P/Invoke**: struct layouts must match Win32 exactly. Prefer `System.Runtime.InteropServices.LibraryImport` on .NET 10 where possible — note this is aspirational, not descriptive: the codebase is currently 48 `DllImport` and 0 `LibraryImport`, so follow the surrounding style when editing an existing interop block rather than converting it piecemeal.
 
+## Settled decisions
+
+Owner decisions from the 2026-10-25 codebase audit. The full record - the
+options weighed and the finding each one closes - is the OD table in
+`docs/plans/2026-10-25-001-fix-codebase-audit-plan.md`. Do not re-raise one,
+in a review or an audit, without naming the assumption that changed. Each names
+the unit that implements it, so whether the code matches is checkable.
+
+- **S36 - AI key over plain HTTP is an accepted risk (OD-11, F-37).**
+  `OPENAI_API_KEY` is sent as the bearer token to whatever AI base URL is
+  configured, including a non-loopback `http://` endpoint. This stays.
+- **S37 - update signing is a separate decision (OD-5, U-C7).** The update feed
+  is pinned to the repository path. Whether to Authenticode-sign and verify
+  releases has not been decided; until it is, release integrity rests on the
+  GitHub account and CI token, and F-38 is closed only as far as the pin goes.
+- **S38 - regex search engine (OD-7, U-B6).** Regex search uses
+  `RegexOptions.NonBacktracking` by default. A setting switches to the
+  backtracking engine, which keeps a 250 ms match timeout reported as "pattern
+  too slow".
+- **S39 - clipboard-history opt-out (OD-10, U-C1).** Content published with
+  `CanIncludeInClipboardHistory` = 0 is not captured while the setting is on,
+  and the setting defaults to on.
+- **S40 - search history (OD-9, U-G8).** A query is recorded only when the user
+  commits to it - Enter, or acting on a result - never on a throttled refresh.
+- **S41 - quitting inside the undo window (OD-8, U-B4).** Pending deletes are
+  committed on exit.
+- **S42 - rekey password whitespace (OD-12, U-A2).** The Rekey dialog rejects a
+  new password with leading or trailing whitespace, consistent with the trimming
+  in the unlock prompt and `StorageOptions.Normalize`.
+
+Two refinements the owner made while Phase C was in review carry the same
+weight. OD-4 (U-C4a): backup copies are purged of sensitive clips only while the
+sensitive-lifetime setting is on; with it off, backups keep them. OD-3 (U-C3):
+Editor and Compare tool copies are also removed at app exit.
+
 ## How to add a feature (template)
 
 1. Read the relevant checkpoint files in the session folder for prior context.
@@ -267,10 +302,10 @@ compilation for this reason; put scratch files in the session folder instead.
 ## Docs
 
 - `README.md`: user-facing. Keep setup, feature list, and screenshots current when behavior changes.
-- `AGENTS.md` (this file): developer/agent guidance. Update when architecture or conventions change.
+- `AGENTS.md` (this file): developer/agent guidance. Update when architecture or conventions change. `AgentDocReferenceTests` fails when this file, `CONCEPTS.md`, `.github/copilot-instructions.md` or a skill names a source file, service interface or `s_` field that does not exist.
 - `CONTRIBUTING.md`: PR and style guidance.
 - `CONCEPTS.md`: glossary of project-specific terms (ClipEntry, WAL, lazy hydration, MetaSegments, etc.). Consult before using a term you haven't seen in code, and update when introducing a new project-specific concept.
 - `docs/solutions/`: verified fix and pattern docs (regression-prevention knowledge base). Each doc has YAML frontmatter (`tags`, `version`, `severity`). Read relevant docs before touching persistence, threading, background workers, or search. Add a doc after landing a non-obvious bug fix. See `docs/solutions/README.md` for structure and frontmatter schema.
 - `.github/copilot-cli-skills/clipthrough-transforms.md`: agent-facing reference for built-in transformations, the auto-copy contract, AI presets, and the custom-hotkey `Target` syntax (`builtin:` / `ai:` / `prompt:`). Update when adding transforms or new hotkey kinds.
-- `.github/copilot-cli-skills/clipthrough-storage-schema.md`: agent-facing reference for the SQLite schema, FTS5 triggers, indexes, and the migration pattern. Update on every schema change.
+- `.github/copilot-cli-skills/clipthrough-storage-schema.md`: agent-facing reference for the SQLite schema, FTS5 triggers, indexes, and the migration pattern. Update on every schema change. `StorageSchemaDocTests` fails when its `clips` columns, index names or status values stop matching the schema and the SQL.
 - `.github/copilot-cli-skills/clipthrough-platform-windows.md`: agent-facing reference for Windows interop — clipboard formats (CF_HTML wrapping), foreground capture + paste sequencing, AttachThreadInput, SendInput, and global hotkeys via `Win32Properties.AddWndProcHookCallback`. Update when changing platform behavior.

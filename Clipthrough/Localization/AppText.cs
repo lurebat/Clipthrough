@@ -126,10 +126,11 @@ public static class AppText
         [nameof(OpenedInEditorStatus)] = "Opened in editor",
         [nameof(SettingsHintText)] = "Enter shortcuts in forms like Ctrl+Shift+R, Ctrl+Shift+F, or F8. Disable any shortcut you do not want active. Startup registration applies on Windows.",
         [nameof(SettingsStorageHintText)] = "The path is stored outside the clip database so you can move or encrypt it. Leave the password empty to keep SQLite unencrypted.",
-        [nameof(SettingsDatabasePasswordWarning)] = "⚠ Saved as plaintext in storage.json so the database can auto-unlock on startup. Anyone with access to your user profile can read it.",
+        [nameof(SettingsDatabasePasswordWarning)] = "⚠ Saved in storage.json encrypted for your Windows account (DPAPI) so the database can unlock on startup. Any program running as you can still decrypt it. Where DPAPI is unavailable the password is kept in memory only and asked for again next launch.",
         [nameof(SettingsConfirmEncryptionPasswordTitle)] = "Save encryption password?",
-        [nameof(SettingsConfirmEncryptionPasswordBody)] = "The encryption password will be stored as plaintext in storage.json so Clipthrough can auto-unlock the database on startup.\n\nAnyone with access to your user profile can read it. Continue?",
-        [nameof(SettingsConfirmEncryptionPasswordConfirm)] = "Save plaintext",
+        [nameof(SettingsConfirmEncryptionPasswordBody)] = "The encryption password will be saved in storage.json, encrypted for your Windows account (DPAPI), so Clipthrough can unlock the database on startup.\n\nAny program running as you can still decrypt it. Where DPAPI is unavailable it is kept in memory only. Continue?",
+        [nameof(SettingsConfirmEncryptionPasswordConfirm)] = "Remember password",
+        [nameof(SettingsRememberDatabasePassword)] = "Remember password (encrypted for your Windows account)",
         [nameof(SettingsConfirmEncryptionPasswordCancel)] = "Cancel",
         [nameof(StartupErrorTitle)] = "Clipthrough could not start",
         [nameof(WelcomeTitleText)] = "Welcome to Clipthrough",
@@ -176,6 +177,8 @@ public static class AppText
         [nameof(SettingsInvalidMaxEntryCount)] = "Enter a max entry count between 1 and 5000000.",
         [nameof(SettingsPasswordMismatch)] = "Passwords do not match.",
         [nameof(RekeyPasswordMismatch)] = "New password and confirmation do not match.",
+        [nameof(RekeyRememberNewPassword)] = "Remember new password (encrypted for your Windows account)",
+        [nameof(RekeyRememberNewPasswordWarning)] = "⚠ The new password will be saved in storage.json, encrypted for your Windows account (DPAPI). Any program running as you can still decrypt it. Where DPAPI is unavailable it is kept in memory only.",
         [nameof(RekeyPasswordEdgeWhitespace)] = "The new password starts or ends with a space or other whitespace. Remove it: Clipthrough ignores leading and trailing whitespace when you unlock, so the database could never be opened with it.",
         [nameof(UnlockIncorrectPassword)] = "Incorrect password. Please try again.",
         [nameof(UnlockDatabaseUnreadable)] = "The database could not be opened. It may have been moved, deleted, or is in use by another program.",
@@ -449,6 +452,7 @@ public static class AppText
     public static string SettingsConfirmEncryptionPasswordTitle => Text(nameof(SettingsConfirmEncryptionPasswordTitle));
     public static string SettingsConfirmEncryptionPasswordBody => Text(nameof(SettingsConfirmEncryptionPasswordBody));
     public static string SettingsConfirmEncryptionPasswordConfirm => Text(nameof(SettingsConfirmEncryptionPasswordConfirm));
+    public static string SettingsRememberDatabasePassword => Text(nameof(SettingsRememberDatabasePassword));
     public static string SettingsConfirmEncryptionPasswordCancel => Text(nameof(SettingsConfirmEncryptionPasswordCancel));
     public static string StartupErrorTitle => Text(nameof(StartupErrorTitle));
     public static string WelcomeTitleText => Text(nameof(WelcomeTitleText));
@@ -507,6 +511,8 @@ public static class AppText
     public static string SettingsPasswordMismatch => Text(nameof(SettingsPasswordMismatch));
     public static string RekeyPasswordMismatch => Text(nameof(RekeyPasswordMismatch));
     public static string RekeyPasswordEdgeWhitespace => Text(nameof(RekeyPasswordEdgeWhitespace));
+    public static string RekeyRememberNewPassword => Text(nameof(RekeyRememberNewPassword));
+    public static string RekeyRememberNewPasswordWarning => Text(nameof(RekeyRememberNewPasswordWarning));
     public static string UnlockIncorrectPassword => Text(nameof(UnlockIncorrectPassword));
     public static string UnlockDatabaseUnreadable => Text(nameof(UnlockDatabaseUnreadable));
     public static string SettingsInvalidRuleName => Text(nameof(SettingsInvalidRuleName));

@@ -2064,10 +2064,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         && !string.Equals(SettingsDatabasePassword, SettingsDatabasePasswordConfirm, StringComparison.Ordinal);
 
     /// <summary>
-    /// True when Save is about to persist a non-empty encryption password as
-    /// plaintext to disk (i.e. the user enabled "Remember password" and the
-    /// stored value would change). Drives the plaintext-storage confirmation
-    /// dialog.
+    /// True when Save is about to remember a non-empty encryption password (the
+    /// user enabled "Remember password" and the stored value would change).
+    /// Drives the confirmation dialog. The password is written DPAPI-protected,
+    /// never as plaintext - see <c>StorageOptionsService.BuildDocument</c>.
     /// </summary>
     public bool IsPendingPlaintextEncryptionPasswordChange =>
         SettingsRememberDatabasePassword
@@ -2087,7 +2087,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// True when the inline plaintext-storage warning under the password field
+    /// True when the inline remember-password warning under the password field
     /// should be visible: user typed a password and ticked "Remember".
     /// </summary>
     public bool IsRememberPasswordWarningVisible =>
