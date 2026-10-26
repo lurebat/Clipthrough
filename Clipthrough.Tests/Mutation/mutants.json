@@ -2702,5 +2702,13 @@
     "find": "            && (char.IsWhiteSpace(newPassword[0]) || char.IsWhiteSpace(newPassword[^1])))",
     "replace": "            && (char.IsWhiteSpace(newPassword[0]) && !char.IsWhiteSpace(newPassword[0])))",
     "filter": "FullyQualifiedName~RekeyDialogValidationTests"
+  },
+  {
+    "id": "rekey-empty-side-uses-pragma-rekey",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "F-16. PRAGMA rekey is a silent no-op on SQLCipher 4.5 when either key is empty, so routing plaintext->encrypted or encrypted->plaintext back through it leaves no in-app way to encrypt an existing history (or remove encryption), and the failure blames the password.",
+    "find": "        if (currentKey.Length == 0 || newKey.Length == 0)\n        {\n            File.Delete(destinationPath);",
+    "replace": "        if (currentKey.Length < 0 && newKey.Length < 0)\n        {\n            File.Delete(destinationPath);",
+    "filter": "FullyQualifiedName~StorageLifecycleTests.Rekey_PlaintextLibrary|FullyQualifiedName~StorageLifecycleTests.Rekey_EncryptedLibrary"
   }
 ]

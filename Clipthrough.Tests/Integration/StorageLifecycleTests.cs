@@ -238,4 +238,112 @@ public sealed class StorageLifecycleTests : IDisposable
 
         Assert.Equal("kept", ReadRows(dbPath, "new-pw"));
     }
+
+    // ─── Adding and removing encryption (F-16) ────────────────────────────────
+
+    private const string Marker = "SECRET-PLAINTEXT-MARKER-4711";
+
+    /// <summary>
+    /// A real library - full schema, FTS5 triggers and all - with one clip,
+    /// opened through the same storage service the rekey goes through.
+    /// </summary>
+    private async Task<(StorageOptionsService Storage, ClipStoreService Store, string DbPath, long UserVersion)> CreateLibraryAsync(string password)
+    {
+        var dbPath = Path.Combine(_root, "clipthrough.db");
+        var storage = NewStorage(dbPath);
+        storage.SetInMemoryPassword(password);
+        var factory = new Clipthrough.Database.SqliteConnectionFactory(storage);
+        var sensitivity = new SensitivityService(factory);
+        await new Clipthrough.Database.DatabaseInitializer(factory, sensitivity).InitializeAsync();
+        var store = new ClipStoreService(factory, sensitivity, new TestSettingsService(), new TestNotificationService());
+        var clip = await store.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "invoice " + Marker + " 2024",
+            ContentBytes = System.Text.Encoding.UTF8.GetBytes("invoice " + Marker + " 2024"),
+            SourceApp = "Tests",
+        });
+        Assert.NotNull(clip);
+
+        long userVersion;
+        await using (var connection = factory.CreateConnection())
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "PRAGMA user_version;";
+            userVersion = Convert.ToInt64(await command.ExecuteScalarAsync(), System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        SqliteConnection.ClearAllPools();
+        return (storage, store, dbPath, userVersion);
+    }
+
+    private static long ReadUserVersion(string dbPath, string password)
+    {
+        var builder = new SqliteConnectionStringBuilder { DataSource = dbPath, Mode = SqliteOpenMode.ReadOnly, Pooling = false };
+        if (!string.IsNullOrEmpty(password)) builder.Password = password;
+        using var connection = new SqliteConnection(builder.ToString());
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA user_version;";
+        return Convert.ToInt64(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static bool FileContains(string path, string marker)
+    {
+        SqliteConnection.ClearAllPools();
+        foreach (var file in new[] { path, path + "-wal" })
+        {
+            if (File.Exists(file)
+                && System.Text.Encoding.ASCII.GetString(File.ReadAllBytes(file)).Contains(marker, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The library starts unencrypted by default, and "Re-encrypt database" is
+    /// the in-app path to encryption the dialog promises. SQLCipher's PRAGMA
+    /// rekey is a no-op on a plaintext file, so this failed verification with
+    /// a message blaming the password.
+    /// </summary>
+    [Fact]
+    public async Task Rekey_PlaintextLibrary_BecomesEncryptedAndKeepsEverything()
+    {
+        var (storage, store, dbPath, userVersion) = await CreateLibraryAsync(string.Empty);
+        Assert.True(FileContains(dbPath, Marker), "Setup: a plaintext library should show its content on disk.");
+
+        await storage.RekeyAsync(string.Empty, "new-pw", rememberNewPassword: false);
+        SqliteConnection.ClearAllPools();
+
+        Assert.True(StorageOptionsService.CanOpenWithPassword(dbPath, "new-pw"), "The encrypted library does not open with the new key.");
+        Assert.False(StorageOptionsService.CanOpenWithPassword(dbPath, string.Empty), "The library still opens without a key.");
+        Assert.False(FileContains(dbPath, Marker), "Clip content is still readable on disk.");
+        Assert.Equal(userVersion, ReadUserVersion(dbPath, "new-pw"));
+
+        // The full-text index came across with the data and still answers.
+        var found = await store.SearchAsync(new ClipSearchFilters { SearchText = Marker });
+        Assert.Equal(1, found.TotalMatchingCount);
+    }
+
+    [Fact]
+    public async Task Rekey_EncryptedLibrary_ToNoPassword_OpensWithoutAKey()
+    {
+        var (storage, store, dbPath, userVersion) = await CreateLibraryAsync("old-pw");
+        Assert.False(FileContains(dbPath, Marker), "Setup: an encrypted library should not show its content on disk.");
+
+        await storage.RekeyAsync("old-pw", string.Empty, rememberNewPassword: false);
+        SqliteConnection.ClearAllPools();
+
+        Assert.True(StorageOptionsService.CanOpenWithPassword(dbPath, string.Empty), "The decrypted library does not open without a key.");
+        Assert.False(StorageOptionsService.RequiresPassword(dbPath));
+        Assert.Equal(userVersion, ReadUserVersion(dbPath, string.Empty));
+
+        var found = await store.SearchAsync(new ClipSearchFilters { SearchText = Marker });
+        Assert.Equal(1, found.TotalMatchingCount);
+    }
 }

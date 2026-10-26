@@ -359,9 +359,8 @@ public sealed class StorageOptionsService : IStorageOptionsService
     /// Sequence:
     ///   1. Verify current password opens the DB.
     ///   2. Enter maintenance scope (stop workers, clear pool).
-    ///   3. Copy the DB to a temp file through SQLite's online backup API, so
-    ///      commits still in the WAL travel with it.
-    ///   4. Apply PRAGMA rekey to the copy.
+    ///   3-4. Write a copy keyed with the new password (<see cref="WriteRekeyedCopy"/>),
+    ///      read through SQLite so commits still in the WAL travel with it.
     ///   5. Verify the copy opens with the new password.
     ///   6. Atomic rename: temp → live DB path (DB file is the source of truth).
     ///   7. Update Current (key for the session + workers restarted on scope dispose).
@@ -409,33 +408,15 @@ public sealed class StorageOptionsService : IStorageOptionsService
             // Step 2: Enter maintenance scope (stop workers, clear pool).
             await using var scope = await EnterMaintenanceScopeAsync();
 
-            // Step 3: Copy the DB to a temp file. This copy is rekeyed and then
-            // renamed over the live database, so it has to be complete: a raw
-            // file copy taken after a busy checkpoint is malformed, and here
-            // that malformed file would become the user's database.
+            // Steps 3 and 4: write a copy of the DB keyed with the new password.
+            // The copy is renamed over the live database, so it has to be
+            // complete - see WriteRekeyedCopy.
             SqliteConnection.ClearAllPools();
-            var tempPath = dbPath + ".rekeying-" + Guid.NewGuid().ToString("N");
-            SqliteDatabaseCopier.CopyDatabase(dbPath, currentKey, tempPath);
+            string? tempPath = dbPath + ".rekeying-" + Guid.NewGuid().ToString("N");
 
             try
             {
-                // Step 4: Rekey the copy with the new password.
-                var tempOptions = current with
-                {
-                    DatabasePath = tempPath,
-                    DatabasePassword = currentKey,
-                };
-
-                await using (var conn = OpenConnection(tempOptions))
-                {
-                    await conn.OpenAsync(cancellationToken);
-                    await using var cmd = conn.CreateCommand();
-                    cmd.CommandText = $"PRAGMA rekey = '{EscapeSqlLiteral(newKey)}';";
-                    await cmd.ExecuteNonQueryAsync(cancellationToken);
-                }
-
-                // Flush pooled connections to the temp file before verifying.
-                SqliteConnection.ClearAllPools();
+                WriteRekeyedCopy(dbPath, currentKey, newKey, tempPath);
 
                 // Step 5: Verify the rekeyed copy opens with the key the session
                 // will use from here on - not merely with what was passed in.
@@ -488,6 +469,98 @@ public sealed class StorageOptionsService : IStorageOptionsService
         }
     }
 
+    /// <summary>
+    /// Writes a copy of <paramref name="sourcePath"/>, which opens with
+    /// <paramref name="currentKey"/>, to <paramref name="destinationPath"/>
+    /// keyed with <paramref name="newKey"/>. An empty key means unencrypted.
+    /// The source is only read. A partial destination is removed on failure.
+    /// </summary>
+    /// <remarks>
+    /// Between two keys this copies through the online backup API and applies
+    /// <c>PRAGMA rekey</c> to the copy. That pragma cannot add encryption to a
+    /// plaintext file or strip it from an encrypted one - on SQLCipher 4.5 it
+    /// is a silent no-op there, so "Re-encrypt database" failed verification
+    /// for every unencrypted library (F-16). When either side is empty the
+    /// copy is written with <c>sqlcipher_export</c> into a database attached
+    /// with the target key instead. Like VACUUM it carries the schema, every
+    /// row, the FTS5 shadow tables, triggers and <c>user_version</c>; the
+    /// journal mode is a property of the file and is set to match the source.
+    /// </remarks>
+    internal static void WriteRekeyedCopy(string sourcePath, string currentKey, string newKey, string destinationPath)
+    {
+        if (currentKey.Length == 0 || newKey.Length == 0)
+        {
+            File.Delete(destinationPath);
+            try
+            {
+                // ReadWriteCreate: ATTACH inherits the open flags, and it has to
+                // create the destination. The source exists (checked by callers).
+                using var source = OpenUnpooled(sourcePath, currentKey, SqliteOpenMode.ReadWriteCreate);
+                string journalMode;
+                using (var mode = source.CreateCommand())
+                {
+                    mode.CommandText = "PRAGMA main.journal_mode;";
+                    journalMode = Convert.ToString(mode.ExecuteScalar(), CultureInfo.InvariantCulture) ?? string.Empty;
+                }
+
+                using var export = source.CreateCommand();
+                export.CommandText =
+                    "ATTACH DATABASE $path AS rekeyed KEY $key; " +
+                    "SELECT sqlcipher_export('rekeyed'); " +
+                    (string.Equals(journalMode, "wal", StringComparison.OrdinalIgnoreCase) ? "PRAGMA rekeyed.journal_mode = WAL; " : string.Empty) +
+                    "DETACH DATABASE rekeyed;";
+                export.Parameters.AddWithValue("$path", destinationPath);
+                export.Parameters.AddWithValue("$key", newKey);
+                export.ExecuteNonQuery();
+            }
+            catch
+            {
+                foreach (var suffix in new[] { string.Empty, "-wal", "-shm", "-journal" })
+                {
+                    try { File.Delete(destinationPath + suffix); } catch { /* best effort */ }
+                }
+
+                throw;
+            }
+
+            return;
+        }
+
+        SqliteDatabaseCopier.CopyDatabase(sourcePath, currentKey, destinationPath);
+        using var copy = OpenUnpooled(destinationPath, currentKey, SqliteOpenMode.ReadWrite);
+        using var rekey = copy.CreateCommand();
+        rekey.CommandText = $"PRAGMA rekey = '{EscapeSqlLiteral(newKey)}';";
+        rekey.ExecuteNonQuery();
+    }
+
+    private static SqliteConnection OpenUnpooled(string path, string key, SqliteOpenMode mode)
+    {
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = mode,
+            // Unpooled so the file is released on Dispose and can be renamed.
+            Pooling = false,
+        };
+        if (key.Length > 0)
+        {
+            builder.Password = key;
+        }
+
+        var connection = new SqliteConnection(builder.ToString());
+        connection.StateChange += ApplyBusyTimeoutOnOpen;
+        try
+        {
+            connection.Open();
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
+        }
+
+        return connection;
+    }
     private SqliteConnection OpenConnection(StorageOptions options)
     {
         var builder = new SqliteConnectionStringBuilder
