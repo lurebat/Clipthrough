@@ -5663,7 +5663,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var ocrWasRunning = _backgroundOcrQueue.IsRunning;
         var embeddingWasRunning = _embeddingWorker?.IsRunning ?? false;
         await _backgroundOcrQueue.StopAsync();
-        if (_embeddingWorker is not null)
+        // Paused, not stopped, when the worker owns its lifetime (F-23): a
+        // settings save during the import must not restart it.
+        IAsyncDisposable? embeddingPause = null;
+        if (_embeddingWorker is Clipthrough.Services.Search.IPausableWorker pausable)
+            embeddingPause = await pausable.PauseAsync();
+        else if (_embeddingWorker is not null)
             await _embeddingWorker.StopAsync();
 
         try
@@ -5694,7 +5699,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 _backgroundOcrQueue.Start();
             }
 
-            if (embeddingWasRunning)
+            if (embeddingPause is not null)
+            {
+                await embeddingPause.DisposeAsync();
+            }
+            else if (embeddingWasRunning)
             {
                 _embeddingWorker?.Start();
             }
@@ -6090,14 +6099,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 {
                     if (enabled)
                     {
+                        // A paused worker reports not running, so this also
+                        // records the wish while a maintenance pause holds it.
                         if (!worker.IsRunning)
                         {
                             worker.Start();
                             worker.Poke();
                         }
                     }
-                    else if (worker.IsRunning)
+                    else
                     {
+                        // Unconditionally: guarding on IsRunning skipped a "turn
+                        // it off" that arrived while a maintenance pause held the
+                        // worker stopped, and the release then restarted it (F-23).
                         await worker.StopAsync().ConfigureAwait(false);
                     }
                 }
