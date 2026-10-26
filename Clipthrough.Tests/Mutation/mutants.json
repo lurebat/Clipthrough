@@ -2710,5 +2710,13 @@
     "find": "        if (!await ClipClipboardWriter.TryCopyAsync(clip, interaction, monitor, maxImageBytes))\n        {\n            return StepPasteOutcome.NotCopied;\n        }",
     "replace": "        monitor.SuppressNext();\n        if (!string.IsNullOrEmpty(clip.Content))\n        {\n            await interaction.CopyTextAsync(clip.Content);\n        }",
     "filter": "FullyQualifiedName~HotkeyClipActionsTests.StepPaste_|FullyQualifiedName~ClipboardPipelineGuardTests"
+  },
+  {
+    "id": "recapture-keeps-pending-delete",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-13. Capture dedupes onto a row whose delete is pending, so without withdrawing it the undo-window commit deletes the copy the user just made, from the list and the database, with no undo left.",
+    "find": "        WithdrawPendingDelete(clip.Id);\n\n        if (!TryGetOptimisticInsertIndex(clip, out var targetIndex))",
+    "replace": "        _ = clip.Id;\n\n        if (!TryGetOptimisticInsertIndex(clip, out var targetIndex))",
+    "filter": "FullyQualifiedName~RecopyDuringUndoWindow"
   }
 ]

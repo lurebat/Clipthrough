@@ -3987,6 +3987,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private void WithdrawPendingDelete(long clipId)
+    {
+        if (_pendingDeletes.Remove(clipId))
+        {
+            _hiddenPendingDeletes.Remove(clipId);
+        }
+    }
+
     private void CancelAllPendingDeletes()
     {
         var seen = new HashSet<CancellationTokenSource>(ReferenceEqualityComparer.Instance);
@@ -4434,6 +4442,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ApplyCapturedClipOptimistically(ClipEntry clip)
     {
+        // A clip captured while its delete is pending is the user copying it
+        // again: they want it. Capture dedupes onto the pending row, so letting
+        // the commit run would delete the fresh copy with no undo left (F-13).
+        // Only this id is withdrawn; the rest of its batch is still deleted.
+        WithdrawPendingDelete(clip.Id);
+
         if (!TryGetOptimisticInsertIndex(clip, out var targetIndex))
         {
             RequestDeferredRefresh();
