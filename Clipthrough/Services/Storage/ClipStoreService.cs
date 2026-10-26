@@ -2599,6 +2599,21 @@ public sealed class ClipStoreService : IClipStoreService
     // A RerunAll resets the counter to give every clip a fresh set of attempts.
     private const int MaxEmbeddingAttempts = 3;
 
+    // INDEXED BY: without stored statistics the planner prefers
+    // idx_clips_retention (is_sensitive = 0, true of nearly every row) plus a
+    // temp B-tree, which visits the whole table - 2.3 s per claim at 60k clips,
+    // 17 s encrypted, even with nothing to claim (F-05). The backlog index
+    // reaches only the rows that still need a vector.
+    internal const string EmbeddingClaimSql = $"""
+        SELECT id, ({EmbeddingTextExpression}) AS etext
+        FROM clips INDEXED BY idx_clips_embedding_backlog
+        WHERE (embedding_status IS NULL OR embedding_status IN ('pending','rerun')
+               OR (embedding_status = 'failed' AND embedding_attempts < $maxAttempts))
+          AND {EmbeddingEligibilityClause}
+        ORDER BY COALESCE(last_copied_at, captured_at) DESC
+        LIMIT $limit;
+        """;
+
     public Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default)
         => RunOffCallerAsync(ct => ClaimPendingEmbeddingsCoreAsync(batchSize, ct), cancellationToken);
 
@@ -2609,22 +2624,15 @@ public sealed class ClipStoreService : IClipStoreService
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        var candidates = new List<ClipEmbeddingCandidate>(batchSize);
 
-        var results = new List<ClipEmbeddingCandidate>(batchSize);
-
+        // Read outside any write transaction. The claim runs on every capture
+        // and every idle tick; under BEGIN IMMEDIATE its SELECT held the write
+        // lock for its whole duration and each capture queued behind it (F-05).
         await using (var selectCommand = connection.CreateCommand())
         {
-            selectCommand.Transaction = transaction;
-            selectCommand.CommandText = $"""
-                SELECT id, ({EmbeddingTextExpression}) AS etext
-                FROM clips
-                WHERE (embedding_status IS NULL OR embedding_status IN ('pending','rerun')
-                       OR (embedding_status = 'failed' AND embedding_attempts < $maxAttempts))
-                  AND {EmbeddingEligibilityClause}
-                ORDER BY COALESCE(last_copied_at, captured_at) DESC
-                LIMIT $limit;
-                """;
+            selectCommand.CommandText = EmbeddingClaimSql;
+
             selectCommand.Parameters.AddWithValue("$limit", batchSize);
             selectCommand.Parameters.AddWithValue("$maxAttempts", MaxEmbeddingAttempts);
 
@@ -2635,28 +2643,49 @@ public sealed class ClipStoreService : IClipStoreService
                 var text = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
                 if (!string.IsNullOrWhiteSpace(text))
                 {
-                    results.Add(new ClipEmbeddingCandidate(id, text));
+                    candidates.Add(new ClipEmbeddingCandidate(id, text));
                 }
             }
         }
 
-        if (results.Count > 0)
+        if (candidates.Count == 0)
         {
-            await using var claim = connection.CreateCommand();
-            claim.Transaction = transaction;
-            var paramNames = new List<string>(results.Count);
-            for (var i = 0; i < results.Count; i++)
+            return candidates;
+        }
+
+        // The write is short and re-checks the backlog state: a row that was
+        // claimed, deleted, marked sensitive or embedded between the read and
+        // here is not flipped, and is not handed to the worker.
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await using var claim = connection.CreateCommand();
+        claim.Transaction = transaction;
+        var paramNames = new List<string>(candidates.Count);
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            var p = "$id" + i;
+            paramNames.Add(p);
+            claim.Parameters.AddWithValue(p, candidates[i].ClipId);
+        }
+        claim.Parameters.AddWithValue("$maxAttempts", MaxEmbeddingAttempts);
+        claim.CommandText = $"""
+            UPDATE clips SET embedding_status = 'processing'
+            WHERE id IN ({string.Join(",", paramNames)})
+              AND is_sensitive = 0
+              AND (embedding_status IS NULL OR embedding_status IN ('pending','rerun')
+                   OR (embedding_status = 'failed' AND embedding_attempts < $maxAttempts))
+            RETURNING id;
+            """;
+        var claimedIds = new HashSet<long>();
+        await using (var reader = await claim.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
             {
-                var p = "$id" + i;
-                paramNames.Add(p);
-                claim.Parameters.AddWithValue(p, results[i].ClipId);
+                claimedIds.Add(reader.GetInt64(0));
             }
-            claim.CommandText = $"UPDATE clips SET embedding_status = 'processing' WHERE id IN ({string.Join(",", paramNames)});";
-            await claim.ExecuteNonQueryAsync(cancellationToken);
         }
 
         await transaction.CommitAsync(cancellationToken);
-        return results;
+        return candidates.Where(c => claimedIds.Contains(c.ClipId)).ToList();
     }
 
     /// <inheritdoc />

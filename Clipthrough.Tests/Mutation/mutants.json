@@ -2678,5 +2678,21 @@
     "find": "        var tokens = input.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);",
     "replace": "        var tokens = input.Split('\\n', StringSplitOptions.RemoveEmptyEntries);",
     "filter": "FullyQualifiedName~WhitespaceToJsonArray"
+  },
+  {
+    "id": "embedding-claim-plan-not-pinned",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-05. Without INDEXED BY the planner takes idx_clips_retention plus a temp B-tree and visits every row: 2.3 s per claim at 60k, 17 s encrypted.",
+    "find": "        FROM clips INDEXED BY idx_clips_embedding_backlog\n",
+    "replace": "        FROM clips\n",
+    "filter": "FullyQualifiedName~EmbeddingClaimIndexTests.EmbeddingClaim_UsesTheBacklogIndex"
+  },
+  {
+    "id": "embedding-claim-reads-under-the-write-lock",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-05. A claim that reads inside BEGIN IMMEDIATE holds the write lock for the whole scan, and every capture waits behind it.",
+    "find": "        var candidates = new List<ClipEmbeddingCandidate>(batchSize);\n",
+    "replace": "        await using var early = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);\n        var candidates = new List<ClipEmbeddingCandidate>(batchSize);\n",
+    "filter": "FullyQualifiedName~EmbeddingClaimIndexTests.AClaimWithNothingPending_DoesNotWaitForTheWriteLock"
   }
 ]
