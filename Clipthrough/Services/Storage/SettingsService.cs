@@ -431,6 +431,16 @@ public sealed class SettingsService : ISettingsService
     /// </remarks>
     private async Task TrySaveLegacyCopyToDatabaseAsync(AppSettings settings, CancellationToken cancellationToken)
     {
+        // On a fresh install settings are saved before the library is created.
+        // There is nothing to mirror into yet, and opening the connection would
+        // either fail (SQLite Error 14, logged to the user on every first run) or
+        // create an empty database file. The next save writes the mirror.
+        // (audit F-51)
+        if (!_connectionFactory.DatabaseExists)
+        {
+            return;
+        }
+
         try
         {
             await using var connection = _connectionFactory.CreateConnection();

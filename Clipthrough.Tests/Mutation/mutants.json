@@ -2726,5 +2726,13 @@
     "find": "        var width = Math.Min(clientSize.Width, (workingArea.Width / scaling) - extraWidth);",
     "replace": "        var width = Math.Max(clientSize.Width, (workingArea.Width / scaling) - extraWidth);",
     "filter": "FullyQualifiedName~MainWindowWorkingAreaFitTests"
+  },
+  {
+    "id": "settings-mirror-ignores-a-missing-database",
+    "why": "Mirrors settings into a database that does not exist yet. On every first run that logs 'Legacy settings mirror save failed: SQLite Error 14' to the user, or creates an empty database file when the folder already exists (audit F-51). The extra clause keeps DatabaseExists referenced while making the guard never return.",
+    "file": "Clipthrough/Services/Storage/SettingsService.cs",
+    "find": "        if (!_connectionFactory.DatabaseExists)",
+    "replace": "        if (!_connectionFactory.DatabaseExists && settings is null)",
+    "filter": "FullyQualifiedName~SettingsLegacyMirrorFirstRunTests"
   }
 ]
