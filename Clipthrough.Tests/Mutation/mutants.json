@@ -2678,5 +2678,21 @@
     "find": "        var tokens = input.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);",
     "replace": "        var tokens = input.Split('\\n', StringSplitOptions.RemoveEmptyEntries);",
     "filter": "FullyQualifiedName~WhitespaceToJsonArray"
+  },
+  {
+    "id": "welcome-close-guards-on-raise-result",
+    "why": "RaiseAndSetIfChanged returns the new value, not a changed flag, so guarding on it returns early whenever the welcome screen closes. IsMainWorkspaceVisible is never raised and the window stays blank after Create library (audit F-46).",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "find": "            if (_isWelcomeOpen == value)\n            {\n                return;\n            }\n\n            this.RaiseAndSetIfChanged(ref _isWelcomeOpen, value);",
+    "replace": "            if (!this.RaiseAndSetIfChanged(ref _isWelcomeOpen, value))\n            {\n                return;\n            }",
+    "filter": "FullyQualifiedName~MainWorkspaceVisibilityHeadlessTests.CreatingTheLibraryFromTheWelcomeScreen_ShowsTheWorkspace"
+  },
+  {
+    "id": "password-prompt-close-guards-on-raise-result",
+    "why": "Same misuse on the password prompt: closing it after a correct password returns before IsMainWorkspaceVisible is raised, so every manual unlock of an encrypted library leaves the window blank (audit F-46).",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "find": "            if (_isPasswordPromptOpen == value)\n            {\n                return;\n            }\n\n            this.RaiseAndSetIfChanged(ref _isPasswordPromptOpen, value);",
+    "replace": "            if (!this.RaiseAndSetIfChanged(ref _isPasswordPromptOpen, value))\n            {\n                return;\n            }",
+    "filter": "FullyQualifiedName~MainWorkspaceVisibilityHeadlessTests.UnlockingWithTheCorrectPassword_ShowsTheWorkspace"
   }
 ]
