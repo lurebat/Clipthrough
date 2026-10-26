@@ -2750,5 +2750,21 @@
     "find": "        if (CollapseWhitespace(prefix).Length <= 140)\n",
     "replace": "        if (CollapseWhitespace(prefix).Length <= 0)\n",
     "filter": "FullyQualifiedName~ClipDisplayFormatterPrefixTests.WhenAPrefixCannotDecide"
+  },
+  {
+    "id": "fts-update-trigger-fires-on-unchanged-text",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "F-26. Without the WHEN, re-copying a clip re-tokenises identical text into FTS under the write lock: 714-763 ms for a 1.8 MB clip.",
+    "find": "        WHEN old.content IS NOT new.content\n",
+    "replace": "        WHEN old.content IS NOT new.content OR 1\n",
+    "filter": "FullyQualifiedName~FtsUpdateTriggerTests.AssigningTheSameIndexedText_DoesNoFtsWork"
+  },
+  {
+    "id": "fts-update-trigger-misses-a-column",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "F-26. A WHEN that leaves out an indexed column stops that column's changes reaching the index.",
+    "find": "          OR old.source_url IS NOT new.source_url\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~FtsUpdateTriggerTests.ChangingAnIndexedColumn_StillReindexesIt"
   }
 ]

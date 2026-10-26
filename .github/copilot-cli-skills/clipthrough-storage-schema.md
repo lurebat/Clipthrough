@@ -135,6 +135,10 @@ Triggers `clips_ai`, `clips_ad`, `clips_au` keep FTS in sync on `INSERT` /
 columns and is dropped and recreated unconditionally, because
 `CREATE TRIGGER IF NOT EXISTS` would silently preserve an older unscoped
 trigger that re-tokenises the whole clip on every metadata-only write.
+Its `WHEN old.x IS NOT new.x OR ...` clause also skips an update that assigns
+the same values back (a re-copy, the deferred HTML/RTF update), which otherwise
+re-tokenised an identical clip under the write lock. A new searchable column
+belongs in that clause too.
 
 If you add a column you want searchable, you must:
 

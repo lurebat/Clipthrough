@@ -80,7 +80,18 @@ public sealed class DatabaseInitializer
         -- re-tokenises the entire clip (content can be megabytes) on every metadata-only
         -- write — paste counters, OCR status, embedding status, pinning — which is the
         -- overwhelming majority of updates.
-        CREATE TRIGGER clips_au AFTER UPDATE OF content, source_app, source_window_title, source_url, ocr_text ON clips BEGIN
+        --
+        -- The WHEN skips an assignment that changes nothing (F-26). Re-copying a
+        -- clip and the deferred HTML/RTF update both write the same text back,
+        -- and re-tokenising a 1.8 MB clip for an identical index cost 714-763 ms
+        -- under the write lock. IS NOT, so a change to or from NULL still counts.
+        CREATE TRIGGER clips_au AFTER UPDATE OF content, source_app, source_window_title, source_url, ocr_text ON clips
+        WHEN old.content IS NOT new.content
+          OR old.source_app IS NOT new.source_app
+          OR old.source_window_title IS NOT new.source_window_title
+          OR old.source_url IS NOT new.source_url
+          OR old.ocr_text IS NOT new.ocr_text
+        BEGIN
             INSERT INTO clips_fts(clips_fts, rowid, content, source_app, source_window_title, source_url, ocr_text)
             VALUES ('delete', old.id, old.content, old.source_app, old.source_window_title, old.source_url, old.ocr_text);
             INSERT INTO clips_fts(rowid, content, source_app, source_window_title, source_url, ocr_text)
