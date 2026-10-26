@@ -2726,5 +2726,29 @@
     "find": "        _isDisposed = true;\n        CommitPendingDeletesOnExit();",
     "replace": "        _isDisposed = true;\n        CommitPendingDeletesOnExit();",
     "filter": "FullyQualifiedName~DeleteThenQuitWithinUndoWindow"
+  },
+  {
+    "id": "embedding-save-ignores-sensitivity",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-17. The save must refuse a clip flagged sensitive since its claim, whatever path raised the flag; otherwise a vector derived from secret content is stored at rest.",
+    "find": "WHERE EXISTS (SELECT 1 FROM clips WHERE id = $id AND is_sensitive = 0 AND embedding_status = 'processing')",
+    "replace": "WHERE EXISTS (SELECT 1 FROM clips WHERE id = $id AND embedding_status = 'processing')",
+    "filter": "FullyQualifiedName~EmbeddingSensitivityTests"
+  },
+  {
+    "id": "embedding-save-ignores-claim",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-17. A vector for a clip no longer claimed (excluded, released, rerun) belongs to a batch nobody is waiting for; saving it stores stale or forbidden vectors.",
+    "find": "WHERE EXISTS (SELECT 1 FROM clips WHERE id = $id AND is_sensitive = 0 AND embedding_status = 'processing')",
+    "replace": "WHERE EXISTS (SELECT 1 FROM clips WHERE id = $id AND is_sensitive = 0)",
+    "filter": "FullyQualifiedName~EmbeddingSensitivityTests"
+  },
+  {
+    "id": "ocr-sensitive-keeps-vector",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-17. An OCR pass that marks an embedded image sensitive must purge its vector and exclude it, as marking it sensitive by hand does.",
+    "find": "                        UPDATE clips SET is_sensitive = 1, embedding_status = 'excluded' WHERE id = $id;\n                        DELETE FROM clip_embeddings WHERE clip_id = $id;",
+    "replace": "                        UPDATE clips SET is_sensitive = 1 WHERE id = $id;",
+    "filter": "FullyQualifiedName~EmbeddingSensitivityTests.OcrResult"
   }
 ]

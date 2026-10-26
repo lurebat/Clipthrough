@@ -740,7 +740,12 @@ public sealed class ClipStoreService : IClipStoreService
                 await using (var markCommand = connection.CreateCommand())
                 {
                     markCommand.Transaction = transaction;
-                    markCommand.CommandText = "UPDATE clips SET is_sensitive = 1 WHERE id = $id;";
+                    // Sensitive now, so excluded from embedding like a clip marked
+                    // sensitive by hand: any vector derived from its OCR text goes.
+                    markCommand.CommandText = """
+                        UPDATE clips SET is_sensitive = 1, embedding_status = 'excluded' WHERE id = $id;
+                        DELETE FROM clip_embeddings WHERE clip_id = $id;
+                        """;
                     markCommand.Parameters.AddWithValue("$id", clipId);
                     await markCommand.ExecuteNonQueryAsync(cancellationToken);
                 }
@@ -2725,10 +2730,15 @@ public sealed class ClipStoreService : IClipStoreService
             await using (var upsert = connection.CreateCommand())
             {
                 upsert.Transaction = transaction;
+                // Only for a clip that is still claimed and still not sensitive.
+                // Eligibility is checked at claim time; a clip marked sensitive
+                // while inference ran (by hand, by a rule rebuild, by OCR) must
+                // not get a vector derived from its content afterwards, nor read
+                // 'succeeded' instead of 'excluded' (F-17).
                 upsert.CommandText = """
                     INSERT INTO clip_embeddings (clip_id, model_version, dimensions, vector, created_at)
                     SELECT $id, $model, $dim, $vec, $at
-                    WHERE EXISTS (SELECT 1 FROM clips WHERE id = $id)
+                    WHERE EXISTS (SELECT 1 FROM clips WHERE id = $id AND is_sensitive = 0 AND embedding_status = 'processing')
                     ON CONFLICT(clip_id) DO UPDATE SET
                         model_version = excluded.model_version,
                         dimensions    = excluded.dimensions,
@@ -2751,7 +2761,7 @@ public sealed class ClipStoreService : IClipStoreService
             await using (var status = connection.CreateCommand())
             {
                 status.Transaction = transaction;
-                status.CommandText = "UPDATE clips SET embedding_status = 'succeeded' WHERE id = $id;";
+                status.CommandText = "UPDATE clips SET embedding_status = 'succeeded' WHERE id = $id AND embedding_status = 'processing';";
                 status.Parameters.AddWithValue("$id", record.ClipId);
                 await status.ExecuteNonQueryAsync(cancellationToken);
             }

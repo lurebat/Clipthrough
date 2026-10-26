@@ -299,7 +299,7 @@ public sealed class SemanticSearchServiceTests
             new(ids[1], emb.VectorFor(phrases[1])),
         };
         // Simulate: save to DB and call RefreshCacheAsync to populate the cache.
-        await scope.ClipStoreService.SaveEmbeddingBatchAsync(firstTwoRecords, "test");
+        await SaveAsClaimedAsync(scope, firstTwoRecords, "test");
         await semantic.RefreshCacheAsync();
         Assert.Equal(2, semantic.CachedCount);
 
@@ -346,7 +346,7 @@ public sealed class SemanticSearchServiceTests
 
         var emb = new DeterministicEmbeddingService(dims: 8);
         var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
-        await scope.ClipStoreService.SaveEmbeddingBatchAsync(
+        await SaveAsClaimedAsync(scope, 
             [.. ids.Select((id, i) => new ClipEmbeddingRecord(id, emb.VectorFor(phrases[i])))],
             "test");
         await semantic.RefreshCacheAsync();
@@ -403,7 +403,7 @@ public sealed class SemanticSearchServiceTests
 
         var emb = new DeterministicEmbeddingService(dims: 8);
         var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
-        await scope.ClipStoreService.SaveEmbeddingBatchAsync(
+        await SaveAsClaimedAsync(scope, 
             [.. ids.Select((id, i) => new ClipEmbeddingRecord(id, emb.VectorFor(phrases[i])))],
             "test");
         await semantic.RefreshCacheAsync();
@@ -459,7 +459,7 @@ public sealed class SemanticSearchServiceTests
 
         var emb = new DeterministicEmbeddingService(dims: 8);
         var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
-        await scope.ClipStoreService.SaveEmbeddingBatchAsync(
+        await SaveAsClaimedAsync(scope, 
             [.. ids.Select((id, i) => new ClipEmbeddingRecord(id, emb.VectorFor(phrases[i])))],
             "test");
         await semantic.RefreshCacheAsync();
@@ -489,7 +489,7 @@ public sealed class SemanticSearchServiceTests
 
         var emb = new DeterministicEmbeddingService(dims: 8);
         var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
-        await scope.ClipStoreService.SaveEmbeddingBatchAsync([new ClipEmbeddingRecord(clip!.Id, emb.VectorFor("alpha beta gamma"))], "test");
+        await SaveAsClaimedAsync(scope, [new ClipEmbeddingRecord(clip!.Id, emb.VectorFor("alpha beta gamma"))], "test");
         await semantic.RefreshCacheAsync();
 
         await semantic.RemoveEmbeddingsAsync([clip.Id + 9999]);
@@ -519,7 +519,7 @@ public sealed class SemanticSearchServiceTests
 
         var emb = new DeterministicEmbeddingService(dims: 8);
         var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
-        await scope.ClipStoreService.SaveEmbeddingBatchAsync([new ClipEmbeddingRecord(clip!.Id, emb.VectorFor("alpha beta gamma"))], "test");
+        await SaveAsClaimedAsync(scope, [new ClipEmbeddingRecord(clip!.Id, emb.VectorFor("alpha beta gamma"))], "test");
         await semantic.RefreshCacheAsync();
 
         await semantic.RemoveEmbeddingsAsync([clip.Id]);
@@ -547,7 +547,7 @@ public sealed class SemanticSearchServiceTests
 
         var emb = new DeterministicEmbeddingService(dims: 4);
         var record = new ClipEmbeddingRecord(clip!.Id, emb.VectorFor("dedupe test"));
-        await scope.ClipStoreService.SaveEmbeddingBatchAsync(new[] { record }, "test");
+        await SaveAsClaimedAsync(scope, new[] { record }, "test");
 
         var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
         await semantic.RefreshCacheAsync();
@@ -577,7 +577,7 @@ public sealed class SemanticSearchServiceTests
 
         var emb = new DeterministicEmbeddingService(dims: 4);
         var record = new ClipEmbeddingRecord(clip!.Id, emb.VectorFor("fresh start"));
-        await scope.ClipStoreService.SaveEmbeddingBatchAsync(new[] { record }, "test");
+        await SaveAsClaimedAsync(scope, new[] { record }, "test");
 
         // SemanticSearchService with empty cache: AppendEmbeddingsAsync should fall back to full refresh.
         var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
@@ -617,7 +617,7 @@ public sealed class SemanticSearchServiceTests
         var emb = new DeterministicEmbeddingService(dims: 8);
         var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
 
-        await scope.ClipStoreService.SaveEmbeddingBatchAsync(new[]
+        await SaveAsClaimedAsync(scope, new[]
         {
             new ClipEmbeddingRecord(apple!.Id, emb.VectorFor("apple")),
             new ClipEmbeddingRecord(banana!.Id, emb.VectorFor("banana")),
@@ -676,7 +676,7 @@ public sealed class SemanticSearchServiceTests
             ContentBytes = Encoding.UTF8.GetBytes("seed"),
             IncrementExistingCopyCount = true,
         });
-        await scope.ClipStoreService.SaveEmbeddingBatchAsync(
+        await SaveAsClaimedAsync(scope, 
             new[] { new ClipEmbeddingRecord(seed!.Id, emb.VectorFor("seed")) }, "test");
         await semantic.RefreshCacheAsync();
 
@@ -759,7 +759,7 @@ public sealed class SemanticSearchServiceTests
             ContentBytes = Encoding.UTF8.GetBytes("seed"),
             IncrementExistingCopyCount = true,
         });
-        await scope.ClipStoreService.SaveEmbeddingBatchAsync(
+        await SaveAsClaimedAsync(scope, 
             new[] { new ClipEmbeddingRecord(seed!.Id, emb.VectorFor("seed")) }, "test");
         await semantic.RefreshCacheAsync();
 
@@ -830,7 +830,7 @@ public sealed class SemanticSearchServiceTests
             ContentBytes = Encoding.UTF8.GetBytes("seed"),
             IncrementExistingCopyCount = true,
         });
-        await scope.ClipStoreService.SaveEmbeddingBatchAsync(
+        await SaveAsClaimedAsync(scope, 
             new[] { new ClipEmbeddingRecord(seed!.Id, emb.VectorFor("seed")) }, "test");
         await semantic.RefreshCacheAsync();
 
@@ -1110,6 +1110,27 @@ public sealed class SemanticSearchServiceTests
         Assert.True(ranked[0].Score >= ranked[1].Score && ranked[1].Score >= ranked[2].Score);
     }
 
+    /// <summary>
+    /// Saves vectors the way the embedding worker does: for clips it has
+    /// claimed. The store refuses a vector for an unclaimed (or since
+    /// sensitive) clip, so these tests mark the clips as claimed first.
+    /// </summary>
+    private static async Task SaveAsClaimedAsync(TemporaryDatabaseScope scope, IReadOnlyList<ClipEmbeddingRecord> records, string modelVersion)
+    {
+        await using (var connection = scope.ConnectionFactory.CreateConnection())
+        {
+            await connection.OpenAsync();
+            foreach (var record in records)
+            {
+                await using var claim = connection.CreateCommand();
+                claim.CommandText = "UPDATE clips SET embedding_status = 'processing' WHERE id = $id;";
+                claim.Parameters.AddWithValue("$id", record.ClipId);
+                await claim.ExecuteNonQueryAsync();
+            }
+        }
+
+        await scope.ClipStoreService.SaveEmbeddingBatchAsync(records, modelVersion);
+    }
     private static async Task<long> FindClipIdByText(TemporaryDatabaseScope scope, string text)
     {
         var result = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters { Limit = 50 });
@@ -1166,7 +1187,7 @@ public sealed class SemanticSearchServiceTests
         }
 
         var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
-        await scope.ClipStoreService.SaveEmbeddingBatchAsync(
+        await SaveAsClaimedAsync(scope, 
             [.. ids.Select((id, i) => new ClipEmbeddingRecord(id, AtSimilarity(queryVector, similarities[i])))],
             "test");
         await semantic.RefreshCacheAsync();
