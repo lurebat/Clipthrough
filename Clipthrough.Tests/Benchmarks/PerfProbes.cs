@@ -425,4 +425,55 @@ public sealed class PerfProbes
         var victim = 50_000L;
         await Measure("RemoveEmbeddingsAsync(1 id)  [per evicted/deleted clip]", async () => await semantic.RemoveEmbeddingsAsync([victim--]));
     }
+
+    /// <summary>U-C4b: what secure_delete costs on deletes and on a retention purge.</summary>
+    [BenchmarkFact]
+    public async Task P15_DeleteAndPurge()
+    {
+        var lib = await PerfLibrary.OpenAsync(Clips, Images, Password);
+        Log(Header(lib) + " :: P15 delete and retention purge");
+        lib.SettingsService.SetCurrent(new AppSettings { EnableMaxEntryCount = false, EnableMaxLibrarySize = false });
+
+        async Task<List<long>> Ids(string sql)
+        {
+            await using var c = lib.ConnectionFactory.CreateConnection();
+            await c.OpenAsync();
+            await using var cmd = c.CreateCommand();
+            cmd.CommandText = sql;
+            var ids = new List<long>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) ids.Add(r.GetInt64(0));
+            return ids;
+        }
+
+        async Task TimeDeletes(string label, List<long> ids)
+        {
+            if (ids.Count == 0)
+            {
+                Log($"{label,-70} skipped: the library is too small for the fixed offsets");
+                return;
+            }
+
+            var times = new List<double>();
+            foreach (var id in ids)
+            {
+                var sw = Stopwatch.StartNew();
+                await lib.Store.DeleteAsync(id);
+                times.Add(sw.Elapsed.TotalMilliseconds);
+            }
+            times.Sort();
+            Log($"{label,-70} median={times[times.Count / 2],9:F1} ms  min={times[0],9:F1}  max={times[^1],9:F1}  n={times.Count}");
+        }
+
+        await TimeDeletes("DeleteAsync text clip", await Ids("SELECT id FROM clips WHERE content_type = 'text' ORDER BY id LIMIT 30 OFFSET 20000;"));
+        await TimeDeletes("DeleteAsync image clip (0.4-1.8 MB)", await Ids("SELECT id FROM clips WHERE content_type = 'image' ORDER BY id LIMIT 10 OFFSET 300;"));
+
+        var before = await ScalarAsync(lib, "SELECT COUNT(*) FROM clips;");
+        lib.SettingsService.SetCurrent(new AppSettings { EnableMaxEntryCount = false, EnableMaxLibrarySize = false, EnableNormalClipLifetime = true, NormalClipLifetimeDays = 230 });
+        var purge = Stopwatch.StartNew();
+        await lib.Store.ApplyMaintenanceAsync();
+        purge.Stop();
+        var purged = before - await ScalarAsync(lib, "SELECT COUNT(*) FROM clips;");
+        Log($"{"ApplyMaintenanceAsync retention purge (single run)",-70} median={purge.Elapsed.TotalMilliseconds,9:F1} ms  purged={purged}");
+    }
 }
