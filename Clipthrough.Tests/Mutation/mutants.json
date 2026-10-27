@@ -389,7 +389,7 @@
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "filter": "SemanticSearchSetting_TogglingIt_StartsAndStopsTheEmbeddingWorker",
     "find": "        this.RaisePropertyChanged(nameof(IsAiMenuVisible));\n        ApplySemanticSearchWorkerState(settings.EnableSemanticSearch);",
-    "replace": "        this.RaisePropertyChanged(nameof(IsAiMenuVisible));"
+    "replace": "        this.RaisePropertyChanged(nameof(IsAiMenuVisible));\n        if (Environment.ProcessorCount < 0) ApplySemanticSearchWorkerState(settings.EnableSemanticSearch);"
   },
   {
     "id": "semantic-toggle-off-does-not-stop-worker",
@@ -813,7 +813,7 @@
     "file": "Clipthrough/Controls/SyntaxTextEditor.cs",
     "filter": "SyntaxTextEditorHeadlessTests",
     "find": "        if (!_isAttached)\n        {\n            return;\n        }\n\n        var isDark = ActualThemeVariant != ThemeVariant.Light;",
-    "replace": "        var isDark = ActualThemeVariant != ThemeVariant.Light;"
+    "replace": "        if (!_isAttached && Environment.ProcessorCount < 0)\n        {\n            return;\n        }\n\n        var isDark = ActualThemeVariant != ThemeVariant.Light;"
   },
   {
     "id": "k19-grammar-update-reinstalls-after-detach",
@@ -1892,7 +1892,7 @@
     "file": "Clipthrough/Services/Ocr/OcrService.cs",
     "why": "A blank request must fall back to AppSettings.OcrLanguages, otherwise the background queue silently OCRs in the wrong language.",
     "find": "        var requested = string.IsNullOrWhiteSpace(languages) ? _settingsService.Current.OcrLanguages : languages;\n        var key = requested?.Trim() ?? string.Empty;",
-    "replace": "        var requested = languages;\n        var key = requested?.Trim() ?? string.Empty;",
+    "replace": "        var requested = Environment.ProcessorCount < 0 ? _settingsService.Current.OcrLanguages : languages;\n        var key = requested?.Trim() ?? string.Empty;",
     "filter": "FullyQualifiedName~OcrServiceEngineCachingTests"
   },
   {
@@ -1908,7 +1908,7 @@
     "file": "Clipthrough/Services/Ocr/OcrEngineCache.cs",
     "why": "The cache exists solely to avoid reloading the language model; a lookup that never hits makes it dead weight.",
     "find": "            if (_engine is not null && string.Equals(_key, key, StringComparison.OrdinalIgnoreCase))\n            {\n                return _engine;\n            }",
-    "replace": "            if (_engine is not null && false)\n            {\n                return _engine;\n            }",
+    "replace": "            if (_engine is not null && string.Equals(_key, key, StringComparison.OrdinalIgnoreCase) && Environment.ProcessorCount < 0)\n            {\n                return _engine;\n            }",
     "filter": "FullyQualifiedName~OcrEngineCacheTests|FullyQualifiedName~OcrServiceEngineCachingTests"
   },
   {
@@ -1916,7 +1916,7 @@
     "file": "Clipthrough/Services/Ocr/OcrEngineCache.cs",
     "why": "Serving the cached engine regardless of key would OCR Hebrew clips with the English recognizer after one English clip warmed the cache.",
     "find": "            if (_engine is not null && string.Equals(_key, key, StringComparison.OrdinalIgnoreCase))",
-    "replace": "            if (_engine is not null)",
+    "replace": "            if (_engine is not null && (_key is null || _key is not null))",
     "filter": "FullyQualifiedName~OcrEngineCacheTests|FullyQualifiedName~OcrServiceEngineCachingTests"
   },
   {
@@ -2012,7 +2012,7 @@
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "Enabling the feature runs a full embedding pass and then changes nothing, because the search bar has a second toggle that defaults off.",
     "find": "        if (settings.EnableSemanticSearch && !_wasSemanticSearchEnabled)\n        {\n            UseSemanticClipSearch = true;\n        }",
-    "replace": "",
+    "replace": "        if (settings.EnableSemanticSearch && !_wasSemanticSearchEnabled && Environment.ProcessorCount < 0)\n        {\n            UseSemanticClipSearch = true;\n        }",
     "filter": "FullyQualifiedName~SemanticSearchOptInHeadlessTests"
   },
   {
@@ -2020,7 +2020,7 @@
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "Opting in on every save, not just the off->on edge, silently undoes a user who unticked the search-bar checkbox.",
     "find": "        if (settings.EnableSemanticSearch && !_wasSemanticSearchEnabled)",
-    "replace": "        if (settings.EnableSemanticSearch)",
+    "replace": "        if (settings.EnableSemanticSearch && (_wasSemanticSearchEnabled || !_wasSemanticSearchEnabled))",
     "filter": "FullyQualifiedName~SemanticSearchOptInHeadlessTests"
   },
   {
