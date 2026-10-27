@@ -44,7 +44,7 @@ public sealed class StorageLifecycleTests : IDisposable
     {
         var builder = new SqliteConnectionStringBuilder { DataSource = dbPath, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false };
         if (!string.IsNullOrEmpty(password)) builder.Password = password;
-        using var connection = new SqliteConnection(builder.ToString());
+        using var connection = TestConnections.Create(builder.ToString());
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = sql;
@@ -55,7 +55,7 @@ public sealed class StorageLifecycleTests : IDisposable
     {
         var builder = new SqliteConnectionStringBuilder { DataSource = dbPath, Mode = SqliteOpenMode.ReadOnly, Pooling = false };
         if (!string.IsNullOrEmpty(password)) builder.Password = password;
-        using var connection = new SqliteConnection(builder.ToString());
+        using var connection = TestConnections.Create(builder.ToString());
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT group_concat(v, ',') FROM (SELECT v FROM clips ORDER BY rowid);";
@@ -81,7 +81,7 @@ public sealed class StorageLifecycleTests : IDisposable
         var savedWal = Path.Combine(_root, "saved-" + Guid.NewGuid().ToString("N") + ".wal");
         var savedMain = savedWal + ".main";
         var builder = new SqliteConnectionStringBuilder { DataSource = targetPath, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false };
-        using (var connection = new SqliteConnection(builder.ToString()))
+        using (var connection = TestConnections.Create(builder.ToString()))
         {
             connection.Open();
             using (var command = connection.CreateCommand())
@@ -283,7 +283,7 @@ public sealed class StorageLifecycleTests : IDisposable
     {
         var builder = new SqliteConnectionStringBuilder { DataSource = dbPath, Mode = SqliteOpenMode.ReadOnly, Pooling = false };
         if (!string.IsNullOrEmpty(password)) builder.Password = password;
-        using var connection = new SqliteConnection(builder.ToString());
+        using var connection = TestConnections.Create(builder.ToString());
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version;";

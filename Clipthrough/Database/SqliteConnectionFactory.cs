@@ -1,3 +1,6 @@
+using System;
+using System.IO;
+using System.Text;
 using Clipthrough.Services;
 using Microsoft.Data.Sqlite;
 
@@ -50,7 +53,7 @@ public sealed class SqliteConnectionFactory
     {
         var builder = new SqliteConnectionStringBuilder
         {
-            DataSource = path,
+            DataSource = DataSourceFor(path),
             Mode = mode,
             // Private cache (the default) is required: shared cache surfaces
             // in-process write contention as SQLITE_LOCKED, which busy_timeout
@@ -76,6 +79,61 @@ public sealed class SqliteConnectionFactory
         var connection = new SqliteConnection(builder.ToString());
         connection.StateChange += ApplyBusyTimeoutOnOpen;
         return connection;
+    }
+
+    /// <summary>
+    /// The SQLite3 Multiple Ciphers configuration that keeps the on-disk format
+    /// SQLCipher 4 (PBKDF2-HMAC-SHA512 at 256000 iterations, HMAC-SHA512, 4096-byte
+    /// pages) - what SQLitePCLRaw.bundle_e_sqlcipher wrote for every installed
+    /// library, and what that build can still read back, so a rollback works.
+    /// </summary>
+    internal const string CipherRecipe = "cipher=sqlcipher&legacy=4";
+
+    /// <summary>
+    /// The data source every connection opens: a SQLite URI carrying
+    /// <see cref="CipherRecipe"/>. Without it the library falls back to its own
+    /// default cipher (sqleet/ChaCha20): an existing library fails to open with
+    /// error 26, which reads as a wrong password, and a new one is written in a
+    /// format no SQLCipher build can read. Applied with or without a key, so a
+    /// plaintext file that is later encrypted with PRAGMA rekey gets the same
+    /// scheme. '%', '?', '#' and space are percent-encoded; other characters,
+    /// including non-ASCII, pass through as UTF-8.
+    /// </summary>
+    internal static string DataSourceFor(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        if (path.Length == 0 || string.Equals(path, ":memory:", StringComparison.Ordinal))
+        {
+            return path;
+        }
+
+        if (path.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+        {
+            // A caller-built URI would decide its own cipher parameters.
+            throw new ArgumentException("Pass a file path, not a SQLite URI; the factory adds the cipher recipe.", nameof(path));
+        }
+
+        var full = Path.GetFullPath(path).Replace('\\', '/');
+        var uri = new StringBuilder("file://", full.Length + 40);
+        if (!full.StartsWith('/'))
+        {
+            // C:/x becomes file:///C:/x; a UNC path (//server/share) keeps its slashes.
+            uri.Append('/');
+        }
+
+        foreach (var ch in full)
+        {
+            _ = ch switch
+            {
+                '%' => uri.Append("%25"),
+                '?' => uri.Append("%3F"),
+                '#' => uri.Append("%23"),
+                ' ' => uri.Append("%20"),
+                _ => uri.Append(ch),
+            };
+        }
+
+        return uri.Append('?').Append(CipherRecipe).ToString();
     }
 
     private static void ApplyBusyTimeoutOnOpen(object? sender, System.Data.StateChangeEventArgs e)

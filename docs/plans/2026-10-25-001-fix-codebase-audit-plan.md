@@ -59,7 +59,7 @@ Add these to the repo's settled decisions (AGENTS.md or a docs/solutions note) w
 | OD | Decision | Effect on this plan |
 |---|---|---|
 | OD-1 | (a) Separate payload table plus deduplicated `app_icons`, migrated once, resumably | Phase E is in scope as U-E1; it depends on Phase D |
-| OD-2 | (b) Start evaluating a replacement encrypted-SQLite package now, as its own unit with on-disk compatibility verification; ship U-C5 meanwhile | New unit U-C8 (evaluation only). Adopting a package is a later unit that needs its own approval (new dependency) |
+| OD-2 | (b) Start evaluating a replacement encrypted-SQLite package now, as its own unit with on-disk compatibility verification; ship U-C5 meanwhile. **Then, on the evaluation (owner, 2026-10-27): (a) adopt `SQLite3MC.PCLRaw.bundle` 2.6.1 in SQLCipher v4 legacy mode**, landing before or together with Phase E's migration | New unit U-C8 (evaluation only); adoption is U-C9, with its own approval recorded here and its risks under U-C9 |
 | OD-3 | (a) Editor and Compare write to a per-session temp folder that is deleted afterwards, with no `metadata.json`. Explicit Export stays in Documents but asks for confirmation on sensitive clips | U-C3 as written |
 | OD-4 | (a) Run expiry before the startup backup; purge sensitive rows from backup copies **only while the sensitive-lifetime setting is on** (refined by the owner during Phase C: with it off, backups keep sensitive clips); add `secure_delete` after measuring its cost on the Phase D fixture | U-C4 split into U-C4a (expiry order and purge) and U-C4b (`secure_delete`, depends on U-D0) |
 | OD-5 | (a) Pin the feed to the repo now; decide on signing separately | U-C7 is the pin only. Signing is out of scope (S37) |
@@ -80,7 +80,7 @@ Add these to the repo's settled decisions (AGENTS.md or a docs/solutions note) w
 | B | F-04, F-11, F-12, F-13, F-14, F-17, **F-47, F-48, F-50, F-52** | Capture, transform, delete, search and preview correctness | U-B8 coordinates with U-B1 (same transform path) | yes |
 | C | F-03, F-18, F-19, F-20, F-21 (hardening + evaluation), F-38 (feed pin) | Keep the product's promises on every path | U-C4b needs U-D0; U-C8 informs U-A3 and Phase E | yes, except U-C4b |
 | D | F-05, F-07, F-08, F-09, F-10, F-24, F-25, F-26, F-27 | Performance at realistic size: indexes, plans, bounds | U-D0 first within the phase | yes; coordinate `DatabaseInitializer` edits with A and E |
-| E | F-06, F-39 | Payload storage layout (OD-1a) | D; review the U-C8 outcome before the migration lands | no |
+| E | F-06, F-39 | Payload storage layout (OD-1a) | D; U-C9 lands before or with it | no |
 | F | F-30, F-29, F-31, F-32, F-33, F-34, F-44, F-45 | Test gate and unguarded high-risk code | U-F1 before U-F2 | yes |
 | G | F-23, F-28, F-35, F-36, F-40, F-41, F-42, F-43 | Consolidation, dead code, docs, history recording | A (U-G1 touches the `StorageOptionsService` connections) | after A |
 
@@ -336,6 +336,22 @@ Guard R3: a lifecycle matrix test class.
 - Adoption is a **separate later unit that needs owner approval** (a new dependency, Iron law 3).
 - If adopted, it must land before or together with Phase E's migration. Otherwise Phase E must be re-verified on the new engine.
 
+**U-C9 (F-21, OD-2) — adopt SQLite3 Multiple Ciphers (owner decision, 2026-10-27)**
+
+*Decision*: replace `SQLitePCLRaw.bundle_e_sqlcipher` 2.1.11 (SQLite 3.39.2, deprecated, no further releases) with `SQLite3MC.PCLRaw.bundle` 2.6.1 (SQLite 3.54.0) in SQLCipher v4 legacy mode (`cipher=sqlcipher&legacy=4`). The on-disk format does not change, so every installed library opens as it is and a rollback to the old build can still read what the new one writes (evaluation, §2). It lands before or together with Phase E.
+
+*Required by the owner*
+- One connection-string / cipher-recipe helper that every connection goes through, with a guard test proving nothing bypasses it.
+- The fixture compatibility test over all four existing formats (plaintext WAL, SQLCipher 4.5.2, rekeyed, encrypted with an uncheckpointed `-wal`).
+- Tests and mutants for the replacement rekey path, which replaces `sqlcipher_export`.
+- The 60k performance comparison against the current bundle, on a quiet machine requested through the coordinator.
+
+*Risks accepted with the decision*
+1. **Untested dependency pairing.** Microsoft.Data.Sqlite 10.0.11 declares `SQLitePCLRaw.core` 2.1.x; this bundle needs 3.x, so the app runs MDS 10 on core 3.0.2. Microsoft has not tested that pair. It is pinned explicitly, and our suite plus the evaluation harness are the only evidence it works. Re-check on every bump of either package (S32).
+2. **Single maintainer.** The package is published by one person (U. Telle), MIT-licensed, with a package id that is not prefix-reserved; the native binaries are Authenticode-signed (SignPath Foundation). Releases are frequent today; nothing guarantees they continue.
+3. **Format fork on a missed recipe.** A connection without the recipe silently uses the library's default cipher: an existing library fails with error 26 ("wrong password") and a new one is unreadable by any SQLCipher build. Mitigated by the single factory and its guard, which also covers the test tree.
+4. **Engine jump 3.39.2 -> 3.54.0** beyond the evaluation's fixtures (query plans on 60k clips) is measured only by the quiet-machine comparison.
+5. **No non-Windows run.** Linux and macOS natives ship in the package but were not exercised.
 ### Phase D — realistic-size performance
 
 **U-D0 — benchmark fixture (prerequisite for every D unit, U-C4b and U-C8)**
@@ -414,7 +430,7 @@ Guard R3: a lifecycle matrix test class.
 
 *Mutant*: hydration skips the payload join.
 
-*Dependencies*: Phase D. Review the U-C8 outcome before merging, because of a possible engine switch.
+*Dependencies*: Phase D, and U-C9 (the engine switch) lands before or with it. The migration is verified on the new engine.
 
 ### Phase F — test gate and unguarded code
 
@@ -494,7 +510,7 @@ This plan does **not** adopt that version. Clipthrough stays on VellumText 0.7.0
 ## Out of scope
 
 - MainWindowViewModel decomposition beyond what a unit needs (S2).
-- Adopting a replacement encrypted-SQLite package; U-C8 evaluates only, and adoption needs separate approval.
+- Adopting a replacement encrypted-SQLite package was out of scope until the owner approved it after U-C8 (OD-2, 2026-10-27); it is now U-C9.
 - Signing and verifying updates (S37; decided separately).
 - F-37 (accepted risk S36) and security F-10 (dropped by the critic); also the image-URL GET in `AiTransformService` (noted under F-37, not counted).
 - Dependency upgrades other than the U-C8 evaluation, including the VellumText async-importer version above. Bumps to Avalonia, Velopack and Onnx are independent; re-run the mutants after any bump (S32).

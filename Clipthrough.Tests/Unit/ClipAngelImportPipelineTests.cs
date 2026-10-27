@@ -45,7 +45,7 @@ public sealed partial class ClipAngelImportServiceTests
     private static string BuildPlainClipAngelDatabase(string directory)
     {
         var path = Path.Combine(directory, "clipangel-plain.db");
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString());
+        using var connection = TestConnections.Create(new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString());
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = $"""

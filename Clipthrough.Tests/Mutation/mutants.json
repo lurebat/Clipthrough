@@ -2704,14 +2704,6 @@
     "filter": "FullyQualifiedName~RekeyDialogValidationTests"
   },
   {
-    "id": "rekey-empty-side-uses-pragma-rekey",
-    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
-    "why": "F-16. PRAGMA rekey is a silent no-op on SQLCipher 4.5 when either key is empty, so routing plaintext->encrypted or encrypted->plaintext back through it leaves no in-app way to encrypt an existing history (or remove encryption), and the failure blames the password.",
-    "find": "        if (currentKey.Length == 0 || newKey.Length == 0)\n        {\n            File.Delete(destinationPath);",
-    "replace": "        if (currentKey.Length < 0 && newKey.Length < 0)\n        {\n            File.Delete(destinationPath);",
-    "filter": "FullyQualifiedName~StorageLifecycleTests.Rekey_PlaintextLibrary|FullyQualifiedName~StorageLifecycleTests.Rekey_EncryptedLibrary"
-  },
-  {
     "id": "rekey-skips-backups",
     "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
     "why": "F-15. Without re-keying the backups, every restore point Settings lists from before a rekey (or before encryption was turned on) fails with 'unreadable or requires a different password', and turning encryption on leaves the history in plaintext beside it.",
@@ -2878,5 +2870,69 @@
     "find": "Content=\"{x:Static loc:AppText.RekeyRememberNewPassword}\" />",
     "replace": "Content=\"Remember new password (saved as plaintext in storage.json)\" />",
     "filter": "FullyQualifiedName~ThePasswordViews_HoldNoPlaintextClaimOfTheirOwn"
+  },
+  {
+    "id": "cipher-recipe-dropped",
+    "file": "Clipthrough/Database/SqliteConnectionFactory.cs",
+    "why": "U-C9. Without the recipe SQLite3 Multiple Ciphers uses its default cipher: every installed library fails with error 26 (read as a wrong password) and a new one is written in a format no SQLCipher build reads.",
+    "find": "        return uri.Append('?').Append(CipherRecipe).ToString();",
+    "replace": "        return CipherRecipe.Length > 0 ? uri.ToString() : CipherRecipe;",
+    "filter": "FullyQualifiedName~SqlCipherFixtureCompatibilityTests|FullyQualifiedName~ANewEncryptedLibrary_IsWrittenAsSqlCipher4"
+  },
+  {
+    "id": "cipher-recipe-without-legacy",
+    "file": "Clipthrough/Database/SqliteConnectionFactory.cs",
+    "why": "U-C9. cipher=sqlcipher without legacy=4 is a different on-disk scheme the SQLCipher 4.5.2 build cannot read; it would make adoption one-way and rollback impossible. Killed by the independent page-1 decryption, not by a string compare.",
+    "find": "    internal const string CipherRecipe = \"cipher=sqlcipher&legacy=4\";",
+    "replace": "    internal const string CipherRecipe = \"cipher=sqlcipher\";",
+    "filter": "FullyQualifiedName~ANewEncryptedLibrary_IsWrittenAsSqlCipher4|FullyQualifiedName~SqlCipherFixtureCompatibilityTests"
+  },
+  {
+    "id": "cipher-recipe-only-for-keyed-connections",
+    "file": "Clipthrough/Database/SqliteConnectionFactory.cs",
+    "why": "U-C9. Encrypting a plaintext library opens it without a key and rekeys it; that connection needs the recipe too, or the new key is applied with the default cipher.",
+    "find": "            DataSource = DataSourceFor(path),",
+    "replace": "            DataSource = string.IsNullOrEmpty(password) ? path : DataSourceFor(path),",
+    "filter": "FullyQualifiedName~EncryptingAPlaintextWalLibrary_WritesSqlCipher4_AndKeepsItInWal"
+  },
+  {
+    "id": "connection-factory-loses-the-cipher-key",
+    "file": "Clipthrough/Database/SqliteConnectionFactory.cs",
+    "why": "U-C8/U-C9. Every installed encrypted library must open through the factory; a connection that misses the key fails with error 26 and reads as a wrong password.",
+    "find": "            builder.Password = password;\n",
+    "replace": "            _ = password;\n",
+    "filter": "FullyQualifiedName~SqlCipherFixtureCompatibilityTests"
+  },
+  {
+    "id": "rekey-encrypts-plaintext-in-wal",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "U-C9. SQLite3 Multiple Ciphers refuses PRAGMA rekey on a plaintext file in WAL mode, and the live library runs in WAL; encrypting it has to switch the copy to a rollback journal first.",
+    "find": "                ExecuteScalarText(copy, \"PRAGMA journal_mode = DELETE;\");\n",
+    "replace": "                _ = copy;\n",
+    "filter": "FullyQualifiedName~EncryptingAPlaintextWalLibrary_WritesSqlCipher4_AndKeepsItInWal|FullyQualifiedName~Rekey_PlaintextLibrary_BecomesEncryptedAndKeepsEverything"
+  },
+  {
+    "id": "rekey-leaves-the-copy-out-of-wal",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "U-C9. Journal mode is a property of the file: an encrypted copy left in DELETE mode becomes the live library and silently loses WAL concurrency for background workers.",
+    "find": "            if (restoreWal)\n",
+    "replace": "            if (restoreWal && !restoreWal)\n",
+    "filter": "FullyQualifiedName~EncryptingAPlaintextWalLibrary_WritesSqlCipher4_AndKeepsItInWal"
+  },
+  {
+    "id": "rekey-copy-is-not-rekeyed",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "U-C9. The rekey pragma is now the only step that changes the key, in every direction; without it decrypting leaves the copy encrypted.",
+    "find": "            ExecuteScalarText(copy, $\"PRAGMA rekey = '{EscapeSqlLiteral(newKey)}';\");\n",
+    "replace": "            _ = EscapeSqlLiteral(newKey);\n",
+    "filter": "FullyQualifiedName~DecryptingAnEncryptedWalLibrary_WritesPlaintext_AndKeepsItInWal"
+  },
+  {
+    "id": "a-test-builds-its-own-connection",
+    "file": "Clipthrough.Tests/TestConnections.cs",
+    "why": "U-C9. A test that builds its own keyed connection creates a library in the wrong cipher, reads it back and passes; the guard must see the test tree, not only shipping code.",
+    "find": "/// hand-built connection in tests too.",
+    "replace": "/// hand-built connection in tests too. new SqliteConnection(",
+    "filter": "FullyQualifiedName~TestsGetTheirConnectionsFromTheFactory_Too"
   }
 ]

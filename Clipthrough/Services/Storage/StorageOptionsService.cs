@@ -470,61 +470,56 @@ public sealed class StorageOptionsService : IStorageOptionsService
     /// The source is only read. A partial destination is removed on failure.
     /// </summary>
     /// <remarks>
-    /// Between two keys this copies through the online backup API and applies
-    /// <c>PRAGMA rekey</c> to the copy. That pragma cannot add encryption to a
-    /// plaintext file or strip it from an encrypted one - on SQLCipher 4.5 it
-    /// is a silent no-op there, so "Re-encrypt database" failed verification
-    /// for every unencrypted library (F-16). When either side is empty the
-    /// copy is written with <c>sqlcipher_export</c> into a database attached
-    /// with the target key instead. Like VACUUM it carries the schema, every
-    /// row, the FTS5 shadow tables, triggers and <c>user_version</c>; the
-    /// journal mode is a property of the file and is set to match the source.
+    /// The copy is taken through the online backup API under the current key,
+    /// then <c>PRAGMA rekey</c> changes the copy's key. SQLite3 Multiple Ciphers
+    /// handles every direction with that pragma, which is why the SQLCipher-only
+    /// <c>sqlcipher_export</c> this used to need for the plaintext cases (F-16)
+    /// is gone (U-C9):
+    /// - between two keys, and from a key to none, it works in any journal mode;
+    /// - from none to a key it is refused in WAL mode, so the copy is switched to
+    ///   a rollback journal for the rekey and back to WAL afterwards. Journal
+    ///   mode is a property of the file, and the live library runs in WAL.
+    /// The cipher scheme the key is applied with comes from the connection's
+    /// recipe (SqliteConnectionFactory.DataSourceFor), not from the pragma.
     /// </remarks>
     internal static void WriteRekeyedCopy(string sourcePath, string currentKey, string newKey, string destinationPath)
     {
-        if (currentKey.Length == 0 || newKey.Length == 0)
-        {
-            File.Delete(destinationPath);
-            try
-            {
-                // ReadWriteCreate: ATTACH inherits the open flags, and it has to
-                // create the destination. The source exists (checked by callers).
-                using var source = OpenUnpooled(sourcePath, currentKey, SqliteOpenMode.ReadWriteCreate);
-                string journalMode;
-                using (var mode = source.CreateCommand())
-                {
-                    mode.CommandText = "PRAGMA main.journal_mode;";
-                    journalMode = Convert.ToString(mode.ExecuteScalar(), CultureInfo.InvariantCulture) ?? string.Empty;
-                }
-
-                using var export = source.CreateCommand();
-                export.CommandText =
-                    "ATTACH DATABASE $path AS rekeyed KEY $key; " +
-                    "SELECT sqlcipher_export('rekeyed'); " +
-                    (string.Equals(journalMode, "wal", StringComparison.OrdinalIgnoreCase) ? "PRAGMA rekeyed.journal_mode = WAL; " : string.Empty) +
-                    "DETACH DATABASE rekeyed;";
-                export.Parameters.AddWithValue("$path", destinationPath);
-                export.Parameters.AddWithValue("$key", newKey);
-                export.ExecuteNonQuery();
-            }
-            catch
-            {
-                foreach (var suffix in new[] { string.Empty, "-wal", "-shm", "-journal" })
-                {
-                    try { File.Delete(destinationPath + suffix); } catch { /* best effort */ }
-                }
-
-                throw;
-            }
-
-            return;
-        }
-
         SqliteDatabaseCopier.CopyDatabase(sourcePath, currentKey, destinationPath);
-        using var copy = OpenUnpooled(destinationPath, currentKey, SqliteOpenMode.ReadWrite);
-        using var rekey = copy.CreateCommand();
-        rekey.CommandText = $"PRAGMA rekey = '{EscapeSqlLiteral(newKey)}';";
-        rekey.ExecuteNonQuery();
+        try
+        {
+            using var copy = OpenUnpooled(destinationPath, currentKey, SqliteOpenMode.ReadWrite);
+            var encryptingPlaintext = currentKey.Length == 0 && newKey.Length > 0;
+            var restoreWal = false;
+            if (encryptingPlaintext)
+            {
+                restoreWal = string.Equals(ExecuteScalarText(copy, "PRAGMA journal_mode;"), "wal", StringComparison.OrdinalIgnoreCase);
+                ExecuteScalarText(copy, "PRAGMA journal_mode = DELETE;");
+            }
+
+            ExecuteScalarText(copy, $"PRAGMA rekey = '{EscapeSqlLiteral(newKey)}';");
+
+            if (restoreWal)
+            {
+                ExecuteScalarText(copy, "PRAGMA journal_mode = WAL;");
+            }
+        }
+        catch
+        {
+            SqliteConnection.ClearAllPools();
+            foreach (var suffix in new[] { string.Empty, "-wal", "-shm", "-journal" })
+            {
+                try { File.Delete(destinationPath + suffix); } catch { /* best effort */ }
+            }
+
+            throw;
+        }
+    }
+
+    private static string ExecuteScalarText(SqliteConnection connection, string sql)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return Convert.ToString(command.ExecuteScalar(), CultureInfo.InvariantCulture) ?? string.Empty;
     }
 
     private static SqliteConnection OpenUnpooled(string path, string key, SqliteOpenMode mode)

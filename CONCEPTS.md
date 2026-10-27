@@ -70,10 +70,19 @@ captures each through `CaptureFastAsync`; there is no shared transaction.
 
 ## Storage and encryption
 
-**SQLCipher** — The encryption extension used for the SQLite database file when
-a password is set. Key derivation is performed once per connection open;
+**SQLCipher** — The on-disk encryption format of the database file when a
+password is set (SQLCipher 4: PBKDF2-HMAC-SHA512, 256000 iterations). It is
+written by SQLite3 Multiple Ciphers (`SQLite3MC.PCLRaw.bundle`), which supports
+several ciphers and needs the **cipher recipe** on every connection to pick this
+one. Key derivation is performed once per connection open;
 `busy_timeout=5000` is applied separately via `SqliteConnectionFactory`'s
 `StateChange` handler (not persisted, re-applied per connection).
+
+**cipher recipe** — `cipher=sqlcipher&legacy=4`, added to every connection's
+data source by `SqliteConnectionFactory.DataSourceFor`. Without it a connection
+silently uses another cipher: existing libraries fail to open and new ones are
+unreadable by SQLCipher. See
+`docs/solutions/every-connection-carries-the-cipher-recipe.md`.
 
 **WAL mode** — Write-Ahead Logging is enabled by `DatabaseInitializer` and is
 persistent per database file. It allows concurrent readers while a writer holds
