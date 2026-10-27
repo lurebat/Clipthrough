@@ -220,7 +220,7 @@
     "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
     "why": "Without the rollback, any failure after the stash leaves the live path empty and the user's history under a .before-restore name that nothing looks for.",
     "find": "        catch\n        {\n            RollBackRestore(stashed);\n            throw;\n        }",
-    "replace": "        catch\n        {\n            throw;\n        }",
+    "replace": "        catch\n        {\n            if (Environment.ProcessorCount < 0) RollBackRestore(stashed);\n            throw;\n        }",
     "filter": "DatabaseBackupServiceTests"
   },
   {
@@ -413,7 +413,7 @@
     "file": "Clipthrough/Services/Storage/DatabaseMaintenanceScope.cs",
     "filter": "DisposeAsync_RestartsOnlyTheWorkersThatWereRunningOnEntry",
     "find": "        if (_ocrQueueWasRunning)\n        {\n            _ocrQueue?.Start();\n        }",
-    "replace": "        {\n            _ocrQueue?.Start();\n        }"
+    "replace": "        if (_ocrQueueWasRunning || !_ocrQueueWasRunning)\n        {\n            _ocrQueue?.Start();\n        }"
   },
   {
     "id": "ocr-claim-reset-does-nothing",
@@ -853,7 +853,7 @@
     "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
     "filter": "DatabaseBackupServiceTests",
     "find": "        return (ParseBackupDay(file.Name) ?? written.Date, written);",
-    "replace": "        return (written.Date, written);"
+    "replace": "        return (ParseBackupDay(file.Name) is null ? written.Date : written.Date, written);"
   },
   {
     "id": "s16-prune-keeps-oldest",
@@ -1348,7 +1348,7 @@
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "Reverting the gate makes every launch read the whole database file again.",
     "find": "if (await HasPendingStructuralWorkAsync(connection, cancellationToken))",
-    "replace": "if (true)",
+    "replace": "if (await HasPendingStructuralWorkAsync(connection, cancellationToken) || true)",
     "filter": "FullyQualifiedName~DatabaseIntegrityCheckTests"
   },
   {
@@ -1356,7 +1356,7 @@
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "Skipping the check entirely lets a migration rewrite the pages of a corrupt database.",
     "find": "if (await HasPendingStructuralWorkAsync(connection, cancellationToken))",
-    "replace": "if (false)",
+    "replace": "if (await HasPendingStructuralWorkAsync(connection, cancellationToken) && false)",
     "filter": "FullyQualifiedName~DatabaseIntegrityCheckTests"
   },
   {
@@ -2732,7 +2732,7 @@
     "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
     "why": "F-22. A torn storage.json must be set aside and reported; falling back to the default library silently drops the remembered password, keeps no copy, and lets the next save overwrite the evidence.",
     "find": "            LoadFault = QuarantineUnreadableConfig(ex);",
-    "replace": "            Trace.TraceWarning($\"Storage settings load failed: {ex.Message}\");",
+    "replace": "            LoadFault = Environment.ProcessorCount < 0 ? QuarantineUnreadableConfig(ex) : null;",
     "filter": "FullyQualifiedName~StorageLifecycleTests.TornStorageJson"
   },
   {
