@@ -352,6 +352,15 @@ Guard R3: a lifecycle matrix test class.
 3. **Format fork on a missed recipe.** A connection without the recipe silently uses the library's default cipher: an existing library fails with error 26 ("wrong password") and a new one is unreadable by any SQLCipher build. Mitigated by the single factory and its guard, which also covers the test tree.
 4. **Engine jump 3.39.2 -> 3.54.0** beyond the evaluation's fixtures (query plans on 60k clips) is measured only by the quiet-machine comparison.
 5. **No non-Windows run.** Linux and macOS natives ship in the package but were not exercised.
+
+*Measured (2026-10-27, quiet machine, U-D0 fixture: 60k clips, ~1.6 GB, Release; the current bundle and SQLite3MC on the same Phase D code, each run from a fresh copy of one seeded library)*
+- **Controlled comparison** (each probe group run alone on a fresh copy, so both engines saw the same state):
+  - Search (P1), encrypted: SQLite3MC is faster on every query except FTS fuzzy (5.2 -> 6.2 ms) and FTS no-match (0.3 -> 0.5 ms). Examples: the image filter 2.6 s -> 1.1 s; text-filter sorts about 6 s -> 3 s; regex no-match 15.3 s -> 6.6 s; case-sensitive 2.5 s -> 1.2 s.
+  - Search (P1), plaintext: equal within noise, for example blank Alphabetical 243 vs 231 ms and case-sensitive 365 vs 359 ms.
+  - Capture (P4), encrypted, large clips: about 2x faster (re-copy of 1.9 MB 261 -> 110 ms).
+- **Full probe runs are confounded and are not used as evidence of a regression.** xUnit ran the probes in a different order for the two builds: the old bundle ran P1 last, SQLite3MC ran it fourth, right after P12 rewrote 58,903 embedding statuses. In those runs the old bundle looked faster on alphabetical, case-sensitive and whole-word search (plaintext 108-119 vs 254-362 ms), and on two single-sample probes: MarkAllEmbeddingsForRerunAsync (21.8 vs 37.9 s, plaintext only) and the first blank search after the stats cache is invalidated (5 vs 42 ms plaintext, 33 vs 165 ms encrypted). The isolated reruns removed the first group. The other two were not rerun in isolation and stay open: measure them with a fixed probe order before reading anything into them.
+- Encrypted full runs took 10.8 min with SQLite3MC against 18.4 min with the current bundle.
+
 ### Phase D — realistic-size performance
 
 **U-D0 — benchmark fixture (prerequisite for every D unit, U-C4b and U-C8)**
