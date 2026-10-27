@@ -2788,7 +2788,7 @@
     "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
     "why": "F-19 / OD-4a. A backup is kept for a week; a sensitive clip copied into it outlives its lifetime there.",
     "find": "                    PurgeSensitiveClips(tempPath, password);\n",
-    "replace": "                    _ = password;\n",
+    "replace": "                    if (Environment.ProcessorCount < 0) PurgeSensitiveClips(tempPath, password);\n",
     "filter": "FullyQualifiedName~BackupSensitivePurgeTests"
   },
   {
