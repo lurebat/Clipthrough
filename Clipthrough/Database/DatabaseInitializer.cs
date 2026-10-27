@@ -130,6 +130,30 @@ public sealed class DatabaseInitializer
             query    TEXT NOT NULL UNIQUE,
             used_at  TEXT NOT NULL
         );
+
+        -- Payloads live outside clips (F-06, U-E1). clips stores content_bytes
+        -- and source_app_icon ahead of every metadata column, so any metadata
+        -- read walked the blob's overflow chain: ocr_status for 700 images took
+        -- 1,375 ms against 10.5 ms for content. Both old columns stay in the
+        -- table, always NULL, because SQLite cannot reorder or cheaply drop them.
+        CREATE TABLE IF NOT EXISTS clip_payloads (
+            clip_id       INTEGER PRIMARY KEY REFERENCES clips(id) ON DELETE CASCADE,
+            content_bytes BLOB
+        );
+
+        -- One row per distinct source-app icon (F-39): the same PNG was stored
+        -- again in every clip from that app.
+        CREATE TABLE IF NOT EXISTS app_icons (
+            hash TEXT PRIMARY KEY,
+            png  BLOB NOT NULL
+        );
+
+        -- Belt and braces for the cascade: a connection opened without
+        -- foreign_keys would otherwise leave a deleted clip's payload - a
+        -- sensitive clip's included - behind.
+        CREATE TRIGGER IF NOT EXISTS clips_payload_ad AFTER DELETE ON clips BEGIN
+            DELETE FROM clip_payloads WHERE clip_id = old.id;
+        END;
         """;
 
     /// <summary>
@@ -233,16 +257,22 @@ public sealed class DatabaseInitializer
         -- index holds only the rows its query counts. The OCR one leads with
         -- content_type so the planner takes it over idx_clips_content_type, and
         -- carries ocr_status, which the row stores after the payload - reading it
-        -- there walked each image's overflow chain. The row is still visited for
-        -- the content_bytes IS NOT NULL term (the bundled SQLite does not treat
-        -- the plan as covering); PerfProbes P3 measures what that costs.
+        -- there walked each image's overflow chain. Since U-E1 moved payloads to
+        -- clip_payloads, the queries check that an image has one with an EXISTS
+        -- probe on that table's primary key; the predicate here is the image
+        -- type alone (MovePayloadsOutOfClipsAsync drops the older index that also
+        -- required content_bytes, which is now always NULL).
         -- Both WHERE clauses match the queries' own terms exactly
         -- (ClipStoreService.PendingSensitivitySql / OcrCoverageSql); SQLite
         -- only uses a partial index whose condition the query implies.
         CREATE INDEX IF NOT EXISTS idx_clips_sensitivity_pending ON clips(id)
             WHERE sensitivity_scanned_at IS NULL;
         CREATE INDEX IF NOT EXISTS idx_clips_ocr_images ON clips(content_type, ocr_status)
-            WHERE content_type = 'image' AND content_bytes IS NOT NULL;
+            WHERE content_type = 'image';
+
+        -- Orphaned app_icons rows are found through this (U-E1).
+        CREATE INDEX IF NOT EXISTS idx_clips_source_app_icon_hash ON clips(source_app_icon_hash)
+            WHERE source_app_icon_hash IS NOT NULL;
 
         -- Retention purges, which run after every capture. Both lifetime deletes
         -- filter on exactly this pair.
@@ -292,7 +322,7 @@ public sealed class DatabaseInitializer
     /// no-ops on a current database but still pay several SQLite round trips
     /// each, which adds up to ~800ms on a cold OS file cache).
     /// </summary>
-    private const int CurrentSchemaVersion = 8;
+    private const int CurrentSchemaVersion = 9;
 
     private readonly SqliteConnectionFactory _connectionFactory;
     private readonly ISensitivityService _sensitivityService;
@@ -370,6 +400,9 @@ public sealed class DatabaseInitializer
             TraceStep(sw, "ensure-unique-hash-index");
             await RebuildClipSearchIndexAsync(connection, cancellationToken);
             TraceStep(sw, "rebuild-search-index");
+            await EnsureSourceAppIconHashColumnAsync(connection, cancellationToken);
+            await MovePayloadsOutOfClipsAsync(connection, cancellationToken);
+            TraceStep(sw, "move-payloads");
             await WriteSchemaVersionAsync(connection, CurrentSchemaVersion, cancellationToken);
             TraceStep(sw, $"version-write ({CurrentSchemaVersion})");
         }
@@ -402,6 +435,8 @@ public sealed class DatabaseInitializer
             await indexCommand.ExecuteNonQueryAsync(cancellationToken);
         }
         TraceStep(sw, "sort-order-indexes");
+
+        await DeleteOrphanedAppIconsAsync(connection, cancellationToken);
 
         foreach (var rule in _sensitivityService.GetDefaultRules())
         {
@@ -774,6 +809,175 @@ public sealed class DatabaseInitializer
     }
 
     /// <summary>
+    /// How many rows <see cref="MovePayloadsOutOfClipsAsync"/> moves per
+    /// transaction, and a cap on the bytes it holds in memory doing so. A test seam.
+    /// </summary>
+    internal static int PayloadMoveBatchRows { get; set; } = 200;
+
+    internal const long PayloadMoveBatchBytes = 32L * 1024 * 1024;
+
+    /// <summary>Test seam: runs after each row is moved, inside the batch's transaction.</summary>
+    internal static Action<long>? AfterPayloadRowMoved { get; set; }
+
+    private static async Task EnsureSourceAppIconHashColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('clips') WHERE name = 'source_app_icon_hash';";
+        if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 0)
+        {
+            await ExecuteNonQueryAsync(connection, "ALTER TABLE clips ADD COLUMN source_app_icon_hash TEXT;", cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Moves every inline <c>content_bytes</c> into <c>clip_payloads</c> and every inline
+    /// <c>source_app_icon</c> into <c>app_icons</c> (deduplicated by SHA-256), then
+    /// NULLs the old columns (F-06, F-39).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A 1 GB library cannot move in one transaction: it would hold the write lock
+    /// and grow the WAL by the whole library. Each batch is one transaction that
+    /// copies its rows, NULLs their old columns and records the last id it reached
+    /// in <c>app_metadata</c>. A row is therefore always either entirely in the old
+    /// place or entirely in the new one, and a crash at any point resumes from the
+    /// last committed batch on the next start - the schema version is written only
+    /// after this returns.
+    /// </para>
+    /// <para>
+    /// NULLing per batch, rather than after the whole copy as the plan sketched,
+    /// lets each batch reuse the pages the previous one freed, so the file does
+    /// not double in size mid-migration. Readers see none of this: it runs inside
+    /// InitializeAsync, before anything reads a clip.
+    /// </para>
+    /// </remarks>
+    private static async Task MovePayloadsOutOfClipsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        // The older OCR index also required content_bytes IS NOT NULL, which is
+        // about to be true of no row. Dropped so the index DDL recreates it.
+        await ExecuteNonQueryAsync(connection, "DROP INDEX IF EXISTS idx_clips_ocr_images;", cancellationToken);
+
+        long lastId;
+        await using (var progress = connection.CreateCommand())
+        {
+            progress.CommandText = "SELECT value FROM app_metadata WHERE key = 'payload_move_last_id';";
+            var raw = await progress.ExecuteScalarAsync(cancellationToken);
+            lastId = raw is string text && long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0;
+        }
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var transaction = connection.BeginTransaction();
+            var rows = new List<(long Id, byte[]? Payload, byte[]? Icon)>();
+            long bytes = 0;
+            await using (var select = connection.CreateCommand())
+            {
+                select.Transaction = transaction;
+                select.CommandText = """
+                    SELECT id, content_bytes, source_app_icon FROM clips
+                    WHERE id > $last AND (content_bytes IS NOT NULL OR source_app_icon IS NOT NULL)
+                    ORDER BY id
+                    LIMIT $limit;
+                    """;
+                select.Parameters.AddWithValue("$last", lastId);
+                select.Parameters.AddWithValue("$limit", PayloadMoveBatchRows);
+                await using var reader = await select.ExecuteReaderAsync(cancellationToken);
+                while (bytes < PayloadMoveBatchBytes && await reader.ReadAsync(cancellationToken))
+                {
+                    var payload = reader.IsDBNull(1) ? null : (byte[])reader.GetValue(1);
+                    var icon = reader.IsDBNull(2) ? null : (byte[])reader.GetValue(2);
+                    rows.Add((reader.GetInt64(0), payload, icon));
+                    bytes += (payload?.LongLength ?? 0) + (icon?.LongLength ?? 0);
+                }
+            }
+
+            if (rows.Count == 0)
+            {
+                transaction.Commit();
+                break;
+            }
+
+            foreach (var (id, payload, icon) in rows)
+            {
+                if (payload is not null)
+                {
+                    await using var insert = connection.CreateCommand();
+                    insert.Transaction = transaction;
+                    insert.CommandText = """
+                        INSERT INTO clip_payloads (clip_id, content_bytes) VALUES ($id, $bytes)
+                        ON CONFLICT(clip_id) DO UPDATE SET content_bytes = excluded.content_bytes;
+                        """;
+                    insert.Parameters.AddWithValue("$id", id);
+                    insert.Parameters.AddWithValue("$bytes", payload);
+                    await insert.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                string? iconHash = null;
+                if (icon is { Length: > 0 })
+                {
+                    iconHash = AppIconHash(icon);
+                    await using var insertIcon = connection.CreateCommand();
+                    insertIcon.Transaction = transaction;
+                    insertIcon.CommandText = "INSERT OR IGNORE INTO app_icons (hash, png) VALUES ($hash, $png);";
+                    insertIcon.Parameters.AddWithValue("$hash", iconHash);
+                    insertIcon.Parameters.AddWithValue("$png", icon);
+                    await insertIcon.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                await using (var clear = connection.CreateCommand())
+                {
+                    clear.Transaction = transaction;
+                    clear.CommandText = """
+                        UPDATE clips
+                        SET content_bytes = NULL,
+                            source_app_icon = NULL,
+                            source_app_icon_hash = COALESCE($hash, source_app_icon_hash)
+                        WHERE id = $id;
+                        """;
+                    clear.Parameters.AddWithValue("$id", id);
+                    clear.Parameters.AddWithValue("$hash", (object?)iconHash ?? DBNull.Value);
+                    await clear.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                AfterPayloadRowMoved?.Invoke(id);
+                lastId = id;
+            }
+
+            await using (var record = connection.CreateCommand())
+            {
+                record.Transaction = transaction;
+                record.CommandText = """
+                    INSERT INTO app_metadata (key, value) VALUES ('payload_move_last_id', $last)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+                    """;
+                record.Parameters.AddWithValue("$last", lastId.ToString(CultureInfo.InvariantCulture));
+                await record.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            transaction.Commit();
+        }
+    }
+
+    /// <summary>The key a source-app icon is stored under in app_icons.</summary>
+    internal static string AppIconHash(byte[] png) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(png));
+
+    /// <summary>
+    /// Removes icons no clip refers to any more. Icons are not sensitive, but an
+    /// orphan would still count against the library size cap.
+    /// </summary>
+    internal static async Task DeleteOrphanedAppIconsAsync(SqliteConnection connection, CancellationToken cancellationToken, SqliteTransaction? transaction = null)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            DELETE FROM app_icons
+            WHERE NOT EXISTS (SELECT 1 FROM clips c WHERE c.source_app_icon_hash = app_icons.hash);
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>
     /// Materialises the on-disk size of each clip row into a real, indexed column.
     /// </summary>
     /// <remarks>
@@ -796,6 +1000,10 @@ public sealed class DatabaseInitializer
     /// in neither trigger's UPDATE OF list, so they cannot re-enter - and it is
     /// likewise absent from the clips_fts trigger's column list, so maintaining it
     /// never re-tokenises a clip.
+    ///
+    /// Since U-E1 (F-39) the icon is stored once per distinct PNG in app_icons, so a
+    /// row costs its payload alone: stored_bytes is byte_size, and the cap adds each
+    /// distinct icon once (ClipStoreService.TotalStoredBytesSql).
     /// </remarks>
     private static async Task EnsureClipStoredBytesAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
@@ -818,8 +1026,8 @@ public sealed class DatabaseInitializer
         // missing converges the next time it is opened.
         await ExecuteNonQueryAsync(connection, """
             UPDATE clips
-            SET stored_bytes = byte_size + COALESCE(LENGTH(source_app_icon), 0)
-            WHERE stored_bytes <> byte_size + COALESCE(LENGTH(source_app_icon), 0);
+            SET stored_bytes = byte_size
+            WHERE stored_bytes <> byte_size;
             """, cancellationToken);
 
         await ExecuteNonQueryAsync(
@@ -832,16 +1040,16 @@ public sealed class DatabaseInitializer
         await ExecuteNonQueryAsync(connection, """
             CREATE TRIGGER clips_stored_bytes_ai AFTER INSERT ON clips BEGIN
                 UPDATE clips
-                SET stored_bytes = new.byte_size + COALESCE(LENGTH(new.source_app_icon), 0)
+                SET stored_bytes = new.byte_size
                 WHERE id = new.id;
             END;
             """, cancellationToken);
 
         await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_stored_bytes_au;", cancellationToken);
         await ExecuteNonQueryAsync(connection, """
-            CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF byte_size, source_app_icon ON clips BEGIN
+            CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF byte_size ON clips BEGIN
                 UPDATE clips
-                SET stored_bytes = new.byte_size + COALESCE(LENGTH(new.source_app_icon), 0)
+                SET stored_bytes = new.byte_size
                 WHERE id = new.id;
             END;
             """, cancellationToken);

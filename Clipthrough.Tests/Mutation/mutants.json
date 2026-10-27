@@ -1011,8 +1011,8 @@
     "id": "icon-read-selects-the-wrong-column",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "The narrow icon read exists to return the icon blob and nothing else; selecting another column would hand callers the wrong bytes while still looking like a cheap single-column read.",
-    "find": "        command.CommandText = \"SELECT source_app_icon FROM clips WHERE id = $id LIMIT 1;\";",
-    "replace": "        command.CommandText = \"SELECT content_bytes FROM clips WHERE id = $id LIMIT 1;\";",
+    "find": "        command.CommandText = \"SELECT i.png FROM clips c JOIN app_icons i ON i.hash = c.source_app_icon_hash WHERE c.id = $id LIMIT 1;\";",
+    "replace": "        command.CommandText = \"SELECT p.content_bytes FROM clips c JOIN clip_payloads p ON p.clip_id = c.id WHERE c.id = $id LIMIT 1;\";",
     "filter": "GetSourceAppIconAsync_ReturnsTheIconWithoutTheRestOfTheRow"
   },
   {
@@ -1499,23 +1499,23 @@
     "id": "schema-version-not-bumped-for-index-change",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "The migration gate skips every Ensure* helper when the stored version already matches, so a schema change that does not bump the version never reaches an installed database.",
-    "find": "    private const int CurrentSchemaVersion = 8;",
-    "replace": "    private const int CurrentSchemaVersion = 7;",
-    "filter": "FullyQualifiedName~ClipStoredBytesTests"
+    "find": "    private const int CurrentSchemaVersion = 9;",
+    "replace": "    private const int CurrentSchemaVersion = 8;",
+    "filter": "FullyQualifiedName~ClipStoredBytesTests|FullyQualifiedName~PayloadLayoutTests"
   },
   {
-    "id": "stored-bytes-trigger-ignores-the-late-icon",
+    "id": "stored-bytes-trigger-misses-a-size-change",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
-    "why": "The source-app icon is written by a background lookup after the clip lands; without the UPDATE trigger the stored total silently omits every icon.",
-    "find": "            CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF byte_size, source_app_icon ON clips BEGIN",
-    "replace": "            CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF byte_size ON clips BEGIN",
+    "why": "Since U-E1 a row costs its payload alone, so the UPDATE trigger's job is byte_size changes (a re-copy, deferred content); without it the stored total keeps the old size. The late icon is counted in app_icons instead (size-cap-ignores-stored-icons).",
+    "find": "        CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF byte_size ON clips BEGIN\n",
+    "replace": "        CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF hash ON clips BEGIN\n",
     "filter": "FullyQualifiedName~ClipStoredBytesTests"
   },
   {
     "id": "stored-bytes-not-maintained-on-insert",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "Without the insert trigger every new clip is totalled as zero bytes, so the library size cap never fires.",
-    "find": "                SET stored_bytes = new.byte_size + COALESCE(LENGTH(new.source_app_icon), 0)\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        await ExecuteNonQueryAsync(connection, \"DROP TRIGGER IF EXISTS clips_stored_bytes_au;\", cancellationToken);",
+    "find": "                SET stored_bytes = new.byte_size\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        await ExecuteNonQueryAsync(connection, \"DROP TRIGGER IF EXISTS clips_stored_bytes_au;\", cancellationToken);",
     "replace": "                SET stored_bytes = 0\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        await ExecuteNonQueryAsync(connection, \"DROP TRIGGER IF EXISTS clips_stored_bytes_au;\", cancellationToken);",
     "filter": "FullyQualifiedName~ClipStoredBytesTests"
   },
@@ -1531,7 +1531,7 @@
     "id": "stored-bytes-is-never-backfilled",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "An upgraded database would keep zeros for every existing clip, so the cap would think the library was empty.",
-    "find": "            UPDATE clips\n            SET stored_bytes = byte_size + COALESCE(LENGTH(source_app_icon), 0)\n            WHERE stored_bytes <> byte_size + COALESCE(LENGTH(source_app_icon), 0);",
+    "find": "            UPDATE clips\n            SET stored_bytes = byte_size\n            WHERE stored_bytes <> byte_size;",
     "replace": "            SELECT 1;",
     "filter": "FullyQualifiedName~ClipStoredBytesTests"
   },
@@ -2787,8 +2787,8 @@
     "id": "no-ocr-coverage-index",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "F-25. Without it OCR coverage reads ocr_status from each image row, after the payload: 1.9 s at 60k, 9.9 s encrypted.",
-    "find": "            WHERE content_type = 'image' AND content_bytes IS NOT NULL;\n",
-    "replace": "            WHERE content_type = 'files' AND content_bytes IS NOT NULL;\n",
+    "find": "            WHERE content_type = 'image';\n\n        -- Orphaned app_icons",
+    "replace": "            WHERE content_type = 'files';\n\n        -- Orphaned app_icons",
     "filter": "FullyQualifiedName~StartupScanIndexTests.OcrCoverage_IsAnsweredFromTheImageIndex"
   },
   {
@@ -2886,5 +2886,69 @@
     "find": "        SelectedClip is { Clip.IsContentTruncated: false } selected",
     "replace": "        SelectedClip is { } selected",
     "filter": "FullyQualifiedName~SelectingALongListRow_ShowsThePrefixFirst"
+  },
+  {
+    "id": "hydration-skips-the-payload-join",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U-E1 plan mutant. A full read that takes content_bytes from the clips row gets NULL for every clip since the move: images and rich text lose their payload.",
+    "find": "            (SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id),\n",
+    "replace": "            c.content_bytes,\n",
+    "filter": "FullyQualifiedName~PayloadLayoutTests"
+  },
+  {
+    "id": "icon-read-skips-app-icons",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U-E1 / F-39. Icons live in app_icons; reading the old inline column shows every clip without its app icon.",
+    "find": "            (SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash),\n",
+    "replace": "            c.source_app_icon,\n",
+    "filter": "FullyQualifiedName~PayloadLayoutTests"
+  },
+  {
+    "id": "icons-not-deduplicated",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "F-39. The same icon PNG was stored again for every clip from that app; keying it by anything but its content stores it per clip again.",
+    "find": "    internal static string AppIconHash(byte[] png) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(png));",
+    "replace": "    internal static string AppIconHash(byte[] png) => png.Length >= 0 ? Guid.NewGuid().ToString(\"N\") : string.Empty;",
+    "filter": "FullyQualifiedName~PayloadLayoutTests.IdenticalIcons_AreStoredOnce"
+  },
+  {
+    "id": "payload-outlives-its-clip",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U-E1. Without the trigger a clip deleted on a connection with foreign keys off leaves its payload - a sensitive clip's included - in the file with nothing pointing at it.",
+    "find": "        CREATE TRIGGER IF NOT EXISTS clips_payload_ad AFTER DELETE ON clips BEGIN\n            DELETE FROM clip_payloads WHERE clip_id = old.id;\n        END;\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~PayloadLayoutTests.ADeletedClip_TakesItsPayloadWithIt"
+  },
+  {
+    "id": "payload-move-leaves-the-old-columns",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "F-06. Copying without NULLing the inline columns keeps every metadata read walking the blob, and doubles the file.",
+    "find": "                        SET content_bytes = NULL,\n                            source_app_icon = NULL,\n                            source_app_icon_hash",
+    "replace": "                        SET source_app_icon_hash",
+    "filter": "FullyQualifiedName~PayloadLayoutTests.AnExistingLibrary_IsMoved"
+  },
+  {
+    "id": "payload-move-in-one-transaction",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U-E1. One transaction over a 1 GB library holds the write lock for the whole move and a crash loses all of it; batches commit as they go.",
+    "find": "                    LIMIT $limit;\n",
+    "replace": "                    LIMIT -1 + ($limit * 0);\n",
+    "filter": "FullyQualifiedName~PayloadLayoutTests.AMoveInterruptedMidBatch"
+  },
+  {
+    "id": "orphaned-icons-kept-after-eviction",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-39. An icon whose last clip was evicted would keep counting against the size cap until the next start.",
+    "find": "            await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);\n",
+    "replace": "            await Task.CompletedTask;\n",
+    "filter": "FullyQualifiedName~PayloadLayoutTests.AnIconWhoseLastClipIsEvicted"
+  },
+  {
+    "id": "size-cap-ignores-stored-icons",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "The cap must bound what is on disk (the 12.5x under-count fixed earlier); since U-E1 icons are counted once, from app_icons.",
+    "find": " + \") FROM clips), 0) + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons), 0);\";",
+    "replace": " + \") FROM clips), 0) + 0;\";",
+    "filter": "FullyQualifiedName~Maintenance_LibrarySizeCap_CountsTheSourceAppIconsItStores"
   }
 ]

@@ -24,12 +24,12 @@ public sealed class ClipStoreService : IClipStoreService
     private const string ClipSelectColumns = """
             c.id,
             c.content,
-            c.content_bytes,
+            (SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id),
             c.content_type,
             c.content_format,
             c.source_app,
             c.source_app_path,
-            c.source_app_icon,
+            (SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash),
             c.hash,
             c.is_favorite,
             c.is_sensitive,
@@ -75,7 +75,7 @@ public sealed class ClipStoreService : IClipStoreService
             c.content_format,
             c.source_app,
             c.source_app_path,
-            (CASE WHEN c.source_app_icon IS NOT NULL AND LENGTH(c.source_app_icon) > 0 THEN 1 ELSE 0 END),
+            (c.source_app_icon_hash IS NOT NULL),
             c.hash,
             c.is_favorite,
             c.is_sensitive,
@@ -274,11 +274,12 @@ public sealed class ClipStoreService : IClipStoreService
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
+        using var transaction = connection.BeginTransaction();
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             UPDATE clips
             SET content = CASE WHEN $content IS NULL OR TRIM($content) = '' THEN content ELSE $content END,
-                content_bytes = $contentBytes,
                 content_type = $contentType,
                 content_format = $contentFormat,
                 byte_size = $byteSize,
@@ -294,7 +295,6 @@ public sealed class ClipStoreService : IClipStoreService
             """;
         command.Parameters.AddWithValue("$id", clipId);
         command.Parameters.AddWithValue("$content", string.IsNullOrWhiteSpace(contentText) ? DBNull.Value : contentText);
-        command.Parameters.AddWithValue("$contentBytes", request.ContentBytes);
         command.Parameters.AddWithValue("$contentType", request.ContentType.ToStorageValue());
         command.Parameters.AddWithValue("$contentFormat", request.ContentFormat.ToStorageValue());
         command.Parameters.AddWithValue("$byteSize", byteSize);
@@ -303,6 +303,12 @@ public sealed class ClipStoreService : IClipStoreService
         command.Parameters.AddWithValue("$sourceWindowTitle", string.IsNullOrWhiteSpace(request.SourceWindowTitle) ? DBNull.Value : request.SourceWindowTitle);
         command.Parameters.AddWithValue("$sourceUrl", string.IsNullOrWhiteSpace(request.SourceUrl) ? DBNull.Value : request.SourceUrl);
         var changed = await command.ExecuteNonQueryAsync(cancellationToken);
+        if (changed > 0)
+        {
+            await WritePayloadAsync(connection, transaction, clipId, request.ContentBytes, iconBytes: null, cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
         if (changed > 0)
         {
             InvalidateStatsCache();
@@ -325,11 +331,17 @@ public sealed class ClipStoreService : IClipStoreService
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE clips SET source_app_icon = $sourceAppIcon WHERE id = $id;";
-        command.Parameters.AddWithValue("$id", clipId);
-        command.Parameters.AddWithValue("$sourceAppIcon", iconBytes);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        using (var transaction = connection.BeginTransaction())
+        {
+            await WritePayloadAsync(connection, transaction, clipId, contentBytes: null, iconBytes, cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "UPDATE clips SET source_app_icon_hash = $hash WHERE id = $id;";
+            command.Parameters.AddWithValue("$id", clipId);
+            command.Parameters.AddWithValue("$hash", Clipthrough.Database.DatabaseInitializer.AppIconHash(iconBytes));
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
 
         return await GetClipByIdAsync(connection, clipId, cancellationToken);
     }
@@ -520,7 +532,7 @@ public sealed class ClipStoreService : IClipStoreService
         {
             var totalClips = await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips;", cancellationToken);
             var sensitiveClips = await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips WHERE is_sensitive = 1;", cancellationToken);
-            var storedBytes = await ExecuteScalarLongAsync(connection, $"SELECT COALESCE(SUM({StoredRowBytes}), 0) FROM clips;", cancellationToken);
+            var storedBytes = await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken);
             var lastCapturedAtStr = await ExecuteScalarStringAsync(connection, "SELECT MAX(COALESCE(last_copied_at, captured_at)) FROM clips;", cancellationToken);
 
             // Only publish if no concurrent invalidation happened during the queries.
@@ -710,7 +722,7 @@ public sealed class ClipStoreService : IClipStoreService
             SET ocr_status = 'running'
             WHERE id = $id
               AND content_type = 'image'
-              AND content_bytes IS NOT NULL
+              AND EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id)
               AND (ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'failed' OR ocr_status = 'rerun');
             """;
         command.Parameters.AddWithValue("$id", clipId);
@@ -802,7 +814,7 @@ public sealed class ClipStoreService : IClipStoreService
         command.CommandText = """
             SELECT id FROM clips
             WHERE content_type = 'image'
-              AND content_bytes IS NOT NULL
+              AND EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id)
               AND (ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'failed' OR ocr_status = 'rerun')
             ORDER BY COALESCE(last_copied_at, captured_at) DESC
             LIMIT 500;
@@ -841,7 +853,7 @@ public sealed class ClipStoreService : IClipStoreService
             COALESCE(SUM(CASE WHEN ocr_status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_count
         FROM clips
         WHERE content_type = 'image'
-          AND content_bytes IS NOT NULL;
+          AND EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id);
         """;
 
     public Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default)
@@ -884,7 +896,7 @@ public sealed class ClipStoreService : IClipStoreService
             SET ocr_status = 'rerun'
             WHERE id = $id
               AND content_type = 'image'
-              AND content_bytes IS NOT NULL
+              AND EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id)
               AND ocr_status = 'succeeded';
             """;
         command.Parameters.AddWithValue("$id", clipId);
@@ -905,7 +917,7 @@ public sealed class ClipStoreService : IClipStoreService
             UPDATE clips
             SET ocr_status = 'rerun'
             WHERE content_type = 'image'
-              AND content_bytes IS NOT NULL
+              AND EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id)
               AND ocr_status = 'succeeded'
             RETURNING id;
             """;
@@ -967,7 +979,7 @@ public sealed class ClipStoreService : IClipStoreService
 
         if (settings.EnableMaxLibrarySize)
         {
-            var totalStoredBytes = await ExecuteScalarLongAsync(connection, $"SELECT COALESCE(SUM({StoredRowBytes}), 0) FROM clips;", cancellationToken, transaction);
+            var totalStoredBytes = await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken, transaction);
             finalStoredBytes = totalStoredBytes;
             var maxBytes = settings.MaxLibrarySizeMegabytes * 1024L * 1024L;
             if (totalStoredBytes > maxBytes)
@@ -976,6 +988,16 @@ public sealed class ClipStoreService : IClipStoreService
                 removedClipIds.AddRange(deleted);
                 finalStoredBytes = remainingBytes;
                 finalClipCount -= deleted.Count;
+            }
+        }
+
+        if (removedClipIds.Count > 0)
+        {
+            // A removed clip may have been the last user of its icon (U-E1).
+            await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);
+            if (finalStoredBytes is not null)
+            {
+                finalStoredBytes = await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken, transaction);
             }
         }
 
@@ -993,7 +1015,7 @@ public sealed class ClipStoreService : IClipStoreService
         {
             PurgedClipCount = removedClipIds.Count,
             TotalClipCount = finalClipCount ?? await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips;", cancellationToken),
-            TotalStoredBytes = finalStoredBytes ?? await ExecuteScalarLongAsync(connection, $"SELECT COALESCE(SUM({StoredRowBytes}), 0) FROM clips;", cancellationToken),
+            TotalStoredBytes = finalStoredBytes ?? await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken),
         };
     }
 
@@ -1195,7 +1217,7 @@ public sealed class ClipStoreService : IClipStoreService
         await connection.OpenAsync(cancellationToken);
 
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT source_app_icon FROM clips WHERE id = $id LIMIT 1;";
+        command.CommandText = "SELECT i.png FROM clips c JOIN app_icons i ON i.hash = c.source_app_icon_hash WHERE c.id = $id LIMIT 1;";
         command.Parameters.AddWithValue("$id", clipId);
 
         var value = await command.ExecuteScalarAsync(cancellationToken);
@@ -1330,11 +1352,10 @@ public sealed class ClipStoreService : IClipStoreService
                         updateCommand.CommandText = """
                             UPDATE clips
                             SET content = CASE WHEN $content IS NULL OR TRIM($content) = '' THEN content ELSE $content END,
-                                content_bytes = CASE WHEN $contentBytes IS NULL THEN content_bytes ELSE $contentBytes END,
-                                content_format = $contentFormat,
+                                                                content_format = $contentFormat,
                                 source_app = CASE WHEN $sourceApp IS NULL OR TRIM($sourceApp) = '' THEN source_app ELSE $sourceApp END,
                                 source_app_path = CASE WHEN $sourceAppPath IS NULL OR TRIM($sourceAppPath) = '' THEN source_app_path ELSE $sourceAppPath END,
-                                source_app_icon = CASE WHEN $sourceAppIcon IS NULL THEN source_app_icon ELSE $sourceAppIcon END,
+                                source_app_icon_hash = COALESCE($sourceAppIconHash, source_app_icon_hash),
                                 source_window_title = CASE WHEN $sourceWindowTitle IS NULL OR TRIM($sourceWindowTitle) = '' THEN source_window_title ELSE $sourceWindowTitle END,
                                 source_url = CASE WHEN $sourceUrl IS NULL OR TRIM($sourceUrl) = '' THEN source_url ELSE $sourceUrl END,
                                 is_favorite = CASE WHEN is_favorite = 1 OR $isFavorite = 1 THEN 1 ELSE 0 END,
@@ -1351,6 +1372,7 @@ public sealed class ClipStoreService : IClipStoreService
                             """;
                         AddUpsertParameters(updateCommand, request, contentText, hash, matches.Count > 0, capturedAt, byteSize, clipId);
                         await updateCommand.ExecuteNonQueryAsync(cancellationToken);
+                        await WritePayloadAsync(connection, transaction, clipId, request.ContentBytes, request.SourceAppIconBytes, cancellationToken);
                         imported++;
                     }
                     else
@@ -1364,15 +1386,15 @@ public sealed class ClipStoreService : IClipStoreService
                 insertCommand.Transaction = transaction;
                 insertCommand.CommandText = """
                     INSERT INTO clips (
-                        content, content_bytes, content_type, content_format,
-                        source_app, source_app_path, source_app_icon, source_window_title, source_url,
+                        content, content_type, content_format,
+                        source_app, source_app_path, source_app_icon_hash, source_window_title, source_url,
                         hash, is_favorite, is_sensitive, captured_at, copy_count,
                         first_copied_at, last_copied_at, byte_size,
                         image_width, image_height, source_clip_id, transform_kind, import_kind,
                         sensitivity_scanned_at)
                     VALUES (
-                        $content, $contentBytes, $contentType, $contentFormat,
-                        $sourceApp, $sourceAppPath, $sourceAppIcon, $sourceWindowTitle, $sourceUrl,
+                        $content, $contentType, $contentFormat,
+                        $sourceApp, $sourceAppPath, $sourceAppIconHash, $sourceWindowTitle, $sourceUrl,
                         $hash, $isFavorite, $isSensitive, $capturedAt, 1,
                         $capturedAt, $capturedAt, $byteSize,
                         $imageWidth, $imageHeight, $sourceClipId, $transformKind, $importKind,
@@ -1381,6 +1403,7 @@ public sealed class ClipStoreService : IClipStoreService
                     """;
                 AddUpsertParameters(insertCommand, request, contentText, hash, matches.Count > 0, capturedAt, byteSize);
                 clipId = (long)(await insertCommand.ExecuteScalarAsync(cancellationToken) ?? 0L);
+                await WritePayloadAsync(connection, transaction, clipId, request.ContentBytes, request.SourceAppIconBytes, cancellationToken);
             }
 
             await AddSensitivityMatchesAsync(connection, transaction, clipId, matches, cancellationToken);
@@ -1428,11 +1451,10 @@ public sealed class ClipStoreService : IClipStoreService
                     updateCommand.CommandText = """
                         UPDATE clips
                         SET content = CASE WHEN $content IS NULL OR TRIM($content) = '' THEN content ELSE $content END,
-                            content_bytes = CASE WHEN $contentBytes IS NULL THEN content_bytes ELSE $contentBytes END,
-                            content_format = $contentFormat,
+                                                        content_format = $contentFormat,
                             source_app = CASE WHEN $sourceApp IS NULL OR TRIM($sourceApp) = '' THEN source_app ELSE $sourceApp END,
                             source_app_path = CASE WHEN $sourceAppPath IS NULL OR TRIM($sourceAppPath) = '' THEN source_app_path ELSE $sourceAppPath END,
-                            source_app_icon = CASE WHEN $sourceAppIcon IS NULL THEN source_app_icon ELSE $sourceAppIcon END,
+                            source_app_icon_hash = COALESCE($sourceAppIconHash, source_app_icon_hash),
                             source_window_title = CASE WHEN $sourceWindowTitle IS NULL OR TRIM($sourceWindowTitle) = '' THEN source_window_title ELSE $sourceWindowTitle END,
                             source_url = CASE WHEN $sourceUrl IS NULL OR TRIM($sourceUrl) = '' THEN source_url ELSE $sourceUrl END,
                             is_favorite = CASE WHEN is_favorite = 1 OR $isFavorite = 1 THEN 1 ELSE 0 END,
@@ -1450,6 +1472,7 @@ public sealed class ClipStoreService : IClipStoreService
                     AddUpsertParameters(updateCommand, request, contentText, hash, matches.Count > 0, capturedAt, byteSize, clipId);
                     updateCommand.Parameters.AddWithValue("$sensitivityScannedAt", scanSensitivity ? capturedAt : (object)DBNull.Value);
                     await updateCommand.ExecuteNonQueryAsync(cancellationToken);
+                    await WritePayloadAsync(connection, transaction, clipId, request.ContentBytes, request.SourceAppIconBytes, cancellationToken);
                 }
             }
             else
@@ -1459,12 +1482,11 @@ public sealed class ClipStoreService : IClipStoreService
                 insertCommand.CommandText = """
                     INSERT INTO clips (
                         content,
-                        content_bytes,
                         content_type,
                         content_format,
                         source_app,
                         source_app_path,
-                        source_app_icon,
+                        source_app_icon_hash,
                         source_window_title,
                         source_url,
                         hash,
@@ -1483,12 +1505,11 @@ public sealed class ClipStoreService : IClipStoreService
                         sensitivity_scanned_at)
                     VALUES (
                         $content,
-                        $contentBytes,
                         $contentType,
                         $contentFormat,
                         $sourceApp,
                         $sourceAppPath,
-                        $sourceAppIcon,
+                        $sourceAppIconHash,
                         $sourceWindowTitle,
                         $sourceUrl,
                         $hash,
@@ -1510,6 +1531,7 @@ public sealed class ClipStoreService : IClipStoreService
                 AddUpsertParameters(insertCommand, request, contentText, hash, matches.Count > 0, capturedAt, byteSize);
                 insertCommand.Parameters.AddWithValue("$sensitivityScannedAt", scanSensitivity ? capturedAt : (object)DBNull.Value);
                 clipId = (long)(await insertCommand.ExecuteScalarAsync(cancellationToken) ?? 0L);
+                await WritePayloadAsync(connection, transaction, clipId, request.ContentBytes, request.SourceAppIconBytes, cancellationToken);
             }
         }
 
@@ -1632,7 +1654,7 @@ public sealed class ClipStoreService : IClipStoreService
             TotalMatchingCount = totalMatchingCount,
             TotalClipCount = _cachedTotalClipCount >= 0 ? _cachedTotalClipCount : await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips;", cancellationToken),
             SensitiveClipCount = _cachedSensitiveClipCount >= 0 ? _cachedSensitiveClipCount : await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips WHERE is_sensitive = 1;", cancellationToken),
-            TotalStoredBytes = _cachedTotalStoredBytes >= 0 ? _cachedTotalStoredBytes : await ExecuteScalarLongAsync(connection, $"SELECT COALESCE(SUM({StoredRowBytes}), 0) FROM clips;", cancellationToken),
+            TotalStoredBytes = _cachedTotalStoredBytes >= 0 ? _cachedTotalStoredBytes : await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken),
             LastCapturedAt = _cachedLastCapturedAt,
         };
     }
@@ -2451,6 +2473,47 @@ public sealed class ClipStoreService : IClipStoreService
     /// </summary>
     private const string StoredRowBytes = "stored_bytes";
 
+    /// <summary>
+    /// What the library occupies for the size cap: every clip's payload, plus each
+    /// distinct source-app icon once (U-E1, F-39). Icons used to be stored, and
+    /// counted, once per clip.
+    /// </summary>
+    private const string TotalStoredBytesSql =
+        "SELECT COALESCE((SELECT SUM(" + StoredRowBytes + ") FROM clips), 0) + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons), 0);";
+
+    /// <summary>
+    /// Writes what the clips row no longer holds inline (U-E1, F-06): the payload
+    /// into clip_payloads, and the icon - once per distinct PNG - into app_icons.
+    /// The row's source_app_icon_hash is set by the caller's own statement. Runs in
+    /// the caller's transaction, so a clip is never committed without its payload.
+    /// A null or empty argument leaves what is stored alone.
+    /// </summary>
+    private static async Task WritePayloadAsync(SqliteConnection connection, SqliteTransaction? transaction, long clipId, byte[]? contentBytes, byte[]? iconBytes, CancellationToken cancellationToken)
+    {
+        if (contentBytes is { Length: > 0 })
+        {
+            await using var payload = connection.CreateCommand();
+            payload.Transaction = transaction;
+            payload.CommandText = """
+                INSERT INTO clip_payloads (clip_id, content_bytes) VALUES ($id, $bytes)
+                ON CONFLICT(clip_id) DO UPDATE SET content_bytes = excluded.content_bytes;
+                """;
+            payload.Parameters.AddWithValue("$id", clipId);
+            payload.Parameters.AddWithValue("$bytes", contentBytes);
+            await payload.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        if (iconBytes is { Length: > 0 })
+        {
+            await using var icon = connection.CreateCommand();
+            icon.Transaction = transaction;
+            icon.CommandText = "INSERT OR IGNORE INTO app_icons (hash, png) VALUES ($hash, $png);";
+            icon.Parameters.AddWithValue("$hash", Clipthrough.Database.DatabaseInitializer.AppIconHash(iconBytes));
+            icon.Parameters.AddWithValue("$png", iconBytes);
+            await icon.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
     private static async Task<List<long>> DeleteOldestAsync(SqliteConnection connection, SqliteTransaction transaction, int deleteCount, CancellationToken cancellationToken)
     {
         if (deleteCount <= 0)
@@ -2541,7 +2604,7 @@ public sealed class ClipStoreService : IClipStoreService
         command.Parameters.AddWithValue("$contentFormat", request.ContentFormat.ToStorageValue());
         command.Parameters.AddWithValue("$sourceApp", string.IsNullOrWhiteSpace(request.SourceApp) ? DBNull.Value : request.SourceApp);
         command.Parameters.AddWithValue("$sourceAppPath", string.IsNullOrWhiteSpace(request.SourceAppPath) ? DBNull.Value : request.SourceAppPath);
-        command.Parameters.AddWithValue("$sourceAppIcon", request.SourceAppIconBytes is { Length: > 0 } iconBytes ? iconBytes : DBNull.Value);
+        command.Parameters.AddWithValue("$sourceAppIconHash", request.SourceAppIconBytes is { Length: > 0 } iconBytes ? Clipthrough.Database.DatabaseInitializer.AppIconHash(iconBytes) : DBNull.Value);
         command.Parameters.AddWithValue("$sourceWindowTitle", string.IsNullOrWhiteSpace(request.SourceWindowTitle) ? DBNull.Value : request.SourceWindowTitle);
         command.Parameters.AddWithValue("$sourceUrl", string.IsNullOrWhiteSpace(request.SourceUrl) ? DBNull.Value : request.SourceUrl);
         command.Parameters.AddWithValue("$hash", hash);

@@ -28,12 +28,12 @@ Use this when adding columns, indexes, queries, or full-text-search behavior. It
 | --------------------- | ------- | -------------------------------------------------------------- |
 | `id`                  | INTEGER | PK AUTOINCREMENT.                                              |
 | `content`             | TEXT    | UTF-8 text representation (also for OCR/AI inputs).            |
-| `content_bytes`       | BLOB    | Raw payload for images/files.                                  |
+| `content_bytes`       | BLOB    | Always NULL since U-E1: the payload is in `clip_payloads`. Kept because SQLite cannot reorder or cheaply drop it. |
 | `content_type`        | TEXT    | `Text` / `RichText` / `Image` / `Files`.                       |
 | `content_format`      | TEXT    | `text` / `html` / `rtf` / `image-png` / etc. Default `text`.   |
 | `source_app`          | TEXT    | Friendly app name.                                             |
 | `source_app_path`     | TEXT    | Resolved exe path (Windows).                                   |
-| `source_app_icon`     | BLOB    | PNG bytes for the app icon.                                    |
+| `source_app_icon`     | BLOB    | Always NULL since U-E1: icons are in `app_icons`.            |
 | `hash`                | TEXT    | NOT NULL — content hash used for dedup / paste tracking.       |
 | `is_favorite`         | INTEGER | 0/1.                                                           |
 | `is_sensitive`        | INTEGER | 0/1, set by `sensitivity_rules` matches.                       |
@@ -58,6 +58,7 @@ Use this when adding columns, indexes, queries, or full-text-search behavior. It
 | `transform_kind`      | TEXT    | `builtin:UpperCase`, `ai:Preset`, etc. Rows written before user scripting was removed may carry `script:Name`. |
 | `import_kind`         | TEXT    | NULL for clipboard captures; `"drag_drop"` for popup drag-and-drop imports. |
 | `embedding_status`    | TEXT    | `pending` / `done` / `failed`.                                 |
+| `source_app_icon_hash` | TEXT   | SHA-256 (hex) of the icon PNG, the key into `app_icons`. NULL when there is no icon. |
 
 ### Indexes
 
@@ -95,7 +96,7 @@ Measured at 20k clips, Alphabetical went 118 ms (no new indexes) -> 206 ms
 
 - `idx_clips_default_order` — `(pinned_at IS NULL, pinned_at DESC, COALESCE(last_copied_at, captured_at) DESC, id DESC)`. **The primary list-view ordering**; serves `MostRecent` and `BestMatching`.
 - `idx_clips_sensitivity_pending` — `(id) WHERE sensitivity_scanned_at IS NULL`. Startup sensitivity recovery (`ClipStoreService.PendingSensitivitySql`) reads only unscanned rows (F-25).
-- `idx_clips_ocr_images` — `(content_type, ocr_status) WHERE content_type = 'image' AND content_bytes IS NOT NULL`. OCR coverage (`OcrCoverageSql`) reads image rows only, and `ocr_status` from the index rather than after the payload (F-25). The partial `WHERE` must stay identical to the query's terms or SQLite will not use it.
+- `idx_clips_ocr_images` — `(content_type, ocr_status) WHERE content_type = 'image'`; the queries check for a payload with an `EXISTS` on `clip_payloads`' primary key (U-E1). OCR coverage (`OcrCoverageSql`) reads image rows only, and `ocr_status` from the index rather than after the payload (F-25). The partial `WHERE` must stay identical to the query's terms or SQLite will not use it.
 - `idx_clips_type_default_order` — `(content_type, pinned_at IS NULL, pinned_at DESC, COALESCE(last_copied_at, captured_at) DESC, id DESC)`. Serves the type dropdown with `MostRecent` and nothing typed (F-09). With a type filter the other sorts also start here and sort the remainder; benchmark them (PerfProbes P1) rather than assume.
 - `idx_clips_oldest_order` — same, ASC. Serves `OldestFirst`.
 - `idx_clips_paste_order` — `(..., paste_count DESC, id DESC)`. Serves `MostPasted`.
@@ -147,6 +148,14 @@ If you add a column you want searchable, you must:
 1. Add it to the FTS5 column list.
 2. Update all three triggers.
 3. Rebuild FTS for existing rows (`INSERT INTO clips_fts(clips_fts) VALUES('rebuild');`) inside a forward migration.
+
+### `clip_payloads` and `app_icons` (U-E1)
+
+- `clip_payloads(clip_id INTEGER PRIMARY KEY REFERENCES clips(id) ON DELETE CASCADE, content_bytes BLOB)` — the raw payload, out of the `clips` row so metadata reads never walk a blob's overflow chain (F-06). Read through a correlated subquery in `ClipSelectColumns`; written by `ClipStoreService.WritePayloadAsync` in the same transaction as the row. Trigger `clips_payload_ad` also deletes it, so a payload cannot outlive its clip on a connection with foreign keys off.
+- `app_icons(hash TEXT PRIMARY KEY, png BLOB NOT NULL)` — one row per distinct icon (F-39). Orphans are deleted at startup and after evictions.
+- `idx_clips_source_app_icon_hash` — partial, non-null only; finds orphaned icons.
+- The size cap counts each row's `stored_bytes` (now just `byte_size`) plus every distinct icon once: `TotalStoredBytesSql`.
+- Existing libraries move in `DatabaseInitializer.MovePayloadsOutOfClipsAsync`: id-ordered batches, one transaction each, progress in `app_metadata.payload_move_last_id`, resumable after a crash.
 
 ### Other tables
 

@@ -168,7 +168,7 @@ public sealed class PerfProbes
         Log($"  matches 'invoice' = {await ScalarAsync(lib, "SELECT COUNT(*) FROM clips_fts WHERE clips_fts MATCH '\"invoice\"';")}");
         Log($"  matches 'invoice' AND 'meeting' = {await ScalarAsync(lib, "SELECT COUNT(*) FROM clips_fts WHERE clips_fts MATCH '\"invoice\" AND \"meeting\"';")}");
         Log($"  text rows = {await ScalarAsync(lib, "SELECT COUNT(*) FROM clips WHERE content_type='text';")}");
-        Log($"  sum stored_bytes MB = {await ScalarAsync(lib, "SELECT SUM(stored_bytes)/1048576 FROM clips;")}  sum length(content_bytes) MB = {await ScalarAsync(lib, "SELECT SUM(length(content_bytes))/1048576 FROM clips;")}  sum icon MB = {await ScalarAsync(lib, "SELECT SUM(length(source_app_icon))/1048576 FROM clips;")}");
+        Log($"  sum stored_bytes MB = {await ScalarAsync(lib, "SELECT SUM(stored_bytes)/1048576 FROM clips;")}  sum length(content_bytes) MB = {await ScalarAsync(lib, "SELECT SUM(length(content_bytes))/1048576 FROM clip_payloads;")}  sum icon MB = {await ScalarAsync(lib, "SELECT COALESCE(SUM(length(png)), 0)/1048576 FROM app_icons;")}");
         Log($"  page_size={await ScalarAsync(lib, "PRAGMA page_size;")} cache_size={await ScalarAsync(lib, "PRAGMA cache_size;")} auto_vacuum={await ScalarAsync(lib, "PRAGMA auto_vacuum;")}");
         const string elig = """
             is_sensitive = 0
@@ -187,7 +187,7 @@ public sealed class PerfProbes
             ORDER BY COALESCE(last_copied_at, captured_at) DESC
             LIMIT $limit;
             """, cmd => { cmd.Parameters.AddWithValue("$limit", 32); cmd.Parameters.AddWithValue("$maxAttempts", 3); });
-        await Plan("ocr coverage", "SELECT COUNT(*), SUM(CASE WHEN ocr_status = 'succeeded' THEN 1 ELSE 0 END) FROM clips WHERE content_type = 'image' AND content_bytes IS NOT NULL;", _ => { });
+        await Plan("ocr coverage", "SELECT COUNT(*), SUM(CASE WHEN ocr_status = 'succeeded' THEN 1 ELSE 0 END) FROM clips WHERE content_type = 'image' AND EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id);", _ => { });
         await Plan("pending sensitivity", "SELECT id FROM clips WHERE sensitivity_scanned_at IS NULL ORDER BY id;", _ => { });
         await Plan("retention lifetime delete probe", "SELECT id FROM clips WHERE is_sensitive = 0 AND last_copied_at < '2020' AND NOT (is_favorite = 1 OR pinned_at IS NOT NULL);", _ => { });
     }

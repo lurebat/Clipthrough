@@ -17,7 +17,8 @@ namespace Clipthrough.Tests.Benchmarks;
 /// Seeds (once) a realistic heavy-user library on disk and hands out services bound to it.
 /// Shape at the default 1 GB library cap: 60k clips, 700 images of 0.4-1.8 MB, text mostly
 /// short with a long tail (1% 5-100 KB, 60 clips 0.5-2 MB), source-app icon on 90% of rows.
-/// Text clips carry content_bytes = UTF-8(content), as production capture does.
+/// Text clips carry content_bytes = UTF-8(content), as production capture does. Rows are
+/// seeded in the pre-U-E1 inline layout and then migrated by the real initializer.
 /// </summary>
 internal sealed class PerfLibrary
 {
@@ -64,7 +65,7 @@ internal sealed class PerfLibrary
             await lib.Initializer.InitializeAsync();
             var sw = Stopwatch.StartNew();
             await SeedAsync(lib, clips, images);
-            File.WriteAllText(marker, $"seeded in {sw.ElapsedMilliseconds} ms");
+            File.WriteAllText(marker, $"seeded in {sw.ElapsedMilliseconds} ms, of which the U-E1 payload migration {MigrationMilliseconds} ms");
         }
         else
         {
@@ -213,8 +214,25 @@ internal sealed class PerfLibrary
             await tx.CommitAsync();
         }
 
+        // The rows above are written in the layout every installed library has
+        // before U-E1 - payload and icon inline - and then migrated by the real
+        // code, so the fixture is what an upgraded library looks like and the
+        // seed log carries the migration's cost at this size.
+        await using (var rewind = connection.CreateCommand())
+        {
+            rewind.CommandText = "UPDATE app_metadata SET value = '8' WHERE key = 'schema_version';";
+            await rewind.ExecuteNonQueryAsync();
+        }
+
+        var migration = Stopwatch.StartNew();
+        await lib.Initializer.InitializeAsync();
+        MigrationMilliseconds = migration.ElapsedMilliseconds;
+
         await using var cp = connection.CreateCommand();
         cp.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
         await cp.ExecuteNonQueryAsync();
     }
+
+    /// <summary>How long the U-E1 payload migration took on the last seed, or -1.</summary>
+    public static long MigrationMilliseconds { get; private set; } = -1;
 }
