@@ -104,7 +104,7 @@ public sealed class PerfProbes
         async Task Run(string label, ClipSearchFilters f)
         {
             var r = await Measure(label, () => store.SearchAsync(f));
-            Log($"    -> items={r.Items.Count} total={r.TotalMatchingCount} contentChars={r.Items.Sum(i => (long)i.Content.Length)}");
+            Log($"    -> items={r.Items.Count} total={r.TotalMatchingCount} contentChars={r.Items.Sum(i => (long)i.ContentPrefix.Length)} truncated={r.Items.Count(i => i.IsContentTruncated)}");
         }
 
         await Run("blank MostRecent", new ClipSearchFilters());
