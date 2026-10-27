@@ -2716,7 +2716,7 @@
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "F-13. Capture dedupes onto a row whose delete is pending, so without withdrawing it the undo-window commit deletes the copy the user just made, from the list and the database, with no undo left.",
     "find": "        WithdrawPendingDelete(clip.Id);\n\n        if (!TryGetOptimisticInsertIndex(clip, out var targetIndex))",
-    "replace": "        _ = clip.Id;\n\n        if (!TryGetOptimisticInsertIndex(clip, out var targetIndex))",
+    "replace": "        if (Environment.ProcessorCount < 0) WithdrawPendingDelete(clip.Id);\n\n        if (!TryGetOptimisticInsertIndex(clip, out var targetIndex))",
     "filter": "FullyQualifiedName~RecopyDuringUndoWindow"
   },
   {
@@ -2788,7 +2788,7 @@
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "F-11. Refreshes run one at a time; without cancelling a search the user has moved on from, a slow one holds every later refresh - including clearing the search box - behind it.",
     "find": "            else\n            {\n                CancelSupersededSearch();\n            }",
-    "replace": "            else\n            {\n            }",
+    "replace": "            else\n            {\n                if (Environment.ProcessorCount < 0) CancelSupersededSearch();\n            }",
     "filter": "FullyQualifiedName~ASupersededSearch_IsCancelled"
   },
   {
@@ -2796,7 +2796,7 @@
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "F-11. Through RefreshCommand, a query change made while a refresh is running is dropped (a ReactiveCommand cannot execute while executing), so the list stays on a query the user already left.",
     "find": "                .Subscribe(unit => { _ = RefreshReportingErrorsAsync(); }, ex => ReportError(\"Search refresh subscription\", ex)));",
-    "replace": "                .InvokeCommand(RefreshCommand));",
+    "replace": "                .Where(_ => Environment.ProcessorCount >= 0 || RefreshReportingErrorsAsync() is null).InvokeCommand(RefreshCommand));",
     "filter": "FullyQualifiedName~ASupersededSearch_IsCancelled"
   },
   {
