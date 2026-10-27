@@ -104,7 +104,7 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     private ReactiveCommand<Unit, Unit>? _exportCommand;
     private ReactiveCommand<Unit, Unit>? _togglePinCommand;
     private ReactiveCommand<TextTransformation, Unit>? _applyTextTransformationCommand;
-    private bool _contentHydrationStarted;
+    private Task<bool>? _hydration;
     private bool _sourceAppIconRequested;
 
     /// <summary>
@@ -258,7 +258,7 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     public string Title => _title;
 
-    public string Preview => Clip.Content;
+    public string Preview => Clip.ContentPrefix;
 
     public string PreviewSnippet => _previewSnippet;
 
@@ -341,7 +341,19 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         return segments;
     }
 
+    /// <summary>
+    /// The clip's raw content for anything that acts on it: copy, export, transform.
+    /// Throws on a list row that carries only a prefix of its text - await
+    /// <see cref="EnsureContentHydratedAsync"/> first. The preview reads
+    /// <see cref="DisplayContent"/>.
+    /// </summary>
     public string FullContent => _fullContent ??= ClipDisplayFormatter.GetRawContentDisplay(Clip);
+
+    /// <summary>
+    /// What the preview shows: <see cref="FullContent"/>, or the row's prefix while a
+    /// truncated row waits for hydration (F-10). Never copy or transform this.
+    /// </summary>
+    public string DisplayContent => Clip.IsContentTruncated ? Clip.ContentPrefix : FullContent;
 
     public string DisplayContentType => Clip.ContentType.ToDisplayName();
 
@@ -364,12 +376,12 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     public bool CanTransform =>
         (IsTextClip || Clip.ContentType == ContentType.Files)
-        && !string.IsNullOrEmpty(Clip.Content);
+        && !string.IsNullOrEmpty(Clip.ContentPrefix);
 
     // For image clips, ContentBytes may be null on metadata-only list reads (U12); use
     // ContentType to decide availability — full bytes load when the clip is opened. (U12)
     public bool CanAiTransform =>
-        ((IsTextClip || Clip.ContentType == ContentType.Files) && !string.IsNullOrEmpty(Clip.Content))
+        ((IsTextClip || Clip.ContentType == ContentType.Files) && !string.IsNullOrEmpty(Clip.ContentPrefix))
         || IsImageClip;
 
     public string CopyCountDisplay => AppText.FormatCopyCount(Clip.CopyCount);
@@ -580,29 +592,31 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// List/search reads omit the image BLOB (U12). When this clip is shown as a
-    /// thumbnail or selected, lazily reload the full entry by id so the bytes are
-    /// present for rendering, edit, export, drag, and AI-image. No-op once started or
-    /// when the entry already carries its bytes. The source-app icon has its own,
+    /// Loads the full row when this clip needs it, and reports whether anything
+    /// was hydrated so callers can skip work that only matters if it was. List and
+    /// search reads withhold three things: the image bytes and the HTML/RTF markup
+    /// (both in content_bytes, U12), and any text past the first
+    /// <see cref="ClipEntry.ListContentLength"/> characters (F-10). A row missing
+    /// none of them returns false immediately. The source-app icon has its own,
     /// much cheaper loader - see <see cref="EnsureSourceAppIconAsync"/>.
     /// </summary>
-    /// <summary>
-    /// Loads the full row when this clip needs it, and reports whether anything
-    /// was actually hydrated so callers can skip work that only matters if it was.
-    /// </summary>
     /// <remarks>
-    /// Only image clips ever need this - list reads omit image blobs (U12) and
-    /// nothing else is withheld - so for text and rich text it returns false
-    /// immediately. The caller in MainWindowViewModel used to rebuild the whole
-    /// preview afterwards regardless, so every selection change rendered the clip
-    /// twice and the second render could not differ from the first.
+    /// Callers that arrive while a hydration is running await the same one. Copy
+    /// used to get <c>false</c> back immediately while selection's hydration was
+    /// still in flight, and then read the row as it was.
     /// </remarks>
-    public async Task<bool> EnsureContentHydratedAsync()
+    public Task<bool> EnsureContentHydratedAsync()
     {
-        if (_contentHydrator is null || _contentHydrationStarted || _isDisposed)
+        if (_contentHydrator is null || _isDisposed)
         {
-            return false;
+            return Task.FromResult(false);
         }
+
+        if (_hydration is { IsCompleted: false } running)
+        {
+            return running;
+        }
+
         // List and search queries select NULL for content_bytes to avoid
         // materialising blobs per row, so a row arrives without them. That was
         // treated as an image-only concern, but rich text keeps its HTML/RTF in
@@ -614,14 +628,19 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         var needsBytes = Clip.ContentBytes is null
             && (Clip.ContentType == ContentType.Image
                 || Clip.ContentFormat is ClipContentFormat.Html or ClipContentFormat.Rtf);
-        if (!needsBytes)
+        if (!needsBytes && !Clip.IsContentTruncated)
         {
-            return false;
+            return Task.FromResult(false);
         }
-        _contentHydrationStarted = true;
+
+        return _hydration = HydrateAsync();
+    }
+
+    private async Task<bool> HydrateAsync()
+    {
         try
         {
-            var full = await _contentHydrator(Clip.Id).ConfigureAwait(false);
+            var full = await _contentHydrator!(Clip.Id).ConfigureAwait(false);
             if (full is null || _isDisposed)
             {
                 return false;
@@ -634,6 +653,7 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
                 }
 
                 Clip = full;
+                _fullContent = null;
                 _previewThumbnailLoaded = false;
                 this.RaisePropertyChanged(nameof(PreviewThumbnailImage));
                 _fullImageLoaded = false;
@@ -642,12 +662,11 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
-            _contentHydrationStarted = false; // allow a later retry
             System.Diagnostics.Trace.TraceWarning($"Clip {Clip.Id} content hydration failed: {ex.Message}");
             return false;
         }
 
-        return true;
+        return !_isDisposed;
     }
 
     // ContentBytes may be null on metadata-only list reads (U12); test ContentType only so the

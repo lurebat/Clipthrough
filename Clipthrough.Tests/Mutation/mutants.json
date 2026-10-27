@@ -2299,7 +2299,7 @@
     "id": "an-image-clip-never-re-presents-after-hydrating",
     "why": "Hydration is the only thing that gives an image clip its bytes, and the preview is built before it finishes. Returning false unconditionally means the pane never rebuilds, so a selected image stays blank until something unrelated refreshes it. This is the risk taken by skipping the re-present for clips that did not hydrate.",
     "file": "Clipthrough/ViewModels/ClipItemViewModel.cs",
-    "find": "        return true;\n    }\n\n    // ContentBytes may be null on metadata-only list reads (U12); test ContentType only so the",
+    "find": "        return !_isDisposed;\n    }\n\n    // ContentBytes may be null on metadata-only list reads (U12); test ContentType only so the",
     "replace": "        return false;\n    }\n\n    // ContentBytes may be null on metadata-only list reads (U12); test ContentType only so the",
     "filter": "FullyQualifiedName~ClipHydrationTests"
   },
@@ -2822,5 +2822,69 @@
     "find": "            if (ids[i] == Tombstone)\n            {\n                continue;\n            }\n\n            selector.Offer(ids[i], Dot(vectors.Slice(i * dim, dim), queryVector));\n",
     "replace": "            selector.Offer(ids[i], Dot(vectors.Slice(i * dim, dim), queryVector));\n",
     "filter": "FullyQualifiedName~SemanticSearchServiceTests.RemovingAClip_KeepsTheSameVectorArray"
+  },
+  {
+    "id": "list-read-unbounded",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-10 / U-D5. A list page carried every clip's whole text: a 2 MB log cost its string and UTF-16 copy per row, per refresh.",
+    "find": "            substr(c.content, 1, 4096),\n",
+    "replace": "            c.content,\n",
+    "filter": "FullyQualifiedName~BoundedListTextTests.ALongClipsListRow"
+  },
+  {
+    "id": "search-scan-matches-the-row-prefix",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-10 / U-D5 owner condition: search and filter must match the full text, not the prefix a row carries. The in-memory engines read the row to decide.",
+    "find": "    private const int SearchOrdinalContent = 31; // the full text, ClipScanSelectColumns only",
+    "replace": "    private const int SearchOrdinalContent = 1; // the full text, ClipScanSelectColumns only",
+    "filter": "FullyQualifiedName~BoundedListTextTests.ATermPastTheBound"
+  },
+  {
+    "id": "list-row-truncation-not-flagged",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-10. An unflagged prefix reads as the whole clip: copy, export and transform would silently hand over part of it.",
+    "find": "            IsContentTruncated = reader.GetInt64(30) == 1,",
+    "replace": "            IsContentTruncated = reader.GetInt64(30) == 2,",
+    "filter": "FullyQualifiedName~BoundedListTextTests.ALongClipsListRow"
+  },
+  {
+    "id": "plain-text-copy-skips-hydration",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-10. Copy as plain text read Clip.Content straight off the list row.",
+    "find": "            await clip.EnsureContentHydratedAsync();\n\n            // Clip.Content, not FullContent.",
+    "replace": "            await Task.CompletedTask;\n\n            // Clip.Content, not FullContent.",
+    "filter": "FullyQualifiedName~CopyingALongListRowAsPlainText_CopiesAllOfIt"
+  },
+  {
+    "id": "transform-skips-hydration",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-10. A transform saves its result as a new clip; started from a prefix it would save a clip missing everything after it.",
+    "find": "        await clip.EnsureContentHydratedAsync();\n        if (clip.Clip.ContentType != ContentType.Files)",
+    "replace": "        await Task.CompletedTask;\n        if (clip.Clip.ContentType != ContentType.Files)",
+    "filter": "FullyQualifiedName~TransformingALongListRow_TransformsAllOfIt"
+  },
+  {
+    "id": "export-skips-hydration",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-10. Export writes the clip to a file the user keeps; from a list row it must not be a prefix.",
+    "find": "        await SelectedClip.EnsureContentHydratedAsync();\n        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);\n        _clipboardMonitorService.SuppressNext();",
+    "replace": "        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);\n        _clipboardMonitorService.SuppressNext();",
+    "filter": "FullyQualifiedName~ExportingALongListRow_ExportsAllOfIt"
+  },
+  {
+    "id": "hydration-not-shared-with-a-second-caller",
+    "file": "Clipthrough/ViewModels/ClipItemViewModel.cs",
+    "why": "Copy runs while selection's hydration is in flight; answering it \"nothing to do\" made it read the row as it stood.",
+    "find": "        if (_hydration is { IsCompleted: false } running)",
+    "replace": "        if (_hydration is { IsCompleted: false } running && running.IsFaulted)",
+    "filter": "FullyQualifiedName~ASecondCaller_WaitsForTheHydrationAlreadyRunning"
+  },
+  {
+    "id": "prefix-row-is-editable",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-10. An edit is saved as a new clip; editing a row that holds a prefix would save a clip missing everything after it.",
+    "find": "        SelectedClip is { Clip.IsContentTruncated: false } selected",
+    "replace": "        SelectedClip is { } selected",
+    "filter": "FullyQualifiedName~SelectingALongListRow_ShowsThePrefixFirst"
   }
 ]

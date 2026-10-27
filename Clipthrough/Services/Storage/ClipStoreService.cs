@@ -60,10 +60,16 @@ public sealed class ClipStoreService : IClipStoreService
     /// every row. Column count and ordinal positions match <see cref="ClipSelectColumns"/>:
     /// index 2 is always <c>NULL</c> (ContentBytes), index 7 is a 0/1 presence flag
     /// (SourceAppIconAvailable). Use with <see cref="ReadClipMeta"/>.  (U12)
+    ///
+    /// The text is bounded too (F-10): index 1 holds at most the first 4096
+    /// characters (<see cref="ClipEntry.ListContentLength"/>) and index 30 says whether
+    /// there was more. A row shows a title and a snippet; carrying a 2 MB log into every
+    /// list page cost the UI that string and its UTF-16 copy per row. An entry read this
+    /// way throws on <see cref="ClipEntry.Content"/> until it is hydrated.
     /// </summary>
     private const string ClipListSelectColumns = """
             c.id,
-            c.content,
+            substr(c.content, 1, 4096),
             NULL,
             c.content_type,
             c.content_format,
@@ -91,19 +97,27 @@ public sealed class ClipStoreService : IClipStoreService
             c.ocr_error,
             c.source_clip_id,
             c.transform_kind,
-            c.import_kind
+            c.import_kind,
+            (COALESCE(length(c.content), 0) > 4096)
         """;
 
     /// <summary>
-    /// Ordinals of the five columns the search covers. They are deliberately identical in
-    /// <see cref="ClipSelectColumns"/> and <see cref="ClipListSelectColumns"/>. A scan
+    /// The list columns plus the full text, for the in-memory search scan: a match is
+    /// decided on the whole clip, never on the prefix a row carries (F-10).
+    /// </summary>
+    private const string ClipScanSelectColumns = ClipListSelectColumns + ", c.content";
+
+    /// <summary>
+    /// Ordinals of the five columns the search covers, in <see cref="ClipScanSelectColumns"/>:
+    /// the four metadata ordinals match <see cref="ClipSelectColumns"/>, and content is the
+    /// full text appended at the end rather than the bounded index 1. A scan
     /// reads only these to decide whether a row matches and materializes the rest of the
     /// entry only if it does: building a thirty-column <see cref="ClipEntry"/> - five
     /// timestamp parses included - for a row about to be discarded was roughly 70% of the
     /// cost of a non-FTS search.
     /// Guarded by ClipListSelectColumns_ExposeTheSearchedColumnsAtTheExpectedOrdinals.
     /// </summary>
-    private const int SearchOrdinalContent = 1;
+    private const int SearchOrdinalContent = 31; // the full text, ClipScanSelectColumns only
     private const int SearchOrdinalSourceApp = 5;
     private const int SearchOrdinalSourceWindowTitle = 17;
     private const int SearchOrdinalSourceUrl = 18;
@@ -1572,7 +1586,7 @@ public sealed class ClipStoreService : IClipStoreService
             // silently stopped working the moment the user ticked Regex or Case
             // (which is what diverts us here in the first place).
             queryCommand.CommandText = $"""
-                SELECT {ClipListSelectColumns}
+                SELECT {ClipScanSelectColumns}
                 FROM clips c
                 {whereClause}
                 {BuildOrderClause(filters.SortOption)};
@@ -2169,6 +2183,7 @@ public sealed class ClipStoreService : IClipStoreService
             SourceClipId = reader.IsDBNull(27) ? null : reader.GetInt64(27),
             TransformKind = reader.IsDBNull(28) ? null : reader.GetString(28),
             ImportKind = reader.IsDBNull(29) ? null : reader.GetString(29),
+            IsContentTruncated = reader.GetInt64(30) == 1,
         };
     }
 

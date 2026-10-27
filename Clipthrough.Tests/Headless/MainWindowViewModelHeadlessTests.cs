@@ -24,7 +24,7 @@ using Xunit;
 
 namespace Clipthrough.Tests.Headless;
 
-public sealed class MainWindowViewModelHeadlessTests
+public sealed partial class MainWindowViewModelHeadlessTests
 {
     [AvaloniaFact]
     public async Task CapturedClipRefresh_SelectsNewestClip()

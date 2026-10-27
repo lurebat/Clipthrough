@@ -43,7 +43,7 @@ public static partial class ClipDisplayFormatter
             return BuildDisplayStrings(GetDisplayRichText(clip), ContentType.Text);
         }
 
-        return BuildDisplayStrings(clip.Content, clip.ContentType);
+        return BuildDisplayStrings(clip.ContentPrefix, clip.ContentType);
     }
 
     /// <summary>
@@ -51,7 +51,7 @@ public static partial class ClipDisplayFormatter
     /// characters, but formatting split and collapsed the whole text on the UI
     /// thread: 40 ms and 20.7 MB for a 1.9 MB log, per row.
     /// </summary>
-    internal const int DisplayPrefixLength = 4096;
+    internal const int DisplayPrefixLength = ClipEntry.ListContentLength;
 
     private static ClipDisplayStrings BuildDisplayStrings(string content, ContentType contentType)
     {
@@ -159,6 +159,10 @@ public static partial class ClipDisplayFormatter
             : collapsed.Length <= 88 ? collapsed : $"{collapsed[..85]}...";
     }
 
+    /// <summary>
+    /// The rendered preview of a clip. Display only: for a list row that carries
+    /// a prefix of its text (F-10) it renders that prefix until the row is hydrated.
+    /// </summary>
     public static string BuildRenderedText(ClipEntry? clip, IReadOnlyList<string> fileItems)
     {
         if (clip is null)
@@ -166,7 +170,7 @@ public static partial class ClipDisplayFormatter
             return AppText.PreviewSelectContent;
         }
 
-        if (string.IsNullOrWhiteSpace(clip.Content))
+        if (string.IsNullOrWhiteSpace(clip.ContentPrefix))
         {
             return clip.ContentType switch
             {
@@ -181,9 +185,9 @@ public static partial class ClipDisplayFormatter
         {
             ContentType.RichText => GetDisplayRichText(clip),
             ContentType.Files => fileItems.Count == 0
-                ? NormalizePreviewText(clip.Content)
+                ? NormalizePreviewText(clip.ContentPrefix)
                 : AppText.FormatFileCount(fileItems.Count),
-            _ => NormalizePreviewText(clip.Content),
+            _ => NormalizePreviewText(clip.ContentPrefix),
         };
     }
 
@@ -275,12 +279,12 @@ public static partial class ClipDisplayFormatter
 
     public static string? TryGetPreferredImageLabel(ClipEntry? clip)
     {
-        if (clip?.ContentType != ContentType.Image || string.IsNullOrWhiteSpace(clip.Content))
+        if (clip?.ContentType != ContentType.Image || string.IsNullOrWhiteSpace(clip.ContentPrefix))
         {
             return null;
         }
 
-        var normalized = NormalizePreviewText(clip.Content);
+        var normalized = NormalizePreviewText(clip.ContentPrefix);
         if (string.IsNullOrWhiteSpace(normalized) || normalized == AppText.PreviewTextUnavailable)
         {
             return null;
@@ -410,9 +414,9 @@ public static partial class ClipDisplayFormatter
 
     private static string GetDisplayRichText(ClipEntry clip)
     {
-        if (!string.IsNullOrWhiteSpace(clip.Content) && !LooksLikeRawRichText(clip.Content))
+        if (!string.IsNullOrWhiteSpace(clip.ContentPrefix) && !LooksLikeRawRichText(clip.ContentPrefix))
         {
-            return NormalizePreviewText(clip.Content);
+            return NormalizePreviewText(clip.ContentPrefix);
         }
 
         var rawMarkup = GetRawMarkup(clip);
@@ -421,7 +425,7 @@ public static partial class ClipDisplayFormatter
             return RenderRichContent(rawMarkup);
         }
 
-        return RenderRichContent(clip.Content);
+        return RenderRichContent(clip.ContentPrefix);
     }
 
     private static bool LooksLikeRawRichText(string content) => LooksLikeCfHtml(content) || LooksLikeHtml(content) || LooksLikeRtf(content);
