@@ -2830,5 +2830,13 @@
     "find": "            builder.Password = options.DatabasePassword;\n",
     "replace": "            _ = options.DatabasePassword;\n",
     "filter": "FullyQualifiedName~SqlCipherFixtureCompatibilityTests"
+  },
+  {
+    "id": "secure-delete-not-enabled",
+    "file": "Clipthrough/Database/SqliteConnectionFactory.cs",
+    "why": "U-C4b / F-19. Without secure_delete a deleted or expired clip stays readable in a free page of a plaintext library, and in every copy of the file.",
+    "find": "                cmd.CommandText = \"PRAGMA busy_timeout = 5000; PRAGMA secure_delete = ON;\";",
+    "replace": "                cmd.CommandText = \"PRAGMA busy_timeout = 5000;\";",
+    "filter": "FullyQualifiedName~SecureDeleteTests"
   }
 ]
