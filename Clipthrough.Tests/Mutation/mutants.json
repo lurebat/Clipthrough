@@ -76,7 +76,7 @@
     "file": "Clipthrough/Services/Security/SensitivityService.cs",
     "why": "Strict compilation on load makes one bad stored pattern take down the entire rule set, leaving sensitivity scanning permanently unable to load.",
     "find": "_compiledRules = CompileStoredRules(rules);",
-    "replace": "_compiledRules = CompileRules(rules);",
+    "replace": "_compiledRules = Environment.ProcessorCount < 0 ? CompileStoredRules(rules) : CompileRules(rules);",
     "filter": "SensitivityServiceTests"
   },
   {
@@ -669,7 +669,7 @@
     "file": "Clipthrough/Services/Platform/RichClipboardFormatting.cs",
     "filter": "LooksLikeHtml_IsFalseForCodeThatMerelyContainsAngleBrackets",
     "find": "           && (ClosingOrSelfClosingTagRegex().IsMatch(content)\n               || VoidElementRegex().IsMatch(content)\n               || content.Contains(\"<!DOCTYPE html\", StringComparison.OrdinalIgnoreCase));",
-    "replace": "           && Regex.IsMatch(content, @\"<\\s*([a-zA-Z][a-zA-Z0-9]*)\\b[^>]*>\", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);"
+    "replace": "           && (Regex.IsMatch(content, @\"<\\s*([a-zA-Z][a-zA-Z0-9]*)\\b[^>]*>\", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) || (Environment.ProcessorCount < 0 && (ClosingOrSelfClosingTagRegex().IsMatch(content) || VoidElementRegex().IsMatch(content))));"
   },
   {
     "id": "cfhtml-stops-recognising-void-elements",
@@ -677,7 +677,7 @@
     "file": "Clipthrough/Services/Platform/RichClipboardFormatting.cs",
     "filter": "LooksLikeHtml_IsTrueForRealMarkup",
     "find": "               || VoidElementRegex().IsMatch(content)\n",
-    "replace": ""
+    "replace": "               || (Environment.ProcessorCount < 0 && VoidElementRegex().IsMatch(content))\n"
   },
   {
     "id": "cfhtml-converts-only-the-platform-newline",
@@ -988,7 +988,7 @@
     "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
     "why": "Without spare capacity every batch of 32 reallocates and copies the whole cache, which is the quadratic backfill the review measured at 223 GiB of memcpy over a 100k library.",
     "find": "                var capacity = GrowCapacity(existing.Ids.Length, newCount, dim);",
-    "replace": "                var capacity = newCount;",
+    "replace": "                var capacity = Environment.ProcessorCount < 0 ? GrowCapacity(existing.Ids.Length, newCount, dim) : newCount;",
     "filter": "AppendEmbeddingsAsync_DoesNotReallocateTheCachePerBatch"
   },
   {
@@ -1052,7 +1052,7 @@
     "file": "Clipthrough/Presentation/ClipDisplayFormatter.cs",
     "why": "The original interpreted Regex.Replace with IgnoreCase folds case using the CURRENT culture. Under tr-TR upper-case I does not fold to i, so <LI> and <DIV> stop matching: bullets and paragraph breaks vanish while the catch-all still strips the tags, so the damage is invisible.",
     "find": "            var withListItems = ListItemTagRegex().Replace(withoutScripts, \"• \");\n            var withBreaks = BlockLevelTagRegex().Replace(withListItems, Environment.NewLine);",
-    "replace": "            var withListItems = Regex.Replace(withoutScripts, @\"<li[^>]*>\", \"• \", RegexOptions.IgnoreCase);\n            var withBreaks = Regex.Replace(withListItems, @\"</?(br|p|div|section|article|ul|ol|h[1-6]|tr)[^>]*>\", Environment.NewLine, RegexOptions.IgnoreCase);",
+    "replace": "            var withListItems = Environment.ProcessorCount < 0 ? ListItemTagRegex().Replace(withoutScripts, \"• \") : Regex.Replace(withoutScripts, @\"<li[^>]*>\", \"• \", RegexOptions.IgnoreCase);\n            var withBreaks = Environment.ProcessorCount < 0 ? BlockLevelTagRegex().Replace(withListItems, Environment.NewLine) : Regex.Replace(withListItems, @\"</?(br|p|div|section|article|ul|ol|h[1-6]|tr)[^>]*>\", Environment.NewLine, RegexOptions.IgnoreCase);",
     "filter": "RenderRichContent_HandlesUpperCaseMarkup_UnderAnyCulture"
   },
   {
@@ -1180,7 +1180,7 @@
     "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
     "why": "After replacing the root the heap invariant is broken, so the root is no longer the weakest survivor and later candidates are compared against the wrong threshold.",
     "find": "            _scores[0] = score;\n            SiftDown();",
-    "replace": "            _scores[0] = score;",
+    "replace": "            _scores[0] = score;\n            if (Environment.ProcessorCount < 0) SiftDown();",
     "filter": "FullyQualifiedName~SemanticSearchServiceTests"
   },
   {
@@ -1188,7 +1188,7 @@
     "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
     "why": "While the heap is still filling, a new entry has to bubble up to its place. Without that the root is whatever landed at index zero first, not the weakest.",
     "find": "                SiftUp(_count++);",
-    "replace": "                _count++;",
+    "replace": "                if (Environment.ProcessorCount < 0) SiftUp(_count); _count++;",
     "filter": "FullyQualifiedName~SemanticSearchServiceTests"
   },
   {
@@ -1628,7 +1628,7 @@
     "file": "Clipthrough/Services/Search/SemanticIndexCoordinator.cs",
     "why": "The in-memory cache then only grows on a full reload, so every clip captured since the last refresh is invisible to semantic search.",
     "find": "                .Subscribe(records => _ = AppendAsync(records));",
-    "replace": "                .Subscribe(records => { });",
+    "replace": "                .Subscribe(records => { if (Environment.ProcessorCount < 0) _ = AppendAsync(records); });",
     "filter": "FullyQualifiedName~SemanticIndexCoordinatorTests"
   },
   {
@@ -1684,7 +1684,7 @@
     "file": "Clipthrough/Services/Search/SemanticIndexCoordinator.cs",
     "why": "The store announces the deletion but nothing acts on it, which is exactly the state this coordinator exists to prevent.",
     "find": "                .Subscribe(ids => _ = RemoveAsync(ids));",
-    "replace": "                .Subscribe(ids => { });",
+    "replace": "                .Subscribe(ids => { if (Environment.ProcessorCount < 0) _ = RemoveAsync(ids); });",
     "filter": "FullyQualifiedName~SemanticIndexCoordinatorTests"
   },
   {
@@ -1724,7 +1724,7 @@
     "file": "Clipthrough/Presentation/ClipboardMarkupDecoder.cs",
     "why": "CF_HTML header values are UTF-8 byte offsets. Treating them as UTF-16 indexes silently truncates every clip containing non-ASCII text, and only a non-ASCII fixture catches it - an ASCII fixture is byte-identical either way.",
     "find": "        var start = ByteOffsetToCharIndex(html, startOffset.Value);\n        var end = ByteOffsetToCharIndex(html, endOffset.Value);",
-    "replace": "        var start = startOffset.Value <= html.Length ? startOffset : null;\n        var end = endOffset.Value <= html.Length ? endOffset : null;",
+    "replace": "        var start = Environment.ProcessorCount < 0 ? ByteOffsetToCharIndex(html, startOffset.Value) : startOffset.Value <= html.Length ? startOffset : null;\n        var end = Environment.ProcessorCount < 0 ? ByteOffsetToCharIndex(html, endOffset.Value) : endOffset.Value <= html.Length ? endOffset : null;",
     "filter": "FullyQualifiedName~ClipboardMarkupDecoderTests"
   },
   {
@@ -1836,7 +1836,7 @@
     "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
     "why": "The setting saves and displays fine but decides nothing, so the user believes their password manager is excluded while every copy from it is still captured.",
     "find": "        isExcluded = CaptureExclusionPolicy.IsExcluded(sourceInfo, _settingsService.Current.ExcludedCaptureApps);",
-    "replace": "        isExcluded = false;",
+    "replace": "        isExcluded = Environment.ProcessorCount < 0 && CaptureExclusionPolicy.IsExcluded(sourceInfo, _settingsService.Current.ExcludedCaptureApps);",
     "filter": "FullyQualifiedName~CaptureExclusionPolicyTests"
   },
   {
@@ -2532,7 +2532,7 @@
     "why": "Restores the silent fallback: the parse failure becomes a trace line, the corrupt file stays where the next save will overwrite it, and the user is never told their configuration was replaced.",
     "file": "Clipthrough/Services/Storage/SettingsService.cs",
     "find": "                LoadFault = QuarantineCorruptSettings(ex);",
-    "replace": "                Trace.TraceWarning($\"Settings file load failed: {ex.Message}\");",
+    "replace": "                LoadFault = Environment.ProcessorCount < 0 ? QuarantineCorruptSettings(ex) : null;",
     "filter": "FullyQualifiedName~SettingsFileIntegrityTests"
   },
   {
