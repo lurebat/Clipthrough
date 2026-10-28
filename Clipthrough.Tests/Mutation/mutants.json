@@ -2723,8 +2723,8 @@
     "id": "exit-cancels-pending-deletes",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "F-14 / S41. Cancelling instead of committing pending deletes on exit brings a clip the user was told was deleted - a password, say - back on the next launch and into every backup.",
-    "find": "        _isDisposed = true;\n        CommitPendingDeletesOnExit();",
-    "replace": "        _isDisposed = true;\n        CommitPendingDeletesOnExit();",
+    "find": "        var ids = _pendingDeletes.Keys.ToArray();",
+    "replace": "        var ids = _pendingDeletes.Keys.Take(0).ToArray();",
     "filter": "FullyQualifiedName~DeleteThenQuitWithinUndoWindow"
   },
   {
