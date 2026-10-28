@@ -26,8 +26,23 @@ public static class TestAppBuilder
     // nothing is invisible to an assertion on view-model state. Routing them to
     // Trace is what lets BindingErrorHeadlessTests see them.
     public static AppBuilder BuildAvaloniaApp()
-        => AppBuilder.Configure<Clipthrough.App>()
-            .UseHeadless(new AvaloniaHeadlessPlatformOptions())
+    {
+        var builder = AppBuilder.Configure<Clipthrough.App>();
+
+        // Layout captures need real pixels, which headless drawing never
+        // produces. Opt-in only, so the ordinary suite keeps the cheaper stub
+        // renderer it has always run on. (Layout/LayoutSurveyCapture.cs)
+        if (Layout.LayoutSurveyCapture.OutputDirectory is not null)
+        {
+            builder = builder.UseSkia();
+        }
+
+        return builder
+            .UseHeadless(new AvaloniaHeadlessPlatformOptions
+            {
+                UseHeadlessDrawing = Layout.LayoutSurveyCapture.OutputDirectory is null,
+            })
             .LogToTrace(LogEventLevel.Warning, LogArea.Binding)
             .UseReactiveUI(_ => { });
+    }
 }

@@ -50,6 +50,12 @@ internal sealed class MainWindowTestHarness : IDisposable
     /// </summary>
     public TestStorageOptionsService StorageOptions => _scope.StorageOptionsService;
 
+    /// <summary>
+    /// The notification service the view model listens to, so a test can raise
+    /// a toast through the real path.
+    /// </summary>
+    public TestNotificationService Notifications => _scope.NotificationService;
+
     public TextBox SearchBox => Window.FindControl<TextBox>("SearchTextBox")!;
 
     public ListBox ClipList => Window.FindControl<ListBox>("ClipsListBox")!;
