@@ -300,6 +300,7 @@ Guard R3: a lifecycle matrix test class.
 - If the cost is user-visible (e.g. capture slower by more than about 10%), stop and return to the owner with the numbers instead of shipping.
 - Test: the free-page half of the probe — the live file no longer contains the expired secret's bytes.
 - Mutant: remove the pragma.
+- **Measured and accepted (owner decision, 2026-10-28):** on the 60k fixture, each probe in its own process on a fresh copy, `secure_delete` costs about 1.00x on capture and on single deletes. The bulk retention purge of 3,072 clips is 1.13x on plaintext (5.95 -> 6.70 s) and 1.00x encrypted. The plaintext purge is over the 10% threshold above; the owner kept the pragma on for every library and accepted that cost. Reproduce with `PerfProbes.P15_DeleteAndPurge`.
 
 **U-C5 (F-21, OD-2) — ClipAngel import hardening (ships whatever U-C8 concludes)**
 - Change: import only when `Clips` is a real table and the schema has no views or triggers. Open with `trusted_schema=OFF` and `query_only`.
@@ -427,6 +428,7 @@ Guard R3: a lifecycle matrix test class.
 - Switch the readers over only after the copy completes; drop or null the old columns last.
 - Never hold a single `DatabaseMaintenanceScope`-length transaction over 1+ GB.
 - Move the `stored_bytes` triggers along with the data.
+- **Startup cost (owner decision, 2026-10-28):** the first version, which read each row into .NET and wrote it back, blocked startup once for 87 s on the 1 GB plaintext fixture and 373 s encrypted. The owner chose an SQL-only batch copy (`INSERT ... SELECT` per id range, icons hashed in .NET), still resumable, with the crash-mid-batch test kept. If it still takes more than about 10 s on either variant, a progress UI over the batches is added too, with a headless test that progress shows and the app stays responsive.
 
 *Readers*
 - `GetByIdAsync` and hydration join `clip_payloads`. Icons resolve through the hash.
