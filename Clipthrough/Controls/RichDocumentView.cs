@@ -156,7 +156,7 @@ public sealed class RichDocumentView : UserControl
     /// <summary>
     /// The importer, as a seam: tests count, block and order calls through it.
     /// </summary>
-    internal Func<string, ClipContentFormat, DocumentNode> Importer { get; init; } = Import;
+    internal Func<string, ClipContentFormat, Task<DocumentNode>> Importer { get; init; } = ImportAsync;
 
     // Single flight (F-47). Markup and ContentFormat each start a render, so one
     // selection changing both used to import twice; renders are now coalesced
@@ -262,8 +262,10 @@ public sealed class RichDocumentView : UserControl
     /// happening. Do not read its presence as evidence that 0.5.0 needs it.
     ///
     /// Ctrl+C and Ctrl+A are deliberately left alone: they are the two things a
-    /// read-only pane should still do. Paste is inert here (InsertText is gated
-    /// and reads rather than writes the clipboard) so it needs no handling.
+    /// read-only pane should still do. Paste needs no handling: VellumText
+    /// refuses it on a read-only editor before reading the clipboard, so no
+    /// import of another application's markup even starts
+    /// (PasteIntoTheRenderedPreview_IsRefusedBeforeAnythingIsImported).
     /// </remarks>
     private static void OnViewerKeyDown(object? sender, KeyEventArgs e)
     {
@@ -407,7 +409,9 @@ public sealed class RichDocumentView : UserControl
                 }
 
                 // Importers are pure and take no Avalonia dependency, so the parse is safe off
-                // the UI thread, and DocumentNode is immutable once built.
+                // the UI thread, and DocumentNode is immutable once built. VellumText's own
+                // importers already parse on a thread of their own; Task.Run keeps whatever an
+                // importer does before its first await off the UI thread too.
                 var importer = Importer;
                 import = Task.Run(() => importer(content, format));
                 _lastImport = import;
@@ -443,10 +447,10 @@ public sealed class RichDocumentView : UserControl
         _emptyState.IsVisible = false;
     }
 
-    private static DocumentNode Import(string content, ClipContentFormat format) => format switch
+    private static async Task<DocumentNode> ImportAsync(string content, ClipContentFormat format) => format switch
     {
-        ClipContentFormat.Html => HtmlFormat.Instance.Import(content).Doc,
-        ClipContentFormat.Rtf => RtfFormat.Instance.Import(content).Doc,
+        ClipContentFormat.Html => (await HtmlFormat.Instance.ImportAsync(content).ConfigureAwait(false)).Doc,
+        ClipContentFormat.Rtf => (await RtfFormat.Instance.ImportAsync(content).ConfigureAwait(false)).Doc,
         // Anything else reaching a rich renderer is text that was mislabelled somewhere
         // upstream; showing it as paragraphs beats showing nothing.
         _ => DocumentNode.FromParagraphs(content.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n')),

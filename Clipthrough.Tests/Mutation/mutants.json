@@ -2894,5 +2894,45 @@
     "find": "        monitor.SuppressNext(content);",
     "replace": "        monitor.SuppressNext(content is null ? null : null);",
     "filter": "FullyQualifiedName~ClipClipboardWriterTests.TheSuppressionCarriesTheTextBeingWritten"
+  },
+  {
+    "id": "markdown-to-html-export-returns-to-caller-thread",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "why": "VellumText 0.8's import is async; the export after it is synchronous. Resuming on the caller's context runs that export on the UI thread - the freeze the async import exists to remove.",
+    "find": ".ImportAsync(input, cancellationToken).ConfigureAwait(false);\n            var html",
+    "replace": ".ImportAsync(input, cancellationToken).ConfigureAwait(true);\n            var html",
+    "filter": "FullyQualifiedName~MarkdownTransformationTests.Conversion_CompletesWithoutTheCallersThread"
+  },
+  {
+    "id": "html-to-markdown-export-returns-to-caller-thread",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "why": "The HTML -> Markdown half of the same contract: the synchronous Markdown export must not be marshalled back to the UI thread that awaited the import.",
+    "find": ".ImportAsync(input, cancellationToken).ConfigureAwait(false);\n            var markdown",
+    "replace": ".ImportAsync(input, cancellationToken).ConfigureAwait(true);\n            var markdown",
+    "filter": "FullyQualifiedName~MarkdownTransformationTests.Conversion_CompletesWithoutTheCallersThread"
+  },
+  {
+    "id": "apply-async-drops-html-to-markdown",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "why": "The converters are dispatched by ApplyAsync, not by the synchronous switch, which returns its input for anything it does not list. Losing the dispatch arm makes HTML -> Markdown a silent no-op.",
+    "find": "            Models.TextTransformation.HtmlToMarkdown => HtmlToMarkdownAsync(input, cancellationToken),",
+    "replace": "            Models.TextTransformation.HtmlToMarkdown => input.Length < 0 ? HtmlToMarkdownAsync(input, cancellationToken) : Task.FromResult(input),",
+    "filter": "FullyQualifiedName~MarkdownTransformationTests.HtmlToMarkdown_ConvertsEmphasisAndHeadings"
+  },
+  {
+    "id": "apply-async-drops-markdown-to-html",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "why": "Same for Markdown -> HTML: without its dispatch arm the synchronous switch returns the input unchanged and the transform reports 'no change'.",
+    "find": "            Models.TextTransformation.MarkdownToHtml => MarkdownToHtmlAsync(input, cancellationToken),",
+    "replace": "            Models.TextTransformation.MarkdownToHtml => input.Length < 0 ? MarkdownToHtmlAsync(input, cancellationToken) : Task.FromResult(input),",
+    "filter": "FullyQualifiedName~MarkdownTransformationTests.MarkdownToHtml_ConvertsEmphasisAndHeadings"
+  },
+  {
+    "id": "preview-viewer-accepts-paste",
+    "file": "Clipthrough/Controls/RichDocumentView.cs",
+    "why": "VellumText 0.8 refuses a paste on a read-only editor before reading the clipboard. Our side of that is IsReadOnly; without it a paste imports another application's markup into the preview and lands.",
+    "find": "            IsReadOnly = true,\n            IsSelectionToolbarEnabled = false,",
+    "replace": "            IsReadOnly = false,\n            IsSelectionToolbarEnabled = false,",
+    "filter": "FullyQualifiedName~RichDocumentInteractionHeadlessTests.PasteIntoTheRenderedPreview_IsRefusedBeforeAnythingIsImported"
   }
 ]

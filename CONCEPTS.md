@@ -181,8 +181,10 @@ cutting per-row binding count.
 ## Transforms
 
 **TextTransformation** — Enum of built-in text operations (case, whitespace,
-lines, `BoxTableToHtml`). Applied by `TextTransformationService.Apply` — a pure
-static function.
+lines, `BoxTableToHtml`, HTML/Markdown). Applied by `TextTransformationService.ApplyAsync`:
+asynchronous only because the HTML/Markdown converters await VellumText's
+async importers; every other transformation is a pure function that completes
+synchronously.
 
 **AiTransformService** — OpenAI-compatible chat-completions client. Base URL /
 key / model come from `AppSettings.Ai*` with env-var fallback.

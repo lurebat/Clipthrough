@@ -47,7 +47,7 @@ public sealed class RichDocumentImportHeadlessTests
 
         public ManualResetEventSlim Gate { get; } = new(initialState: true);
 
-        public DocumentNode Import(string markup, ClipContentFormat format)
+        public Task<DocumentNode> Import(string markup, ClipContentFormat format)
         {
             var now = Interlocked.Increment(ref _inFlight);
             int seen;
@@ -63,7 +63,7 @@ public sealed class RichDocumentImportHeadlessTests
                     Gate.Wait(TimeSpan.FromSeconds(30));
                 }
 
-                return DocumentNode.FromParagraphs([markup]);
+                return Task.FromResult(DocumentNode.FromParagraphs([markup]));
             }
             finally
             {

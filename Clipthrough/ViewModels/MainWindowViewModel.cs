@@ -3480,10 +3480,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         try
         {
             await ApplyTransformToTargetsAsync(
-                (source, _) =>
+                (source, cancellationToken) =>
                 {
                     refusal ??= TextTransformationService.RefusalReason(transformation, source);
-                    return Task.FromResult(TextTransformationService.Apply(transformation, source));
+                    return TextTransformationService.ApplyAsync(transformation, source, cancellationToken: cancellationToken);
                 },
                 label,
                 multiSummary: count => $"Applied {label} to {count} clips",

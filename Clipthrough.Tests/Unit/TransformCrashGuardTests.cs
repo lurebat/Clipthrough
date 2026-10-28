@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using Clipthrough.Models;
 using Clipthrough.Presentation;
 using Clipthrough.Services;
@@ -36,13 +37,13 @@ public sealed class TransformCrashGuardTests
     /// every ordinary run.
     /// </summary>
     [Fact]
-    public void ChildEntry()
+    public async Task ChildEntry()
     {
         var payload = Environment.GetEnvironmentVariable(PayloadVariable);
         Assert.SkipUnless(payload is not null, "Runs only as the child process of TransformCrashGuardTests.");
 
         var transformation = Enum.Parse<TextTransformation>(Environment.GetEnvironmentVariable(TransformVariable)!);
-        var result = TextTransformationService.Apply(transformation, File.ReadAllText(payload!));
+        var result = await TextTransformationService.ApplyAsync(transformation, File.ReadAllText(payload!));
         File.WriteAllText(Environment.GetEnvironmentVariable(OutputVariable)!, result);
     }
 
@@ -114,11 +115,11 @@ public sealed class TransformCrashGuardTests
     /// is a bound, not a refusal of anything bracketed.
     /// </summary>
     [Fact]
-    public void ModerateNesting_StillConverts()
+    public async Task ModerateNesting_StillConverts()
     {
         var input = new string('>', 50) + " deeply quoted text";
 
-        var output = TextTransformationService.Apply(TextTransformation.MarkdownToHtml, input);
+        var output = await TextTransformationService.ApplyAsync(TextTransformation.MarkdownToHtml, input);
 
         Assert.True(ImportGuards.NestingDepth(input, ImportGuards.MaxNestingDepth) >= 50, "Setup: the fixture should be deeply nested.");
         Assert.NotEqual(input, output);

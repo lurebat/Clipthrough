@@ -4,7 +4,7 @@ Use this reference when the user wants to add, modify, or bind a clip transforma
 
 ## Built-in text transformations
 
-All values live in the `Clipthrough.Models.TextTransformation` enum and are applied via `Clipthrough.Services.TextTransformationService.Apply(kind, input)`. Pure, no I/O, safe to unit-test.
+All values live in the `Clipthrough.Models.TextTransformation` enum and are applied via `await Clipthrough.Services.TextTransformationService.ApplyAsync(kind, input)`. No I/O and safe to unit-test; asynchronous only because `HtmlToMarkdown` and `MarkdownToHtml` await VellumText's async-only importers. Every other kind completes synchronously. Never block on it from the UI thread.
 
 | Group      | Enum value                  | Notes                                                         |
 | ---------- | --------------------------- | ------------------------------------------------------------- |
@@ -108,7 +108,7 @@ record CustomHotkeyBinding {
 
 | Kind       | `value`                                         | Behaviour                                                            |
 | ---------- | ----------------------------------------------- | -------------------------------------------------------------------- |
-| `builtin`  | `TextTransformation` enum name                  | Runs `TextTransformationService.Apply(kind, latestClip)`.            |
+| `builtin`  | `TextTransformation` enum name                  | Runs `TextTransformationService.ApplyAsync(kind, latestClip)`.       |
 | `ai`       | AI preset `Name`                                | Runs `IAiTransformService.TransformAsync(preset.Prompt, latestClip)`.|
 | `prompt`   | Free-form prompt text                           | Runs `IAiTransformService.TransformAsync(value, latestClip)` directly — handy for one-off prompts without creating a preset. |
 | `aiprompt` | `<kind>[\|<prefill>]` (`<kind>` ∈ `auto`, `text`, `image-to-text`, `image-to-image`) | Opens the AI prompt dialog with the requested kind selected. Anything after the first `\|` is loaded into the prompt textbox so the user can edit/extend before submitting. `auto` (default) lets the VM pick the kind based on the active clip. |

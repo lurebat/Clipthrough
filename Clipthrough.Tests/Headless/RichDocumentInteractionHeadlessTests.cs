@@ -440,6 +440,74 @@ public sealed class RichDocumentInteractionHeadlessTests
         }
     }
     /// <summary>
+    /// The read-only preview refuses a paste before it reads the clipboard or
+    /// imports anything, by gesture and by API.
+    /// </summary>
+    /// <remarks>
+    /// VellumText 0.8 made paste asynchronous: the clipboard is decoded on a
+    /// background thread and the result applied later, behind an origin check.
+    /// The document cannot change while <c>IsReadOnly</c> is set either way,
+    /// but a paste that is refused only when it lands would still have parsed
+    /// whatever another application left on the clipboard - which is the
+    /// hostile-markup exposure the preview is otherwise guarded against. So
+    /// this asserts that no import was even started, not only that the
+    /// document is unchanged.
+    ///
+    /// The guarantor is VellumText (<c>RichTextView.CanPasteHere</c>); our part
+    /// is setting <c>IsReadOnly</c>. The editable control at the end is what
+    /// makes the refusals mean something: the same clipboard, the same
+    /// gesture, and the paste lands.
+    /// </remarks>
+    [AvaloniaFact]
+    public async Task PasteIntoTheRenderedPreview_IsRefusedBeforeAnythingIsImported()
+    {
+        var (view, window) = await RenderAsync("<p>PREVIEW CONTENTS</p>");
+        try
+        {
+            var editorView = view.Viewer.View;
+            Assert.NotNull(editorView);
+            var importsStarted = 0;
+            view.Viewer.ContentImporting += (_, _) => importsStarted++;
+
+            var clipboard = TopLevel.GetTopLevel(window)!.Clipboard!;
+            await WriteClipboardTextAsync(clipboard, "PASTED FROM ELSEWHERE");
+            string DocumentText() => VellumText.DocumentText.Of(view.Viewer.State.Doc);
+            var before = DocumentText();
+
+            editorView.SelectAll();
+            editorView.Focus();
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(editorView.IsKeyboardFocusWithin, "the editor never took focus, so the keys never reached it");
+
+            window.KeyPressQwerty(PhysicalKey.V, RawInputModifiers.Control);
+            window.KeyPressQwerty(PhysicalKey.Insert, RawInputModifiers.Shift);
+            Assert.False(await editorView.PasteAsync());
+            Assert.False(await editorView.PasteTextAsync());
+            Dispatcher.UIThread.RunJobs();
+            await Task.Delay(200);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Equal(before, DocumentText());
+            Assert.Equal(0, importsStarted);
+
+            // The control: the same pane made editable takes the same paste.
+            view.Viewer.IsReadOnly = false;
+            Dispatcher.UIThread.RunJobs();
+            editorView.SelectAll();
+            Assert.True(await editorView.PasteAsync(), "an editable pane refused the paste, so the refusals above prove nothing");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.Contains("PASTED FROM ELSEWHERE", DocumentText(), StringComparison.Ordinal);
+            Assert.True(importsStarted > 0, "the editable paste raised no ContentImporting, so counting it above proves nothing");
+        }
+        finally
+        {
+            window.Close();
+            Dispatcher.UIThread.RunJobs();
+        }
+    }
+
+    /// <summary>
     /// The degraded path too. An oversized or unbreakable clip falls back to
     /// plain text, and those are exactly the clips a user wants a piece of
     /// rather than the whole of, so the fallback cannot be an inert TextBlock.

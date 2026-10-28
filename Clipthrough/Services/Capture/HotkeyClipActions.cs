@@ -101,7 +101,7 @@ internal static class HotkeyClipActions
                     return false;
                 }
 
-                output = TextTransformationService.Apply(tx, input);
+                output = await TextTransformationService.ApplyAsync(tx, input);
                 isHtmlOutput = TextTransformationService.ProducesHtml(tx);
                 break;
             case CustomHotkeyKind.AiPreset:
