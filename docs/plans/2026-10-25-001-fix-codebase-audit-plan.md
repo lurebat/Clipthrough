@@ -46,7 +46,7 @@ Add these to the repo's settled decisions (AGENTS.md or a docs/solutions note) w
 - **S36 — accepted risk (OD-11, F-37).** `OPENAI_API_KEY` is used as the bearer token for whatever AI base URL is configured, including a non-loopback `http://` endpoint. This is current behaviour and stays.
   - Assumption: a user who configures a cleartext endpoint while that environment variable is set accepts that the key travels to it.
   - Revisit if the env-key fallback is ever applied without the user configuring the base URL themselves.
-- **S37 — update signing deferred (OD-5).** The feed is pinned to the repository path (U-C7). Whether to Authenticode-sign and verify releases is a separate decision. Until then, release integrity rests on the GitHub account and CI token. F-38 is closed only as far as the feed pin goes.
+- **S37 — no paid update signing (OD-5; user decision, 2026-10-28).** "Signing is money and I don't want to spend it." The feed is pinned to the repository path (U-C7), and release integrity rests on that pin plus the security of the GitHub account and its CI token: an accepted risk. F-38 is closed only as far as the feed pin goes. A free route (SignPath Foundation's open-source programme) is recorded as an option, with no action taken, in `docs/plans/2026-10-28-001-fts-rebuild-and-upgrade-start-research.md`.
 - **S38 — regex search engine (OD-7).** Regex search uses .NET `RegexOptions.NonBacktracking` by default. A user setting switches to the backtracking engine, which has a 250 ms match timeout; a timeout is reported as "pattern too slow".
   - Assumption: the default engine never needs backreferences or lookarounds. Users who need them opt into backtracking.
 - **S39 — clipboard-history opt-out (OD-10).** Content published with `CanIncludeInClipboardHistory` = 0 is not captured while the new setting is on. The setting defaults to on.
@@ -62,7 +62,7 @@ Add these to the repo's settled decisions (AGENTS.md or a docs/solutions note) w
 | OD-2 | (b) Start evaluating a replacement encrypted-SQLite package now, as its own unit with on-disk compatibility verification; ship U-C5 meanwhile. **Then, on the evaluation (owner, 2026-10-27): (a) adopt `SQLite3MC.PCLRaw.bundle` 2.6.1 in SQLCipher v4 legacy mode**, landing before or together with Phase E's migration | New unit U-C8 (evaluation only); adoption is U-C9, with its own approval recorded here and its risks under U-C9 |
 | OD-3 | (a) Editor and Compare write to a per-session temp folder that is deleted afterwards, with no `metadata.json`. Explicit Export stays in Documents but asks for confirmation on sensitive clips | U-C3 as written |
 | OD-4 | (a) Run expiry before the startup backup; purge sensitive rows from backup copies **only while the sensitive-lifetime setting is on** (refined by the owner during Phase C: with it off, backups keep sensitive clips); add `secure_delete` after measuring its cost on the Phase D fixture | U-C4 split into U-C4a (expiry order and purge) and U-C4b (`secure_delete`, depends on U-D0) |
-| OD-5 | (a) Pin the feed to the repo now; decide on signing separately | U-C7 is the pin only. Signing is out of scope (S37) |
+| OD-5 | (a) Pin the feed to the repo now; no paid signing (user decision, 2026-10-28) | U-C7 is the pin only. Signing is out of scope; the remaining risk is accepted (S37) |
 | OD-6 | (a) Separate headless CI step that re-runs only cleanup failures; F-30 comes first | U-F1 is a hard prerequisite of U-F2 |
 | OD-7 | NonBacktracking is the default, with a setting to switch to backtracking. Backtracking keeps the 250 ms timeout and the "pattern too slow" status (owner's own option) | U-B6 reworked: engine setting, tests for both engines; S38 |
 | OD-8 | (a) Commit pending deletes on exit | U-B4 as written; S41 |
@@ -529,7 +529,7 @@ This plan does **not** adopt that version. Clipthrough stays on VellumText 0.7.0
 
 - MainWindowViewModel decomposition beyond what a unit needs (S2).
 - Adopting a replacement encrypted-SQLite package was out of scope until the owner approved it after U-C8 (OD-2, 2026-10-27); it is now U-C9.
-- Signing and verifying updates (S37; decided separately).
+- Signing and verifying updates: no paid signing, accepted risk (S37). The free SignPath Foundation route is an unexercised option.
 - F-37 (accepted risk S36) and security F-10 (dropped by the critic); also the image-URL GET in `AiTransformService` (noted under F-37, not counted).
 - Dependency upgrades other than the U-C8 evaluation, including the VellumText async-importer version above. Bumps to Avalonia, Velopack and Onnx are independent; re-run the mutants after any bump (S32).
 - Non-Windows feature work (S8); `LibraryImport` conversion (S9); CA1001/CA2213 (S29).
@@ -539,3 +539,4 @@ This plan does **not** adopt that version. Clipthrough stays on VellumText 0.7.0
   - Measured on 60k clips: the first 1.9 MB capture on a fresh copy of the rebuilt seed took 2.6 s plaintext and 4.9 s encrypted. The second run on the same copy took 662 ms, against 538 ms on Phase D. Whether merge state accounts for all of it is being confirmed on #11.
   - Since U-E1 (B), only libraries older than schema 3 and FTS-schema repairs trigger a rebuild. The cost predates Phase E.
   - A fix would be to run `'optimize'` (or bounded `'merge'` steps) after a rebuild, ahead of the first capture. Its cost needs measuring first.
+  - Researched in `docs/plans/2026-10-28-001-fts-rebuild-and-upgrade-start-research.md`, together with the first start after an upgrade, which still blocks for 74 s plaintext and 5-7 min encrypted on 1 GB. Decisions are pending.

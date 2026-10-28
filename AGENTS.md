@@ -263,10 +263,13 @@ the unit that implements it, so whether the code matches is checkable.
 - **S36 - AI key over plain HTTP is an accepted risk (OD-11, F-37).**
   `OPENAI_API_KEY` is sent as the bearer token to whatever AI base URL is
   configured, including a non-loopback `http://` endpoint. This stays.
-- **S37 - update signing is a separate decision (OD-5, U-C7).** The update feed
-  is pinned to the repository path. Whether to Authenticode-sign and verify
-  releases has not been decided; until it is, release integrity rests on the
-  GitHub account and CI token, and F-38 is closed only as far as the pin goes.
+- **S37 - no paid update signing (OD-5, U-C7).** The owner decided against paid
+  code signing (2026-10-28). The update feed is pinned to the repository path,
+  and release integrity rests on that pin plus the GitHub account and CI token:
+  an accepted risk, and F-38 is closed only as far as the pin goes. A free route
+  (SignPath Foundation) is recorded in
+  `docs/plans/2026-10-28-001-fts-rebuild-and-upgrade-start-research.md` but not
+  taken.
 - **S38 - regex search engine (OD-7, U-B6).** Regex search uses
   `RegexOptions.NonBacktracking` by default. A setting switches to the
   backtracking engine, which keeps a 250 ms match timeout reported as "pattern
