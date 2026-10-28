@@ -147,7 +147,7 @@ If you add a column you want searchable, you must:
 
 1. Add it to the FTS5 column list.
 2. Update all three triggers.
-3. Rebuild FTS for existing rows (`INSERT INTO clips_fts(clips_fts) VALUES('rebuild');`) inside a forward migration.
+3. Rebuild FTS for existing rows: raise `DatabaseInitializer.LastSearchIndexChangeVersion` to the new `CurrentSchemaVersion`, so the version-gated `'rebuild'` runs once for every library stored before it.
 
 ### `clip_payloads` and `app_icons` (U-E1)
 
@@ -189,7 +189,7 @@ if (!existingColumns.Contains("my_new_col"))
 
 For a new index or trigger, just emit `CREATE … IF NOT EXISTS …`. SQLite ALTER cannot drop columns; if you need to remove one, accept that it lingers or write a `CREATE TABLE clips_new (…) → INSERT SELECT → DROP → RENAME` block.
 
-When you change FTS columns or triggers, **always** run a `'rebuild'` once after the migration so existing rows reflect the new shape.
+When you change FTS columns, the tokenizer, or rewrite indexed text with the triggers bypassed, raise `LastSearchIndexChangeVersion` to the new `CurrentSchemaVersion` so the `'rebuild'` runs once after the migration and existing rows reflect the new shape. Any other version bump skips the rebuild: it was 17.2 s of a 28.5 s first start on a 420 MB library, and the triggers already keep the index current. `FtsRebuildGateTests` covers both sides.
 
 ### The FTS repair path is not the version-gated path
 

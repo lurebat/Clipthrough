@@ -2950,5 +2950,29 @@
     "find": " + \") FROM clips), 0) + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons), 0);\";",
     "replace": " + \") FROM clips), 0) + 0;\";",
     "filter": "FullyQualifiedName~Maintenance_LibrarySizeCap_CountsTheSourceAppIconsItStores"
+  },
+  {
+    "id": "fts-rebuilt-on-every-version-bump",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U-E1, owner decision (B). The full FTS rebuild was 17.2 s of a 28.5 s first start on 420 MB and ran on every version bump, although no bump after version 3 changed what the index holds.",
+    "find": "            if (ftsSchemaRecreated || storedVersion < LastSearchIndexChangeVersion)",
+    "replace": "            if (ftsSchemaRecreated || storedVersion < LastSearchIndexChangeVersion || storedVersion >= 0)",
+    "filter": "FullyQualifiedName~FtsRebuildGateTests.AVersionBumpThatChangesNoIndexedContent"
+  },
+  {
+    "id": "fts-not-rebuilt-for-a-library-older-than-the-index-change",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "A library stored before version 3 holds an index of the old shape; skipping its rebuild leaves its clips unfindable by keyword.",
+    "find": "            if (ftsSchemaRecreated || storedVersion < LastSearchIndexChangeVersion)",
+    "replace": "            if (ftsSchemaRecreated || storedVersion < LastSearchIndexChangeVersion - 1000)",
+    "filter": "FullyQualifiedName~FtsRebuildGateTests.ALibraryOlderThanTheLastSearchIndexChange"
+  },
+  {
+    "id": "fts-not-rebuilt-when-recreated-during-a-bump",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "A bump that also repairs an old FTS schema recreates the table empty; without the rebuild every stored clip stops being findable by keyword.",
+    "find": "            if (ftsSchemaRecreated || storedVersion < LastSearchIndexChangeVersion)",
+    "replace": "            if (storedVersion < LastSearchIndexChangeVersion)",
+    "filter": "FullyQualifiedName~FtsRebuildGateTests.AnFtsSchemaRecreatedDuringAVersionBump"
   }
 ]

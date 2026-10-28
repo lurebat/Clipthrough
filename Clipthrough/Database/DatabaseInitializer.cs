@@ -324,6 +324,24 @@ public sealed class DatabaseInitializer
     /// </summary>
     private const int CurrentSchemaVersion = 9;
 
+    /// <summary>
+    /// The last schema version whose migration changed what clips_fts holds:
+    /// version 3, which moved the index to five columns and the trigram tokenizer.
+    /// A version bump rebuilds the index only for a library stored before this, or
+    /// when the FTS schema itself was just recreated.
+    /// </summary>
+    /// <remarks>
+    /// The rebuild is the largest part of the first start after an upgrade (17.2 s
+    /// of 28.5 s on a 420 MB library). Until v0.9.3 it ran on every start; that
+    /// release moved it behind the version gate with the other helpers, so it ran
+    /// on every bump although no later bump changed the index - the insert, update
+    /// and delete triggers keep it current. Raise this to the new
+    /// <see cref="CurrentSchemaVersion"/> when a migration changes the indexed
+    /// columns or the tokenizer, or rewrites indexed text with the triggers
+    /// bypassed.
+    /// </remarks>
+    internal const int LastSearchIndexChangeVersion = 3;
+
     private readonly SqliteConnectionFactory _connectionFactory;
     private readonly ISensitivityService _sensitivityService;
 
@@ -398,8 +416,16 @@ public sealed class DatabaseInitializer
             TraceStep(sw, "dedupe-by-hash");
             await EnsureUniqueClipHashIndexAsync(connection, cancellationToken);
             TraceStep(sw, "ensure-unique-hash-index");
-            await RebuildClipSearchIndexAsync(connection, cancellationToken);
-            TraceStep(sw, "rebuild-search-index");
+            if (ftsSchemaRecreated || storedVersion < LastSearchIndexChangeVersion)
+            {
+                await RebuildClipSearchIndexAsync(connection, cancellationToken);
+                TraceStep(sw, "rebuild-search-index");
+            }
+            else
+            {
+                TraceStep(sw, "search-index-current (rebuild skipped)");
+            }
+
             await EnsureSourceAppIconHashColumnAsync(connection, cancellationToken);
             await MovePayloadsOutOfClipsAsync(connection, cancellationToken);
             TraceStep(sw, "move-payloads");
