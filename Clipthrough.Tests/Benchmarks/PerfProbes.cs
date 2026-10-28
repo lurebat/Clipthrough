@@ -597,9 +597,10 @@ public sealed class PerfProbes
         await SetAutomergeAsync(lib, automerge);
         try
         {
+            var before = await ScalarAsync(lib, "SELECT COUNT(DISTINCT segid) FROM clips_fts_idx;");
             await TimeLargeCapturesAsync(lib, $"automerge={automerge}");
-            var segments = await ScalarAsync(lib, "SELECT COUNT(DISTINCT segid) FROM clips_fts_idx;");
-            Log($"{"segments after the captures",-70} median={segments,9} ms (count, not ms)");
+            var after = await ScalarAsync(lib, "SELECT COUNT(DISTINCT segid) FROM clips_fts_idx;");
+            Log($"    index segments: {before} before the captures, {after} after");
         }
         finally
         {
