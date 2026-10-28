@@ -400,6 +400,9 @@ public static class AppText
     public static string ClipAngelImportRunning => Text(nameof(ClipAngelImportRunning));
     public static string ClipAngelImportUnsupported => Text(nameof(ClipAngelImportUnsupported));
     public static string FormatClipAngelImportProgress(int processed, int total) => $"Importing ClipAngel clips... {processed}/{total}";
+    public static string FormatLibraryOptimizeJob(int percent) =>
+        $"Optimizing library storage… {Math.Clamp(percent, 0, 100)}%";
+
     public static string FormatLibraryUpgradeStage(LibraryUpgradeProgress progress)
     {
         var stage = progress.Stage switch

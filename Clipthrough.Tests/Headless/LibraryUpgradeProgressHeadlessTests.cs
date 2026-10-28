@@ -35,7 +35,11 @@ public sealed class LibraryUpgradeProgressHeadlessTests
 {
     private const int LegacyRows = 4;
 
-    private static void SeedLegacyRows(TemporaryDatabaseScope scope)
+    /// <param name="version">
+    /// The schema the library claims. Below 8 the move still runs before the app
+    /// opens, behind the overlay; from 8 it runs in the background (U4).
+    /// </param>
+    private static void SeedLegacyRows(TemporaryDatabaseScope scope, int version)
     {
         using var connection = scope.ConnectionFactory.CreateConnection();
         connection.Open();
@@ -56,9 +60,10 @@ public sealed class LibraryUpgradeProgressHeadlessTests
 
         using var rewind = connection.CreateCommand();
         rewind.CommandText = """
-            UPDATE app_metadata SET value = CAST(CAST(value AS INTEGER) - 1 AS TEXT) WHERE key = 'schema_version';
-            DELETE FROM app_metadata WHERE key = 'payload_move_last_id';
+            UPDATE app_metadata SET value = $v WHERE key = 'schema_version';
+            DELETE FROM app_metadata WHERE key IN ('payload_move_last_id', 'payload_move_done');
             """;
+        rewind.Parameters.AddWithValue("$v", version.ToString(System.Globalization.CultureInfo.InvariantCulture));
         rewind.ExecuteNonQuery();
     }
 
@@ -75,7 +80,7 @@ public sealed class LibraryUpgradeProgressHeadlessTests
         scope.SettingsService.SetHasSavedSettings(true);
         scope.StorageOptionsService.SetHasSavedConfig(true);
         Task.Run(() => scope.DatabaseInitializer.InitializeAsync()).GetAwaiter().GetResult();
-        SeedLegacyRows(scope);
+        SeedLegacyRows(scope, version: 4);
 
         using var moveReached = new ManualResetEventSlim();
         using var release = new ManualResetEventSlim();
@@ -187,6 +192,160 @@ public sealed class LibraryUpgradeProgressHeadlessTests
             release.Set();
             DatabaseInitializer.AfterPayloadRowMoved = null;
             DatabaseInitializer.PayloadMoveBatchRows = 200;
+
+            try { window?.Close(); } catch { /* test teardown */ }
+            viewModel?.Dispose();
+            for (var i = 0; i < 5; i++)
+            {
+                try { Dispatcher.UIThread.RunJobs(); } catch { /* test teardown */ }
+            }
+        }
+    }
+
+    /// <summary>
+    /// U4, owner decision (c): an upgrade from schema 8 opens at once and moves
+    /// payloads in the background. With the move held between batches, the clip
+    /// list has loaded, a capture lands, and the running-jobs line shows the move
+    /// and its progress; once released, the move finishes and the line clears.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task AnUpgradeFromSchema8_OpensAtOnce_AndShowsTheBackgroundMove()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        scope.SettingsService.SetHasSavedSettings(true);
+        scope.StorageOptionsService.SetHasSavedConfig(true);
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 1_048_576 });
+        Task.Run(() => scope.DatabaseInitializer.InitializeAsync()).GetAwaiter().GetResult();
+        SeedLegacyRows(scope, version: 8);
+
+        // As if a search-index rebuild had left merges behind: the background
+        // work drains them after the move (R1).
+        using (var connection = scope.ConnectionFactory.CreateConnection())
+        {
+            connection.Open();
+            using var pending = connection.CreateCommand();
+            pending.CommandText = "INSERT INTO app_metadata (key, value) VALUES ('fts_merge_pending', '1') ON CONFLICT(key) DO UPDATE SET value = '1';";
+            pending.ExecuteNonQuery();
+        }
+
+        using var held = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        DatabaseInitializer.BackgroundPayloadMoveBatchBudget = TimeSpan.Zero;
+        DatabaseInitializer.BetweenBackgroundPayloadBatches = _ =>
+        {
+            held.Set();
+            return Task.Run(() => release.Wait(TimeSpan.FromSeconds(30)));
+        };
+
+        // Recorded as the indicator raises them, on the reporting thread. The
+        // view model's label reads whatever is current when its posted update
+        // runs, so a 0% replaced by 25% before the dispatcher turns is never seen
+        // there.
+        var jobs = new BackgroundJobIndicator();
+        var seenJobLabels = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        jobs.Changed += (_, _) =>
+        {
+            foreach (var label in jobs.ActiveLabels)
+            {
+                seenJobLabels.Enqueue(label);
+            }
+        };
+        MainWindow? window = null;
+        MainWindowViewModel? viewModel = null;
+        try
+        {
+            var systemInteraction = new TestSystemInteractionService();
+            viewModel = new MainWindowViewModel(
+                scope.ClipStoreService,
+                new TestClipboardMonitorService(),
+                new TestClipSampleDataService(),
+                scope.SettingsService,
+                systemInteraction,
+                scope.StorageOptionsService,
+                scope.SensitivityService,
+                scope.NotificationService,
+                new TestSessionLogService(),
+                scope.ClipExportService,
+                new TestImageEditorService(),
+                scope.SearchHistoryService,
+                new TestAiTransformService(false),
+                new TestOcrService(),
+                new BackgroundOcrQueueStub(),
+                jobs,
+                scope.DatabaseInitializer);
+            window = new MainWindow(systemInteraction) { DataContext = viewModel };
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            await viewModel.InitializeAsync();
+            var clock = Stopwatch.StartNew();
+            while ((viewModel.IsLoadingDatabase || !held.IsSet) && clock.Elapsed < TimeSpan.FromSeconds(20))
+            {
+                await Task.Delay(20);
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            Assert.True(held.IsSet, "The background move never started.");
+            Assert.False(viewModel.IsLoadingDatabase, "The app did not open before the move finished.");
+            Assert.False(viewModel.IsUpgradingLibrary, "The blocking upgrade overlay showed for a background move.");
+
+            clock.Restart();
+            while (viewModel.Clips.Count < LegacyRows && clock.Elapsed < TimeSpan.FromSeconds(10))
+            {
+                await Task.Delay(20);
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            Assert.Equal(LegacyRows, viewModel.Clips.Count);
+            Assert.True(viewModel.HasRunningJobs);
+            Assert.StartsWith(AppText.FormatLibraryOptimizeJob(0)[..^2], viewModel.RunningJobsLabel);
+
+            // Held after the first of four one-row batches: the bar has moved off 0, and the 0% report before it showed too.
+            Assert.Contains(seenJobLabels, l => l == AppText.FormatLibraryOptimizeJob(0));
+
+            var captured = await scope.ClipStoreService.CaptureFastAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = "copied while the library was being optimized",
+                ContentBytes = System.Text.Encoding.UTF8.GetBytes("copied while the library was being optimized"),
+            });
+            Assert.NotNull(captured);
+
+            DatabaseInitializer.BetweenBackgroundPayloadBatches = null;
+            release.Set();
+            clock.Restart();
+            while (viewModel.HasRunningJobs && clock.Elapsed < TimeSpan.FromSeconds(20))
+            {
+                await Task.Delay(20);
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            Assert.False(viewModel.HasRunningJobs, "The move's job line outlived the move.");
+            using var connection = scope.ConnectionFactory.CreateConnection();
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM clips WHERE content_bytes IS NOT NULL;";
+            Assert.Equal(0L, Convert.ToInt64(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture));
+            clock.Restart();
+            long pendingMerges;
+            do
+            {
+                command.CommandText = "SELECT COUNT(*) FROM app_metadata WHERE key = 'fts_merge_pending';";
+                pendingMerges = Convert.ToInt64(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+                if (pendingMerges > 0)
+                {
+                    await Task.Delay(20);
+                }
+            }
+            while (pendingMerges > 0 && clock.Elapsed < TimeSpan.FromSeconds(10));
+            Assert.Equal(0L, pendingMerges);
+        }
+        finally
+        {
+            release.Set();
+            DatabaseInitializer.BetweenBackgroundPayloadBatches = null;
+            DatabaseInitializer.BackgroundPayloadMoveBatchBudget = TimeSpan.FromMilliseconds(100);
 
             try { window?.Close(); } catch { /* test teardown */ }
             viewModel?.Dispose();

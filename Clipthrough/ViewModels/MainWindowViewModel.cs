@@ -108,6 +108,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _startupErrorTitle = string.Empty;
     private string _startupErrorMessage = string.Empty;
     private bool _areBackgroundServicesStarted;
+    private readonly CancellationTokenSource _deferredPayloadMoveCancellation = new();
     private bool _isDisposed;
 
     // In-flight or completed source-app icon loads, keyed by executable path and shared
@@ -2172,6 +2173,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         _isDisposed = true;
+        _deferredPayloadMoveCancellation.Cancel();
         CancelAllPendingDeletes();
         _clipboardMonitorService.Stop();
         _settingsService.SettingsChanged -= OnSettingsChanged;
@@ -6253,7 +6255,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private async Task StartDatabaseAsync()
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        await _databaseInitializer.InitializeAsync(new UiThreadProgress(SetLibraryUpgradeProgress));
+        await _databaseInitializer.InitializeAsync(new UiThreadProgress(SetLibraryUpgradeProgress), allowDeferredPayloadMove: true);
         Trace.TraceInformation($"[startup-timing] DatabaseInitializer @ {sw.ElapsedMilliseconds}ms");
 
         if (!_settingsService.HasSavedSettings)
@@ -6318,6 +6320,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         _areBackgroundServicesStarted = true;
+        _ = RunDeferredPayloadMoveAsync();
         _clipboardMonitorService.Start();
         _backgroundOcrQueue.Start();
         _ = Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync());
@@ -6359,6 +6362,74 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .ObserveOn(RxSchedulers.MainThreadScheduler)
                 .Subscribe((int count) => { _ = RefreshSemanticCoverageAsync(); }));
         }
+    }
+
+    /// <summary>
+    /// Finishes an upgrade's payload move in the background while the app is in
+    /// use (upgrade-start research, U4). Shown as a running job with its
+    /// progress; a library with nothing left to move returns at once.
+    /// </summary>
+    private async Task RunDeferredPayloadMoveAsync()
+    {
+        IDisposable? job = null;
+        var shownPercent = -1;
+        var gate = new object();
+        void OnProgress(LibraryUpgradeProgress progress)
+        {
+            var percent = (int)Math.Round((progress.Fraction ?? 0) * 100);
+            lock (gate)
+            {
+                // A new label per step of five, so the job line moves without
+                // raising a change for every batch.
+                if (_deferredPayloadMoveCancellation.IsCancellationRequested || (shownPercent >= 0 && percent / 5 == shownPercent / 5))
+                {
+                    return;
+                }
+
+                var previous = job;
+                job = _jobIndicator.Begin(AppText.FormatLibraryOptimizeJob(percent));
+                previous?.Dispose();
+                shownPercent = percent;
+            }
+        }
+
+        try
+        {
+            await Task.Run(
+                () => _databaseInitializer.RunDeferredPayloadMoveAsync(
+                    new DirectProgress(OnProgress),
+                    _deferredPayloadMoveCancellation.Token),
+                _deferredPayloadMoveCancellation.Token).ConfigureAwait(false);
+
+            // After the move, never alongside it: both are writers, and the merges
+            // a rebuild leaves are only drained when one ran (R1). Silent - it
+            // changes nothing anyone can see except how fast captures are.
+            await Task.Run(
+                () => _databaseInitializer.DrainSearchIndexMergesAsync(_deferredPayloadMoveCancellation.Token),
+                _deferredPayloadMoveCancellation.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown. The batch in flight rolled back; the next start resumes.
+        }
+        catch (Exception ex)
+        {
+            ReportError("Library storage optimization", ex);
+        }
+        finally
+        {
+            lock (gate)
+            {
+                job?.Dispose();
+                job = null;
+            }
+        }
+    }
+
+    /// <summary>Reports on the caller's thread; the job indicator marshals its own change event.</summary>
+    private sealed class DirectProgress(Action<LibraryUpgradeProgress> apply) : IProgress<LibraryUpgradeProgress>
+    {
+        public void Report(LibraryUpgradeProgress value) => apply(value);
     }
 
     /// <summary>

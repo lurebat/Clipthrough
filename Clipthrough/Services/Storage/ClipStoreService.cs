@@ -2467,7 +2467,7 @@ public sealed class ClipStoreService : IClipStoreService
     /// Stored rather than computed. The icon is written after the clip, by a
     /// background lookup, so a column maintained by the write paths would go stale -
     /// but a trigger pair on the clips table keeps it exact through every path
-    /// (see DatabaseInitializer.EnsureClipStoredBytesAsync). Spelling it as the
+    /// (see DatabaseInitializer.EnsureClipStoredBytesColumnAsync). Spelling it as the
     /// expression instead is correct but unindexable, and cost 445 ms per capture at
     /// 60k clips against 2.5 ms here.
     ///

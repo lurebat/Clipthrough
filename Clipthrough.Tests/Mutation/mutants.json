@@ -979,8 +979,8 @@
     "id": "view-model-dispose-runs-twice",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "Dispose runs from Window.Closed and blocks on a settings flush with a timeout. Losing the idempotence guard makes a second call pay that wait again during shutdown.",
-    "find": "        if (_isDisposed)\n        {\n            return;\n        }\n\n        _isDisposed = true;\n        CancelAllPendingDeletes();",
-    "replace": "        _isDisposed = true;\n        CancelAllPendingDeletes();",
+    "find": "        if (_isDisposed)\n        {\n            return;\n        }\n\n        _isDisposed = true;\n        _deferredPayloadMoveCancellation.Cancel();\n        CancelAllPendingDeletes();",
+    "replace": "        _isDisposed = true;\n        _deferredPayloadMoveCancellation.Cancel();\n        CancelAllPendingDeletes();",
     "filter": "Dispose_IsIdempotent"
   },
   {
@@ -2923,8 +2923,8 @@
     "id": "payload-move-leaves-the-old-columns",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "F-06. Copying without NULLing the inline columns keeps every metadata read walking the blob, and doubles the file.",
-    "find": "                        SET content_bytes = NULL,\n                            source_app_icon = NULL,\n                            source_app_icon_hash",
-    "replace": "                        SET source_app_icon_hash",
+    "find": "                        SET content_bytes = NULL,\n                            source_app_icon = NULL,\n                            stored_bytes = byte_size,\n                            source_app_icon_hash",
+    "replace": "                        SET stored_bytes = byte_size,\n                            source_app_icon_hash",
     "filter": "FullyQualifiedName~PayloadLayoutTests.AnExistingLibrary_IsMoved"
   },
   {
@@ -3027,8 +3027,8 @@
     "id": "upgrade-scans-before-the-payload-move",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "Option A. Every full-table scan before the move walks each inline payload (F-06); the move has to come first.",
-    "find": "            await MovePayloadsOutOfClipsAsync(connection, progress, cancellationToken);\n            TraceStep(sw, \"move-payloads\");\n\n            await EnsureClipStoredBytesAsync(connection, cancellationToken);\n            TraceStep(sw, \"ensure-stored-bytes\");\n",
-    "replace": "            await EnsureClipStoredBytesAsync(connection, cancellationToken);\n            TraceStep(sw, \"ensure-stored-bytes\");\n            await MovePayloadsOutOfClipsAsync(connection, progress, cancellationToken);\n            TraceStep(sw, \"move-payloads\");\n\n",
+    "find": "                await MovePayloadsOutOfClipsAsync(connection, progress, background: false, cancellationToken);\n                TraceStep(sw, \"move-payloads\");\n\n                await RepairClipStoredBytesAsync(connection, cancellationToken);\n                TraceStep(sw, \"ensure-stored-bytes\");\n",
+    "replace": "                await RepairClipStoredBytesAsync(connection, cancellationToken);\n                TraceStep(sw, \"ensure-stored-bytes\");\n                await MovePayloadsOutOfClipsAsync(connection, progress, background: false, cancellationToken);\n                TraceStep(sw, \"move-payloads\");\n\n",
     "filter": "FullyQualifiedName~UpgradeStartOrderTests.ThePayloadMove_RunsBefore"
   },
   {
@@ -3118,5 +3118,101 @@
     "find": "                if (icon is { Length: > 0 } && !hasNewerIcon)",
     "replace": "                if (icon is { Length: > 0 } && (hasNewerIcon || !hasNewerIcon))",
     "filter": "FullyQualifiedName~PartlyMovedLibraryTests.AnEditBeforeTheMoveReachesAClip"
+  },
+  {
+    "id": "upgrade-never-defers-the-move",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U4, owner decision (c). An upgrade from schema 8 opens at once and moves payloads in the background; deferring never means the 74 s / 5-7 min blocking start again.",
+    "find": "            var deferPayloadMove = allowDeferredPayloadMove",
+    "replace": "            var deferPayloadMove = allowDeferredPayloadMove && Environment.ProcessorCount < 0",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.AnUpgradeFromSchema8_Opens"
+  },
+  {
+    "id": "old-library-defers-the-move",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U4. A library from before schema 8 runs scanning backfills that are only cheap after the move, so it must still move before opening.",
+    "find": "                && storedVersion >= StoredBytesIntroducedVersion",
+    "replace": "                && storedVersion >= StoredBytesIntroducedVersion - 1000",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.AnUpgradeFromBeforeSchema8"
+  },
+  {
+    "id": "background-move-ignores-its-time-budget",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U4. Each background batch is a write transaction captures wait behind (busy_timeout 5 s); an encrypted batch bounded only by size can take seconds.",
+    "find": "                    && (!background || rows.Count == 0 || batchClock.Elapsed < BackgroundPayloadMoveBatchBudget)",
+    "replace": "                    && (!background || rows.Count == 0 || batchClock.Elapsed >= TimeSpan.Zero || batchClock.Elapsed < BackgroundPayloadMoveBatchBudget)",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.TheBackgroundMove_CommitsInBatchesBoundedByItsTimeBudget"
+  },
+  {
+    "id": "payload-move-never-marked-done",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U4. Without the done marker every start re-runs the background move and scans for rows to move.",
+    "find": "                        INSERT INTO app_metadata (key, value) VALUES ('payload_move_done', '1')",
+    "replace": "                        INSERT INTO app_metadata (key, value) VALUES ('payload_move_done', '0')",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.AnUpgradeFromSchema8_Opens"
+  },
+  {
+    "id": "moved-row-keeps-counting-its-icon",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U4. While the move runs, a moved row's icon is counted once in app_icons; keeping it in the row too overcounts the library and can evict clips early.",
+    "find": "                            stored_bytes = byte_size,",
+    "replace": "                            stored_bytes = stored_bytes,",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.WhileTheBackgroundMoveRuns"
+  },
+  {
+    "id": "background-move-never-started",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "U4. The app opens without moving an upgraded library's payloads; nothing else ever moves them.",
+    "find": "        _ = RunDeferredPayloadMoveAsync();",
+    "replace": "        _ = Environment.ProcessorCount < 0 ? RunDeferredPayloadMoveAsync() : Task.CompletedTask;",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests.AnUpgradeFromSchema8"
+  },
+  {
+    "id": "app-start-forbids-the-deferred-move",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "U4. The app has to allow the deferral, or every upgrade blocks behind the overlay.",
+    "find": "        await _databaseInitializer.InitializeAsync(new UiThreadProgress(SetLibraryUpgradeProgress), allowDeferredPayloadMove: true);",
+    "replace": "        await _databaseInitializer.InitializeAsync(new UiThreadProgress(SetLibraryUpgradeProgress), allowDeferredPayloadMove: false);",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests.AnUpgradeFromSchema8"
+  },
+  {
+    "id": "merge-drain-stops-after-one-step",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "R1. A rebuild leaves many merge steps of work; stopping after one leaves the rest for the first large captures.",
+    "find": "            if (after - before < 2)",
+    "replace": "            if (after - before < 2 || after >= 0)",
+    "filter": "FullyQualifiedName~SearchIndexMergeDrainTests.AfterARebuild"
+  },
+  {
+    "id": "rebuild-records-no-pending-merges",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "R1. The drain only runs when a rebuild recorded that it left merges behind.",
+    "find": "            INSERT INTO app_metadata (key, value) VALUES ('fts_merge_pending', '1')",
+    "replace": "            INSERT INTO app_metadata (key, value) VALUES ('fts_merge_pending', '0')",
+    "filter": "FullyQualifiedName~SearchIndexMergeDrainTests.ARebuild_RecordsThatMergesArePending"
+  },
+  {
+    "id": "merge-drain-runs-without-a-rebuild",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "R1. Without a rebuild there is no debt to drain, and merging anyway is background write work for nothing.",
+    "find": "            if (await pending.ExecuteScalarAsync(cancellationToken) is not \"1\")",
+    "replace": "            if (await pending.ExecuteScalarAsync(cancellationToken) is not \"1\" && Environment.ProcessorCount < 0)",
+    "filter": "FullyQualifiedName~SearchIndexMergeDrainTests.WithoutARebuild"
+  },
+  {
+    "id": "merge-drain-never-started",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "R1. Nothing else drains the merges a rebuild leaves.",
+    "find": "                () => _databaseInitializer.DrainSearchIndexMergesAsync(_deferredPayloadMoveCancellation.Token),",
+    "replace": "                () => Environment.ProcessorCount < 0 ? _databaseInitializer.DrainSearchIndexMergesAsync(_deferredPayloadMoveCancellation.Token) : Task.FromResult(false),",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests"
+  },
+  {
+    "id": "background-move-skips-its-first-progress",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "U4. The first report is 0%, and -1 / 5 == 0 in C#, so a bucket check with no \"nothing shown yet\" guard drops it and the job line stays empty until the first 5%.",
+    "find": "(shownPercent >= 0 && percent / 5 == shownPercent / 5)",
+    "replace": "(percent / 5 == shownPercent / 5)",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests.AnUpgradeFromSchema8"
   }
 ]
