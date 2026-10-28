@@ -534,3 +534,8 @@ This plan does **not** adopt that version. Clipthrough stays on VellumText 0.7.0
 - Dependency upgrades other than the U-C8 evaluation, including the VellumText async-importer version above. Bumps to Avalonia, Velopack and Onnx are independent; re-run the mutants after any bump (S32).
 - Non-Windows feature work (S8); `LibraryImport` conversion (S9); CA1001/CA2213 (S29).
 - Pull requests: approving this plan, or a phase of it, is not approval to open PRs.
+- **Follow-up (owner: out of scope for now, 2026-10-28): merge cost after a full FTS rebuild.** After an `INSERT INTO clips_fts(clips_fts) VALUES('rebuild')`, the index is left with large segments at one level and an incremental merge still pending. FTS5 charges merge work to later writes in proportion to what each one adds, so the first large captures after a rebuild each pay part of that merge.
+  - Evidence: the U-E1 seed, rebuilt by the pre-(B) migration, decoded from `clips_fts_data` id 10 (the structure record) as 5 levels and 13 segments. Level 3 held 4 segments totalling about 33k pages, and a merge was pending at level 2. The D seed, which had never been rebuilt, had no level holding 4 segments.
+  - Measured on 60k clips: the first 1.9 MB capture on a fresh copy of the rebuilt seed took 2.6 s plaintext and 4.9 s encrypted. The second run on the same copy took 662 ms, against 538 ms on Phase D. Whether merge state accounts for all of it is being confirmed on #11.
+  - Since U-E1 (B), only libraries older than schema 3 and FTS-schema repairs trigger a rebuild. The cost predates Phase E.
+  - A fix would be to run `'optimize'` (or bounded `'merge'` steps) after a rebuild, ahead of the first capture. Its cost needs measuring first.
