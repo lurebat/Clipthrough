@@ -42,8 +42,15 @@ Two things it does not cover, and which are covered elsewhere:
 Measured on the U-D0 fixture (60k clips, ~1.6 GB) on a quiet machine on
 2026-10-27. Capture took 0.98-1.06x the time without it, on plaintext and
 encrypted libraries alike (the median of four samples per build), which is
-under the 10% the plan set as the point to stop and ask. The cost of deletes
-and of the retention purge was not measured separately.
+under the 10% the plan set as the point to stop and ask.
+
+Deletes and the retention purge were measured in a second quiet window, each
+probe in its own process on a fresh copy (`PerfProbes.P15_DeleteAndPurge`).
+Single deletes cost about 1.00x. The bulk retention purge of 3,072 clips cost
+1.13x on plaintext (5.95 -> 6.70 s) and 1.00x encrypted. The plaintext purge is
+over the 10% threshold; the owner kept the pragma on for every library and
+accepted that cost (2026-10-28). If it is ever restricted to encrypted
+libraries, plaintext libraries lose the guarantee this doc is about.
 
 ## Prevention
 
