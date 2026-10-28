@@ -1011,8 +1011,8 @@
     "id": "icon-read-selects-the-wrong-column",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "The narrow icon read exists to return the icon blob and nothing else; selecting another column would hand callers the wrong bytes while still looking like a cheap single-column read.",
-    "find": "        command.CommandText = \"SELECT i.png FROM clips c JOIN app_icons i ON i.hash = c.source_app_icon_hash WHERE c.id = $id LIMIT 1;\";",
-    "replace": "        command.CommandText = \"SELECT p.content_bytes FROM clips c JOIN clip_payloads p ON p.clip_id = c.id WHERE c.id = $id LIMIT 1;\";",
+    "find": "            SELECT COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), c.source_app_icon)\n            FROM clips c WHERE c.id = $id;",
+    "replace": "            SELECT COALESCE((SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id), c.source_app_icon)\n            FROM clips c WHERE c.id = $id;",
     "filter": "GetSourceAppIconAsync_ReturnsTheIconWithoutTheRestOfTheRow"
   },
   {
@@ -2891,16 +2891,16 @@
     "id": "hydration-skips-the-payload-join",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "U-E1 plan mutant. A full read that takes content_bytes from the clips row gets NULL for every clip since the move: images and rich text lose their payload.",
-    "find": "            (SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id),\n",
-    "replace": "            c.content_bytes,\n",
+    "find": "            COALESCE((SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id), c.content_bytes),\n",
+    "replace": "            COALESCE(NULL, c.content_bytes),\n",
     "filter": "FullyQualifiedName~PayloadLayoutTests"
   },
   {
     "id": "icon-read-skips-app-icons",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "U-E1 / F-39. Icons live in app_icons; reading the old inline column shows every clip without its app icon.",
-    "find": "            (SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash),\n",
-    "replace": "            c.source_app_icon,\n",
+    "find": "            COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), c.source_app_icon),\n",
+    "replace": "            COALESCE(NULL, c.source_app_icon),\n",
     "filter": "FullyQualifiedName~PayloadLayoutTests"
   },
   {
@@ -3062,5 +3062,61 @@
     "find": "            if (!await HasUniqueClipHashIndexAsync(connection, cancellationToken))",
     "replace": "            if (!await HasUniqueClipHashIndexAsync(connection, cancellationToken) && Environment.ProcessorCount < 0)",
     "filter": "FullyQualifiedName~UpgradeStartOrderTests.ALibraryWithoutTheUniqueHashIndex"
+  },
+  {
+    "id": "hydration-ignores-unmoved-payloads",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U3. While the move is unfinished, a clip it has not reached keeps its payload inline; a read that only looks in clip_payloads finds nothing.",
+    "find": "            COALESCE((SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id), c.content_bytes),",
+    "replace": "            COALESCE((SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id), NULL),",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.EveryClip_ReadsItsPayloadAndIcon"
+  },
+  {
+    "id": "hydration-ignores-unmoved-icons",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U3. An unmoved clip keeps its icon inline until the move reaches it.",
+    "find": "            COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), c.source_app_icon),",
+    "replace": "            COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), NULL),",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.EveryClip_ReadsItsPayloadAndIcon"
+  },
+  {
+    "id": "list-ignores-unmoved-icons",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U3. The list shows an icon only when it is flagged available; an unmoved clip has no hash yet.",
+    "find": "            (c.source_app_icon_hash IS NOT NULL OR c.source_app_icon IS NOT NULL),",
+    "replace": "            (c.source_app_icon_hash IS NOT NULL),",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.EveryClip_ReadsItsPayloadAndIcon"
+  },
+  {
+    "id": "icon-lookup-ignores-unmoved-icons",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U3. GetSourceAppIconAsync serves the icon column in the clip list; an unmoved clip's icon is still inline.",
+    "find": "            SELECT COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), c.source_app_icon)\n            FROM clips c WHERE c.id = $id;",
+    "replace": "            SELECT COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), NULL)\n            FROM clips c WHERE c.id = $id;",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.EveryClip_ReadsItsPayloadAndIcon"
+  },
+  {
+    "id": "ocr-misses-unmoved-images",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U3. OCR finds images by their payload; an image the move has not reached is still one.",
+    "find": "              AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id) OR clips.content_bytes IS NOT NULL)\n              AND (ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'failed' OR ocr_status = 'rerun')\n            ORDER BY COALESCE(last_copied_at, captured_at) DESC\n            LIMIT 500;",
+    "replace": "              AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id))\n              AND (ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'failed' OR ocr_status = 'rerun')\n            ORDER BY COALESCE(last_copied_at, captured_at) DESC\n            LIMIT 500;",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.EveryClip_ReadsItsPayloadAndIcon"
+  },
+  {
+    "id": "payload-move-overwrites-a-newer-payload",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U3, the lost edit. A clip written before the move reaches it has its new payload in clip_payloads and the old one still inline; an upsert copies the old over the new.",
+    "find": "                        ON CONFLICT(clip_id) DO NOTHING;",
+    "replace": "                        ON CONFLICT(clip_id) DO UPDATE SET content_bytes = excluded.content_bytes;",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.AnEditBeforeTheMoveReachesAClip"
+  },
+  {
+    "id": "payload-move-overwrites-a-newer-icon",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U3, the lost edit. An icon set before the move reaches the clip must not be replaced by the stale inline one.",
+    "find": "                if (icon is { Length: > 0 } && !hasNewerIcon)",
+    "replace": "                if (icon is { Length: > 0 } && (hasNewerIcon || !hasNewerIcon))",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.AnEditBeforeTheMoveReachesAClip"
   }
 ]

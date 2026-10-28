@@ -24,12 +24,12 @@ public sealed class ClipStoreService : IClipStoreService
     private const string ClipSelectColumns = """
             c.id,
             c.content,
-            (SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id),
+            COALESCE((SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id), c.content_bytes),
             c.content_type,
             c.content_format,
             c.source_app,
             c.source_app_path,
-            (SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash),
+            COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), c.source_app_icon),
             c.hash,
             c.is_favorite,
             c.is_sensitive,
@@ -75,7 +75,7 @@ public sealed class ClipStoreService : IClipStoreService
             c.content_format,
             c.source_app,
             c.source_app_path,
-            (c.source_app_icon_hash IS NOT NULL),
+            (c.source_app_icon_hash IS NOT NULL OR c.source_app_icon IS NOT NULL),
             c.hash,
             c.is_favorite,
             c.is_sensitive,
@@ -722,7 +722,7 @@ public sealed class ClipStoreService : IClipStoreService
             SET ocr_status = 'running'
             WHERE id = $id
               AND content_type = 'image'
-              AND EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id)
+              AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id) OR clips.content_bytes IS NOT NULL)
               AND (ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'failed' OR ocr_status = 'rerun');
             """;
         command.Parameters.AddWithValue("$id", clipId);
@@ -814,7 +814,7 @@ public sealed class ClipStoreService : IClipStoreService
         command.CommandText = """
             SELECT id FROM clips
             WHERE content_type = 'image'
-              AND EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id)
+              AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id) OR clips.content_bytes IS NOT NULL)
               AND (ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'failed' OR ocr_status = 'rerun')
             ORDER BY COALESCE(last_copied_at, captured_at) DESC
             LIMIT 500;
@@ -853,7 +853,7 @@ public sealed class ClipStoreService : IClipStoreService
             COALESCE(SUM(CASE WHEN ocr_status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_count
         FROM clips
         WHERE content_type = 'image'
-          AND EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id);
+          AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id) OR clips.content_bytes IS NOT NULL);
         """;
 
     public Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default)
@@ -896,7 +896,7 @@ public sealed class ClipStoreService : IClipStoreService
             SET ocr_status = 'rerun'
             WHERE id = $id
               AND content_type = 'image'
-              AND EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id)
+              AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id) OR clips.content_bytes IS NOT NULL)
               AND ocr_status = 'succeeded';
             """;
         command.Parameters.AddWithValue("$id", clipId);
@@ -917,7 +917,7 @@ public sealed class ClipStoreService : IClipStoreService
             UPDATE clips
             SET ocr_status = 'rerun'
             WHERE content_type = 'image'
-              AND EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id)
+              AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id) OR clips.content_bytes IS NOT NULL)
               AND ocr_status = 'succeeded'
             RETURNING id;
             """;
@@ -1217,7 +1217,10 @@ public sealed class ClipStoreService : IClipStoreService
         await connection.OpenAsync(cancellationToken);
 
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT i.png FROM clips c JOIN app_icons i ON i.hash = c.source_app_icon_hash WHERE c.id = $id LIMIT 1;";
+        command.CommandText = """
+            SELECT COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), c.source_app_icon)
+            FROM clips c WHERE c.id = $id;
+            """;
         command.Parameters.AddWithValue("$id", clipId);
 
         var value = await command.ExecuteScalarAsync(cancellationToken);

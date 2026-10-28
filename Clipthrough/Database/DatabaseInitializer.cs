@@ -979,13 +979,13 @@ public sealed class DatabaseInitializer
         {
             cancellationToken.ThrowIfCancellationRequested();
             using var transaction = connection.BeginTransaction();
-            var rows = new List<(long Id, byte[]? Payload, byte[]? Icon)>();
+            var rows = new List<(long Id, byte[]? Payload, byte[]? Icon, bool HasNewerIcon)>();
             long bytes = 0;
             await using (var select = connection.CreateCommand())
             {
                 select.Transaction = transaction;
                 select.CommandText = """
-                    SELECT id, content_bytes, source_app_icon FROM clips
+                    SELECT id, content_bytes, source_app_icon, source_app_icon_hash IS NOT NULL FROM clips
                     WHERE id > $last AND (content_bytes IS NOT NULL OR source_app_icon IS NOT NULL)
                     ORDER BY id
                     LIMIT $limit;
@@ -997,7 +997,7 @@ public sealed class DatabaseInitializer
                 {
                     var payload = reader.IsDBNull(1) ? null : (byte[])reader.GetValue(1);
                     var icon = reader.IsDBNull(2) ? null : (byte[])reader.GetValue(2);
-                    rows.Add((reader.GetInt64(0), payload, icon));
+                    rows.Add((reader.GetInt64(0), payload, icon, reader.GetInt64(3) != 0));
                     bytes += (payload?.LongLength ?? 0) + (icon?.LongLength ?? 0);
                 }
             }
@@ -1009,7 +1009,12 @@ public sealed class DatabaseInitializer
                 break;
             }
 
-            foreach (var (id, payload, icon) in rows)
+            // Newer data wins. A clip the move has not reached yet can still be
+            // written - captured again, edited, given an icon - and every write
+            // goes to the new layout, leaving the inline copy behind it stale.
+            // So the move never replaces a payload or an icon hash that is already
+            // there; it only clears the stale inline copy.
+            foreach (var (id, payload, icon, hasNewerIcon) in rows)
             {
                 if (payload is not null)
                 {
@@ -1017,7 +1022,7 @@ public sealed class DatabaseInitializer
                     insert.Transaction = transaction;
                     insert.CommandText = """
                         INSERT INTO clip_payloads (clip_id, content_bytes) VALUES ($id, $bytes)
-                        ON CONFLICT(clip_id) DO UPDATE SET content_bytes = excluded.content_bytes;
+                        ON CONFLICT(clip_id) DO NOTHING;
                         """;
                     insert.Parameters.AddWithValue("$id", id);
                     insert.Parameters.AddWithValue("$bytes", payload);
@@ -1025,7 +1030,7 @@ public sealed class DatabaseInitializer
                 }
 
                 string? iconHash = null;
-                if (icon is { Length: > 0 })
+                if (icon is { Length: > 0 } && !hasNewerIcon)
                 {
                     iconHash = AppIconHash(icon);
                     await using var insertIcon = connection.CreateCommand();
