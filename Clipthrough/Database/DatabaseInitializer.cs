@@ -343,6 +343,20 @@ public sealed class DatabaseInitializer
     /// </remarks>
     internal const int LastSearchIndexChangeVersion = 3;
 
+    /// <summary>
+    /// The first schema version, stamped by v0.9.3 (b1dd717). The aggregation and
+    /// content-format backfills have not changed since, so every library stamped
+    /// with a version has had them; only an unstamped one (0) still needs them.
+    /// </summary>
+    private const int GateIntroducedVersion = 1;
+
+    /// <summary>
+    /// The version whose migration added byte_size and its backfill (bf05b15).
+    /// A library at or past it already has every row sized; rows written since
+    /// are sized at capture.
+    /// </summary>
+    private const int ByteSizeIntroducedVersion = 5;
+
     private readonly SqliteConnectionFactory _connectionFactory;
     private readonly ISensitivityService _sensitivityService;
 
@@ -421,14 +435,47 @@ public sealed class DatabaseInitializer
             TraceStep(sw, "ensure-lineage-columns");
             await EnsureClipEmbeddingSchemaAsync(connection, cancellationToken);
             TraceStep(sw, "ensure-embedding-schema");
+
+            // The move first: until it has run, every scan below walks each
+            // row's inline payload (F-06), and after it the same scans read
+            // small rows. Everything below must therefore read payload sizes
+            // from clip_payloads, not content_bytes.
+            await EnsureSourceAppIconHashColumnAsync(connection, cancellationToken);
+            await MovePayloadsOutOfClipsAsync(connection, progress, cancellationToken);
+            TraceStep(sw, "move-payloads");
+
             await EnsureClipStoredBytesAsync(connection, cancellationToken);
             TraceStep(sw, "ensure-stored-bytes");
-            await BackfillClipAggregationColumnsAsync(connection, cancellationToken);
-            TraceStep(sw, "backfill-aggregation");
-            await BackfillClipPayloadColumnsAsync(connection, cancellationToken);
-            TraceStep(sw, "backfill-payload");
-            await DeduplicateClipsByHashAsync(connection, cancellationToken);
-            TraceStep(sw, "dedupe-by-hash");
+            if (storedVersion < GateIntroducedVersion)
+            {
+                await BackfillClipAggregationColumnsAsync(connection, cancellationToken);
+                TraceStep(sw, "backfill-aggregation");
+            }
+            else
+            {
+                TraceStep(sw, "backfill-aggregation skipped");
+            }
+
+            if (storedVersion < ByteSizeIntroducedVersion)
+            {
+                await BackfillClipPayloadColumnsAsync(connection, cancellationToken);
+                TraceStep(sw, "backfill-payload");
+            }
+            else
+            {
+                TraceStep(sw, "backfill-payload skipped");
+            }
+
+            if (!await HasUniqueClipHashIndexAsync(connection, cancellationToken))
+            {
+                await DeduplicateClipsByHashAsync(connection, cancellationToken);
+                TraceStep(sw, "dedupe-by-hash");
+            }
+            else
+            {
+                TraceStep(sw, "dedupe-by-hash skipped");
+            }
+
             await EnsureUniqueClipHashIndexAsync(connection, cancellationToken);
             TraceStep(sw, "ensure-unique-hash-index");
             if (ftsSchemaRecreated || storedVersion < LastSearchIndexChangeVersion)
@@ -442,9 +489,6 @@ public sealed class DatabaseInitializer
                 TraceStep(sw, "search-index-current (rebuild skipped)");
             }
 
-            await EnsureSourceAppIconHashColumnAsync(connection, cancellationToken);
-            await MovePayloadsOutOfClipsAsync(connection, progress, cancellationToken);
-            TraceStep(sw, "move-payloads");
             progress?.Report(new LibraryUpgradeProgress(LibraryUpgradeStage.Finishing));
             await WriteSchemaVersionAsync(connection, CurrentSchemaVersion, cancellationToken);
             TraceStep(sw, $"version-write ({CurrentSchemaVersion})");
@@ -1155,7 +1199,15 @@ public sealed class DatabaseInitializer
         // the best measure available without rehydrating every payload.
         await ExecuteNonQueryAsync(
             connection,
-            "UPDATE clips SET byte_size = COALESCE(LENGTH(CAST(content AS BLOB)), LENGTH(content_bytes), 0) WHERE byte_size = 0;",
+            """
+            UPDATE clips
+            SET byte_size = COALESCE(
+                LENGTH(CAST(content AS BLOB)),
+                (SELECT LENGTH(p.content_bytes) FROM clip_payloads p WHERE p.clip_id = clips.id),
+                LENGTH(content_bytes),
+                0)
+            WHERE byte_size = 0;
+            """,
             cancellationToken);
     }
 
@@ -1309,6 +1361,13 @@ public sealed class DatabaseInitializer
     {
         await ExecuteNonQueryAsync(connection, "DROP INDEX IF EXISTS idx_clips_hash;", cancellationToken);
         await ExecuteNonQueryAsync(connection, "CREATE UNIQUE INDEX IF NOT EXISTS idx_clips_hash_unique ON clips(hash);", cancellationToken);
+    }
+
+    private static async Task<bool> HasUniqueClipHashIndexAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_clips_hash_unique';";
+        return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) > 0;
     }
 
     private static async Task RebuildClipSearchIndexAsync(SqliteConnection connection, CancellationToken cancellationToken)

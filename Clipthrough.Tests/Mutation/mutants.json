@@ -3014,5 +3014,53 @@
     "find": "            await Task.Run(async () => await StartDatabaseAsync().ConfigureAwait(false)).ConfigureAwait(false);",
     "replace": "            await StartDatabaseAsync();",
     "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests"
+  },
+  {
+    "id": "byte-size-backfill-ignores-moved-payloads",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Option A puts the payload move before the byte_size backfill, so content_bytes is NULL by then. Reading only it records zero sizes, which also makes the size cap undercount.",
+    "find": "                (SELECT LENGTH(p.content_bytes) FROM clip_payloads p WHERE p.clip_id = clips.id),\n",
+    "replace": "                (SELECT NULL FROM clip_payloads p WHERE p.clip_id = clips.id),\n",
+    "filter": "FullyQualifiedName~UpgradeStartOrderTests.ARowWithoutASize"
+  },
+  {
+    "id": "upgrade-scans-before-the-payload-move",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Option A. Every full-table scan before the move walks each inline payload (F-06); the move has to come first.",
+    "find": "            await MovePayloadsOutOfClipsAsync(connection, progress, cancellationToken);\n            TraceStep(sw, \"move-payloads\");\n\n            await EnsureClipStoredBytesAsync(connection, cancellationToken);\n            TraceStep(sw, \"ensure-stored-bytes\");\n",
+    "replace": "            await EnsureClipStoredBytesAsync(connection, cancellationToken);\n            TraceStep(sw, \"ensure-stored-bytes\");\n            await MovePayloadsOutOfClipsAsync(connection, progress, cancellationToken);\n            TraceStep(sw, \"move-payloads\");\n\n",
+    "filter": "FullyQualifiedName~UpgradeStartOrderTests.ThePayloadMove_RunsBefore"
+  },
+  {
+    "id": "aggregation-backfill-always-runs",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Option A. A library stamped with any version already has the aggregation backfill; rerunning it is a full scan for nothing.",
+    "find": "            if (storedVersion < GateIntroducedVersion)",
+    "replace": "            if (storedVersion < GateIntroducedVersion || storedVersion >= 0)",
+    "filter": "FullyQualifiedName~UpgradeStartOrderTests.AnUpgradeFromARecentVersion"
+  },
+  {
+    "id": "aggregation-backfill-never-runs",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "A library from before the version gate still needs copy counts and first/last-copied times filled.",
+    "find": "            if (storedVersion < GateIntroducedVersion)",
+    "replace": "            if (storedVersion < GateIntroducedVersion - 1000)",
+    "filter": "FullyQualifiedName~UpgradeStartOrderTests.ALibraryFromBeforeTheVersionGate"
+  },
+  {
+    "id": "payload-backfill-never-runs",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "A library from before schema 5 has rows with byte_size 0; skipping the backfill leaves them unsized and uncounted by the size cap.",
+    "find": "            if (storedVersion < ByteSizeIntroducedVersion)",
+    "replace": "            if (storedVersion < ByteSizeIntroducedVersion - 1000)",
+    "filter": "FullyQualifiedName~UpgradeStartOrderTests.ARowWithoutASize"
+  },
+  {
+    "id": "dedupe-skipped-without-the-unique-index",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Dedupe has to run whenever the unique hash index is missing, or creating that index fails on the duplicates.",
+    "find": "            if (!await HasUniqueClipHashIndexAsync(connection, cancellationToken))",
+    "replace": "            if (!await HasUniqueClipHashIndexAsync(connection, cancellationToken) && Environment.ProcessorCount < 0)",
+    "filter": "FullyQualifiedName~UpgradeStartOrderTests.ALibraryWithoutTheUniqueHashIndex"
   }
 ]

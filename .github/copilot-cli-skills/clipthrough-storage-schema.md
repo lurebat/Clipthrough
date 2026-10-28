@@ -156,6 +156,7 @@ If you add a column you want searchable, you must:
 - `idx_clips_source_app_icon_hash` — partial, non-null only; finds orphaned icons.
 - The size cap counts each row's `stored_bytes` (now just `byte_size`) plus every distinct icon once: `TotalStoredBytesSql`.
 - Existing libraries move in `DatabaseInitializer.MovePayloadsOutOfClipsAsync`: id-ordered batches, one transaction each, progress in `app_metadata.payload_move_last_id`, resumable after a crash.
+- The move runs before every version-gated step that scans `clips` (stored-bytes, backfills, dedupe, FTS rebuild), because a scan over rows with inline payloads walks every overflow chain. A step after it that needs a payload's size must read `clip_payloads`, not `content_bytes` (see `BackfillClipPayloadColumnsAsync`). The backfills are gated: aggregation and content-format for libraries below schema 1, `byte_size` below schema 5, and dedupe while `idx_clips_hash_unique` is missing. `UpgradeStartOrderTests` covers the order, the gates and the size trap.
 - The first start after an upgrade reports its stages through `InitializeAsync(IProgress<LibraryUpgradeProgress>)`, and the move reports a fraction per batch (by id, since the rowid's MIN and MAX are free). The loading overlay shows them. Only a library that already has clips reports. A new long-running migration step should report a stage too.
 
 ### Other tables
