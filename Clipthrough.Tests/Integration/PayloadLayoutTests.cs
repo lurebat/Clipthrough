@@ -195,11 +195,11 @@ public sealed class PayloadLayoutTests
         var ids = await SeedLegacyRowsAsync(scope, 5);
 
         DatabaseInitializer.PayloadMoveBatchRows = 2;
-        DatabaseInitializer.AfterPayloadRowMoved = id =>
+        DatabaseInitializer.AfterPayloadBatchCopied = (first, last) =>
         {
-            if (id == ids[2])
+            if (first <= ids[2] && ids[2] <= last)
             {
-                throw new InvalidOperationException("injected crash in the second batch");
+                throw new InvalidOperationException("injected crash in the second batch, after its copy");
             }
         };
         try
@@ -208,7 +208,7 @@ public sealed class PayloadLayoutTests
         }
         finally
         {
-            DatabaseInitializer.AfterPayloadRowMoved = null;
+            DatabaseInitializer.AfterPayloadBatchCopied = null;
             DatabaseInitializer.PayloadMoveBatchRows = 200;
         }
 

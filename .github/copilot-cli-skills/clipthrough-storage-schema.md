@@ -155,7 +155,7 @@ If you add a column you want searchable, you must:
 - `app_icons(hash TEXT PRIMARY KEY, png BLOB NOT NULL)` — one row per distinct icon (F-39). Orphans are deleted at startup and after evictions.
 - `idx_clips_source_app_icon_hash` — partial, non-null only; finds orphaned icons.
 - The size cap counts each row's `stored_bytes` (now just `byte_size`) plus every distinct icon once: `TotalStoredBytesSql`.
-- Existing libraries move in `DatabaseInitializer.MovePayloadsOutOfClipsAsync`: id-ordered batches, one transaction each, progress in `app_metadata.payload_move_last_id`, resumable after a crash.
+- Existing libraries move in `DatabaseInitializer.MovePayloadsOutOfClipsAsync`: id-ordered batches, one transaction each, progress in `app_metadata.payload_move_last_id`, resumable after a crash. The copy is SQL-only (`INSERT ... SELECT` over each batch's id range), so payloads never enter managed memory; icons are hashed by a .NET function registered on the connection. `PayloadMoveAllocationTests` holds the move to an allocation budget well under one copy of the payloads.
 
 ### Other tables
 
