@@ -244,6 +244,7 @@ public static class AppText
         [nameof(UnexpectedErrorTitle)] = "Something went wrong",
         [nameof(ClipCaptureFailedTitle)] = "Clip capture failed",
         [nameof(SettingsLoadFailedTitle)] = "Settings could not be read",
+        [nameof(LibraryOptimizeFailedTitle)] = "Library storage was not optimized",
         [nameof(ClipCaptureFailedUnsupportedPayload)] = "The clipboard payload was not a supported text, rich text, image, or file format.",
         [nameof(ClipCaptureFailedEmptyPayload)] = "The clipboard payload was empty.",
         [nameof(ClipDragImportTitle)] = "Imported by drag",
@@ -607,6 +608,7 @@ public static class AppText
     public static string ClipCaptureFailedTitle => Text(nameof(ClipCaptureFailedTitle));
 
     public static string SettingsLoadFailedTitle => Text(nameof(SettingsLoadFailedTitle));
+    public static string LibraryOptimizeFailedTitle => Text(nameof(LibraryOptimizeFailedTitle));
 
     public static string ClipDragImportTitle => Text(nameof(ClipDragImportTitle));
 

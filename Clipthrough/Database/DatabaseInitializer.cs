@@ -409,7 +409,17 @@ public sealed class DatabaseInitializer
         // HasPendingStructuralWorkAsync - the check costs a full read of the
         // database file, and on an established database there is no migration for
         // it to protect.
-        if (await HasPendingStructuralWorkAsync(connection, cancellationToken))
+        // A deferred upgrade start writes nothing the check protects - new columns
+        // with defaults, triggers, the version - so the full-file read moves to the
+        // background, ahead of the payload move that does rewrite pages
+        // (RunDeferredPayloadMoveAsync). Read cold it was 71.5 s of a 73 s start on
+        // the 1 GB fixture.
+        var deferPayloadMove = allowDeferredPayloadMove && await CanDeferPayloadMoveAsync(connection, cancellationToken);
+        if (deferPayloadMove)
+        {
+            TraceStep(sw, "integrity-check deferred");
+        }
+        else if (await HasPendingStructuralWorkAsync(connection, cancellationToken))
         {
             progress?.Report(new LibraryUpgradeProgress(LibraryUpgradeStage.CheckingIntegrity));
             await VerifyIntegrityAsync(connection, cancellationToken);
@@ -463,10 +473,6 @@ public sealed class DatabaseInitializer
             // payload (F-06), and after it the same scans read small rows.
             // Everything below must therefore read payload sizes from
             // clip_payloads, not content_bytes.
-            var deferPayloadMove = allowDeferredPayloadMove
-                && storedVersion >= StoredBytesIntroducedVersion
-                && !ftsSchemaRecreated
-                && await HasUniqueClipHashIndexAsync(connection, cancellationToken);
             if (deferPayloadMove)
             {
                 TraceStep(sw, "move-payloads deferred");
@@ -973,6 +979,10 @@ public sealed class DatabaseInitializer
             return false;
         }
 
+        // The integrity check the deferred start skipped, before anything is
+        // rewritten. Runs again on each start until the move finishes, which only
+        // costs background time.
+        await VerifyIntegrityAsync(connection, cancellationToken);
         await MovePayloadsOutOfClipsAsync(connection, progress, background: true, cancellationToken);
 
         // After the move, these read small rows and are cheap. Every row the move
@@ -980,6 +990,32 @@ public sealed class DatabaseInitializer
         await RepairClipStoredBytesAsync(connection, cancellationToken);
         await DeleteOrphanedAppIconsAsync(connection, cancellationToken);
         return true;
+    }
+
+    /// <summary>
+    /// Whether this start is an upgrade whose only rewriting work is the payload
+    /// move, which can then wait for the background: a library from schema 8 or
+    /// later, behind the current version, whose search index and unique hash index
+    /// need nothing. Read before the schema DDL, so it touches nothing that DDL
+    /// creates. Anything older runs scanning backfills that are only cheap after
+    /// the move, and keeps the blocking path.
+    /// </summary>
+    private static async Task<bool> CanDeferPayloadMoveAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='app_metadata';";
+            if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 0)
+            {
+                return false;
+            }
+        }
+
+        var storedVersion = await ReadSchemaVersionAsync(connection, cancellationToken);
+        return storedVersion >= StoredBytesIntroducedVersion
+            && storedVersion < CurrentSchemaVersion
+            && !await FtsSchemaNeedsMigrationAsync(connection, cancellationToken)
+            && await HasUniqueClipHashIndexAsync(connection, cancellationToken);
     }
 
     private static async Task<bool> IsPayloadMoveDoneAsync(SqliteConnection connection, CancellationToken cancellationToken)

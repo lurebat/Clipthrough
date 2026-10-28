@@ -6414,7 +6414,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
+            // An integrity failure lands here too (the background move checks the
+            // library before rewriting it), so it is raised as a notification and
+            // not only as a status-bar line. Nothing was moved.
             ReportError("Library storage optimization", ex);
+            _notificationService.PublishError(AppText.LibraryOptimizeFailedTitle, ex.Message);
         }
         finally
         {

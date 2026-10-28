@@ -356,6 +356,96 @@ public sealed class LibraryUpgradeProgressHeadlessTests
         }
     }
 
+    /// <summary>
+    /// Owner decision on the integrity check (b): the background move checks the
+    /// library before rewriting it. On a corrupt library the app is open, nothing
+    /// is moved, and the failure is raised as an error notification.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task ACorruptLibrary_IsNotMovedInTheBackground_AndTheFailureIsReported()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        scope.SettingsService.SetHasSavedSettings(true);
+        scope.StorageOptionsService.SetHasSavedConfig(true);
+        Task.Run(() => scope.DatabaseInitializer.InitializeAsync()).GetAwaiter().GetResult();
+        SeedLegacyRows(scope, version: 8);
+        using (var connection = scope.ConnectionFactory.CreateConnection())
+        {
+            connection.Open();
+            using var fill = connection.CreateCommand();
+            fill.CommandText = """
+                CREATE TABLE integrity_test_filler (id INTEGER PRIMARY KEY, payload TEXT NOT NULL);
+                WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 3000)
+                INSERT INTO integrity_test_filler (payload) SELECT printf('%.400c', 'x') FROM n;
+                PRAGMA wal_checkpoint(TRUNCATE);
+                """;
+            fill.ExecuteNonQuery();
+        }
+
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        using (var file = new System.IO.FileStream(scope.DatabasePath, System.IO.FileMode.Open, System.IO.FileAccess.ReadWrite))
+        {
+            file.Seek(file.Length / 2, System.IO.SeekOrigin.Begin);
+            var garbage = new byte[256];
+            Array.Fill(garbage, (byte)0xDE);
+            file.Write(garbage);
+        }
+
+        MainWindowViewModel? viewModel = null;
+        try
+        {
+            viewModel = new MainWindowViewModel(
+                scope.ClipStoreService,
+                new TestClipboardMonitorService(),
+                new TestClipSampleDataService(),
+                scope.SettingsService,
+                new TestSystemInteractionService(),
+                scope.StorageOptionsService,
+                scope.SensitivityService,
+                scope.NotificationService,
+                new TestSessionLogService(),
+                scope.ClipExportService,
+                new TestImageEditorService(),
+                scope.SearchHistoryService,
+                new TestAiTransformService(false),
+                new TestOcrService(),
+                new BackgroundOcrQueueStub(),
+                new BackgroundJobIndicator(),
+                scope.DatabaseInitializer);
+
+            await viewModel.InitializeAsync();
+            var clock = Stopwatch.StartNew();
+            while (scope.NotificationService.LastNotification?.Title != AppText.LibraryOptimizeFailedTitle && clock.Elapsed < TimeSpan.FromSeconds(20))
+            {
+                await Task.Delay(20);
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            Assert.False(viewModel.IsLoadingDatabase, "The app did not open.");
+            var notification = scope.NotificationService.LastNotification;
+            Assert.NotNull(notification);
+            Assert.Equal(AppText.LibraryOptimizeFailedTitle, notification.Title);
+            Assert.Equal(AppNotificationLevel.Error, notification.Level);
+            Assert.Contains("integrity check failed", notification.Message, StringComparison.OrdinalIgnoreCase);
+
+            using var connection = scope.ConnectionFactory.CreateConnection();
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT (SELECT COUNT(*) FROM clips WHERE content_bytes IS NOT NULL), (SELECT COUNT(*) FROM clip_payloads);";
+            using var reader = command.ExecuteReader();
+            Assert.True(reader.Read());
+            Assert.Equal(LegacyRows, reader.GetInt64(0));
+            Assert.Equal(0, reader.GetInt64(1));
+        }
+        finally
+        {
+            viewModel?.Dispose();
+            for (var i = 0; i < 5; i++)
+            {
+                try { Dispatcher.UIThread.RunJobs(); } catch { /* test teardown */ }
+            }
+        }
+    }
     private sealed class BackgroundOcrQueueStub : IBackgroundOcrQueue
     {
         public IObservable<long> OcrCompleted { get; } = System.Reactive.Linq.Observable.Empty<long>();

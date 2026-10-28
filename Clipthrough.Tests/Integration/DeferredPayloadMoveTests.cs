@@ -304,6 +304,95 @@ public sealed class DeferredPayloadMoveTests
         await AssertEveryClipReadsAsync(scope, ids);
     }
 
+    /// <summary>
+    /// Owner decision on the integrity check (option b): a deferred upgrade start
+    /// does not read the whole file to check it - that was 71.5 s of a 73 s start
+    /// on the cold 1 GB fixture. A page nothing on that start reads is corrupted,
+    /// so only the full-file check could notice it.
+    /// </summary>
+    [Fact]
+    public async Task ADeferredUpgradeStart_DoesNotReadEveryPageToCheckIt()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        SeedSchema8Library(scope, 3);
+        await SeedFillerPagesAsync(scope);
+        CorruptTheMiddleOfTheFile(scope);
+
+        var steps = await InitializeTracingStepsAsync(scope, allowDeferredPayloadMove: true);
+
+        Assert.DoesNotContain(steps, s => s.Contains("[init-timing] integrity-check @", StringComparison.Ordinal));
+        Assert.Equal(9, Scalar(scope, "SELECT CAST(value AS INTEGER) FROM app_metadata WHERE key = 'schema_version';"));
+    }
+
+    /// <summary>
+    /// The check is not dropped, it is moved: the background move runs it before it
+    /// rewrites anything, and a corrupt library is not touched.
+    /// </summary>
+    [Fact]
+    public async Task TheBackgroundMove_ChecksTheLibraryFirst_AndMovesNothingWhenItIsCorrupt()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        var ids = SeedSchema8Library(scope, 3);
+        await SeedFillerPagesAsync(scope);
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+        CorruptTheMiddleOfTheFile(scope);
+
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(progress: null));
+
+        Assert.Contains("Database integrity check failed", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(ids.Length, InlineRows(scope));
+        Assert.Equal(0, Scalar(scope, "SELECT COUNT(*) FROM clip_payloads;"));
+    }
+
+    /// <summary>
+    /// Pages of a table of the test's own, so the file is large enough that the
+    /// middle of it lands in a page no upgrade step reads.
+    /// </summary>
+    private static async Task SeedFillerPagesAsync(TemporaryDatabaseScope scope)
+    {
+        await using var connection = scope.ConnectionFactory.CreateConnection();
+        await connection.OpenAsync();
+        await using (var create = connection.CreateCommand())
+        {
+            create.CommandText = "CREATE TABLE IF NOT EXISTS integrity_test_filler (id INTEGER PRIMARY KEY, payload TEXT NOT NULL);";
+            await create.ExecuteNonQueryAsync();
+        }
+
+        await using var transaction = connection.BeginTransaction();
+        await using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText = "INSERT INTO integrity_test_filler (payload) VALUES ($payload);";
+        var payload = insert.Parameters.Add("$payload", Microsoft.Data.Sqlite.SqliteType.Text);
+        var filler = new string('x', 400);
+        for (var i = 0; i < 3_000; i++)
+        {
+            payload.Value = filler;
+            await insert.ExecuteNonQueryAsync();
+        }
+
+        await transaction.CommitAsync();
+    }
+
+    private static void CorruptTheMiddleOfTheFile(TemporaryDatabaseScope scope)
+    {
+        using (var connection = scope.ConnectionFactory.CreateConnection())
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+            command.ExecuteNonQuery();
+        }
+
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        using var file = new System.IO.FileStream(scope.DatabasePath, System.IO.FileMode.Open, System.IO.FileAccess.ReadWrite);
+        file.Seek(file.Length / 2, System.IO.SeekOrigin.Begin);
+        var garbage = new byte[256];
+        Array.Fill(garbage, (byte)0xDE);
+        file.Write(garbage);
+    }
     private sealed class TraceCaptureListener(ConcurrentQueue<string> sink) : TraceListener
     {
         public override void Write(string? message)

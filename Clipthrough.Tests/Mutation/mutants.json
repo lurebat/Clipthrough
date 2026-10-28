@@ -3123,16 +3123,16 @@
     "id": "upgrade-never-defers-the-move",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "U4, owner decision (c). An upgrade from schema 8 opens at once and moves payloads in the background; deferring never means the 74 s / 5-7 min blocking start again.",
-    "find": "            var deferPayloadMove = allowDeferredPayloadMove",
-    "replace": "            var deferPayloadMove = allowDeferredPayloadMove && Environment.ProcessorCount < 0",
+    "find": "        var deferPayloadMove = allowDeferredPayloadMove && await CanDeferPayloadMoveAsync(connection, cancellationToken);",
+    "replace": "        var deferPayloadMove = allowDeferredPayloadMove && Environment.ProcessorCount < 0 && await CanDeferPayloadMoveAsync(connection, cancellationToken);",
     "filter": "FullyQualifiedName~DeferredPayloadMoveTests.AnUpgradeFromSchema8_Opens"
   },
   {
     "id": "old-library-defers-the-move",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "U4. A library from before schema 8 runs scanning backfills that are only cheap after the move, so it must still move before opening.",
-    "find": "                && storedVersion >= StoredBytesIntroducedVersion",
-    "replace": "                && storedVersion >= StoredBytesIntroducedVersion - 1000",
+    "find": "        return storedVersion >= StoredBytesIntroducedVersion\n",
+    "replace": "        return storedVersion >= StoredBytesIntroducedVersion - 1000\n",
     "filter": "FullyQualifiedName~DeferredPayloadMoveTests.AnUpgradeFromBeforeSchema8"
   },
   {
@@ -3214,5 +3214,29 @@
     "find": "(shownPercent >= 0 && percent / 5 == shownPercent / 5)",
     "replace": "(percent / 5 == shownPercent / 5)",
     "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests.AnUpgradeFromSchema8"
+  },
+  {
+    "id": "deferred-start-still-checks-every-page",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Owner decision on the integrity check (b). On the cold 1 GB fixture the full-file check was 71.5 s of a 73 s deferred upgrade start; it belongs ahead of the background rewrite, not the start.",
+    "find": "        else if (await HasPendingStructuralWorkAsync(connection, cancellationToken))",
+    "replace": "        if (await HasPendingStructuralWorkAsync(connection, cancellationToken))",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.ADeferredUpgradeStart_DoesNotReadEveryPageToCheckIt"
+  },
+  {
+    "id": "background-move-skips-the-integrity-check",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Owner decision on the integrity check (b). The check moved, it was not dropped: the move rewrites every row, and a corrupt library must not be rewritten.",
+    "find": "        await VerifyIntegrityAsync(connection, cancellationToken);\n        await MovePayloadsOutOfClipsAsync(connection, progress, background: true, cancellationToken);",
+    "replace": "        await (Environment.ProcessorCount < 0 ? VerifyIntegrityAsync(connection, cancellationToken) : Task.CompletedTask);\n        await MovePayloadsOutOfClipsAsync(connection, progress, background: true, cancellationToken);",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.TheBackgroundMove_ChecksTheLibraryFirst"
+  },
+  {
+    "id": "background-move-failure-not-notified",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Owner decision on the integrity check (b). A failed background check means a corrupt library; a status-bar line alone is easily missed.",
+    "find": "            _notificationService.PublishError(AppText.LibraryOptimizeFailedTitle, ex.Message);",
+    "replace": "            _ = AppText.LibraryOptimizeFailedTitle;",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests.ACorruptLibrary"
   }
 ]
