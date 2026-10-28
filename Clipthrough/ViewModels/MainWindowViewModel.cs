@@ -1621,39 +1621,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set => this.RaiseAndSetIfChanged(ref _editedClipSelectionLength, value);
     }
 
-    public IReadOnlyList<TextTransformation> TextTransformationOptions { get; } = Enum.GetValues<TextTransformation>();
-
-    private TextTransformation _selectedTextTransformation = TextTransformation.None;
-
-    public TextTransformation SelectedTextTransformation
-    {
-        get => _selectedTextTransformation;
-        set
-        {
-            if (_selectedTextTransformation == value)
-            {
-                return;
-            }
-
-            _selectedTextTransformation = value;
-            this.RaisePropertyChanged(nameof(SelectedTextTransformation));
-
-            if (value != TextTransformation.None && IsSelectedClipTextEditable && !string.IsNullOrEmpty(_editedClipText))
-            {
-                var transformed = TextTransformationService.Apply(value, _editedClipText);
-                if (!string.Equals(transformed, _editedClipText, StringComparison.Ordinal))
-                {
-                    EditedClipText = transformed;
-                    _ = CopyEditedClipAsync();
-                }
-
-                // Snap back to None so re-selecting same transformation re-triggers
-                _selectedTextTransformation = TextTransformation.None;
-                this.RaisePropertyChanged(nameof(SelectedTextTransformation));
-            }
-        }
-    }
-
     public byte[]? SelectedClipImageBytes => SelectedClip?.Clip.ContentType == ContentType.Image ? SelectedClip.Clip.ContentBytes : null;
 
     public string SelectedClipImageHint => _selectedClipImageHint;
