@@ -2974,5 +2974,45 @@
     "find": "            if (ftsSchemaRecreated || storedVersion < LastSearchIndexChangeVersion)",
     "replace": "            if (storedVersion < LastSearchIndexChangeVersion)",
     "filter": "FullyQualifiedName~FtsRebuildGateTests.AnFtsSchemaRecreatedDuringAVersionBump"
+  },
+  {
+    "id": "upgrade-move-reports-no-progress",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U-E1 (C). The payload move is the long stage of the first start after an upgrade; without its reports the overlay sits on an indeterminate bar for the whole move.",
+    "find": "        void ReportMoved(long reachedId) => progress?.Report(new LibraryUpgradeProgress(",
+    "replace": "        void ReportMoved(long reachedId) => (reachedId < long.MinValue + 1 ? progress : null)?.Report(new LibraryUpgradeProgress(",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests"
+  },
+  {
+    "id": "upgrade-reported-for-a-new-library",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U-E1 (C). A new or empty library is not being upgraded; reporting for it titles the first-run overlay \"Upgrading\".",
+    "find": "        if (progress is not null && !await HasStoredClipsAsync(connection, cancellationToken))",
+    "replace": "        if (progress is not null && Environment.ProcessorCount < 0 && !await HasStoredClipsAsync(connection, cancellationToken))",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressTests.ANewLibrary"
+  },
+  {
+    "id": "upgrade-progress-applied-on-the-worker-thread",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "U-E1 (C). The initializer reports from a worker thread; raising the overlay properties there touches Avalonia from the wrong thread.",
+    "find": "        public void Report(LibraryUpgradeProgress value) => Avalonia.Threading.Dispatcher.UIThread.Post(() => apply(value));",
+    "replace": "        public void Report(LibraryUpgradeProgress value) => apply(value);",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests"
+  },
+  {
+    "id": "upgrade-state-outlives-the-load",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "U-E1 (C). The upgrade state must end with the load, or the next load (after unlocking or moving the library) shows a stale upgrade.",
+    "find": "                IsLoadingDatabase = false;\n                SetLibraryUpgradeProgress(null);\n                IsWelcomeOpen = false;",
+    "replace": "                IsLoadingDatabase = false;\n                IsWelcomeOpen = false;",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests"
+  },
+  {
+    "id": "upgrade-runs-on-the-ui-thread",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "U-E1 (C). The owner asked that the app stay responsive during the first start after an upgrade; run on the UI thread, the window freezes for the whole upgrade.",
+    "find": "            await Task.Run(async () => await StartDatabaseAsync().ConfigureAwait(false)).ConfigureAwait(false);",
+    "replace": "            await StartDatabaseAsync();",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests"
   }
 ]

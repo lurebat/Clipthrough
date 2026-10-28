@@ -1028,6 +1028,48 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         private set => this.RaiseAndSetIfChanged(ref _isLoadingDatabase, value);
     }
 
+    private LibraryUpgradeProgress? _libraryUpgradeProgress;
+
+    /// <summary>
+    /// True while the first start after an upgrade is running, from its first
+    /// progress report until loading ends (U-E1). The loading overlay then shows
+    /// the stage and, where the stage knows it, how far it has got.
+    /// </summary>
+    public bool IsUpgradingLibrary => _libraryUpgradeProgress is not null;
+
+    public string LibraryUpgradeTitle => AppText.LibraryUpgradeTitle;
+
+    public string LibraryUpgradeNote => AppText.LibraryUpgradeNote;
+
+    public string LibraryUpgradeStageText =>
+        _libraryUpgradeProgress is { } progress ? AppText.FormatLibraryUpgradeStage(progress) : string.Empty;
+
+    public double LibraryUpgradeProgressValue => (_libraryUpgradeProgress?.Fraction ?? 0) * 100;
+
+    public bool IsLibraryUpgradeProgressIndeterminate => _libraryUpgradeProgress?.Fraction is null;
+
+    private void SetLibraryUpgradeProgress(LibraryUpgradeProgress? progress)
+    {
+        // A report posted from the worker can land after loading has ended; it
+        // must not bring the overlay's upgrade state back.
+        if (progress is not null && !IsLoadingDatabase)
+        {
+            return;
+        }
+
+        _libraryUpgradeProgress = progress;
+        this.RaisePropertyChanged(nameof(IsUpgradingLibrary));
+        this.RaisePropertyChanged(nameof(LibraryUpgradeStageText));
+        this.RaisePropertyChanged(nameof(LibraryUpgradeProgressValue));
+        this.RaisePropertyChanged(nameof(IsLibraryUpgradeProgressIndeterminate));
+    }
+
+    /// <summary>Hands each report from the initializer's worker thread to the UI thread.</summary>
+    private sealed class UiThreadProgress(Action<LibraryUpgradeProgress> apply) : IProgress<LibraryUpgradeProgress>
+    {
+        public void Report(LibraryUpgradeProgress value) => Avalonia.Threading.Dispatcher.UIThread.Post(() => apply(value));
+    }
+
     public string StartupErrorTitle
     {
         get => _startupErrorTitle;
@@ -2247,6 +2289,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
                 IsLoadingDatabase = false;
+                SetLibraryUpgradeProgress(null);
                 IsWelcomeOpen = false;
             });
 
@@ -2259,6 +2302,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
                 IsLoadingDatabase = false;
+                SetLibraryUpgradeProgress(null);
                 StartupErrorTitle = AppText.StartupErrorTitle;
                 StartupErrorMessage = ex.Message;
                 StatusText = AppText.FormatErrorStatus(ex.Message);
@@ -6209,7 +6253,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private async Task StartDatabaseAsync()
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        await _databaseInitializer.InitializeAsync();
+        await _databaseInitializer.InitializeAsync(new UiThreadProgress(SetLibraryUpgradeProgress));
         Trace.TraceInformation($"[startup-timing] DatabaseInitializer @ {sw.ElapsedMilliseconds}ms");
 
         if (!_settingsService.HasSavedSettings)

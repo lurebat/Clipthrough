@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Clipthrough.Models;
 using Clipthrough.Services;
 using Microsoft.Data.Sqlite;
 
@@ -351,12 +352,24 @@ public sealed class DatabaseInitializer
         _sensitivityService = sensitivityService;
     }
 
-    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    public Task InitializeAsync(CancellationToken cancellationToken = default) => InitializeAsync(progress: null, cancellationToken);
+
+    /// <param name="progress">
+    /// Told what the first start after an upgrade is doing, so the loading overlay
+    /// can show it (U-E1). Only an existing library with clips reports; a new or
+    /// empty one opens too quickly to need it, and is not being upgraded.
+    /// </param>
+    public async Task InitializeAsync(IProgress<LibraryUpgradeProgress>? progress, CancellationToken cancellationToken = default)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
         TraceStep(sw, "connection-opened");
+
+        if (progress is not null && !await HasStoredClipsAsync(connection, cancellationToken))
+        {
+            progress = null;
+        }
 
         // WAL mode allows concurrent readers during writes — critical for responsiveness.
         await ExecuteNonQueryAsync(connection, "PRAGMA journal_mode = WAL;", cancellationToken);
@@ -368,6 +381,7 @@ public sealed class DatabaseInitializer
         // it to protect.
         if (await HasPendingStructuralWorkAsync(connection, cancellationToken))
         {
+            progress?.Report(new LibraryUpgradeProgress(LibraryUpgradeStage.CheckingIntegrity));
             await VerifyIntegrityAsync(connection, cancellationToken);
             TraceStep(sw, "integrity-check");
         }
@@ -392,6 +406,7 @@ public sealed class DatabaseInitializer
 
         if (storedVersion < CurrentSchemaVersion)
         {
+            progress?.Report(new LibraryUpgradeProgress(LibraryUpgradeStage.UpdatingStructure));
             await EnsureClipAggregationColumnsAsync(connection, cancellationToken);
             TraceStep(sw, "ensure-aggregation-columns");
             await EnsureClipPayloadColumnsAsync(connection, cancellationToken);
@@ -418,6 +433,7 @@ public sealed class DatabaseInitializer
             TraceStep(sw, "ensure-unique-hash-index");
             if (ftsSchemaRecreated || storedVersion < LastSearchIndexChangeVersion)
             {
+                progress?.Report(new LibraryUpgradeProgress(LibraryUpgradeStage.RebuildingSearchIndex));
                 await RebuildClipSearchIndexAsync(connection, cancellationToken);
                 TraceStep(sw, "rebuild-search-index");
             }
@@ -427,8 +443,9 @@ public sealed class DatabaseInitializer
             }
 
             await EnsureSourceAppIconHashColumnAsync(connection, cancellationToken);
-            await MovePayloadsOutOfClipsAsync(connection, cancellationToken);
+            await MovePayloadsOutOfClipsAsync(connection, progress, cancellationToken);
             TraceStep(sw, "move-payloads");
+            progress?.Report(new LibraryUpgradeProgress(LibraryUpgradeStage.Finishing));
             await WriteSchemaVersionAsync(connection, CurrentSchemaVersion, cancellationToken);
             TraceStep(sw, $"version-write ({CurrentSchemaVersion})");
         }
@@ -444,6 +461,7 @@ public sealed class DatabaseInitializer
             // the strength of it. (arch-sol A16)
             if (ftsSchemaRecreated)
             {
+                progress?.Report(new LibraryUpgradeProgress(LibraryUpgradeStage.RebuildingSearchIndex));
                 await RebuildClipSearchIndexAsync(connection, cancellationToken);
                 TraceStep(sw, "rebuild-search-index (fts repaired at current version)");
             }
@@ -877,19 +895,41 @@ public sealed class DatabaseInitializer
     /// InitializeAsync, before anything reads a clip.
     /// </para>
     /// </remarks>
-    private static async Task MovePayloadsOutOfClipsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    private static async Task MovePayloadsOutOfClipsAsync(SqliteConnection connection, IProgress<LibraryUpgradeProgress>? progress, CancellationToken cancellationToken)
     {
         // The older OCR index also required content_bytes IS NOT NULL, which is
         // about to be true of no row. Dropped so the index DDL recreates it.
         await ExecuteNonQueryAsync(connection, "DROP INDEX IF EXISTS idx_clips_ocr_images;", cancellationToken);
 
         long lastId;
-        await using (var progress = connection.CreateCommand())
+        await using (var readLastId = connection.CreateCommand())
         {
-            progress.CommandText = "SELECT value FROM app_metadata WHERE key = 'payload_move_last_id';";
-            var raw = await progress.ExecuteScalarAsync(cancellationToken);
+            readLastId.CommandText = "SELECT value FROM app_metadata WHERE key = 'payload_move_last_id';";
+            var raw = await readLastId.ExecuteScalarAsync(cancellationToken);
             lastId = raw is string text && long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0;
         }
+
+        // Progress by id, not by row count: MIN and MAX of the rowid are free,
+        // while counting the rows still to move would read every one of them.
+        long firstClipId = 0, lastClipId = 0;
+        await using (var range = connection.CreateCommand())
+        {
+            range.CommandText = "SELECT COALESCE(MIN(id), 0), COALESCE(MAX(id), 0) FROM clips;";
+            await using var reader = await range.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                firstClipId = reader.GetInt64(0);
+                lastClipId = reader.GetInt64(1);
+            }
+        }
+
+        void ReportMoved(long reachedId) => progress?.Report(new LibraryUpgradeProgress(
+            LibraryUpgradeStage.MovingClipData,
+            lastClipId < firstClipId || lastClipId == 0
+                ? 1
+                : Math.Clamp((double)(reachedId - firstClipId + 1) / (lastClipId - firstClipId + 1), 0, 1)));
+
+        ReportMoved(lastId);
 
         while (true)
         {
@@ -921,6 +961,7 @@ public sealed class DatabaseInitializer
             if (rows.Count == 0)
             {
                 transaction.Commit();
+                progress?.Report(new LibraryUpgradeProgress(LibraryUpgradeStage.MovingClipData, 1));
                 break;
             }
 
@@ -982,7 +1023,21 @@ public sealed class DatabaseInitializer
             }
 
             transaction.Commit();
+            ReportMoved(lastId);
         }
+    }
+
+    private static async Task<bool> HasStoredClipsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'clips';";
+        if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 0)
+        {
+            return false;
+        }
+
+        command.CommandText = "SELECT EXISTS (SELECT 1 FROM clips);";
+        return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) != 0;
     }
 
     /// <summary>The key a source-app icon is stored under in app_icons.</summary>

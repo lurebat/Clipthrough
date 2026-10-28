@@ -157,6 +157,13 @@ public static class AppText
         [nameof(NoClipSelected)] = "No clip selected",
         [nameof(NotAvailable)] = "—",
         [nameof(LoadingStatus)] = "Loading…",
+        [nameof(LibraryUpgradeTitle)] = "Upgrading Clipboard Library",
+        [nameof(LibraryUpgradeNote)] = "This runs once after an update, and can take a few minutes on a large library.",
+        [nameof(LibraryUpgradeStageCheckingIntegrity)] = "Checking the library",
+        [nameof(LibraryUpgradeStageUpdatingStructure)] = "Updating the library structure",
+        [nameof(LibraryUpgradeStageRebuildingSearchIndex)] = "Rebuilding the search index",
+        [nameof(LibraryUpgradeStageMovingClipData)] = "Moving stored clip data",
+        [nameof(LibraryUpgradeStageFinishing)] = "Finishing up",
         [nameof(WaitingForFirstCapture)] = "Waiting for first capture",
         [nameof(RemoveFavorite)] = "Remove Favorite",
         [nameof(AddFavorite)] = "Add Favorite",
@@ -393,6 +400,20 @@ public static class AppText
     public static string ClipAngelImportRunning => Text(nameof(ClipAngelImportRunning));
     public static string ClipAngelImportUnsupported => Text(nameof(ClipAngelImportUnsupported));
     public static string FormatClipAngelImportProgress(int processed, int total) => $"Importing ClipAngel clips... {processed}/{total}";
+    public static string FormatLibraryUpgradeStage(LibraryUpgradeProgress progress)
+    {
+        var stage = progress.Stage switch
+        {
+            LibraryUpgradeStage.CheckingIntegrity => LibraryUpgradeStageCheckingIntegrity,
+            LibraryUpgradeStage.UpdatingStructure => LibraryUpgradeStageUpdatingStructure,
+            LibraryUpgradeStage.RebuildingSearchIndex => LibraryUpgradeStageRebuildingSearchIndex,
+            LibraryUpgradeStage.MovingClipData => LibraryUpgradeStageMovingClipData,
+            _ => LibraryUpgradeStageFinishing,
+        };
+        return progress.Fraction is { } fraction
+            ? $"{stage}… {(int)Math.Round(Math.Clamp(fraction, 0, 1) * 100)}%"
+            : $"{stage}…";
+    }
     public static string FormatClipAngelImportSuccess(int imported, int skipped, int failed) =>
         failed == 0 && skipped == 0
             ? $"ClipAngel import complete: {imported} clips added."
@@ -481,6 +502,13 @@ public static class AppText
     public static string NoClipSelected => Text(nameof(NoClipSelected));
     public static string NotAvailable => Text(nameof(NotAvailable));
     public static string LoadingStatus => Text(nameof(LoadingStatus));
+    public static string LibraryUpgradeTitle => Text(nameof(LibraryUpgradeTitle));
+    public static string LibraryUpgradeNote => Text(nameof(LibraryUpgradeNote));
+    public static string LibraryUpgradeStageCheckingIntegrity => Text(nameof(LibraryUpgradeStageCheckingIntegrity));
+    public static string LibraryUpgradeStageUpdatingStructure => Text(nameof(LibraryUpgradeStageUpdatingStructure));
+    public static string LibraryUpgradeStageRebuildingSearchIndex => Text(nameof(LibraryUpgradeStageRebuildingSearchIndex));
+    public static string LibraryUpgradeStageMovingClipData => Text(nameof(LibraryUpgradeStageMovingClipData));
+    public static string LibraryUpgradeStageFinishing => Text(nameof(LibraryUpgradeStageFinishing));
     public static string WaitingForFirstCapture => Text(nameof(WaitingForFirstCapture));
     public static string RemoveFavorite => Text(nameof(RemoveFavorite));
     public static string AddFavorite => Text(nameof(AddFavorite));
