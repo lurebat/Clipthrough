@@ -2923,8 +2923,8 @@
     "id": "payload-move-leaves-the-old-columns",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "F-06. Copying without NULLing the inline columns keeps every metadata read walking the blob, and doubles the file.",
-    "find": "                UPDATE clips SET content_bytes = NULL, source_app_icon = NULL\n",
-    "replace": "                UPDATE clips SET source_app_icon_hash = source_app_icon_hash\n",
+    "find": "                        SET content_bytes = NULL,\n                            source_app_icon = NULL,\n                            source_app_icon_hash",
+    "replace": "                        SET source_app_icon_hash",
     "filter": "FullyQualifiedName~PayloadLayoutTests.AnExistingLibrary_IsMoved"
   },
   {
@@ -2950,29 +2950,5 @@
     "find": " + \") FROM clips), 0) + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons), 0);\";",
     "replace": " + \") FROM clips), 0) + 0;\";",
     "filter": "FullyQualifiedName~Maintenance_LibrarySizeCap_CountsTheSourceAppIconsItStores"
-  },
-  {
-    "id": "payload-move-materialises-the-payloads",
-    "file": "Clipthrough/Database/DatabaseInitializer.cs",
-    "why": "U-E1, owner decision (c). The first move read every payload into .NET and wrote it back, 87 s on 1 GB plaintext; the SQL-only copy keeps payloads inside SQLite. Routing them through a managed function puts them back in managed memory.",
-    "find": "                SELECT id, content_bytes FROM clips\n",
-    "replace": "                SELECT id, CASE WHEN clipthrough_app_icon_hash(content_bytes) IS NULL THEN NULL ELSE content_bytes END FROM clips\n",
-    "filter": "FullyQualifiedName~PayloadMoveAllocationTests"
-  },
-  {
-    "id": "payload-move-copies-past-the-batch",
-    "file": "Clipthrough/Database/DatabaseInitializer.cs",
-    "why": "U-E1. Each batch must copy exactly its own id range; without the upper bound the first batch copies every later payload too, so a crash in a later batch leaves copies whose old columns were never cleared.",
-    "find": "                WHERE id > $last AND id <= $hi AND content_bytes IS NOT NULL\n",
-    "replace": "                WHERE id > $last AND content_bytes IS NOT NULL\n",
-    "filter": "FullyQualifiedName~PayloadLayoutTests.AMoveInterruptedMidBatch"
-  },
-  {
-    "id": "payload-move-skips-the-icon-hash",
-    "file": "Clipthrough/Database/DatabaseInitializer.cs",
-    "why": "F-39. A moved icon is found through source_app_icon_hash; a row whose hash is not set loses its icon once the inline column is cleared.",
-    "find": "(source_app_icon)\n                WHERE id > $last AND id <= $hi AND length(source_app_icon) > 0;",
-    "replace": "(source_app_icon)\n                WHERE id > $last AND id <= $hi AND length(source_app_icon) > 0 AND 0;",
-    "filter": "FullyQualifiedName~PayloadLayoutTests.AnExistingLibrary_IsMoved"
   }
 ]

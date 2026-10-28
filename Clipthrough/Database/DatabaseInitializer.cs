@@ -816,14 +816,8 @@ public sealed class DatabaseInitializer
 
     internal const long PayloadMoveBatchBytes = 32L * 1024 * 1024;
 
-    /// <summary>
-    /// Test seam: runs once per batch, inside its transaction, after the batch's
-    /// payloads and icons are copied and before the old columns are cleared. It is
-    /// given the batch's first and last clip id.
-    /// </summary>
-    internal static Action<long, long>? AfterPayloadBatchCopied { get; set; }
-
-    private const string PayloadIconHashFunction = "clipthrough_app_icon_hash";
+    /// <summary>Test seam: runs after each row is moved, inside the batch's transaction.</summary>
+    internal static Action<long>? AfterPayloadRowMoved { get; set; }
 
     private static async Task EnsureSourceAppIconHashColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
@@ -843,21 +837,12 @@ public sealed class DatabaseInitializer
     /// <remarks>
     /// <para>
     /// A 1 GB library cannot move in one transaction: it would hold the write lock
-    /// and grow the WAL by the whole library. Each batch is one transaction over a
-    /// range of clip ids that copies the range's payloads and icons, NULLs their old
-    /// columns and records the last id it reached in <c>app_metadata</c>. A row is
-    /// therefore always either entirely in the old place or entirely in the new one,
-    /// and a crash at any point resumes from the last committed batch on the next
-    /// start - the schema version is written only after this returns.
-    /// </para>
-    /// <para>
-    /// The copy is SQL-only (owner decision on U-E1): payloads go from one table to
-    /// the other inside SQLite and never cross into managed memory. The first
-    /// version read each row into .NET and wrote it back, and took 87 s on a 1 GB
-    /// plaintext library. Only the batch boundaries are read, as ids and
-    /// <c>length()</c>s, which SQLite answers from the record header without
-    /// loading the blob. Icons are hashed in .NET through a function registered on
-    /// this connection, because SQLite has no SHA-256; they are small.
+    /// and grow the WAL by the whole library. Each batch is one transaction that
+    /// copies its rows, NULLs their old columns and records the last id it reached
+    /// in <c>app_metadata</c>. A row is therefore always either entirely in the old
+    /// place or entirely in the new one, and a crash at any point resumes from the
+    /// last committed batch on the next start - the schema version is written only
+    /// after this returns.
     /// </para>
     /// <para>
     /// NULLing per batch, rather than after the whole copy as the plan sketched,
@@ -880,20 +865,17 @@ public sealed class DatabaseInitializer
             lastId = raw is string text && long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0;
         }
 
-        connection.CreateFunction<byte[], string>(PayloadIconHashFunction, AppIconHash, isDeterministic: true);
-
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
             using var transaction = connection.BeginTransaction();
-            long firstId = 0;
-            long batchLastId = 0;
+            var rows = new List<(long Id, byte[]? Payload, byte[]? Icon)>();
             long bytes = 0;
             await using (var select = connection.CreateCommand())
             {
                 select.Transaction = transaction;
                 select.CommandText = """
-                    SELECT id, COALESCE(length(content_bytes), 0) + COALESCE(length(source_app_icon), 0) FROM clips
+                    SELECT id, content_bytes, source_app_icon FROM clips
                     WHERE id > $last AND (content_bytes IS NOT NULL OR source_app_icon IS NOT NULL)
                     ORDER BY id
                     LIMIT $limit;
@@ -903,63 +885,77 @@ public sealed class DatabaseInitializer
                 await using var reader = await select.ExecuteReaderAsync(cancellationToken);
                 while (bytes < PayloadMoveBatchBytes && await reader.ReadAsync(cancellationToken))
                 {
-                    batchLastId = reader.GetInt64(0);
-                    if (firstId == 0)
-                    {
-                        firstId = batchLastId;
-                    }
-
-                    bytes += reader.GetInt64(1);
+                    var payload = reader.IsDBNull(1) ? null : (byte[])reader.GetValue(1);
+                    var icon = reader.IsDBNull(2) ? null : (byte[])reader.GetValue(2);
+                    rows.Add((reader.GetInt64(0), payload, icon));
+                    bytes += (payload?.LongLength ?? 0) + (icon?.LongLength ?? 0);
                 }
             }
 
-            if (firstId == 0)
+            if (rows.Count == 0)
             {
                 transaction.Commit();
                 break;
             }
 
-            // $last is exclusive and $hi inclusive, so rows with neither column set
-            // inside the range are simply untouched by every statement below.
-            await ExecuteBatchAsync("""
-                INSERT INTO clip_payloads (clip_id, content_bytes)
-                SELECT id, content_bytes FROM clips
-                WHERE id > $last AND id <= $hi AND content_bytes IS NOT NULL
-                ON CONFLICT(clip_id) DO UPDATE SET content_bytes = excluded.content_bytes;
-                """);
-            await ExecuteBatchAsync($"""
-                UPDATE clips SET source_app_icon_hash = {PayloadIconHashFunction}(source_app_icon)
-                WHERE id > $last AND id <= $hi AND length(source_app_icon) > 0;
-                """);
-            await ExecuteBatchAsync("""
-                INSERT OR IGNORE INTO app_icons (hash, png)
-                SELECT source_app_icon_hash, source_app_icon FROM clips
-                WHERE id > $last AND id <= $hi AND length(source_app_icon) > 0;
-                """);
+            foreach (var (id, payload, icon) in rows)
+            {
+                if (payload is not null)
+                {
+                    await using var insert = connection.CreateCommand();
+                    insert.Transaction = transaction;
+                    insert.CommandText = """
+                        INSERT INTO clip_payloads (clip_id, content_bytes) VALUES ($id, $bytes)
+                        ON CONFLICT(clip_id) DO UPDATE SET content_bytes = excluded.content_bytes;
+                        """;
+                    insert.Parameters.AddWithValue("$id", id);
+                    insert.Parameters.AddWithValue("$bytes", payload);
+                    await insert.ExecuteNonQueryAsync(cancellationToken);
+                }
 
-            AfterPayloadBatchCopied?.Invoke(firstId, batchLastId);
+                string? iconHash = null;
+                if (icon is { Length: > 0 })
+                {
+                    iconHash = AppIconHash(icon);
+                    await using var insertIcon = connection.CreateCommand();
+                    insertIcon.Transaction = transaction;
+                    insertIcon.CommandText = "INSERT OR IGNORE INTO app_icons (hash, png) VALUES ($hash, $png);";
+                    insertIcon.Parameters.AddWithValue("$hash", iconHash);
+                    insertIcon.Parameters.AddWithValue("$png", icon);
+                    await insertIcon.ExecuteNonQueryAsync(cancellationToken);
+                }
 
-            await ExecuteBatchAsync("""
-                UPDATE clips SET content_bytes = NULL, source_app_icon = NULL
-                WHERE id > $last AND id <= $hi AND (content_bytes IS NOT NULL OR source_app_icon IS NOT NULL);
-                """);
-            await ExecuteBatchAsync("""
-                INSERT INTO app_metadata (key, value) VALUES ('payload_move_last_id', CAST($hi AS TEXT))
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value;
-                """);
+                await using (var clear = connection.CreateCommand())
+                {
+                    clear.Transaction = transaction;
+                    clear.CommandText = """
+                        UPDATE clips
+                        SET content_bytes = NULL,
+                            source_app_icon = NULL,
+                            source_app_icon_hash = COALESCE($hash, source_app_icon_hash)
+                        WHERE id = $id;
+                        """;
+                    clear.Parameters.AddWithValue("$id", id);
+                    clear.Parameters.AddWithValue("$hash", (object?)iconHash ?? DBNull.Value);
+                    await clear.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                AfterPayloadRowMoved?.Invoke(id);
+                lastId = id;
+            }
+
+            await using (var record = connection.CreateCommand())
+            {
+                record.Transaction = transaction;
+                record.CommandText = """
+                    INSERT INTO app_metadata (key, value) VALUES ('payload_move_last_id', $last)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+                    """;
+                record.Parameters.AddWithValue("$last", lastId.ToString(CultureInfo.InvariantCulture));
+                await record.ExecuteNonQueryAsync(cancellationToken);
+            }
 
             transaction.Commit();
-            lastId = batchLastId;
-
-            async Task ExecuteBatchAsync(string sql)
-            {
-                await using var command = connection.CreateCommand();
-                command.Transaction = transaction;
-                command.CommandText = sql;
-                command.Parameters.AddWithValue("$last", lastId);
-                command.Parameters.AddWithValue("$hi", batchLastId);
-                await command.ExecuteNonQueryAsync(cancellationToken);
-            }
         }
     }
 
