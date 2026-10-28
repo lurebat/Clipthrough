@@ -65,7 +65,7 @@ internal sealed class PerfLibrary
             await lib.Initializer.InitializeAsync();
             var sw = Stopwatch.StartNew();
             await SeedAsync(lib, clips, images);
-            File.WriteAllText(marker, $"seeded in {sw.ElapsedMilliseconds} ms, of which the U-E1 payload migration {MigrationMilliseconds} ms");
+            File.WriteAllText(marker, $"seeded in {sw.ElapsedMilliseconds} ms, of which InitializeAsync from schema 8 (every version-gated step, the U-E1 payload move among them) {MigrationMilliseconds} ms");
         }
         else
         {
@@ -233,6 +233,10 @@ internal sealed class PerfLibrary
         await cp.ExecuteNonQueryAsync();
     }
 
-    /// <summary>How long the U-E1 payload migration took on the last seed, or -1.</summary>
+    /// <summary>
+    /// How long InitializeAsync took on the last seed after rewinding to schema 8, or -1.
+    /// That runs every version-gated step - the integrity check and the full FTS
+    /// rebuild among them - not just the U-E1 payload move; time the move alone with P16.
+    /// </summary>
     public static long MigrationMilliseconds { get; private set; } = -1;
 }

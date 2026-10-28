@@ -476,4 +476,28 @@ public sealed class PerfProbes
         var purged = before - await ScalarAsync(lib, "SELECT COUNT(*) FROM clips;");
         Log($"{"ApplyMaintenanceAsync retention purge (single run)",-70} median={purge.Elapsed.TotalMilliseconds,9:F1} ms  purged={purged}");
     }
+
+    /// <summary>
+    /// U-E1: InitializeAsync on a library seeded before U-E1 (schema 8, inline
+    /// payloads), which runs the payload move and every other version-gated step,
+    /// the full FTS rebuild among them. Point CLIPTHROUGH_BENCH_DIR at a fresh copy;
+    /// on an already-moved library it reports that and times nothing useful.
+    /// </summary>
+    [BenchmarkFact]
+    public async Task P16_PayloadMigration()
+    {
+        var name = $"lib_{Clips}_{Images}{(string.IsNullOrEmpty(Password) ? "" : "_enc")}.db";
+        var lib = new PerfLibrary(Path.Combine(PerfLibrary.Root, name), Password);
+        var version = await ScalarAsync(lib, "SELECT CAST(value AS INTEGER) FROM app_metadata WHERE key = 'schema_version';");
+        var inline = await ScalarAsync(lib, "SELECT COUNT(*) FROM clips WHERE content_bytes IS NOT NULL OR source_app_icon IS NOT NULL;");
+        Log($"=== {DateTime.Now:HH:mm:ss} db={name} enc={!string.IsNullOrEmpty(Password)} :: P16 payload migration (schema {version}, {inline} rows with inline payloads)");
+
+        var sw = Stopwatch.StartNew();
+        await lib.Initializer.InitializeAsync();
+        sw.Stop();
+
+        var moved = await ScalarAsync(lib, "SELECT COUNT(*) FROM clip_payloads;");
+        var left = await ScalarAsync(lib, "SELECT COUNT(*) FROM clips WHERE content_bytes IS NOT NULL OR source_app_icon IS NOT NULL;");
+        Log($"{"InitializeAsync from schema 8 (all gated steps + U-E1 move)",-70} median={sw.Elapsed.TotalMilliseconds,9:F1} ms  payloads={moved} leftInline={left}");
+    }
 }
