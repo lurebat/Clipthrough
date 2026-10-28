@@ -348,7 +348,7 @@ Guard R3: a lifecycle matrix test class.
 - The 60k performance comparison against the current bundle, on a quiet machine requested through the coordinator.
 
 *Risks accepted with the decision*
-1. **Untested dependency pairing.** Microsoft.Data.Sqlite 10.0.11 declares `SQLitePCLRaw.core` 2.1.x; this bundle needs 3.x, so the app runs MDS 10 on core 3.0.2. Microsoft has not tested that pair. It is pinned explicitly, and our suite plus the evaluation harness are the only evidence it works. Re-check on every bump of either package (S32).
+1. **Untested dependency pairing.** Microsoft.Data.Sqlite 10.0.11 declares `SQLitePCLRaw.core` 2.1.x; this bundle needs 3.x, so the app runs MDS 10 on core 3.x (pinned at 3.0.5 since 2026-10-28, for 3.0.3's fixes to memory corruption and a connection-handle race). Microsoft has not tested that pair. It is pinned explicitly, and our suite plus the evaluation harness are the only evidence it works. Re-check on every bump of either package (S32).
 2. **Single maintainer.** The package is published by one person (U. Telle), MIT-licensed, with a package id that is not prefix-reserved; the native binaries are Authenticode-signed (SignPath Foundation). Releases are frequent today; nothing guarantees they continue.
 3. **Format fork on a missed recipe.** A connection without the recipe silently uses the library's default cipher: an existing library fails with error 26 ("wrong password") and a new one is unreadable by any SQLCipher build. Mitigated by the single factory and its guard, which also covers the test tree.
 4. **Engine jump 3.39.2 -> 3.54.0** beyond the evaluation's fixtures (query plans on 60k clips) is measured only by the quiet-machine comparison.
