@@ -428,7 +428,9 @@ Guard R3: a lifecycle matrix test class.
 - Switch the readers over only after the copy completes; drop or null the old columns last.
 - Never hold a single `DatabaseMaintenanceScope`-length transaction over 1+ GB.
 - Move the `stored_bytes` triggers along with the data.
-- **Startup cost (owner decision, 2026-10-28):** the first version, which read each row into .NET and wrote it back, blocked startup once for 87 s on the 1 GB plaintext fixture and 373 s encrypted. The owner chose an SQL-only batch copy (`INSERT ... SELECT` per id range, icons hashed in .NET), still resumable, with the crash-mid-batch test kept. If it still takes more than about 10 s on either variant, a progress UI over the batches is added too, with a headless test that progress shows and the app stays responsive.
+- **Startup cost (owner decision, 2026-10-28, under review):** the first upgrade start blocked for 87 s on the 1 GB plaintext fixture and 373 s encrypted. The owner chose an SQL-only batch copy (`INSERT ... SELECT` per id range, icons hashed in .NET), still resumable, with the crash-mid-batch test kept, plus a progress UI if it still took over about 10 s.
+  - **Correction (measured 2026-10-28):** those figures are the whole `InitializeAsync` after the version bump, not the payload move. A bump re-runs every version-gated step. On a 420 MB, 5k-clip library the 28.5 s splits into the full FTS rebuild (`RebuildClipSearchIndexAsync`) at 17.2 s, the payload move at 5.5 s, stored-bytes and backfills at 4.2 s, and the integrity check at 0.85 s.
+  - The SQL-only move measured 6.1 s against 5.2-5.5 s for the per-row one: the move is bound by SQLite page I/O, not by marshalling. The decision went back to the owner with these numbers.
 
 *Readers*
 - `GetByIdAsync` and hydration join `clip_payloads`. Icons resolve through the hash.
