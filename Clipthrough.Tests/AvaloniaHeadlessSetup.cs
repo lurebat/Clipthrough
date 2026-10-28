@@ -27,11 +27,18 @@ public static class TestAppBuilder
     // Trace is what lets BindingErrorHeadlessTests see them.
     public static AppBuilder BuildAvaloniaApp()
     {
-        var builder = AppBuilder.Configure<Clipthrough.App>();
+        var builder = AppBuilder.Configure<Clipthrough.App>()
+
+            // The app's own font. Fluent asks for Inter first; without it the
+            // headless platform falls back to a stub font whose glyphs are half
+            // as wide again as Inter's, and every layout assertion about what
+            // fits on a screen measured text that does not exist - a search row
+            // "overflowed" a 1366 DIP window it fits with room to spare.
+            .WithInterFont();
 
         // Layout captures need real pixels, which headless drawing never
-        // produces. Opt-in only, so the ordinary suite keeps the cheaper stub
-        // renderer it has always run on. (Layout/LayoutSurveyCapture.cs)
+        // produces. Opt-in only: Skia also really decodes images, which several
+        // tests rely on the stub renderer not doing. (Layout/LayoutSurveyCapture.cs)
         if (Layout.LayoutSurveyCapture.OutputDirectory is not null)
         {
             builder = builder.UseSkia();

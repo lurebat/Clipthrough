@@ -67,7 +67,8 @@ internal sealed class MainWindowTestHarness : IDisposable
     /// </param>
     public static MainWindowTestHarness Create(
         Func<AppSettings, AppSettings>? configureSettings = null,
-        bool aiConfigured = false)
+        bool aiConfigured = false,
+        IWindowPlacementStore? placementStore = null)
     {
         var scope = new TemporaryDatabaseScope();
 
@@ -106,7 +107,7 @@ internal sealed class MainWindowTestHarness : IDisposable
             new BackgroundJobIndicator(),
             scope.DatabaseInitializer);
 
-        var window = new MainWindow(systemInteraction) { DataContext = viewModel };
+        var window = new MainWindow(systemInteraction, placementStore) { DataContext = viewModel };
         window.Show();
         Dispatcher.UIThread.RunJobs();
 

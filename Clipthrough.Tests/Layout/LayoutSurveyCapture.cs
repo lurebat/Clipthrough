@@ -27,17 +27,18 @@ namespace Clipthrough.Tests.Layout;
 /// Renders every Clipthrough surface at a set of real-world working areas and
 /// records which controls end up outside the screen. A survey tool for the
 /// multi-monitor design (docs/plans/2026-10-28-001-multi-monitor-fit-design.md),
-/// not a regression test: it asserts nothing and skips unless
-/// CLIPTHROUGH_LAYOUT_CAPTURE_DIR names an output directory.
+/// not a regression test - those are the *HeadlessTests beside it. It asserts
+/// nothing and skips unless CLIPTHROUGH_LAYOUT_CAPTURE_DIR names an output
+/// directory.
 /// </summary>
 /// <remarks>
-/// The main window is modelled maximized (client = working area minus the
-/// caption), which is the most room it can ever have. Owned windows are placed
-/// the way Avalonia's CenterOwner does it: centred on the owner and clamped to
-/// the working area only when they fit, so a dialog larger than the screen
-/// overflows on both sides. A window cannot be laid out smaller than its
-/// minimum size, so the rendered frame is what the window really lays out at;
-/// the red overlay marks the part the screen cannot show.
+/// Each profile installs a <see cref="TestScreens"/> screen whose working area
+/// sits below a mock 31 DIP caption, so the windows' own fitting
+/// (<see cref="WindowFitter"/>) runs against it as it does on a real monitor.
+/// The main window is then sized as if maximized, the most room it can ever
+/// have. A window cannot be laid out smaller than its minimum size, so the
+/// rendered frame is what the window really lays out at; the red overlay marks
+/// the part the screen cannot show.
 /// </remarks>
 public sealed class LayoutSurveyCapture
 {
@@ -71,30 +72,26 @@ public sealed class LayoutSurveyCapture
         SkipUnlessCapturing();
         foreach (var profile in Profiles)
         {
+            using var screens = WindowFitter.UseScreens(ScreensFor(profile));
             using var harness = MainWindowTestHarness.Create();
             SeedRealisticClips(harness);
             harness.Notifications.PublishInfo("Copied to clipboard", "The selected clip is on the clipboard and ready to paste.");
-            Dispatcher.UIThread.RunJobs();
-            var placement = PlaceMainWindow(harness.Window, profile);
-            Capture("workspace", profile, harness.Window, placement, WorkspaceKeys(harness));
-            CaptureClipContextMenu(profile, harness);
+            Maximize(harness.Window, profile);
+            Capture("workspace", profile, harness.Window,
+            [
+                ("Search box", harness.SearchBox),
+                ("Type filter: Files", OnScreen.FindByContent<ToggleButton>(harness.Window, "Files")),
+                ("Sort", harness.Window.FindControl<ComboBox>("SortComboBox")),
+                ("Search modifiers", (Control?)OnScreen.FindByContent<CheckBox>(harness.Window, "Semantic") ?? harness.Window.FindControl<Button>("SearchOptionsButton")),
+                ("Clip list", harness.ClipList),
+                ("List: Delete checked", OnScreen.FindByCommand(harness.Window, harness.ViewModel.DeleteCheckedClipsCommand)),
+                ("Preview: Copy", OnScreen.FindByCommand(harness.Window, harness.ViewModel.CopySelectedCommand)),
+                ("Preview: Delete", OnScreen.FindByCommand(harness.Window, harness.ViewModel.DeleteSelectedCommand)),
+                ("Preview: content", harness.Window.GetVisualDescendants().OfType<Border>().FirstOrDefault(b => b.Classes.Contains("content-stage") && b.IsEffectivelyVisible)),
+                ("Toast", harness.Window.GetVisualDescendants().OfType<Border>().FirstOrDefault(b => b.DataContext is AppNotificationViewModel && b.CornerRadius.TopLeft >= 10 && b.IsEffectivelyVisible)),
+            ]);
         }
     }
-
-    internal static (string Label, Control? Control)[] WorkspaceKeys(MainWindowTestHarness harness) =>
-    [
-        ("Search box", harness.SearchBox),
-        ("Type filter: Files", FindByContent<ToggleButton>(harness.Window, "Files")),
-        ("Sort", harness.Window.FindControl<ComboBox>("SortComboBox")),
-        ("Search modifier: Semantic", FindByContent<CheckBox>(harness.Window, "Semantic")),
-        ("Clip list", harness.ClipList),
-        ("List: Delete checked", FindByCommand(harness.Window, harness.ViewModel.DeleteCheckedClipsCommand)),
-        ("Preview: Copy", FindByCommand(harness.Window, harness.ViewModel.CopySelectedCommand)),
-        ("Preview: Delete", FindByCommand(harness.Window, harness.ViewModel.DeleteSelectedCommand)),
-        ("Preview: content", harness.Window.GetVisualDescendants().OfType<Border>().FirstOrDefault(b => b.Classes.Contains("content-stage") && b.IsEffectivelyVisible)),
-        ("Footer: Settings", FindByCommand(harness.Window, harness.ViewModel.OpenSettingsCommand)),
-        ("Toast", FindToast(harness.Window)),
-    ];
 
     [AvaloniaFact]
     public async Task Welcome()
@@ -102,14 +99,15 @@ public sealed class LayoutSurveyCapture
         SkipUnlessCapturing();
         foreach (var profile in Profiles)
         {
+            using var screens = WindowFitter.UseScreens(ScreensFor(profile));
             using var harness = MainWindowTestHarness.Create();
             await harness.ViewModel.InitializeAsync();
             Dispatcher.UIThread.RunJobs();
-            var placement = PlaceMainWindow(harness.Window, profile);
-            Capture("welcome", profile, harness.Window, placement,
+            Maximize(harness.Window, profile);
+            Capture("welcome", profile, harness.Window,
             [
                 ("Database path", harness.Window.FindControl<TextBox>("WelcomeDatabasePathTextBox")),
-                ("Create library", FindByCommand(harness.Window, harness.ViewModel.SaveSettingsCommand)),
+                ("Create library", OnScreen.FindByCommand(harness.Window, harness.ViewModel.SaveSettingsCommand)),
             ]);
         }
     }
@@ -120,13 +118,15 @@ public sealed class LayoutSurveyCapture
         SkipUnlessCapturing();
         foreach (var profile in Profiles)
         {
+            using var screens = WindowFitter.UseScreens(ScreensFor(profile));
             using var harness = MainWindowTestHarness.Create();
             harness.ViewModel.OpenPasswordPromptForTests();
             Dispatcher.UIThread.RunJobs();
-            var placement = PlaceMainWindow(harness.Window, profile);
-            Capture("password", profile, harness.Window, placement,
+            Maximize(harness.Window, profile);
+            Capture("password", profile, harness.Window,
             [
                 ("Password box", harness.Window.FindControl<TextBox>("PasswordPromptTextBox")),
+                ("Unlock", OnScreen.FindByCommand(harness.Window, harness.ViewModel.UnlockDatabaseCommand)),
             ]);
         }
     }
@@ -137,57 +137,52 @@ public sealed class LayoutSurveyCapture
         SkipUnlessCapturing();
         foreach (var profile in Profiles)
         {
+            using var screens = WindowFitter.UseScreens(ScreensFor(profile));
             using var harness = MainWindowTestHarness.Create();
             SeedRealisticClips(harness);
-            var owner = PlaceMainWindow(harness.Window, profile);
+            Maximize(harness.Window, profile);
 
             harness.ViewModel.OpenSettingsCommand.Execute().Subscribe();
             Dispatcher.UIThread.RunJobs();
             var settings = harness.Window.OwnedWindows.OfType<SettingsWindow>().Single();
-            CaptureOwned("settings", profile, settings, owner);
+            CaptureOwned("settings", profile, settings);
 
             _ = RekeyDialog.ShowAsync(settings, harness.StorageOptions);
             Dispatcher.UIThread.RunJobs();
             var rekey = settings.OwnedWindows.OfType<RekeyDialog>().Single();
-            CaptureOwned("rekey", profile, rekey, owner);
+            CaptureOwned("rekey", profile, rekey);
             rekey.Close();
 
             _ = ConfirmDialog.ShowAsync(settings, "Move the database?", "Clipthrough will copy the library to the new folder and switch to it. This can take a while on a large library.", "Move", "Cancel");
             Dispatcher.UIThread.RunJobs();
             var confirm = settings.OwnedWindows.OfType<ConfirmDialog>().Single();
-            CaptureOwned("confirm", profile, confirm, owner);
+            CaptureOwned("confirm", profile, confirm);
             confirm.Close();
             settings.Close();
 
-            var about = new AboutWindow { DataContext = harness.ViewModel };
-            about.Show(harness.Window);
-            Dispatcher.UIThread.RunJobs();
-            CaptureOwned("about", profile, about, owner);
-            about.Close();
-
-            var help = new HelpWindow();
-            help.Show(harness.Window);
-            Dispatcher.UIThread.RunJobs();
-            CaptureOwned("help", profile, help, owner);
-            help.Close();
-
-            var logs = new SessionLogsWindow { DataContext = harness.ViewModel.SessionLogs };
-            logs.Show(harness.Window);
-            Dispatcher.UIThread.RunJobs();
-            CaptureOwned("logs", profile, logs, owner);
-            logs.Close();
-
-            var ai = new AiPromptWindow { DataContext = harness.ViewModel };
-            ai.Show(harness.Window);
-            Dispatcher.UIThread.RunJobs();
-            CaptureOwned("aiprompt", profile, ai, owner);
-            ai.Close();
-            Dispatcher.UIThread.RunJobs();
+            foreach (var (surface, window) in new (string, Window)[]
+            {
+                ("about", new AboutWindow { DataContext = harness.ViewModel }),
+                ("help", new HelpWindow()),
+                ("logs", new SessionLogsWindow { DataContext = harness.ViewModel.SessionLogs }),
+                ("aiprompt", new AiPromptWindow { DataContext = harness.ViewModel }),
+            })
+            {
+                window.Show(harness.Window);
+                Dispatcher.UIThread.RunJobs();
+                CaptureOwned(surface, profile, window);
+                window.Close();
+                Dispatcher.UIThread.RunJobs();
+            }
         }
     }
 
     private static void SkipUnlessCapturing()
         => Assert.SkipWhen(OutputDirectory is null, "Layout survey capture: set CLIPTHROUGH_LAYOUT_CAPTURE_DIR to run.");
+
+    /// <summary>The profile's screen, less a caption at the top for the mock title bar.</summary>
+    private static TestScreens ScreensFor(Profile profile)
+        => new(TestScreens.Dip(profile.WorkWidth, profile.WorkHeight - CaptionHeight, profile.Scaling, y: (int)Math.Round(CaptionHeight * profile.Scaling)));
 
     internal static void SeedRealisticClips(MainWindowTestHarness harness)
     {
@@ -222,172 +217,57 @@ public sealed class LayoutSurveyCapture
         Dispatcher.UIThread.RunJobs();
     }
 
-    /// <summary>
-    /// Sizes the main window as if maximized on <paramref name="profile"/>'s
-    /// working area. Returns the client rectangle in working-area DIP, which
-    /// is larger than the working area when a minimum size wins.
-    /// </summary>
-    internal static Rect PlaceMainWindow(Window window, Profile profile)
+    /// <summary>Sizes the main window as if maximized on <paramref name="profile"/>'s working area.</summary>
+    private static void Maximize(Window window, Profile profile)
     {
         window.SetRenderScaling(profile.Scaling);
+        window.Position = new PixelPoint(0, (int)Math.Round(CaptionHeight * profile.Scaling));
         window.Width = profile.WorkWidth;
         window.Height = profile.WorkHeight - CaptionHeight;
         Dispatcher.UIThread.RunJobs();
-        return new Rect(0, CaptionHeight, window.Bounds.Width, window.Bounds.Height);
     }
 
-    internal static void Capture(string surface, Profile profile, Window window, Rect clientRect, IEnumerable<(string Label, Control? Control)> keys)
-    {
-        Dispatcher.UIThread.RunJobs();
-        var frame = window.CaptureRenderedFrame();
-        var results = keys.Select(k => Classify(k.Label, k.Control, window, clientRect, profile)).ToList();
-        SaveScreenView(surface, profile, window.Title ?? surface, frame, clientRect);
-        Report(surface, profile, clientRect, results, window);
-    }
-
-    private static void CaptureOwned(string surface, Profile profile, Window dialog, Rect ownerClient)
+    private static void CaptureOwned(string surface, Profile profile, Window dialog)
     {
         dialog.SetRenderScaling(profile.Scaling);
         Dispatcher.UIThread.RunJobs();
-        var size = dialog.Bounds.Size;
-        var ownerFrame = new Rect(ownerClient.X, ownerClient.Y - CaptionHeight, ownerClient.Width, ownerClient.Height + CaptionHeight);
-        var frameSize = new Size(size.Width, size.Height + CaptionHeight);
-        var x = ownerFrame.X + ((ownerFrame.Width - frameSize.Width) / 2);
-        var y = ownerFrame.Y + ((ownerFrame.Height - frameSize.Height) / 2);
-        if (frameSize.Width <= profile.WorkWidth)
-        {
-            x = Math.Clamp(x, 0, profile.WorkWidth - frameSize.Width);
-        }
 
-        if (frameSize.Height <= profile.WorkHeight)
-        {
-            y = Math.Clamp(y, 0, profile.WorkHeight - frameSize.Height);
-        }
-
-        // The prototype fits every window into its working area when it opens
-        // (WorkingAreaFit). Headless has no real screen to fit against, so run
-        // the same geometry here against the modelled one.
-        if (Variant != "current")
-        {
-            var s = profile.Scaling;
-            var fit = MainWindow.FitToWorkingArea(
-                size,
-                new Size(0, CaptionHeight),
-                new PixelPoint((int)Math.Round(x * s), (int)Math.Round(y * s)),
-                new PixelRect(0, 0, (int)Math.Floor(profile.WorkWidth * s), (int)Math.Floor(profile.WorkHeight * s)),
-                s);
-            if (fit is { } placement)
-            {
-                if (placement.Size.Height < size.Height)
-                {
-                    dialog.SizeToContent &= ~SizeToContent.Height;
-                }
-
-                dialog.Width = placement.Size.Width;
-                dialog.Height = placement.Size.Height;
-                Dispatcher.UIThread.RunJobs();
-                size = dialog.Bounds.Size;
-                x = placement.Position.X / s;
-                y = placement.Position.Y / s;
-            }
-        }
-
-        var clientRect = new Rect(x, y + CaptionHeight, size.Width, size.Height);
-        // The dialog's own action buttons: those outside any scroller, which the
-        // user cannot bring into view by scrolling.
+        // The dialog's own action buttons: those outside any scroller, which
+        // the user cannot bring into view by scrolling.
         var keys = dialog.GetVisualDescendants().OfType<Button>()
             .Where(b => b.IsEffectivelyVisible
                 && !(b.Name ?? string.Empty).StartsWith("PART_", StringComparison.Ordinal)
                 && !b.GetVisualAncestors().OfType<ScrollViewer>().Any())
             .Select(b => (LabelOf(b), (Control?)b))
             .ToList();
-        Capture(surface, profile, dialog, clientRect, keys);
+        Capture(surface, profile, dialog, keys);
     }
 
-    private static void CaptureClipContextMenu(Profile profile, MainWindowTestHarness harness)
+    private static void Capture(string surface, Profile profile, Window window, IEnumerable<(string Label, Control? Control)> keys)
     {
-        var list = harness.ClipList;
-        var menu = list.ContextMenu!;
-        menu.Open(list);
         Dispatcher.UIThread.RunJobs();
-        var menuSize = menu.Bounds.Size;
-        AppendReport(string.Create(CultureInfo.InvariantCulture,
-            $"| contextmenu | {profile.Label} | {profile.WorkWidth:F0}x{profile.WorkHeight:F0} | menu {menuSize.Width:F0}x{menuSize.Height:F0} | {(menuSize.Height > profile.WorkHeight ? "TALLER THAN WORK AREA" : "fits")} | |"));
-        menu.Close();
-        Dispatcher.UIThread.RunJobs();
-    }
+        var clientRect = new Rect(
+            new Point(window.Position.X / profile.Scaling, window.Position.Y / profile.Scaling),
+            window.Bounds.Size);
+        var workArea = new Size(profile.WorkWidth, profile.WorkHeight);
+        var frame = window.CaptureRenderedFrame();
+        var results = keys.Select(k => (k.Label, Result: OnScreen.Classify(k.Control, window, clientRect.Position, workArea))).ToList();
+        SaveScreenView(surface, profile, window.Title ?? surface, frame, clientRect);
 
-    internal enum Reach
-    {
-        Visible,
-        ScrollReachable,
-        Clipped,
-        OffScreen,
-        Missing,
-    }
-
-    internal sealed record KeyResult(string Label, Reach Reach, double VisibleFraction);
-
-    /// <summary>
-    /// How much of a control the user can see: clipped by any ancestor that
-    /// clips (a scroller viewport, a ClipToBounds border), then by the working
-    /// area. A control hidden only by a scroller that can scroll is reachable.
-    /// </summary>
-    internal static KeyResult Classify(string label, Control? control, Window window, Rect clientRect, Profile profile)
-    {
-        if (control is null || !control.IsEffectivelyVisible || control.TranslatePoint(default, window) is not { } topLeft)
-        {
-            return new KeyResult(label, Reach.Missing, 0);
-        }
-
-        var rect = new Rect(topLeft, control.Bounds.Size);
-        var visible = rect;
-        var inScrollableViewer = false;
-        foreach (var ancestor in control.GetVisualAncestors())
-        {
-            if (ancestor is ScrollViewer sv && (sv.Extent.Width > sv.Viewport.Width + 0.5 || sv.Extent.Height > sv.Viewport.Height + 0.5))
-            {
-                inScrollableViewer = true;
-            }
-
-            if (ancestor.ClipToBounds && ancestor.TranslatePoint(default, window) is { } at)
-            {
-                visible = visible.Intersect(new Rect(at, ancestor.Bounds.Size));
-            }
-        }
-
-        var area = rect.Width * rect.Height;
-        var screen = visible.Translate(clientRect.Position).Intersect(new Rect(0, 0, profile.WorkWidth, profile.WorkHeight));
-        var fraction = area <= 0 ? 0 : Math.Max(0, screen.Width) * Math.Max(0, screen.Height) / area;
-        var clippedInWindow = visible.Width * visible.Height < area - 1;
-
-        var reach = fraction >= 0.99 ? Reach.Visible
-            : clippedInWindow && inScrollableViewer ? Reach.ScrollReachable
-            : clippedInWindow ? Reach.Clipped
-            : Reach.OffScreen;
-        return new KeyResult(label, reach, fraction);
-    }
-
-    private static void Report(string surface, Profile profile, Rect clientRect, List<KeyResult> results, Window window)
-    {
         var overflowX = Math.Max(0, clientRect.Right - profile.WorkWidth) + Math.Max(0, -clientRect.X);
         var overflowY = Math.Max(0, clientRect.Bottom - profile.WorkHeight) + Math.Max(0, CaptionHeight - clientRect.Y);
-        var broken = results.Where(r => r.Reach != Reach.Visible)
-            .Select(r => string.Create(CultureInfo.InvariantCulture, $"{r.Label}: {r.Reach} ({r.VisibleFraction:P0})"))
+        var broken = results.Where(r => r.Result.Reach != Reach.Visible)
+            .Select(r => string.Create(CultureInfo.InvariantCulture, $"{r.Label}: {r.Result.Reach} ({r.Result.VisibleFraction:P0})"))
             .ToList();
-        var interactive = window.GetVisualDescendants().OfType<Control>()
+        var lost = window.GetVisualDescendants().OfType<Control>()
             .Where(c => c is Button or CheckBox or RadioButton or TextBox or ComboBox or ToggleButton && c.IsEffectivelyVisible)
-            .Select(c => Classify(LabelOf(c), c, window, clientRect, profile))
-            .ToList();
-        var lostLabels = interactive
-            .Where(r => r.Reach is Reach.OffScreen or Reach.Clipped && !r.Label.StartsWith("PART_", StringComparison.Ordinal))
+            .Where(c => !(c.Name ?? string.Empty).StartsWith("PART_", StringComparison.Ordinal))
+            .Select(c => (Label: LabelOf(c), Result: OnScreen.Classify(c, window, clientRect.Position, workArea)))
+            .Where(r => r.Result.Reach is Reach.OffScreen or Reach.Clipped)
             .Select(r => r.Label)
-            .Distinct()
-            .Take(10)
             .ToList();
-        var lost = interactive.Count(r => r.Reach is Reach.OffScreen or Reach.Clipped && !r.Label.StartsWith("PART_", StringComparison.Ordinal));
         AppendReport(string.Create(CultureInfo.InvariantCulture,
-            $"| {surface} | {profile.Label} | {profile.WorkWidth:F0}x{profile.WorkHeight:F0} | client {clientRect.Width:F0}x{clientRect.Height:F0} at ({clientRect.X:F0},{clientRect.Y:F0}); overflow x {overflowX:F0}, y {overflowY:F0} | lost {lost}/{interactive.Count}: {string.Join(", ", lostLabels)} | {(broken.Count > 0 ? string.Join("; ", broken) : "all key controls visible")} |"));
+            $"| {surface} | {profile.Label} | {profile.WorkWidth:F0}x{profile.WorkHeight:F0} | client {clientRect.Width:F0}x{clientRect.Height:F0} at ({clientRect.X:F0},{clientRect.Y:F0}); overflow x {overflowX:F0}, y {overflowY:F0} | lost {lost.Count}: {string.Join(", ", lost.Distinct().Take(10))} | {(broken.Count > 0 ? string.Join("; ", broken) : "all key controls visible")} |"));
     }
 
     private static void AppendReport(string line)
@@ -454,7 +334,7 @@ public sealed class LayoutSurveyCapture
     private static FormattedText Text(string text, double size, IBrush brush)
         => new(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, Typeface.Default, size, brush);
 
-    internal static string LabelOf(Control control)
+    private static string LabelOf(Control control)
     {
         if (!string.IsNullOrEmpty(control.Name)) return control.Name;
         if (AutomationProperties.GetName(control) is { Length: > 0 } automationName) return automationName;
@@ -465,16 +345,4 @@ public sealed class LayoutSurveyCapture
             _ => control.GetType().Name,
         };
     }
-
-    internal static T? FindByContent<T>(Window window, string content)
-        where T : ContentControl
-        => window.GetVisualDescendants().OfType<T>().FirstOrDefault(c => Equals(c.Content, content) && c.IsEffectivelyVisible);
-
-    internal static Button? FindByCommand(Window window, System.Windows.Input.ICommand command)
-        => window.GetVisualDescendants().OfType<Button>()
-            .LastOrDefault(b => ReferenceEquals(b.Command, command) && b.IsEffectivelyVisible);
-
-    internal static Control? FindToast(Window window)
-        => window.GetVisualDescendants().OfType<Border>()
-            .FirstOrDefault(b => b.DataContext is AppNotificationViewModel && b.CornerRadius.TopLeft >= 10 && b.IsEffectivelyVisible);
 }

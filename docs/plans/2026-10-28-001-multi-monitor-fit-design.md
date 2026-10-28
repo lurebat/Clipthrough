@@ -1,7 +1,7 @@
 # design: Fit Clipthrough to every monitor
 
 **Created:** 2026-10-28
-**Type:** design (decision needed before implementation)
+**Type:** design (decided 2026-10-28; see [Decisions](#decisions))
 **Branch:** `user/asafmahlev/multi-monitor-fit-design`, stacked on `user/asafmahlev/first-run-hotfix` (#3)
 **Origin:** "Let's also see how we optimize clipboard to different sized monitors so it would fit
 nicely." Part of the road to 1.0.
@@ -24,7 +24,7 @@ screen whenever it opens, is shown, or changes DPI. A working prototype on this 
 key control on-screen in all seven test profiles, from 576 DIP portrait to 3440 DIP ultrawide.
 It makes no change at 1100 DIP and wider.
 
-**Decisions needed from Asaf** are collected in [Decisions](#decisions-for-asaf).
+The decisions are recorded in [Decisions](#decisions).
 
 ---
 
@@ -366,12 +366,52 @@ already attached.
 
 ---
 
-## Decisions for Asaf
+## Decisions
 
-1. **Direction:** A, **B (recommended)**, or C.
-2. **Short screens:** in Short, is hiding the footer meters and counters acceptable? Should the
-   six search modifiers collapse into a "Search options" button?
-3. **Narrow order:** put the preview **below** the list (prototype) or show it on demand?
-4. **Toasts:** keep them top-right, which covers the type toggles, or move them bottom-right?
-5. **Geometry memory:** D0, **D1 (recommended)**, or D2.
-6. **Wide screens:** cap the toggle, search, and preview widths on 2560+ (B18)?
+Asaf decided all six on 2026-10-28:
+
+1. **Direction:** Option B.
+2. **Short screens:** collapse the six search modifiers into a **Search options** button, and hide the footer meters and the counters. Settings and Logs stay reachable from the File and View menus.
+3. **Narrow order:** the preview goes below the list, with a draggable splitter, as prototyped.
+4. **Toasts:** move to the bottom-right.
+5. **Geometry memory:** D1. Remember the last normal size and the maximized state, clamped to the current working area on restore.
+6. **Wide screens:** cap the toggle, search and preview widths (B18). The caps are 900, 960 and 1600 DIP, so they change nothing up to 1920 DIP.
+
+## Implementation decisions
+
+These were made during implementation, within the approved scope:
+
+- The prototype commit was not merged. Its layout was rebuilt as `MainWindow.Layout.cs`, `WorkspaceBreakpoints`, `WindowGeometry` and `WindowFitter`.
+- The geometry is remembered in a separate `window.json`, not in `AppSettings`. The window moves on every hotkey show, and a settings save re-applies hotkeys, theme and capture rules to everything listening.
+- When a window's minimum size cannot fit the screen, the fit pins the window's top-left to the working area, so its caption and menu stay reachable.
+- A DPI change only resizes a window that no longer fits. It does not move one that merely hangs off an edge, so it does not fight a drag between monitors.
+- The Search options flyout duplicates the six modifier check boxes and binds them to the same properties. Avalonia cannot move one control between the toolbar and a flyout, so there are two sets of controls.
+- The Settings hotkey rows changed from a fixed 260 DIP label column to 2*:3*, with wrapping labels and a 220 DIP minimum on the hotkey column. Settings' minimum width is 520 DIP, which fits the 576 DIP portrait screen. At its 960 DIP default the window looks almost unchanged.
+- The window minimum is 480x360 DIP. Narrow and Short together (a window resized below 760x600) cannot stack the list and preview at a useful height, so there the list-and-preview area keeps 520 DIP and scrolls. Nothing else scrolls.
+- The list pane's bulk actions (All, None, Favorite, Pin, Delete) now wrap. In a narrow list pane, Delete used to run under the preview.
+- In Short, the preview title is trimmed to one line, so the preview content keeps its height.
+- On 2560+ DIP screens, a thin spacer column between the search box and the type toggles takes the space their caps leave, so the toggles stay at the right edge. That adds one 10 DIP column gap to the Wide toolbar at every width.
+- The test suite now loads the app's Inter font (`.WithInterFont()`, as `Program.cs` does). Without it, headless falls back to a stub font about 1.6 times as wide, and layout tests measured text that does not exist. Moving the whole suite to Skia was measured and rejected: it broke 6 image tests that rely on the stub renderer, and the suite ran 60% slower.
+
+## Result
+
+The same capture tool, run against the implementation, finds every key control on-screen in all seven profiles. See [measurements-implemented.md](assets/2026-10-28-multi-monitor-fit/measurements-implemented.md).
+
+![workspace, portrait](assets/2026-10-28-multi-monitor-fit/implemented/workspace-p576.png)
+![workspace, 1280x720 at 150%](assets/2026-10-28-multi-monitor-fit/implemented/workspace-l853.png)
+![workspace, ultrawide](assets/2026-10-28-multi-monitor-fit/implemented/workspace-u3440.png)
+![welcome, laptop](assets/2026-10-28-multi-monitor-fit/implemented/welcome-l853.png)
+![password, laptop](assets/2026-10-28-multi-monitor-fit/implemented/password-l853.png)
+![settings, portrait](assets/2026-10-28-multi-monitor-fit/implemented/settings-p576.png)
+![re-encrypt, laptop](assets/2026-10-28-multi-monitor-fit/implemented/rekey-l853.png)
+
+## Live re-checks (pending; batched for the live window)
+
+These need a real desktop: an isolated profile with `APPDATA` and `LOCALAPPDATA` redirected, and an existing second monitor. Display settings must not be changed.
+
+1. Toggle-hotkey show with the caret on the 250% portrait screen: the window opens beside the caret and inside the screen (B16).
+2. Drag the window from a 100% monitor to the 250% portrait one: it shrinks to fit, and the drag is not fought.
+3. Hide to the tray, disconnect a monitor, then show from the tray: the window comes back on a connected screen.
+4. Quit while maximized, then restart: the window opens maximized, and un-maximizing returns it to the remembered normal size.
+5. First run on 1280x720 at 150%: Create library and Unlock are on-screen in a real window.
+6. Settings, Re-encrypt and Session logs on the portrait screen: each opens fitted, with its buttons on-screen.

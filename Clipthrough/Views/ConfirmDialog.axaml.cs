@@ -10,6 +10,7 @@ public partial class ConfirmDialog : Window
     public ConfirmDialog()
     {
         InitializeComponent();
+        WindowFitter.Attach(this);
     }
 
     private void InitializeComponent()
