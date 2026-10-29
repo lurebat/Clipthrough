@@ -3754,7 +3754,7 @@
   {
     "id": "backup-purge-leaves-free-pages",
     "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
-    "why": "F-19. Deleted rows stay readable in free pages and in un-merged FTS segments until the copy is optimized and vacuumed.",
+    "why": "F-19. Deleted rows stay in free pages and in un-merged FTS segments until the copy is optimized and vacuumed. The engine's SQLITE_SECURE_DELETE zeroes the free pages, so the test checks the freelist is empty, not only the bytes.",
     "find": "        if (removed > 0)\n        {\n            if (HasTable(connection, \"clips_fts\"))\n",
     "replace": "        if (removed < 0)\n        {\n            if (HasTable(connection, \"clips_fts\"))\n",
     "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WithTheLifetimeOn_TheDailyBackup_HoldsNoSensitiveClip"
@@ -3794,7 +3794,7 @@
   {
     "id": "secure-delete-not-enabled",
     "file": "Clipthrough/Database/SqliteConnectionFactory.cs",
-    "why": "U-C4b / F-19. Without secure_delete a deleted or expired clip stays readable in a free page of a plaintext library, and in every copy of the file.",
+    "why": "U-C4b / F-19. Without secure_delete a deleted or expired clip stays readable in a free page of a plaintext library, and in every copy of the file. SQLite3 Multiple Ciphers compiles SQLITE_SECURE_DELETE in, so only a connection that had it turned off shows the pragma missing; the test reopens such a pooled connection.",
     "find": "            cmd.CommandText = \"PRAGMA busy_timeout = 5000; PRAGMA secure_delete = ON;\";",
     "replace": "            cmd.CommandText = \"PRAGMA busy_timeout = 5000;\";",
     "filter": "FullyQualifiedName~SecureDeleteTests"
