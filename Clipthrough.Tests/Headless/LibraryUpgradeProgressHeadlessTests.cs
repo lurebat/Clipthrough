@@ -73,6 +73,11 @@ public sealed class LibraryUpgradeProgressHeadlessTests
         return match.Success ? int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) : null;
     }
 
+    private static string TodaysBackup(TemporaryDatabaseScope scope) => System.IO.Path.Combine(
+        System.IO.Path.GetDirectoryName(scope.DatabasePath)!,
+        "backups",
+        $"clipthrough-{DateTime.UtcNow.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture)}.db");
+
     [AvaloniaFact]
     public async Task TheFirstStartAfterAnUpgrade_ShowsItsProgress_AndKeepsTheWindowLive()
     {
@@ -344,6 +349,9 @@ public sealed class LibraryUpgradeProgressHeadlessTests
             });
             Assert.NotNull(captured);
 
+            // The startup backup waits for the background integrity check (live check F3).
+            Assert.False(System.IO.File.Exists(TodaysBackup(scope)), "The daily backup ran before the background integrity check.");
+
             DatabaseInitializer.BetweenBackgroundPayloadBatches = null;
             release.Set();
             clock.Restart();
@@ -372,6 +380,16 @@ public sealed class LibraryUpgradeProgressHeadlessTests
             }
             while (pendingMerges > 0 && clock.Elapsed < TimeSpan.FromSeconds(10));
             Assert.Equal(0L, pendingMerges);
+
+            // ...and is taken once the run has finished.
+            clock.Restart();
+            while (!System.IO.File.Exists(TodaysBackup(scope)) && clock.Elapsed < TimeSpan.FromSeconds(10))
+            {
+                await Task.Delay(20);
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            Assert.True(System.IO.File.Exists(TodaysBackup(scope)), "No daily backup after the background run passed its check.");
         }
         finally
         {
@@ -467,6 +485,15 @@ public sealed class LibraryUpgradeProgressHeadlessTests
             Assert.True(reader.Read());
             Assert.Equal(LegacyRows, reader.GetInt64(0));
             Assert.Equal(0, reader.GetInt64(1));
+
+            // Live check F3: nothing is backed up from a library that failed its check.
+            for (var i = 0; i < 10; i++)
+            {
+                await Task.Delay(20);
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            Assert.False(System.IO.File.Exists(TodaysBackup(scope)), "A daily backup was taken from a library that failed its integrity check.");
         }
         finally
         {

@@ -307,7 +307,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         JumpToTopCommand = ReactiveCommand.Create(() => { if (Clips.Count > 0) SelectedClip = Clips[0]; });
         OpenHelpCommand = ReactiveCommand.Create(OpenHelp);
         OpenAboutCommand = ReactiveCommand.Create(OpenAbout);
-        Maintenance = new DatabaseMaintenanceViewModel(databaseBackupService ?? new DatabaseBackupService(storageOptionsService, null, null, null, settingsService: settingsService), _storageOptionsService, _systemInteractionService, _notificationService, ReportError);
+        Maintenance = new DatabaseMaintenanceViewModel(databaseBackupService ?? new DatabaseBackupService(storageOptionsService, null, null, null, settingsService: settingsService, databaseInitializer: databaseInitializer), _storageOptionsService, _systemInteractionService, _notificationService, ReportError);
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
         SaveSettingsCommand = ReactiveCommand.CreateFromTask(SaveSettingsAsync);
         BrowseDatabasePathCommand = ReactiveCommand.CreateFromTask<Window?>(BrowseDatabasePathAsync);
@@ -6623,6 +6623,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             await Task.Run(
                 () => _databaseInitializer.DrainSearchIndexMergesAsync(_deferredPayloadMoveCancellation.Token),
                 _deferredPayloadMoveCancellation.Token).ConfigureAwait(false);
+
+            // The startup backup waited for the integrity check this run has now
+            // passed (live check F3); without this the day would go unbacked-up.
+            // Expired clips first, as at startup (OD-4a).
+            try
+            {
+                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);
+                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);
+            }
+            catch (Exception backupFailure) when (backupFailure is not OperationCanceledException)
+            {
+                Trace.TraceWarning($"Daily backup failed: {backupFailure.Message}");
+            }
         }
         catch (OperationCanceledException)
         {

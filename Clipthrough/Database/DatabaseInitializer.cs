@@ -444,7 +444,7 @@ public sealed class DatabaseInitializer
         else if (await HasPendingStructuralWorkAsync(connection, cancellationToken))
         {
             progress?.Report(new LibraryUpgradeProgress(LibraryUpgradeStage.CheckingIntegrity));
-            await VerifyIntegrityAsync(connection, cancellationToken);
+            await VerifyIntegrityRecordingFailureAsync(connection, cancellationToken);
             TraceStep(sw, "integrity-check");
         }
 
@@ -603,7 +603,8 @@ public sealed class DatabaseInitializer
         TraceStep(sw, "sort-order-indexes");
 
         // A move the background still owes leaves this to it (AppIconHashIndex).
-        if (!allowDeferredPayloadMove || await IsPayloadMoveDoneAsync(connection, cancellationToken))
+        var payloadMoveDone = await IsPayloadMoveDoneAsync(connection, cancellationToken);
+        if (!allowDeferredPayloadMove || payloadMoveDone)
         {
             await ExecuteNonQueryAsync(connection, AppIconHashIndex, cancellationToken);
             TraceStep(sw, "app-icon-hash-index");
@@ -612,6 +613,11 @@ public sealed class DatabaseInitializer
         {
             TraceStep(sw, "app-icon-hash-index deferred");
         }
+
+        // The same condition RunDeferredPayloadMoveAsync checks before its integrity
+        // check: until that check has run, the daily backup waits.
+        IsIntegrityCheckOwed = allowDeferredPayloadMove
+            && (!payloadMoveDone || await IsUtcBackfillPendingAsync(connection, cancellationToken));
 
         await DeleteOrphanedAppIconsAsync(connection, cancellationToken);
 
@@ -1027,13 +1033,14 @@ public sealed class DatabaseInitializer
         var backfillPending = await IsUtcBackfillPendingAsync(connection, cancellationToken);
         if (moveDone && !backfillPending)
         {
+            IsIntegrityCheckOwed = false;
             return false;
         }
 
         // The integrity check the deferred start skipped, before anything is
         // rewritten. Runs again on each start until the work is done, which only
         // costs background time.
-        await VerifyIntegrityAsync(connection, cancellationToken);
+        await VerifyIntegrityRecordingFailureAsync(connection, cancellationToken);
         if (!moveDone)
         {
             await MovePayloadsOutOfClipsAsync(connection, progress, background: true, cancellationToken);
@@ -1099,6 +1106,19 @@ public sealed class DatabaseInitializer
 
     /// <summary>Test seam: runs after each row is moved, inside the batch's transaction.</summary>
     internal static Action<long>? AfterPayloadRowMoved { get; set; }
+
+    /// <summary>
+    /// Whether a quick_check failed this session. The daily backup is not taken from
+    /// such a library (live check F3), so the older, good backups are kept.
+    /// </summary>
+    public bool HasFailedIntegrityCheck { get; private set; }
+
+    /// <summary>
+    /// Whether this session still owes the integrity check a deferred upgrade start
+    /// skipped (it runs at the start of <see cref="RunDeferredPayloadMoveAsync"/>).
+    /// The daily backup waits for it.
+    /// </summary>
+    public bool IsIntegrityCheckOwed { get; private set; }
 
     private static async Task EnsureSourceAppIconHashColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
@@ -1878,6 +1898,24 @@ public sealed class DatabaseInitializer
     /// callers gate it on <see cref="HasPendingStructuralWorkAsync"/> instead of
     /// running it on every launch.
     /// </summary>
+    private async Task VerifyIntegrityRecordingFailureAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await VerifyIntegrityAsync(connection, cancellationToken);
+        }
+        catch (InvalidOperationException)
+        {
+            HasFailedIntegrityCheck = true;
+            throw;
+        }
+        finally
+        {
+            // Run, whatever its outcome: a failure is HasFailedIntegrityCheck's to report.
+            IsIntegrityCheckOwed = false;
+        }
+    }
+
     private static async Task VerifyIntegrityAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
         var problems = new List<string>();

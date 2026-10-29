@@ -3211,8 +3211,8 @@
     "id": "background-move-skips-the-integrity-check",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "Owner decision on the integrity check (b). The check moved, it was not dropped: the move rewrites every row, and a corrupt library must not be rewritten.",
-    "find": "        await VerifyIntegrityAsync(connection, cancellationToken);\n        if (!moveDone)\n",
-    "replace": "        await (Environment.ProcessorCount < 0 ? VerifyIntegrityAsync(connection, cancellationToken) : Task.CompletedTask);\n        if (!moveDone)\n",
+    "find": "        await VerifyIntegrityRecordingFailureAsync(connection, cancellationToken);\n        if (!moveDone)\n",
+    "replace": "        await (Environment.ProcessorCount < 0 ? VerifyIntegrityRecordingFailureAsync(connection, cancellationToken) : Task.CompletedTask);\n        if (!moveDone)\n",
     "filter": "FullyQualifiedName~DeferredPayloadMoveTests.TheBackgroundMove_ChecksTheLibraryFirst"
   },
   {
@@ -3235,8 +3235,8 @@
     "id": "utc-backfill-before-the-integrity-check",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "Owner decision (b): the background run checks the library before it rewrites anything. A backfill ahead of the check rewrites rows of a library the check would have refused.",
-    "find": "        await VerifyIntegrityAsync(connection, cancellationToken);\n        if (!moveDone)\n",
-    "replace": "        if (backfillPending)\n        {\n            await BackfillUtcTimestampsAsync(connection, cancellationToken);\n        }\n\n        await VerifyIntegrityAsync(connection, cancellationToken);\n        if (!moveDone)\n",
+    "find": "        await VerifyIntegrityRecordingFailureAsync(connection, cancellationToken);\n        if (!moveDone)\n",
+    "replace": "        if (backfillPending)\n        {\n            await BackfillUtcTimestampsAsync(connection, cancellationToken);\n        }\n\n        await VerifyIntegrityRecordingFailureAsync(connection, cancellationToken);\n        if (!moveDone)\n",
     "filter": "FullyQualifiedName~DeferredPayloadMoveTests.TheBackgroundMove_ChecksTheLibraryFirst"
   },
   {
@@ -3691,8 +3691,8 @@
     "id": "startup-backup-precedes-expiry",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "F-19 / OD-4a. The startup backup ran before the first expiry, copying clips that outlived their lifetime while the app was closed.",
-    "find": "                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n",
-    "replace": "                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n",
+    "find": "                // tick a minute later removes it from the live library.\n                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n",
+    "replace": "                // tick a minute later removes it from the live library.\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n",
     "filter": "FullyQualifiedName~StartupExpiresSensitiveClips_BeforeTakingTheDailyBackup"
   },
   {
@@ -4219,8 +4219,8 @@
     "id": "icon-hash-index-built-at-a-deferred-start",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "Live check F2: building idx_clips_source_app_icon_hash reads every row; before the move each row spans a page, 19.5-20.7 s on the deferred start of a 60k upgrade. It waits for the background run.",
-    "find": "        if (!allowDeferredPayloadMove || await IsPayloadMoveDoneAsync(connection, cancellationToken))",
-    "replace": "        if (!allowDeferredPayloadMove || await IsPayloadMoveDoneAsync(connection, cancellationToken) || allowDeferredPayloadMove)",
+    "find": "        if (!allowDeferredPayloadMove || payloadMoveDone)",
+    "replace": "        if (!allowDeferredPayloadMove || payloadMoveDone || allowDeferredPayloadMove)",
     "filter": "FullyQualifiedName~ADeferredUpgradeStart_LeavesTheIconHashIndexToTheBackgroundRun"
   },
   {
@@ -4254,5 +4254,29 @@
     "find": "                .Catch(static (Exception ex) => Observable.Return<Exception?>(ex)))",
     "replace": "                .Catch(static (Exception ex) => Observable.Throw<Exception?>(ex)))",
     "filter": "FullyQualifiedName~MaintenanceLoop_SurvivesAFailingTick"
+  },
+  {
+    "id": "backup-taken-after-a-failed-check",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Live check F3: the daily backup copied a library that had just failed quick_check; a week of that rotates every good backup out.",
+    "find": "        if (_databaseInitializer is { HasFailedIntegrityCheck: true })",
+    "replace": "        if (_databaseInitializer is { HasFailedIntegrityCheck: true } && _retention < 0)",
+    "filter": "FullyQualifiedName~TheDailyBackup_IsSkipped_AfterTheLibraryFailedItsCheck|FullyQualifiedName~ACorruptLibrary_IsNotMovedInTheBackground"
+  },
+  {
+    "id": "backup-taken-before-the-owed-check",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Live check F2/F3: the startup backup ran while the background quick_check was still reading the file, so it could copy a library about to fail.",
+    "find": "        if (_databaseInitializer is { IsIntegrityCheckOwed: true })",
+    "replace": "        if (_databaseInitializer is { IsIntegrityCheckOwed: true } && _retention < 0)",
+    "filter": "FullyQualifiedName~TheDailyBackup_WaitsForTheBackgroundCheck|FullyQualifiedName~AnUpgradeFromSchema8_OpensAtOnce"
+  },
+  {
+    "id": "no-backup-after-the-background-run",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "The startup backup waits for the background check; without asking again after the run, the day goes without a backup.",
+    "find": "                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n            }\n            catch (Exception backupFailure)",
+    "replace": "                await Task.CompletedTask.ConfigureAwait(false);\n            }\n            catch (Exception backupFailure)",
+    "filter": "FullyQualifiedName~AnUpgradeFromSchema8_OpensAtOnce"
   }
 ]
