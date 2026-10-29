@@ -2779,8 +2779,8 @@
     "id": "sensitive-export-is-not-confirmed",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "F-18 / OD-3a. Exporting a sensitive clip writes plaintext that outlives its lifetime; the user must choose it knowingly.",
-    "find": "        if (SelectedClip.Clip.IsSensitive\n            && (ConfirmAsync is null\n",
-    "replace": "        if (SelectedClip.Clip.IsSensitive && !SelectedClip.Clip.IsSensitive\n            && (ConfirmAsync is null\n",
+    "find": "        if (target.Clip.IsSensitive\n            && (ConfirmAsync is null\n",
+    "replace": "        if (target.Clip.IsSensitive && !target.Clip.IsSensitive\n            && (ConfirmAsync is null\n",
     "filter": "FullyQualifiedName~ExportingASensitiveClip_AsksFirst|FullyQualifiedName~ExportingASensitiveClip_WithNoWayToAsk"
   },
   {
@@ -3326,5 +3326,13 @@
     "find": "            if (placement is null || !(placement.Width > 0) || !(placement.Height > 0))",
     "replace": "            if (placement is null)",
     "filter": "FullyQualifiedName~WindowPlacementStoreTests"
+  },
+  {
+    "id": "f06-1-export-rereads-selection",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-06-1: export must write the clip the user confirmed, not whatever SelectedClip became while the dialog was open.",
+    "find": "var exportResult = await _clipExportService.ExportAsync(target.Clip);",
+    "replace": "var exportResult = await _clipExportService.ExportAsync((SelectedClip ?? target).Clip);",
+    "filter": "FullyQualifiedName~ExportingASensitiveClip_ExportsTheConfirmedClip"
   }
 ]
