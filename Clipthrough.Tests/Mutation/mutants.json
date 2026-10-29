@@ -2875,8 +2875,8 @@
     "id": "export-skips-hydration",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "F-10. Export writes the clip to a file the user keeps; from a list row it must not be a prefix.",
-    "find": "        await SelectedClip.EnsureContentHydratedAsync();\n        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);\n        _clipboardMonitorService.SuppressNext();",
-    "replace": "        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);\n        _clipboardMonitorService.SuppressNext();",
+    "find": "        await SelectedClip.EnsureContentHydratedAsync();\n        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);\n        _clipboardMonitorService.SuppressNext(exportResult.PrimaryPath);",
+    "replace": "        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);\n        _clipboardMonitorService.SuppressNext(exportResult.PrimaryPath);",
     "filter": "FullyQualifiedName~ExportingALongListRow_ExportsAllOfIt"
   },
   {
