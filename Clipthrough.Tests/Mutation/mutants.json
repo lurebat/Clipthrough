@@ -3942,5 +3942,13 @@
     "find": "        _presentedClipIsComplete = SelectedClip is { Clip.IsContentTruncated: false };",
     "replace": "        _presentedClipIsComplete = SelectedClip is not null || _presentedClipIsComplete;",
     "filter": "FullyQualifiedName~BetweenHydrationAndThePreview_TheEditorStaysReadOnly"
+  },
+  {
+    "id": "undecodable-thumbnail-throws",
+    "file": "Clipthrough/Presentation/ClipBitmapFactory.cs",
+    "why": "Live check G1: Avalonia.Skia scaled decode throws NullReferenceException for data no codec recognises; uncaught, the row thumbnail task faulted unobserved.",
+    "find": "        catch (NullReferenceException ex) when (decodeWidth is > 0)",
+    "replace": "        catch (NullReferenceException ex) when (decodeWidth is < 0)",
+    "filter": "FullyQualifiedName~ClipBitmapFactoryHeadlessTests"
   }
 ]
