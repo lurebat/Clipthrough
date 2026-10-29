@@ -36,6 +36,110 @@ public sealed class DeferredPayloadMoveTests
 
     private static byte[] Payload(int i) => [(byte)i, 9, 9, 9, 9];
 
+    private static int CurrentSchemaVersion =>
+        (int)(typeof(DatabaseInitializer)
+            .GetField("CurrentSchemaVersion", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+            ?.GetRawConstantValue()
+            ?? throw new InvalidOperationException(
+                "DatabaseInitializer.CurrentSchemaVersion is gone or is no longer a const - this test can no longer track it."));
+
+    private const string OffsetCaptured = "2024-01-02T10:00:00.0000000+05:00";
+    private const string OffsetLastCopied = "2024-01-02T11:30:00.0000000-02:30";
+    private static readonly string[] OffsetTimestamps = [OffsetCaptured, OffsetCaptured, OffsetLastCopied];
+    private static readonly string[] RepairedTimestamps = ["2024-01-02T05:00:00.0000000+00:00", "2024-01-02T05:00:00.0000000+00:00", "2024-01-02T14:00:00.0000000+00:00"];
+
+    /// <summary>
+    /// A row as schema 8 could hold it after a ClipAngel import: timestamps with the
+    /// importing machine's offset, which Phase G's one-time backfill converts (F-35).
+    /// </summary>
+    private static void GiveTimestampsAnOffset(TemporaryDatabaseScope scope, long id)
+    {
+        using var connection = scope.ConnectionFactory.CreateConnection();
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE clips SET captured_at = $c, first_copied_at = $c, last_copied_at = $l WHERE id = $id;";
+        command.Parameters.AddWithValue("$c", OffsetCaptured);
+        command.Parameters.AddWithValue("$l", OffsetLastCopied);
+        command.Parameters.AddWithValue("$id", id);
+        command.ExecuteNonQuery();
+    }
+
+    private static string[] Timestamps(TemporaryDatabaseScope scope, long id)
+    {
+        using var connection = scope.ConnectionFactory.CreateConnection();
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT captured_at, first_copied_at, last_copied_at FROM clips WHERE id = $id;";
+        command.Parameters.AddWithValue("$id", id);
+        using var reader = command.ExecuteReader();
+        Assert.True(reader.Read());
+        return [reader.GetString(0), reader.GetString(1), reader.GetString(2)];
+    }
+
+    private sealed class SynchronousProgress(Action<LibraryUpgradeProgress> report) : IProgress<LibraryUpgradeProgress>
+    {
+        public void Report(LibraryUpgradeProgress value) => report(value);
+    }
+
+    /// <summary>
+    /// Phase G's UTC backfill rewrites rows, so on a deferred start it is background
+    /// work like the move: not on the start, which writes nothing the integrity check
+    /// protects, but after the background check and the move, when the rows it scans
+    /// are small.
+    /// </summary>
+    [Fact]
+    public async Task ADeferredUpgradeStart_LeavesTimestampsAlone_AndTheBackgroundRunRepairsThem()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        var ids = SeedSchema8Library(scope, 3);
+        GiveTimestampsAnOffset(scope, ids[0]);
+
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+        Assert.Equal(OffsetTimestamps, Timestamps(scope, ids[0]));
+
+        Assert.True(await scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(progress: null));
+
+        Assert.Equal(0, InlineRows(scope));
+        Assert.Equal(RepairedTimestamps, Timestamps(scope, ids[0]));
+    }
+
+    /// <summary>
+    /// The move commits its last batch together with the flag that says it is done.
+    /// Closing the app right after that - Dispose cancels the background run - must
+    /// not leave the backfill undone for good: the next start's run still does it.
+    /// </summary>
+    [Fact]
+    public async Task ABackgroundRunStoppedRightAfterTheMove_StillRepairsTimestampsOnTheNextStart()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        var ids = SeedSchema8Library(scope, 3);
+        GiveTimestampsAnOffset(scope, ids[0]);
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+
+        using var closing = new CancellationTokenSource();
+        // Stop once the move has committed its done flag, and not before: the last
+        // batch of rows also reports 1, before the flag is written.
+        var stopAfterTheMove = new SynchronousProgress(p =>
+        {
+            if (p.Stage == LibraryUpgradeStage.MovingClipData && p.Fraction == 1
+                && Scalar(scope, "SELECT COUNT(*) FROM app_metadata WHERE key = 'payload_move_done' AND value = '1';") == 1)
+            {
+                closing.Cancel();
+            }
+        });
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(stopAfterTheMove, closing.Token));
+        Assert.Equal(0, InlineRows(scope));
+
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+        await scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(progress: null);
+
+        Assert.Equal(RepairedTimestamps, Timestamps(scope, ids[0]));
+        Assert.False(await scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(progress: null));
+    }
+
     /// <summary>
     /// Rows as a schema-8 library holds them: payload and icon inline, and
     /// stored_bytes counting the icon, as schema 8's triggers did.
@@ -114,7 +218,7 @@ public sealed class DeferredPayloadMoveTests
 
         Assert.Contains(steps, s => s.Contains("move-payloads deferred", StringComparison.Ordinal));
         Assert.Equal(ids.Length, InlineRows(scope));
-        Assert.Equal(9, Scalar(scope, "SELECT CAST(value AS INTEGER) FROM app_metadata WHERE key = 'schema_version';"));
+        Assert.Equal(CurrentSchemaVersion, Scalar(scope, "SELECT CAST(value AS INTEGER) FROM app_metadata WHERE key = 'schema_version';"));
         await AssertEveryClipReadsAsync(scope, ids);
 
         // Until a row moves, its icon is still inline and still counted with it.
@@ -322,7 +426,7 @@ public sealed class DeferredPayloadMoveTests
         var steps = await InitializeTracingStepsAsync(scope, allowDeferredPayloadMove: true);
 
         Assert.DoesNotContain(steps, s => s.Contains("[init-timing] integrity-check @", StringComparison.Ordinal));
-        Assert.Equal(9, Scalar(scope, "SELECT CAST(value AS INTEGER) FROM app_metadata WHERE key = 'schema_version';"));
+        Assert.Equal(CurrentSchemaVersion, Scalar(scope, "SELECT CAST(value AS INTEGER) FROM app_metadata WHERE key = 'schema_version';"));
     }
 
     /// <summary>
@@ -335,6 +439,7 @@ public sealed class DeferredPayloadMoveTests
         using var scope = new TemporaryDatabaseScope();
         await scope.DatabaseInitializer.InitializeAsync();
         var ids = SeedSchema8Library(scope, 3);
+        GiveTimestampsAnOffset(scope, ids[0]);
         await SeedFillerPagesAsync(scope);
         await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
         CorruptTheMiddleOfTheFile(scope);
@@ -345,6 +450,7 @@ public sealed class DeferredPayloadMoveTests
         Assert.Contains("Database integrity check failed", failure.Message, StringComparison.Ordinal);
         Assert.Equal(ids.Length, InlineRows(scope));
         Assert.Equal(0, Scalar(scope, "SELECT COUNT(*) FROM clip_payloads;"));
+        Assert.Equal(OffsetTimestamps, Timestamps(scope, ids[0]));
     }
 
     /// <summary>

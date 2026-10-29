@@ -483,6 +483,14 @@ public sealed class DatabaseInitializer
             // clip_payloads, not content_bytes.
             if (deferPayloadMove)
             {
+                // G's UTC backfill rewrites rows too, so it waits for the background
+                // run's integrity check like the move. The marker, not the version
+                // (written below), is what tells that run it is still owed.
+                if (storedVersion < UtcTimestampsIntroducedVersion)
+                {
+                    await ExecuteNonQueryAsync(connection, "INSERT INTO app_metadata (key, value) VALUES ('utc_backfill_pending', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;", cancellationToken);
+                }
+
                 TraceStep(sw, "move-payloads deferred");
             }
             else
@@ -492,6 +500,14 @@ public sealed class DatabaseInitializer
 
                 await RepairClipStoredBytesAsync(connection, cancellationToken);
                 TraceStep(sw, "ensure-stored-bytes");
+
+                // After the move: it scans every row's timestamps, which sit after the
+                // inline payload until the move has run (F-06).
+                if (storedVersion < UtcTimestampsIntroducedVersion)
+                {
+                    await BackfillUtcTimestampsAsync(connection, cancellationToken);
+                    TraceStep(sw, "backfill-utc-timestamps");
+                }
             }
 
             if (storedVersion < GateIntroducedVersion)
@@ -982,16 +998,31 @@ public sealed class DatabaseInitializer
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
-        if (await IsPayloadMoveDoneAsync(connection, cancellationToken))
+        var moveDone = await IsPayloadMoveDoneAsync(connection, cancellationToken);
+        var backfillPending = await IsUtcBackfillPendingAsync(connection, cancellationToken);
+        if (moveDone && !backfillPending)
         {
             return false;
         }
 
         // The integrity check the deferred start skipped, before anything is
-        // rewritten. Runs again on each start until the move finishes, which only
+        // rewritten. Runs again on each start until the work is done, which only
         // costs background time.
         await VerifyIntegrityAsync(connection, cancellationToken);
-        await MovePayloadsOutOfClipsAsync(connection, progress, background: true, cancellationToken);
+        if (!moveDone)
+        {
+            await MovePayloadsOutOfClipsAsync(connection, progress, background: true, cancellationToken);
+        }
+
+        // After the move, when the timestamps it scans no longer sit behind an
+        // inline payload (F-06). The move commits its done flag with its last
+        // batch, so the backfill keeps a marker of its own: a run stopped between
+        // the two still owes the backfill, and the next run does it.
+        if (backfillPending)
+        {
+            await BackfillUtcTimestampsAsync(connection, cancellationToken);
+            await ExecuteNonQueryAsync(connection, "DELETE FROM app_metadata WHERE key = 'utc_backfill_pending';", cancellationToken);
+        }
 
         // After the move, these read small rows and are cheap. Every row the move
         // cleared already has its stored_bytes; this is the safety net.
@@ -1024,6 +1055,13 @@ public sealed class DatabaseInitializer
             && storedVersion < CurrentSchemaVersion
             && !await FtsSchemaNeedsMigrationAsync(connection, cancellationToken)
             && await HasUniqueClipHashIndexAsync(connection, cancellationToken);
+    }
+
+    private static async Task<bool> IsUtcBackfillPendingAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT value FROM app_metadata WHERE key = 'utc_backfill_pending';";
+        return await command.ExecuteScalarAsync(cancellationToken) is "1";
     }
 
     private static async Task<bool> IsPayloadMoveDoneAsync(SqliteConnection connection, CancellationToken cancellationToken)

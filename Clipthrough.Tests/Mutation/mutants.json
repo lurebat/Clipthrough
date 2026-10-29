@@ -3227,9 +3227,41 @@
     "id": "background-move-skips-the-integrity-check",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "Owner decision on the integrity check (b). The check moved, it was not dropped: the move rewrites every row, and a corrupt library must not be rewritten.",
-    "find": "        await VerifyIntegrityAsync(connection, cancellationToken);\n        await MovePayloadsOutOfClipsAsync(connection, progress, background: true, cancellationToken);",
-    "replace": "        await (Environment.ProcessorCount < 0 ? VerifyIntegrityAsync(connection, cancellationToken) : Task.CompletedTask);\n        await MovePayloadsOutOfClipsAsync(connection, progress, background: true, cancellationToken);",
+    "find": "        await VerifyIntegrityAsync(connection, cancellationToken);\n        if (!moveDone)\n",
+    "replace": "        await (Environment.ProcessorCount < 0 ? VerifyIntegrityAsync(connection, cancellationToken) : Task.CompletedTask);\n        if (!moveDone)\n",
     "filter": "FullyQualifiedName~DeferredPayloadMoveTests.TheBackgroundMove_ChecksTheLibraryFirst"
+  },
+  {
+    "id": "deferred-start-runs-the-utc-backfill",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Owner decision (b): a deferred upgrade start rewrites no row before the background integrity check. G's UTC backfill rewrites rows, so running it on the start instead of marking it owed rewrites the library unchecked.",
+    "find": "                    await ExecuteNonQueryAsync(connection, \"INSERT INTO app_metadata (key, value) VALUES ('utc_backfill_pending', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;\", cancellationToken);",
+    "replace": "                    await BackfillUtcTimestampsAsync(connection, cancellationToken);",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.ADeferredUpgradeStart_LeavesTimestampsAlone"
+  },
+  {
+    "id": "utc-backfill-rides-on-the-move-flag",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "The move commits payload_move_done with its last batch. If the background run treats that flag as 'nothing left', a run stopped between the move and the backfill leaves the offset timestamps unrepaired for good.",
+    "find": "        if (moveDone && !backfillPending)\n",
+    "replace": "        if (moveDone || !backfillPending && moveDone)\n",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.ABackgroundRunStoppedRightAfterTheMove"
+  },
+  {
+    "id": "utc-backfill-before-the-integrity-check",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Owner decision (b): the background run checks the library before it rewrites anything. A backfill ahead of the check rewrites rows of a library the check would have refused.",
+    "find": "        await VerifyIntegrityAsync(connection, cancellationToken);\n        if (!moveDone)\n",
+    "replace": "        if (backfillPending)\n        {\n            await BackfillUtcTimestampsAsync(connection, cancellationToken);\n        }\n\n        await VerifyIntegrityAsync(connection, cancellationToken);\n        if (!moveDone)\n",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.TheBackgroundMove_ChecksTheLibraryFirst"
+  },
+  {
+    "id": "blocking-upgrade-skips-the-utc-backfill",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "The blocking upgrade path (libraries older than schema 8, or no permission to defer) must still run G's UTC backfill once, after the move.",
+    "find": "                if (storedVersion < UtcTimestampsIntroducedVersion)\n                {\n                    await BackfillUtcTimestampsAsync(connection, cancellationToken);\n                    TraceStep(sw, \"backfill-utc-timestamps\");",
+    "replace": "                if (storedVersion < UtcTimestampsIntroducedVersion && storedVersion < 0)\n                {\n                    await BackfillUtcTimestampsAsync(connection, cancellationToken);\n                    TraceStep(sw, \"backfill-utc-timestamps\");",
+    "filter": "FullyQualifiedName~ImportedTimestampTests.RowsAlreadyImportedWithAnOffset"
   },
   {
     "id": "background-move-failure-not-notified",
