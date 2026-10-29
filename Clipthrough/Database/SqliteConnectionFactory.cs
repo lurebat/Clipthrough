@@ -152,7 +152,10 @@ public sealed class SqliteConnectionFactory
             // deleted or expired clip does not stay readable in a free page of
             // the file, its backups or a sync client's history. Per connection,
             // like busy_timeout. Measured on the 60k fixture: capture within
-            // 0.98-1.06x with it on, plaintext and encrypted.
+            // 0.98-1.06x with it on, plaintext and encrypted. SQLite3 Multiple
+            // Ciphers is built with SQLITE_SECURE_DELETE, so on that engine this only
+            // matters for a connection that turned it off; it is kept so the guarantee
+            // does not depend on a build option (SecureDeleteTests).
             cmd.CommandText = "PRAGMA busy_timeout = 5000; PRAGMA secure_delete = ON;";
             cmd.ExecuteNonQuery();
         }
