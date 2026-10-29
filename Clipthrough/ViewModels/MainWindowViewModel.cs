@@ -100,6 +100,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ContentDisplayMode _contentDisplayMode;
     private string _selectedClipRenderedText = AppText.PreviewSelectContent;
     private string _selectedClipRawContent = AppText.PreviewSelectRawContent;
+
+    // Whether the text the editor was last given is the whole clip. Recorded with
+    // that text in UpdateSelectedClipPresentation, because hydration replaces the
+    // row's clip a dispatcher turn before the selection re-presents it.
+    private bool _presentedClipIsComplete;
     private string _selectedClipImageHint = AppText.PreviewSelectImage;
     private bool _isStartupInProgress;
     private bool _isDatabaseReady;
@@ -1580,8 +1585,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // Not while the row carries only a prefix of its text (F-10): an edit is saved
     // as a new clip, and saving the prefix would lose everything after it. The
     // hydration that selection starts re-presents the clip and re-raises this.
+    // It follows what the editor was given, not the row: the row is complete a
+    // dispatcher turn before the editor is, and an edit made in between was saved
+    // as the prefix plus the edit.
     public bool IsSelectedClipTextEditable =>
-        SelectedClip is { Clip.IsContentTruncated: false } selected
+        _presentedClipIsComplete
+        && SelectedClip is { } selected
         && (selected.Clip.ContentType is ContentType.Text
             || (selected.Clip.ContentType is ContentType.RichText
                 && _contentDisplayMode is ContentDisplayMode.Textual or ContentDisplayMode.Raw));
@@ -4912,6 +4921,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private void UpdateSelectedClipPresentation()
     {
         var rawContent = SelectedClip?.DisplayContent ?? ClipDisplayFormatter.GetRawContentDisplay(null);
+        _presentedClipIsComplete = SelectedClip is { Clip.IsContentTruncated: false };
         var fileItems = ClipDisplayFormatter.BuildFileItems(rawContent);
         ReplaceSelectedClipFiles(fileItems);
         _selectedClipRawContent = rawContent;
