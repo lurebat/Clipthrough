@@ -308,6 +308,18 @@ public sealed partial class MainWindowViewModelHeadlessTests
         clipboardMonitor.Emit(clip);
         Dispatcher.UIThread.RunJobs();
 
+        // Settle the refresh the capture started. It ends by writing the list
+        // summary to StatusText, and when that landed after the transform it
+        // overwrote the message under test (seen in about one headless run in
+        // ten).
+        for (var attempt = 0; attempt < 200 && !viewModel.StatusText.Contains("matching", StringComparison.Ordinal); attempt++)
+        {
+            await Task.Delay(10);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.Contains("matching", viewModel.StatusText, StringComparison.Ordinal);
+
         var row = viewModel.Clips.Single(c => c.Clip.Id == clip.Id);
         await row.ApplyTextTransformationCommand.Execute(TextTransformation.MarkdownToHtml).ToTask();
         Dispatcher.UIThread.RunJobs();
