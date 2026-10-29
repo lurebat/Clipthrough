@@ -71,6 +71,14 @@ overloads, and `CA2201` where raising a reserved exception type *is* the
 behaviour under test). `external/.editorconfig` is a `root = true` shield so
 none of this fires on vendored code.
 
+Because analyzers are enforced at `error`, the SDK feature band is pinned in
+`global.json` (`rollForward: latestPatch`): a new band can ship new analyzer
+diagnostics and break a release build with no commit here. CI reads the same
+file through `setup-dotnet`'s `global-json-file`. Moving to a new band is a
+deliberate edit to `global.json`, made together with whatever it newly flags.
+If `dotnet` reports that no compatible SDK was found, install the newest SDK in
+that band rather than editing the file.
+
 The headless filter is there because a few Avalonia headless tests still fail
 intermittently — a couple of percent of runs — with a `[Test Case Cleanup
 Failure]` naming an innocent test. That is work outliving a previous test, not
@@ -178,9 +186,10 @@ Measured on the VellumText 0.4.1 -> 0.5.0 upgrade: 0.5.0 gates Cut inside
 `CutAsync`, so `RichDocumentView`'s own Ctrl+X handler became redundant and its
 mutant went from KILLED to SURVIVED. **The suite was green, the build was clean,
 and `-ValidateOnly` passed all 284 anchors.** Nothing short of running the
-mutants against the new package would have shown it. We pin Avalonia too
-(`12.1.1`), so the same thing is waiting on that bump: a test that passes because
-Avalonia grew a guard is not a test of our code.
+mutants against the new package would have shown it. We pin Avalonia too (the
+`Avalonia*` references in `Clipthrough.csproj`), so the same thing can happen on
+every Avalonia bump: a test that passes because Avalonia grew a guard is not a
+test of our code.
 
 So a dependency bump is not done when the suite is green. Run the sweep, or at
 minimum re-run the mutants covering anything we implemented *because* of that
