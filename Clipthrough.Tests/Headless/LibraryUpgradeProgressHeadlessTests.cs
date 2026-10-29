@@ -97,7 +97,6 @@ public sealed class LibraryUpgradeProgressHeadlessTests
             viewModel = new MainWindowViewModel(
                 scope.ClipStoreService,
                 new TestClipboardMonitorService(),
-                new TestClipSampleDataService(),
                 scope.SettingsService,
                 systemInteraction,
                 scope.StorageOptionsService,
