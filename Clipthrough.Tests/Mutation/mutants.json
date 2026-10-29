@@ -2683,8 +2683,8 @@
     "id": "copilot-token-written-unprotected",
     "file": "Clipthrough/Services/Ai/CopilotAuthService.cs",
     "why": "F-31. The GitHub token behind Copilot must reach disk only through DPAPI; survived all 721 tests in the audit because nothing could construct the persisting service safely.",
-    "find": "            File.WriteAllBytes(_tokenPath, protectedBytes);\n",
-    "replace": "            File.WriteAllBytes(_tokenPath, protectedBytes.Length >= 0 ? raw : protectedBytes);\n",
+    "find": "            AtomicFile.WriteAllBytes(_tokenPath, protectedBytes);\n",
+    "replace": "            AtomicFile.WriteAllBytes(_tokenPath, protectedBytes.Length >= 0 ? raw : protectedBytes);\n",
     "filter": "FullyQualifiedName~CopilotAuthServicePersistenceTests"
   },
   {
