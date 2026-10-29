@@ -120,6 +120,57 @@ public sealed class BackupSensitivePurgeTests
         Assert.Equal(1L, Scalar(backup, $"SELECT count(*) FROM clips_fts WHERE clips_fts MATCH '\"{Secret}\"';"));
     }
 
+    /// <summary>
+    /// Rubber-duck F-06-2. When the purge fails after the copy was written, the
+    /// unpurged temp copy must not stay behind: retention only prunes
+    /// <c>clipthrough-*.db</c>, so a <c>.db.tmp</c> would keep every sensitive
+    /// clip on disk indefinitely.
+    /// </summary>
+    [Fact]
+    public async Task WhenThePurgeFails_NoUnpurgedCopyIsLeftInTheBackupsFolder()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await SeedAsync(scope);
+        using (var connection = scope.ConnectionFactory.CreateConnection())
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TRIGGER block_sensitive_delete BEFORE DELETE ON clips WHEN OLD.is_sensitive = 1
+                BEGIN SELECT RAISE(ABORT, 'test: purge blocked'); END;
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        await BackUpAsync(scope, lifetimeOn: true);
+
+        var backupDir = Path.Combine(Path.GetDirectoryName(scope.DatabasePath)!, "backups");
+        Assert.Empty(Directory.GetFiles(backupDir).Select(Path.GetFileName));
+    }
+
+    /// <summary>
+    /// Rubber-duck F-06-2. A temp copy stranded by a crash on an earlier day has
+    /// a name nothing else ever writes or prunes again, so the next backup
+    /// removes it.
+    /// </summary>
+    [Fact]
+    public async Task ATempCopyLeftByAnEarlierCrash_IsRemovedByTheNextBackup()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await SeedAsync(scope);
+        var backupDir = Path.Combine(Path.GetDirectoryName(scope.DatabasePath)!, "backups");
+        Directory.CreateDirectory(backupDir);
+        var stranded = Path.Combine(backupDir, "clipthrough-20200101.db.tmp");
+        File.WriteAllText(stranded, Secret);
+        File.WriteAllText(stranded + "-wal", Secret);
+
+        await BackUpAsync(scope, lifetimeOn: true);
+
+        Assert.False(File.Exists(stranded));
+        Assert.False(File.Exists(stranded + "-wal"));
+        Assert.Single(Directory.GetFiles(backupDir, "*.db"));
+    }
+
     [Fact]
     public void ACopyWithoutTheSensitiveColumn_IsLeftAlone()
     {

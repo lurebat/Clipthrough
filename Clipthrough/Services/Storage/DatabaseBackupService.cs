@@ -84,22 +84,33 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
             // Read the snapshot through SQLite rather than checkpointing and
             // copying the file, so commits still living in the WAL are included
             // even while other connections are reading or writing.
-            var tempPath = todayPath + ".tmp";
-            await Task.Run(
-                () =>
-                {
-                    var password = _storageOptionsService.Current.DatabasePassword;
-                    SqliteDatabaseCopier.CopyDatabase(dbPath, password, tempPath);
-                    // Owner decision on OD-4a: the purge serves the lifetime
-                    // promise. With the lifetime off sensitive clips are kept
-                    // like any other, so a restored backup brings them back.
-                    if (_settingsService?.Current.EnableSensitiveClipLifetime == true)
+            var tempPath = todayPath + TempSuffix;
+            DeleteStrandedTempCopies(backupDir, tempPath);
+            try
+            {
+                await Task.Run(
+                    () =>
                     {
-                        PurgeSensitiveClips(tempPath, password);
-                    }
-                },
-                cancellationToken).ConfigureAwait(false);
-            File.Move(tempPath, todayPath, overwrite: true);
+                        var password = _storageOptionsService.Current.DatabasePassword;
+                        SqliteDatabaseCopier.CopyDatabase(dbPath, password, tempPath);
+                        // Owner decision on OD-4a: the purge serves the lifetime
+                        // promise. With the lifetime off sensitive clips are kept
+                        // like any other, so a restored backup brings them back.
+                        if (_settingsService?.Current.EnableSensitiveClipLifetime == true)
+                        {
+                            PurgeSensitiveClips(tempPath, password);
+                        }
+                    },
+                    cancellationToken).ConfigureAwait(false);
+                File.Move(tempPath, todayPath, overwrite: true);
+            }
+            finally
+            {
+                // On any failure the temp copy may hold clips the purge never
+                // removed, and retention only prunes finished backups.
+                DeleteTempCopy(tempPath);
+            }
+
             Trace.TraceInformation($"Database backup written: {todayPath}");
 
             PruneOldBackups(backupDir);
@@ -107,6 +118,61 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException)
         {
             Trace.TraceWarning($"Database backup failed: {ex.Message}");
+        }
+    }
+
+    private const string TempSuffix = ".tmp";
+
+    /// <summary>
+    /// Removes a temp copy and any journal beside it. Best effort: a copy that
+    /// cannot be removed now is swept by a later backup.
+    /// </summary>
+    private static void DeleteTempCopy(string tempPath)
+    {
+        foreach (var suffix in new[] { string.Empty, "-wal", "-shm", "-journal" })
+        {
+            try
+            {
+                File.Delete(tempPath + suffix);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Trace.TraceWarning($"Could not remove the backup temp copy '{Path.GetFileName(tempPath + suffix)}': {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Sweeps temp copies a crash left behind on earlier days. Each day writes
+    /// its own temp name, so nothing else would ever overwrite or prune them,
+    /// and one that died mid-purge still holds sensitive clips. Today's name is
+    /// skipped: this run overwrites it.
+    /// </summary>
+    private static void DeleteStrandedTempCopies(string backupDir, string currentTempPath)
+    {
+        try
+        {
+            foreach (var path in Directory.EnumerateFiles(backupDir, BackupNamePattern + TempSuffix + "*"))
+            {
+                if (path.StartsWith(currentTempPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    File.Delete(path);
+                    Trace.TraceInformation($"Removed a stranded backup temp copy: {Path.GetFileName(path)}");
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Trace.TraceWarning($"Could not remove the stranded backup temp copy '{Path.GetFileName(path)}': {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceWarning($"Could not list stranded backup temp copies: {ex.Message}");
         }
     }
 

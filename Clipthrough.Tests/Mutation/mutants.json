@@ -3334,5 +3334,21 @@
     "find": "var exportResult = await _clipExportService.ExportAsync(target.Clip);",
     "replace": "var exportResult = await _clipExportService.ExportAsync((SelectedClip ?? target).Clip);",
     "filter": "FullyQualifiedName~ExportingASensitiveClip_ExportsTheConfirmedClip"
+  },
+  {
+    "id": "f06-2-failed-backup-keeps-temp",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Rubber-duck F-06-2: a backup that fails after the copy (e.g. in the purge) must not leave the unpurged .db.tmp, which retention never prunes.",
+    "find": "                DeleteTempCopy(tempPath);",
+    "replace": "                if (tempPath.Length < 0) DeleteTempCopy(tempPath);",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WhenThePurgeFails"
+  },
+  {
+    "id": "f06-2-stranded-temp-not-swept",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Rubber-duck F-06-2: a temp copy stranded by a crash on an earlier day is never overwritten or pruned, so the next backup sweeps it.",
+    "find": "            DeleteStrandedTempCopies(backupDir, tempPath);",
+    "replace": "            if (tempPath.Length < 0) DeleteStrandedTempCopies(backupDir, tempPath);",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.ATempCopyLeftByAnEarlierCrash"
   }
 ]
