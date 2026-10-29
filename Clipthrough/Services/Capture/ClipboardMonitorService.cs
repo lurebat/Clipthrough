@@ -433,7 +433,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     private async Task<ClipCaptureRequest?> BuildCaptureRequestAsync(IAsyncDataTransfer clipboardData, ClipboardSourceApplicationInfo? sourceInfo)
     {
         var plainText = await clipboardData.TryGetTextAsync();
-        var relatedSourceUrl = await TryGetPlatformStringAsync(clipboardData, SourceUrlFormats);
+        var relatedSourceUrl = await ReadSourceUrlAsync(clipboardData);
 
         var files = await clipboardData.TryGetFilesAsync();
         var filePaths = Array.Empty<string>();
@@ -670,28 +670,54 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
         return null;
     }
 
-    private static async Task<string?> TryGetPlatformStringAsync(IAsyncDataTransfer clipboardData, string[] formatNames)
+    /// <summary>
+    /// The page a copy came from. Read from the bytes, decoded as the format
+    /// declares, and cut at its terminator: the string accessor decodes every
+    /// format as UTF-16, so Chromium's UTF-8 URL came back as byte pairs - CJK
+    /// characters - followed by whatever lay past the URL in the buffer (live
+    /// check C7). The string is used only where no bytes are offered.
+    /// </summary>
+    internal static async Task<string?> ReadSourceUrlAsync(IAsyncDataTransfer clipboardData)
     {
-        foreach (var formatName in formatNames)
+        foreach (var formatName in SourceUrlFormats)
         {
-            var stringValue = await clipboardData.TryGetValueAsync(DataFormat.CreateStringPlatformFormat(formatName));
-            if (!string.IsNullOrWhiteSpace(stringValue))
-            {
-                return stringValue.Trim();
-            }
-
             var bytesValue = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(formatName));
             if (bytesValue is { Length: > 0 })
             {
-                var decodedValue = Encoding.UTF8.GetString(bytesValue).Trim('\0', ' ', '\r', '\n', '\t');
-                if (!string.IsNullOrWhiteSpace(decodedValue))
+                var decoded = DecodeSourceUrl(formatName, bytesValue);
+                if (!string.IsNullOrWhiteSpace(decoded))
                 {
-                    return decodedValue;
+                    return decoded;
                 }
+
+                continue;
+            }
+
+            var stringValue = await clipboardData.TryGetValueAsync(DataFormat.CreateStringPlatformFormat(formatName));
+            var terminated = stringValue?.Split('\0', 2)[0].Trim();
+            if (!string.IsNullOrWhiteSpace(terminated))
+            {
+                return terminated;
             }
         }
 
         return null;
+    }
+
+    private static string DecodeSourceUrl(string formatName, byte[] bytes)
+    {
+        var text = formatName switch
+        {
+            // UTF-16LE, as the W suffix says.
+            "UniformResourceLocatorW" => Encoding.Unicode.GetString(bytes, 0, bytes.Length & ~1),
+            // The ANSI form. A URL in it is ASCII in practice; Latin-1 maps every
+            // byte to one character and cannot fail.
+            "UniformResourceLocator" => Encoding.Latin1.GetString(bytes),
+            // Chromium's own format is UTF-8.
+            _ => Encoding.UTF8.GetString(bytes),
+        };
+
+        return text.Split('\0', 2)[0].Trim();
     }
 
     private static string DescribeFormats(IAsyncDataTransfer clipboardData)
