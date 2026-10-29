@@ -48,6 +48,27 @@ public static partial class TextTransformationService
             or Models.TextTransformation.MarkdownToHtml;
 
     /// <summary>
+    /// The markup <paramref name="transformation"/> should read from
+    /// <paramref name="clip"/> instead of its text, or null to use the text.
+    /// HTML -&gt; Markdown on a rich HTML clip takes the stored HTML fragment: the
+    /// clip's text is the plain text a browser offers beside it, with no markup
+    /// left to convert (live check C3). Needs the clip's bytes; a list row does not
+    /// carry them, so callers hydrate it first.
+    /// </summary>
+    public static string? MarkupSource(Models.TextTransformation transformation, Models.ClipEntry clip)
+    {
+        if (transformation is not Models.TextTransformation.HtmlToMarkdown
+            || clip.ContentFormat is not Models.ClipContentFormat.Html
+            || Presentation.ClipDisplayFormatter.GetRawMarkup(clip) is not { } markup)
+        {
+            return null;
+        }
+
+        var fragment = Presentation.ClipboardMarkupDecoder.ExtractHtmlFragment(markup);
+        return string.IsNullOrWhiteSpace(fragment) ? null : fragment;
+    }
+
+    /// <summary>
     /// Whether text transforms apply to <paramref name="clip"/>: text, rich
     /// text and file lists with content. Not images - an image clip's text is
     /// the title of the window it was copied from, not anything the user wants

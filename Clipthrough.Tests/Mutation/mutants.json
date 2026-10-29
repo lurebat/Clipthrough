@@ -2923,8 +2923,8 @@
     "id": "transform-skips-hydration",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "F-10. A transform saves its result as a new clip; started from a prefix it would save a clip missing everything after it.",
-    "find": "        await clip.EnsureContentHydratedAsync();\n        if (clip.Clip.ContentType != ContentType.Files)",
-    "replace": "        await Task.CompletedTask;\n        if (clip.Clip.ContentType != ContentType.Files)",
+    "find": "        await clip.EnsureContentHydratedAsync();\n        if (transformation is { } builtin && TextTransformationService.MarkupSource(builtin, clip.Clip) is { } markup)",
+    "replace": "        await Task.CompletedTask;\n        if (transformation is { } builtin && TextTransformationService.MarkupSource(builtin, clip.Clip) is { } markup)",
     "filter": "FullyQualifiedName~TransformingALongListRow_TransformsAllOfIt"
   },
   {
@@ -3379,8 +3379,8 @@
     "id": "row-transform-uses-the-selection",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "The row context menu applies to the row it was opened on. Dropping the explicit target makes it transform the selection or the checked clips instead - a different clip than the one the user right-clicked.",
-    "find": "                explicitTarget: explicitTarget);",
-    "replace": "                explicitTarget: explicitTarget is null ? null : null);",
+    "find": "                explicitTarget: explicitTarget,\n                builtinTransformation: transformation);",
+    "replace": "                explicitTarget: explicitTarget is null ? null : null,\n                builtinTransformation: transformation);",
     "filter": "FullyQualifiedName~RowTransform_AppliesToTheClickedRowOnly"
   },
   {
@@ -4366,5 +4366,21 @@
     "find": "            var html = Presentation.ClipboardMarkupDecoder.ExtractHtmlFragment(\n                VellumText.Interop.Html.HtmlFormat.Instance.Export(imported.Doc));",
     "replace": "            var html = input.Length < 0 ? Presentation.ClipboardMarkupDecoder.ExtractHtmlFragment(\n                VellumText.Interop.Html.HtmlFormat.Instance.Export(imported.Doc)) : VellumText.Interop.Html.HtmlFormat.Instance.Export(imported.Doc);",
     "filter": "FullyQualifiedName~MarkdownToHtml_ReturnsTheFragment|FullyQualifiedName~RowTransform_MarkdownToHtml_StoresAndCopiesHtml"
+  },
+  {
+    "id": "html-to-markdown-reads-the-plain-text",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "why": "Live check C3: HTML -> Markdown on a rich browser clip transformed its plain text, which has no markup, so nothing happened.",
+    "find": "            || Presentation.ClipDisplayFormatter.GetRawMarkup(clip) is not { } markup)",
+    "replace": "            || Presentation.ClipDisplayFormatter.GetRawMarkup(clip) is not { } markup || clip.Id > long.MinValue)",
+    "filter": "FullyQualifiedName~ConvertsItsHtml"
+  },
+  {
+    "id": "html-to-markdown-hotkey-uses-the-list-row",
+    "file": "Clipthrough/Services/Capture/HotkeyClipActions.cs",
+    "why": "The hotkey takes the selected list row, which carries no markup; HTML -> Markdown must fetch the full clip.",
+    "find": "                    clip = await store.GetByIdAsync(clip.Id) ?? clip;",
+    "replace": "                    clip = clip.Id < 0 ? (await store.GetByIdAsync(clip.Id) ?? clip) : clip;",
+    "filter": "FullyQualifiedName~HtmlToMarkdownHotkey_OnARichClipFromTheList"
   }
 ]

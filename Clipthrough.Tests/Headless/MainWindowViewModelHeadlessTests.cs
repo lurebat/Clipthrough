@@ -293,6 +293,41 @@ public sealed partial class MainWindowViewModelHeadlessTests
     }
 
     /// <summary>
+    /// Live check C3 (2026-10-29): HTML -> Markdown on a rich clip copied from
+    /// Edge did nothing, from every entry point. The transform read the clip's
+    /// plain text - which has no markup to convert - instead of the HTML stored
+    /// with it.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RowTransform_HtmlToMarkdown_OnARichBrowserClip_ConvertsItsHtml()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, new TestSessionLogService());
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var clip = (await RichBrowserClip.CaptureAsync(scope.ClipStoreService))!;
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        var row = viewModel.Clips.Single(c => c.Clip.Id == clip.Id);
+        await row.ApplyTextTransformationCommand.Execute(TextTransformation.HtmlToMarkdown).ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        var stored = Assert.Single(all.Items, c => c.SourceClipId == clip.Id);
+        Assert.Equal("builtin:HtmlToMarkdown", stored.TransformKind);
+        Assert.Contains("C3 Heading", stored.ContentPrefix, StringComparison.Ordinal);
+        Assert.Contains("**bold**", stored.ContentPrefix, StringComparison.Ordinal);
+        Assert.Contains("](https://example.com/c7-link)", stored.ContentPrefix, StringComparison.Ordinal);
+        Assert.DoesNotContain("<", stored.ContentPrefix, StringComparison.Ordinal);
+        Assert.Contains("**bold**", systemInteraction.LastCopiedText, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Input too deeply nested to convert safely (F-48) is left alone, and the
     /// status says why rather than a bare "no change".
     /// </summary>

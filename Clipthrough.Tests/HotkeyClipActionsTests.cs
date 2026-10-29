@@ -101,6 +101,37 @@ public sealed class HotkeyClipActionsTests
         Assert.Equal("MAKE ME LOUD", interaction.LastCopiedText);
     }
 
+    /// <summary>
+    /// Live check C3: a builtin:HtmlToMarkdown hotkey on a rich clip copied from a
+    /// browser transformed its plain text. The hotkey takes the selected list row
+    /// when the window is open, and list rows carry no markup (it is read lazily),
+    /// so the transform has to fetch it.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task HtmlToMarkdownHotkey_OnARichClipFromTheList_ConvertsItsHtml()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        await RichBrowserClip.CaptureAsync(scope.ClipStoreService);
+        var listRow = Assert.Single((await scope.ClipStoreService.SearchAsync(new ClipSearchFilters())).Items);
+        Assert.Null(listRow.ContentBytes);
+        var interaction = new TestSystemInteractionService();
+
+        var copied = await HotkeyClipActions.TransformAndCopyAsync(
+            listRow,
+            CustomHotkeyTarget.Parse("builtin:HtmlToMarkdown"),
+            "Ctrl+Alt+H",
+            scope.ClipStoreService,
+            interaction,
+            new TestClipboardMonitorService(),
+            ai: null,
+            presets: Array.Empty<AiPreset>());
+
+        Assert.True(copied);
+        Assert.Contains("**bold**", interaction.LastCopiedText, StringComparison.Ordinal);
+        Assert.DoesNotContain("<", interaction.LastCopiedText, StringComparison.Ordinal);
+    }
+
     [AvaloniaFact]
     public async Task StepPaste_OnAnImageClip_CopiesThePictureNotTheWindowTitle()
     {
