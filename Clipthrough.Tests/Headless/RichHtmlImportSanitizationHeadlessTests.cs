@@ -1,3 +1,4 @@
+using System.Threading.Tasks;
 using Avalonia.Headless.XUnit;
 using VellumText;
 using VellumText.Interop.Html;
@@ -8,13 +9,13 @@ namespace Clipthrough.Tests.Headless;
 /// <summary>
 /// Script and style bodies must not surface as visible text in the rendered
 /// preview. Clipboard HTML arrives from arbitrary applications and web pages,
-/// and the rendered pane imports it through <c>HtmlFormat.Instance.Import</c> -
+/// and the rendered pane imports it through <c>HtmlFormat.Instance.ImportAsync</c> -
 /// so that importer's raw-text handling is a boundary this application depends
 /// on, not an upstream detail.
 /// </summary>
 /// <remarks>
 /// <strong>The guarantor is VellumText, not Clipthrough.</strong>
-/// <c>RichDocumentView.Import</c> delegates straight to the library; there is no
+/// <c>RichDocumentView.ImportAsync</c> delegates straight to the library; there is no
 /// sanitising step of our own on this path, so nothing here would fail if we
 /// removed code. That is deliberate and worth stating, because a reader finding
 /// these tests could otherwise credit us for the library's work.
@@ -32,15 +33,15 @@ namespace Clipthrough.Tests.Headless;
 /// </remarks>
 public sealed class RichHtmlImportSanitizationHeadlessTests
 {
-    private static string VisibleText(string html)
-        => DocumentText.Of(HtmlFormat.Instance.Import(html).Doc);
+    private static async Task<string> VisibleTextAsync(string html)
+        => DocumentText.Of((await HtmlFormat.Instance.ImportAsync(html)).Doc);
 
     [AvaloniaTheory]
     [InlineData("<html><body><p>before</p><script>stealTheClipboard()</script><p>after</p></body></html>", "stealTheClipboard")]
     [InlineData("<html><body><p>before</p><style>.x{color:red}</style><p>after</p></body></html>", ".x{color:red}")]
-    public void AScriptOrStyleBody_DoesNotSurfaceAsVisibleText(string html, string forbidden)
+    public async Task AScriptOrStyleBody_DoesNotSurfaceAsVisibleText(string html, string forbidden)
     {
-        var text = VisibleText(html);
+        var text = await VisibleTextAsync(html);
 
         Assert.DoesNotContain(forbidden, text, System.StringComparison.Ordinal);
 
@@ -57,8 +58,8 @@ public sealed class RichHtmlImportSanitizationHeadlessTests
     [AvaloniaTheory]
     [InlineData("<html><body>a <b>x<script>evil()</script>y</b> b</body></html>", "evil()")]
     [InlineData("<html><body><p>kept</p><script>trailing()", "trailing()")]
-    public void AScriptInAnAwkwardPosition_StillDoesNotSurface(string html, string forbidden)
+    public async Task AScriptInAnAwkwardPosition_StillDoesNotSurface(string html, string forbidden)
     {
-        Assert.DoesNotContain(forbidden, VisibleText(html), System.StringComparison.Ordinal);
+        Assert.DoesNotContain(forbidden, await VisibleTextAsync(html), System.StringComparison.Ordinal);
     }
 }

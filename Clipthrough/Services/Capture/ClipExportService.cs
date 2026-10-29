@@ -9,28 +9,133 @@ using Clipthrough.Presentation;
 
 namespace Clipthrough.Services;
 
-public sealed class ClipExportService : IClipExportService
+/// <remarks>
+/// Open in editor and Compare used to write through <see cref="ExportAsync"/>
+/// too: a plaintext copy of the clip - sensitive ones included - plus a
+/// metadata.json carrying the raw content, left in Documents, which is
+/// usually OneDrive-synced, for good (F-18). That copy bypassed database
+/// encryption and the sensitive-clip lifetime. Tool copies now go to a
+/// per-session temp folder that is removed at exit, and at the next start if
+/// the app did not exit cleanly.
+/// </remarks>
+public sealed class ClipExportService : IClipExportService, IDisposable
 {
+    private const string SessionFolderPrefix = "Clipthrough-tool-copies-";
     private static readonly JsonSerializerOptions s_jsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     private readonly string _exportRoot;
+    private readonly string _sessionTempParent;
+    private readonly string _sessionRoot;
 
     public ClipExportService()
-        : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Clipthrough Exports"))
+        : this(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Clipthrough Exports"),
+            Path.GetTempPath())
     {
     }
 
     /// <summary>Exports under <paramref name="exportRoot"/>; lets tests check containment (F-33).</summary>
     internal ClipExportService(string exportRoot)
+        : this(exportRoot, Path.GetTempPath())
     {
-        _exportRoot = exportRoot;
     }
 
-    public async Task<ClipExportResult> ExportAsync(ClipEntry clip, CancellationToken cancellationToken = default)
+    /// <summary>Test seam: where exports and tool copies are written.</summary>
+    internal ClipExportService(string exportRoot, string sessionTempParent)
+    {
+        _exportRoot = exportRoot;
+        _sessionTempParent = sessionTempParent;
+        _sessionRoot = Path.Combine(sessionTempParent, $"{SessionFolderPrefix}{Environment.ProcessId}-{Guid.NewGuid():N}");
+        RemoveAbandonedSessionFolders();
+    }
+
+    /// <summary>The folder this session's tool copies are written under.</summary>
+    internal string SessionRoot => _sessionRoot;
+
+    public Task<ClipExportResult> ExportAsync(ClipEntry clip, CancellationToken cancellationToken = default)
+        => ExportCoreAsync(clip, _exportRoot, includeMetadata: true, cancellationToken);
+
+    public Task<ClipExportResult> ExportForToolAsync(ClipEntry clip, CancellationToken cancellationToken = default)
+        => ExportCoreAsync(clip, _sessionRoot, includeMetadata: false, cancellationToken);
+
+    public void Dispose()
+    {
+        TryDeleteDirectory(_sessionRoot);
+    }
+
+    /// <summary>
+    /// Removes tool-copy folders left by a session that did not exit cleanly.
+    /// Only folders this service names, and only when the process that made
+    /// them is gone - a second running instance keeps its own.
+    /// </summary>
+    private void RemoveAbandonedSessionFolders()
+    {
+        try
+        {
+            if (!Directory.Exists(_sessionTempParent))
+            {
+                return;
+            }
+
+            foreach (var folder in Directory.EnumerateDirectories(_sessionTempParent, SessionFolderPrefix + "*"))
+            {
+                var name = Path.GetFileName(folder);
+                var pidText = name[SessionFolderPrefix.Length..].Split('-')[0];
+                if (int.TryParse(pidText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var pid)
+                    && !IsProcessRunning(pid))
+                {
+                    TryDeleteDirectory(folder);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            System.Diagnostics.Trace.TraceWarning($"Could not sweep abandoned tool-copy folders: {ex.Message}");
+        }
+    }
+
+    private static bool IsProcessRunning(int pid)
+    {
+        if (pid == Environment.ProcessId)
+        {
+            return true;
+        }
+
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById(pid);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // An editor may still hold a file open; the next start sweeps it.
+            System.Diagnostics.Trace.TraceWarning($"Could not remove tool-copy folder '{path}': {ex.Message}");
+        }
+    }
+
+    private static async Task<ClipExportResult> ExportCoreAsync(ClipEntry clip, string exportRoot, bool includeMetadata, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(clip);
 
-        var exportRoot = _exportRoot;
         var clipName = BuildClipFileName(clip);
         var folderName = $"{SanitizePathSegment(clipName)}-{clip.Id}-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}";
         var exportDirectory = Path.Combine(exportRoot, folderName);
@@ -38,7 +143,10 @@ public sealed class ClipExportService : IClipExportService
 
         var originalPath = await ExportOriginalPayloadAsync(exportDirectory, clip, clipName, cancellationToken);
         var renderedPath = await ExportRenderedTextAsync(exportDirectory, clip, clipName, cancellationToken);
-        await ExportMetadataAsync(exportDirectory, clip, cancellationToken);
+        if (includeMetadata)
+        {
+            await ExportMetadataAsync(exportDirectory, clip, cancellationToken);
+        }
 
         return new ClipExportResult(exportDirectory, renderedPath ?? originalPath);
     }

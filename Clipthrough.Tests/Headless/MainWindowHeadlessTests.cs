@@ -198,7 +198,6 @@ public sealed class MainWindowHeadlessTests
         using var viewModel = new MainWindowViewModel(
             scope.ClipStoreService,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -259,7 +258,6 @@ public sealed class MainWindowHeadlessTests
         using var viewModel = new MainWindowViewModel(
             scope.ClipStoreService,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -339,7 +337,6 @@ public sealed class MainWindowHeadlessTests
         using var viewModel = new MainWindowViewModel(
             scope.ClipStoreService,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -402,7 +399,6 @@ public sealed class MainWindowHeadlessTests
         using var viewModel = new MainWindowViewModel(
             scope.ClipStoreService,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -466,7 +462,6 @@ public sealed class MainWindowHeadlessTests
         using var viewModel = new MainWindowViewModel(
             scope.ClipStoreService,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,

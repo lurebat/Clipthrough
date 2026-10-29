@@ -74,30 +74,10 @@ public sealed class RichDocumentView : UserControl
     //
     // So a document is only built when the content actually has break opportunities;
     // otherwise it takes the same bounded plain-text path as an oversized clip. 10,000
-    // chars sits an order of magnitude below where the curve turns painful.
-    private const int MaxUnbrokenRunChars = 10_000;
-
-    private static int LongestUnbrokenRun(string content)
-    {
-        var longest = 0;
-        var current = 0;
-        foreach (var c in content)
-        {
-            if (char.IsWhiteSpace(c))
-            {
-                current = 0;
-                continue;
-            }
-
-            current++;
-            if (current > longest)
-            {
-                longest = current;
-            }
-        }
-
-        return longest;
-    }
+    // chars sits an order of magnitude below where the curve turns painful. This is the
+    // one structural guard the preview keeps on VellumText 0.8: the importer bounds
+    // nesting and table spans itself, but line breaking is Avalonia's, after import.
+    private const int MaxUnbrokenRunChars = ImportGuards.MaxUnbrokenRunChars;
 
     private readonly RichTextEditor _viewer;
     private readonly TextBlock _emptyState;
@@ -115,6 +95,21 @@ public sealed class RichDocumentView : UserControl
     internal SelectableTextBlock FallbackText => _fallbackContent;
 
     internal TextBlock EmptyState => _emptyState;
+
+    /// <summary>
+    /// The importer, as a seam: tests count, block and order calls through it.
+    /// </summary>
+    internal Func<string, ClipContentFormat, Task<DocumentNode>> Importer { get; init; } = ImportAsync;
+
+    // Single flight (F-47). Markup and ContentFormat each start a render, so one
+    // selection changing both used to import twice; renders are now coalesced
+    // per dispatcher turn. The import that last ran is remembered so identical
+    // input reuses it, and so a new import waits for an abandoned one instead of
+    // running beside it: a timeout stops the preview waiting, not the importer.
+    private TaskCompletionSource? _scheduledRender;
+    private Task<DocumentNode> _lastImport = Task.FromResult(DocumentNode.Empty);
+    private string? _lastImportMarkup;
+    private ClipContentFormat _lastImportFormat;
 
     // Incremented per render so a slow import cannot overwrite the document belonging to
     // a clip the user has since moved off. Arrowing through the list starts a render per
@@ -210,8 +205,10 @@ public sealed class RichDocumentView : UserControl
     /// happening. Do not read its presence as evidence that 0.5.0 needs it.
     ///
     /// Ctrl+C and Ctrl+A are deliberately left alone: they are the two things a
-    /// read-only pane should still do. Paste is inert here (InsertText is gated
-    /// and reads rather than writes the clipboard) so it needs no handling.
+    /// read-only pane should still do. Paste needs no handling: VellumText
+    /// refuses it on a read-only editor before reading the clipboard, so no
+    /// import of another application's markup even starts
+    /// (PasteIntoTheRenderedPreview_IsRefusedBeforeAnythingIsImported).
     /// </remarks>
     private static void OnViewerKeyDown(object? sender, KeyEventArgs e)
     {
@@ -272,7 +269,28 @@ public sealed class RichDocumentView : UserControl
         set => SetValue(ContentFormatProperty, value);
     }
 
-    private void StartRender() => _pendingRender = RenderContentAsync();
+    private void StartRender()
+    {
+        if (_scheduledRender is not null)
+        {
+            // Already scheduled for this turn; it reads the latest values.
+            return;
+        }
+
+        var scheduled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _scheduledRender = scheduled;
+        _pendingRender = scheduled.Task;
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            _scheduledRender = null;
+            RenderContentAsync().ContinueWith(
+                static (_, state) => ((TaskCompletionSource)state!).TrySetResult(),
+                scheduled,
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        });
+    }
 
     private async Task RenderContentAsync()
     {
@@ -294,7 +312,7 @@ public sealed class RichDocumentView : UserControl
             return;
         }
 
-        if (LongestUnbrokenRun(content) > MaxUnbrokenRunChars)
+        if (ImportGuards.LongestUnbrokenRun(content) > MaxUnbrokenRunChars)
         {
             Trace.TraceWarning(
                 "Rich content contains a very long run with no break opportunity; falling back to plain text.");
@@ -305,10 +323,38 @@ public sealed class RichDocumentView : UserControl
         DocumentNode document;
         try
         {
-            // Importers are pure and take no Avalonia dependency, so the parse is safe off
-            // the UI thread, and DocumentNode is immutable once built.
-            document = await Task.Run(() => Import(content, format)).WaitAsync(ImportTimeout)
-                .ConfigureAwait(true);
+            Task<DocumentNode> import;
+            if (string.Equals(_lastImportMarkup, content, StringComparison.Ordinal) && _lastImportFormat == format)
+            {
+                import = _lastImport;
+            }
+            else
+            {
+                if (!_lastImport.IsCompleted)
+                {
+                    // An earlier import is still running - abandoned by a timeout or
+                    // superseded. Starting another beside it is how memory compounded
+                    // per copy, so wait for it, then import only if this is still the
+                    // content on screen.
+                    try { await _lastImport.ConfigureAwait(true); } catch { /* its render reported it */ }
+                    if (Volatile.Read(ref _renderGeneration) != generation)
+                    {
+                        return;
+                    }
+                }
+
+                // Importers are pure and take no Avalonia dependency, so the parse is safe off
+                // the UI thread, and DocumentNode is immutable once built. VellumText's own
+                // importers already parse on a thread of their own; Task.Run keeps whatever an
+                // importer does before its first await off the UI thread too.
+                var importer = Importer;
+                import = Task.Run(() => importer(content, format));
+                _lastImport = import;
+                _lastImportMarkup = content;
+                _lastImportFormat = format;
+            }
+
+            document = await import.WaitAsync(ImportTimeout).ConfigureAwait(true);
         }
         catch (TimeoutException)
         {
@@ -336,10 +382,10 @@ public sealed class RichDocumentView : UserControl
         _emptyState.IsVisible = false;
     }
 
-    private static DocumentNode Import(string content, ClipContentFormat format) => format switch
+    private static async Task<DocumentNode> ImportAsync(string content, ClipContentFormat format) => format switch
     {
-        ClipContentFormat.Html => HtmlFormat.Instance.Import(content).Doc,
-        ClipContentFormat.Rtf => RtfFormat.Instance.Import(content).Doc,
+        ClipContentFormat.Html => (await HtmlFormat.Instance.ImportAsync(content).ConfigureAwait(false)).Doc,
+        ClipContentFormat.Rtf => (await RtfFormat.Instance.ImportAsync(content).ConfigureAwait(false)).Doc,
         // Anything else reaching a rich renderer is text that was mislabelled somewhere
         // upstream; showing it as paragraphs beats showing nothing.
         _ => DocumentNode.FromParagraphs(content.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n')),

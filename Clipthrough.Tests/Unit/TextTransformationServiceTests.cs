@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using System.Globalization;
 using Clipthrough.Models;
 using Clipthrough.Services;
@@ -12,99 +13,99 @@ public sealed class TextTransformationServiceTests
     [InlineData("hello world", "HELLO WORLD")]
     [InlineData("Hello World", "HELLO WORLD")]
     [InlineData("", "")]
-    public void UpperCase(string input, string expected)
-        => Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.UpperCase, input));
+    public async Task UpperCase(string input, string expected)
+        => Assert.Equal(expected, await TextTransformationService.ApplyAsync(TextTransformation.UpperCase, input));
 
     [Theory]
     [InlineData("HELLO WORLD", "hello world")]
     [InlineData("Hello World", "hello world")]
-    public void LowerCase(string input, string expected)
-        => Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.LowerCase, input));
+    public async Task LowerCase(string input, string expected)
+        => Assert.Equal(expected, await TextTransformationService.ApplyAsync(TextTransformation.LowerCase, input));
 
     [Theory]
     [InlineData("hello world", "Hello World")]
     [InlineData("HELLO WORLD", "Hello World")]
-    public void TitleCase(string input, string expected)
-        => Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.TitleCase, input));
+    public async Task TitleCase(string input, string expected)
+        => Assert.Equal(expected, await TextTransformationService.ApplyAsync(TextTransformation.TitleCase, input));
 
     [Theory]
     [InlineData("hello world. goodbye world", "Hello world. Goodbye world")]
-    public void SentenceCase(string input, string expected)
-        => Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.SentenceCase, input));
+    public async Task SentenceCase(string input, string expected)
+        => Assert.Equal(expected, await TextTransformationService.ApplyAsync(TextTransformation.SentenceCase, input));
 
     [Theory]
     [InlineData("hello world", "HelloWorld")]
     [InlineData("hello-world", "HelloWorld")]
     [InlineData("hello_world_test", "HelloWorldTest")]
-    public void UpperCamelCase(string input, string expected)
-        => Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.UpperCamelCase, input));
+    public async Task UpperCamelCase(string input, string expected)
+        => Assert.Equal(expected, await TextTransformationService.ApplyAsync(TextTransformation.UpperCamelCase, input));
 
     [Theory]
     [InlineData("hello world", "helloWorld")]
     [InlineData("Hello World", "helloWorld")]
     [InlineData("some-thing", "someThing")]
-    public void LowerCamelCase(string input, string expected)
-        => Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.LowerCamelCase, input));
+    public async Task LowerCamelCase(string input, string expected)
+        => Assert.Equal(expected, await TextTransformationService.ApplyAsync(TextTransformation.LowerCamelCase, input));
 
     [Theory]
     [InlineData("helloWorld", "Hello World")]
     [InlineData("HelloWorld", "Hello World")]
     [InlineData("myURLParser", "My U R L Parser")]
-    public void FromCamelCase(string input, string expected)
-        => Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.FromCamelCase, input));
+    public async Task FromCamelCase(string input, string expected)
+        => Assert.Equal(expected, await TextTransformationService.ApplyAsync(TextTransformation.FromCamelCase, input));
 
     [Fact]
-    public void TrimWhitespace_TrimsEachLine()
+    public async Task TrimWhitespace_TrimsEachLine()
     {
         var input = "  hello  \n  world  ";
-        var result = TextTransformationService.Apply(TextTransformation.TrimWhitespace, input);
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.TrimWhitespace, input);
         Assert.Equal("hello\nworld", result);
     }
 
     [Fact]
-    public void CollapseWhitespace_CollapsesMultiple()
+    public async Task CollapseWhitespace_CollapsesMultiple()
     {
         var input = "hello   world   test";
-        var result = TextTransformationService.Apply(TextTransformation.CollapseWhitespace, input);
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.CollapseWhitespace, input);
         Assert.Equal("hello world test", result);
     }
 
     [Fact]
-    public void TabsToSpaces_ReplacesTabsWithSpaces()
+    public async Task TabsToSpaces_ReplacesTabsWithSpaces()
     {
         var input = "\thello\n\t\tworld";
-        var result = TextTransformationService.Apply(TextTransformation.TabsToSpaces, input);
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.TabsToSpaces, input);
         Assert.Equal("    hello\n        world", result);
     }
 
     [Fact]
-    public void SpacesToTabs_ConvertsLeadingSpaces()
+    public async Task SpacesToTabs_ConvertsLeadingSpaces()
     {
         var input = "    hello\n        world";
-        var result = TextTransformationService.Apply(TextTransformation.SpacesToTabs, input);
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.SpacesToTabs, input);
         Assert.Equal("\thello\n\t\tworld", result);
     }
 
     [Fact]
-    public void NormalizeEol_ConvertsToUnixLineEndings()
+    public async Task NormalizeEol_ConvertsToUnixLineEndings()
     {
         var input = "hello\r\nworld\rfoo";
-        var result = TextTransformationService.Apply(TextTransformation.NormalizeEol, input);
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.NormalizeEol, input);
         Assert.Equal("hello\nworld\nfoo", result);
     }
 
     [Fact]
-    public void LinesToJsonArray_ProducesValidJson()
+    public async Task LinesToJsonArray_ProducesValidJson()
     {
         var input = "hello\nworld\nfoo";
-        var result = TextTransformationService.Apply(TextTransformation.LinesToJsonArray, input);
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.LinesToJsonArray, input);
         Assert.Equal("[\"hello\",\"world\",\"foo\"]", result);
     }
 
     [Fact]
-    public void WhitespaceToJsonArray_SplitsOnSpacesNotJustNewlines()
+    public async Task WhitespaceToJsonArray_SplitsOnSpacesNotJustNewlines()
     {
-        var result = TextTransformationService.Apply(TextTransformation.WhitespaceToJsonArray, "hello world foo");
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.WhitespaceToJsonArray, "hello world foo");
         Assert.Equal("[\"hello\",\"world\",\"foo\"]", result);
     }
 
@@ -119,9 +120,9 @@ public sealed class TextTransformationServiceTests
     [InlineData("a\n\nb")]
     [InlineData("  a b  ")]
     [InlineData("\na b\n")]
-    public void WhitespaceToJsonArray_CollapsesRunsAndTrimsEnds(string input)
+    public async Task WhitespaceToJsonArray_CollapsesRunsAndTrimsEnds(string input)
     {
-        var result = TextTransformationService.Apply(TextTransformation.WhitespaceToJsonArray, input);
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.WhitespaceToJsonArray, input);
         Assert.Equal("[\"a\",\"b\"]", result);
     }
 
@@ -130,9 +131,9 @@ public sealed class TextTransformationServiceTests
     /// column pasted out of a terminal or a spreadsheet needs no cleanup first.
     /// </summary>
     [Fact]
-    public void WhitespaceToJsonArray_TreatsEveryWhitespaceKindAsASeparator()
+    public async Task WhitespaceToJsonArray_TreatsEveryWhitespaceKindAsASeparator()
     {
-        var result = TextTransformationService.Apply(TextTransformation.WhitespaceToJsonArray, "a b\tc\r\nd\re\u00a0f");
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.WhitespaceToJsonArray, "a b\tc\r\nd\re\u00a0f");
         Assert.Equal("[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\"]", result);
     }
 
@@ -142,12 +143,12 @@ public sealed class TextTransformationServiceTests
     /// a fixture where two sources of truth agree cannot tell them apart.
     /// </summary>
     [Fact]
-    public void WhitespaceToJsonArray_DiffersFromLinesToJsonArrayOnTheSameInput()
+    public async Task WhitespaceToJsonArray_DiffersFromLinesToJsonArrayOnTheSameInput()
     {
         const string input = "one two\nthree";
 
-        var byWhitespace = TextTransformationService.Apply(TextTransformation.WhitespaceToJsonArray, input);
-        var byLine = TextTransformationService.Apply(TextTransformation.LinesToJsonArray, input);
+        var byWhitespace = await TextTransformationService.ApplyAsync(TextTransformation.WhitespaceToJsonArray, input);
+        var byLine = await TextTransformationService.ApplyAsync(TextTransformation.LinesToJsonArray, input);
 
         Assert.Equal("[\"one\",\"two\",\"three\"]", byWhitespace);
 
@@ -163,12 +164,12 @@ public sealed class TextTransformationServiceTests
     /// differently on purpose.
     /// </summary>
     [Fact]
-    public void WhitespaceToJsonArray_DropsEmptyEntriesWhereLinesKeepsThem()
+    public async Task WhitespaceToJsonArray_DropsEmptyEntriesWhereLinesKeepsThem()
     {
         const string input = "a\n\nb";
 
-        Assert.Equal("[\"a\",\"b\"]", TextTransformationService.Apply(TextTransformation.WhitespaceToJsonArray, input));
-        Assert.Equal("[\"a\",\"\",\"b\"]", TextTransformationService.Apply(TextTransformation.LinesToJsonArray, input));
+        Assert.Equal("[\"a\",\"b\"]", await TextTransformationService.ApplyAsync(TextTransformation.WhitespaceToJsonArray, input));
+        Assert.Equal("[\"a\",\"\",\"b\"]", await TextTransformationService.ApplyAsync(TextTransformation.LinesToJsonArray, input));
     }
 
     /// <summary>
@@ -176,9 +177,9 @@ public sealed class TextTransformationServiceTests
     /// string comparison would accept malformed JSON that happened to match.
     /// </summary>
     [Fact]
-    public void WhitespaceToJsonArray_ProducesJsonThatRoundTrips()
+    public async Task WhitespaceToJsonArray_ProducesJsonThatRoundTrips()
     {
-        var result = TextTransformationService.Apply(TextTransformation.WhitespaceToJsonArray, "alpha \"quoted\" c:\\path");
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.WhitespaceToJsonArray, "alpha \"quoted\" c:\\path");
 
         var parsed = System.Text.Json.JsonSerializer.Deserialize<string[]>(result);
         Assert.NotNull(parsed);
@@ -194,16 +195,16 @@ public sealed class TextTransformationServiceTests
     [InlineData("   ", "[]")]
     [InlineData("\n\t \r\n", "[]")]
     [InlineData("", "")]
-    public void WhitespaceToJsonArray_HandlesInputWithNoTokens(string input, string expected)
+    public async Task WhitespaceToJsonArray_HandlesInputWithNoTokens(string input, string expected)
     {
-        Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.WhitespaceToJsonArray, input));
+        Assert.Equal(expected, await TextTransformationService.ApplyAsync(TextTransformation.WhitespaceToJsonArray, input));
     }
 
     [Fact]
-    public void LinesToJsonArray_EscapesSpecialCharacters()
+    public async Task LinesToJsonArray_EscapesSpecialCharacters()
     {
         var input = "hello \"world\"\nfoo\\bar";
-        var result = TextTransformationService.Apply(TextTransformation.LinesToJsonArray, input);
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.LinesToJsonArray, input);
         // System.Text.Json uses \u0022 for double quotes by default
         Assert.Contains("world", result);
         Assert.Contains("foo", result);
@@ -214,14 +215,14 @@ public sealed class TextTransformationServiceTests
     [Theory]
     [InlineData("hello\nworld\nfoo", ", ", "hello, world, foo")]
     [InlineData("hello\nworld\nfoo", "|", "hello|world|foo")]
-    public void JoinWithDelimiter(string input, string delimiter, string expected)
-        => Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.JoinWithDelimiter, input, delimiter));
+    public async Task JoinWithDelimiter(string input, string delimiter, string expected)
+        => Assert.Equal(expected, await TextTransformationService.ApplyAsync(TextTransformation.JoinWithDelimiter, input, delimiter));
 
     [Fact]
-    public void SortLines_SortsAlphabetically()
+    public async Task SortLines_SortsAlphabetically()
     {
         var input = "charlie\nalpha\nbravo";
-        var result = TextTransformationService.Apply(TextTransformation.SortLines, input);
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.SortLines, input);
         Assert.Equal("alpha\nbravo\ncharlie", result);
     }
 
@@ -234,7 +235,7 @@ public sealed class TextTransformationServiceTests
     /// cherry) and unstable under CurrentCulture.
     /// </summary>
     [Fact]
-    public void SortLines_IsCaseAwareAndIndependentOfTheMachineCulture()
+    public async Task SortLines_IsCaseAwareAndIndependentOfTheMachineCulture()
     {
         // "Ahre" with a diaeresis is the discriminator: sv-SE treats it as a
         // distinct letter sorting after Z, while invariant groups it with A.
@@ -243,9 +244,9 @@ public sealed class TextTransformationServiceTests
         const string input = "Zebra\napple\nBanana\ncherry\n\u00c4hre";
         const string expected = "\u00c4hre\napple\nBanana\ncherry\nZebra";
 
-        Assert.Equal(expected, WithCulture("en-US", () => TextTransformationService.Apply(TextTransformation.SortLines, input)));
-        Assert.Equal(expected, WithCulture("sv-SE", () => TextTransformationService.Apply(TextTransformation.SortLines, input)));
-        Assert.Equal(expected, WithCulture("tr-TR", () => TextTransformationService.Apply(TextTransformation.SortLines, input)));
+        Assert.Equal(expected, await WithCultureAsync("en-US", () => TextTransformationService.ApplyAsync(TextTransformation.SortLines, input)));
+        Assert.Equal(expected, await WithCultureAsync("sv-SE", () => TextTransformationService.ApplyAsync(TextTransformation.SortLines, input)));
+        Assert.Equal(expected, await WithCultureAsync("tr-TR", () => TextTransformationService.ApplyAsync(TextTransformation.SortLines, input)));
     }
 
     /// <summary>
@@ -265,11 +266,11 @@ public sealed class TextTransformationServiceTests
     [InlineData(TextTransformation.LowerCamelCase, "user MAIL", "userMail")]
     [InlineData(TextTransformation.UpperCamelCase, "user identifier", "UserIdentifier")]
     [InlineData(TextTransformation.FromCamelCase, "identifierValue", "Identifier Value")]
-    public void CamelCaseTransforms_AreNotCorruptedByTheTurkishDotlessI(
+    public async Task CamelCaseTransforms_AreNotCorruptedByTheTurkishDotlessI(
         TextTransformation transformation, string input, string expected)
     {
-        Assert.Equal(expected, WithCulture("en-US", () => TextTransformationService.Apply(transformation, input)));
-        Assert.Equal(expected, WithCulture("tr-TR", () => TextTransformationService.Apply(transformation, input)));
+        Assert.Equal(expected, await WithCultureAsync("en-US", () => TextTransformationService.ApplyAsync(transformation, input)));
+        Assert.Equal(expected, await WithCultureAsync("tr-TR", () => TextTransformationService.ApplyAsync(transformation, input)));
     }
 
     /// <summary>
@@ -280,19 +281,19 @@ public sealed class TextTransformationServiceTests
     /// sweep from making every case transform invariant.
     /// </summary>
     [Fact]
-    public void UpperCase_StaysLinguisticSoTurkishPreservesItsDottedCapital()
+    public async Task UpperCase_StaysLinguisticSoTurkishPreservesItsDottedCapital()
     {
-        Assert.Equal("ISTANBUL", WithCulture("en-US", () => TextTransformationService.Apply(TextTransformation.UpperCase, "istanbul")));
-        Assert.Equal("\u0130STANBUL", WithCulture("tr-TR", () => TextTransformationService.Apply(TextTransformation.UpperCase, "istanbul")));
+        Assert.Equal("ISTANBUL", await WithCultureAsync("en-US", () => TextTransformationService.ApplyAsync(TextTransformation.UpperCase, "istanbul")));
+        Assert.Equal("\u0130STANBUL", await WithCultureAsync("tr-TR", () => TextTransformationService.ApplyAsync(TextTransformation.UpperCase, "istanbul")));
     }
 
-    private static T WithCulture<T>(string cultureName, Func<T> action)
+    private static async Task<T> WithCultureAsync<T>(string cultureName, Func<Task<T>> action)
     {
         var previous = CultureInfo.CurrentCulture;
         try
         {
             CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(cultureName);
-            return action();
+            return await action();
         }
         finally
         {
@@ -301,31 +302,31 @@ public sealed class TextTransformationServiceTests
     }
 
     [Fact]
-    public void ReverseLines_ReversesOrder()
+    public async Task ReverseLines_ReversesOrder()
     {
         var input = "first\nsecond\nthird";
-        var result = TextTransformationService.Apply(TextTransformation.ReverseLines, input);
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.ReverseLines, input);
         Assert.Equal("third\nsecond\nfirst", result);
     }
 
     [Fact]
-    public void RemoveEmptyLines_FiltersBlankLines()
+    public async Task RemoveEmptyLines_FiltersBlankLines()
     {
         var input = "hello\n\nworld\n  \nfoo";
-        var result = TextTransformationService.Apply(TextTransformation.RemoveEmptyLines, input);
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.RemoveEmptyLines, input);
         Assert.Equal("hello\nworld\nfoo", result);
     }
 
     [Fact]
-    public void RemoveDuplicateLines_KeepsFirstOccurrence()
+    public async Task RemoveDuplicateLines_KeepsFirstOccurrence()
     {
         var input = "hello\nworld\nhello\nfoo\nworld";
-        var result = TextTransformationService.Apply(TextTransformation.RemoveDuplicateLines, input);
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.RemoveDuplicateLines, input);
         Assert.Equal("hello\nworld\nfoo", result);
     }
 
     [Fact]
-    public void BoxTableToHtml_ConvertsBoxDrawingTable()
+    public async Task BoxTableToHtml_ConvertsBoxDrawingTable()
     {
         var input = string.Join('\n',
             "┌────────┬─────────┐",
@@ -336,7 +337,7 @@ public sealed class TextTransformationServiceTests
             "│ bravo  │ ⚠️ miss │",
             "└────────┴─────────┘");
 
-        var result = TextTransformationService.Apply(TextTransformation.BoxTableToHtml, input);
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.BoxTableToHtml, input);
 
         Assert.StartsWith("<table", result);
         Assert.EndsWith("</table>", result);
@@ -350,11 +351,11 @@ public sealed class TextTransformationServiceTests
     }
 
     [Fact]
-    public void BoxTableToHtml_ConvertsCollapsedSingleLineBoxDrawingTable()
+    public async Task BoxTableToHtml_ConvertsCollapsedSingleLineBoxDrawingTable()
     {
         var input = "┌──────────────────────────┬────────────────────────────┬─────────────────┬──────────────┐ │ Source                   │ May 5-7 schema-skip alerts │ Distinct tables │ Distinct DBs │ ├──────────────────────────┼────────────────────────────┼─────────────────┼──────────────┤ │ INGEST-REFLEXPRDCUC000   │ ~445K                      │ 235             │ 155          │ ├──────────────────────────┼────────────────────────────┼─────────────────┼──────────────┤ │ INGEST-REFLEXPRDE2C000   │ ~253K                      │ 141             │ 77           │ ├──────────────────────────┼────────────────────────────┼─────────────────┼──────────────┤ │ INGEST-REFLEXPRDWUC000   │ ~208K                      │ 55              │ 51           │ ├──────────────────────────┼────────────────────────────┼─────────────────┼──────────────┤ │ INGEST-REFLEXPRDNEU000   │ ~139K                      │ 44              │ 32           │ └──────────────────────────┴────────────────────────────┴─────────────────┴──────────────┘";
 
-        var result = TextTransformationService.Apply(TextTransformation.BoxTableToHtml, input);
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.BoxTableToHtml, input);
 
         Assert.StartsWith("<table", result);
         Assert.Contains("<th>Source</th>", result);
@@ -366,14 +367,14 @@ public sealed class TextTransformationServiceTests
     }
 
     [Fact]
-    public void BoxTableToHtml_EscapesHtmlInCells()
+    public async Task BoxTableToHtml_EscapesHtmlInCells()
     {
         var input = string.Join('\n',
             "┌──────────────┐",
             "│ a<b>&\"c\"      │",
             "└──────────────┘");
 
-        var result = TextTransformationService.Apply(TextTransformation.BoxTableToHtml, input);
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.BoxTableToHtml, input);
 
         Assert.Contains("a&lt;b&gt;&amp;&quot;c&quot;", result);
     }
@@ -388,8 +389,8 @@ public sealed class TextTransformationServiceTests
     [InlineData("| where Timestamp > ago(1h)\n| project Operation, Count")]
     [InlineData("| summarize count() by bin(Timestamp, 1h)")]
     [InlineData("cat file.txt\n| grep foo\n| sort -u")]
-    public void BoxTableToHtml_LeavesPipelineSyntaxAlone(string input)
-        => Assert.Equal(input, TextTransformationService.Apply(TextTransformation.BoxTableToHtml, input));
+    public async Task BoxTableToHtml_LeavesPipelineSyntaxAlone(string input)
+        => Assert.Equal(input, await TextTransformationService.ApplyAsync(TextTransformation.BoxTableToHtml, input));
 
     /// <summary>
     /// The counterpart: box-drawing verticals are unambiguous table markup - no
@@ -398,13 +399,13 @@ public sealed class TextTransformationServiceTests
     /// line is always required".
     /// </summary>
     [Fact]
-    public void BoxTableToHtml_ConvertsBorderlessBoxDrawingTable()
+    public async Task BoxTableToHtml_ConvertsBorderlessBoxDrawingTable()
     {
         var input = string.Join('\n',
             "\u2502 Name  \u2502 Status \u2502",
             "\u2502 alpha \u2502 ok     \u2502");
 
-        var result = TextTransformationService.Apply(TextTransformation.BoxTableToHtml, input);
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.BoxTableToHtml, input);
 
         Assert.StartsWith("<table", result);
         Assert.Contains("<th>Name</th>", result);
@@ -420,7 +421,7 @@ public sealed class TextTransformationServiceTests
     /// so that stays true.
     /// </summary>
     [Fact]
-    public void BoxTableToHtml_EscapesProseForHtmlButThePlainTextFlavourStaysLiteral()
+    public async Task BoxTableToHtml_EscapesProseForHtmlButThePlainTextFlavourStaysLiteral()
     {
         var input = string.Join('\n',
             "Q1 sales & margin <draft>",
@@ -428,7 +429,7 @@ public sealed class TextTransformationServiceTests
             "|---|---|",
             "| 1 | 2 |");
 
-        var html = TextTransformationService.Apply(TextTransformation.BoxTableToHtml, input);
+        var html = await TextTransformationService.ApplyAsync(TextTransformation.BoxTableToHtml, input);
 
         Assert.Contains("&amp;", html, StringComparison.Ordinal);
         Assert.Contains("&lt;draft&gt;", html, StringComparison.Ordinal);
@@ -441,15 +442,15 @@ public sealed class TextTransformationServiceTests
     }
 
     [Fact]
-    public void BoxTableToHtml_ReturnsInputWhenNoTableRows()
+    public async Task BoxTableToHtml_ReturnsInputWhenNoTableRows()
     {
         var input = "just some plain text\nwith no box drawing";
-        var result = TextTransformationService.Apply(TextTransformation.BoxTableToHtml, input);
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.BoxTableToHtml, input);
         Assert.Equal(input, result);
     }
 
     [Fact]
-    public void BoxTableToHtml_ConvertsMarkdownPipeTable()
+    public async Task BoxTableToHtml_ConvertsMarkdownPipeTable()
     {
         var input = string.Join('\n',
             "| Name  | Status |",
@@ -457,7 +458,7 @@ public sealed class TextTransformationServiceTests
             "| alpha | ok     |",
             "| bravo | miss   |");
 
-        var result = TextTransformationService.Apply(TextTransformation.BoxTableToHtml, input);
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.BoxTableToHtml, input);
 
         Assert.StartsWith("<table", result);
         Assert.Contains("<th>Name</th>", result);
@@ -469,7 +470,7 @@ public sealed class TextTransformationServiceTests
     }
 
     [Fact]
-    public void BoxTableToHtml_ConvertsAsciiPlusBorderedTable()
+    public async Task BoxTableToHtml_ConvertsAsciiPlusBorderedTable()
     {
         var input = string.Join('\n',
             "+-------+--------+",
@@ -479,7 +480,7 @@ public sealed class TextTransformationServiceTests
             "| bravo | miss   |",
             "+-------+--------+");
 
-        var result = TextTransformationService.Apply(TextTransformation.BoxTableToHtml, input);
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.BoxTableToHtml, input);
 
         Assert.Contains("<th>Name</th>", result);
         Assert.Contains("<td>alpha</td>", result);
@@ -488,7 +489,7 @@ public sealed class TextTransformationServiceTests
     }
 
     [Fact]
-    public void BoxTableToHtml_PreservesSurroundingTextAndHandlesMultipleTables()
+    public async Task BoxTableToHtml_PreservesSurroundingTextAndHandlesMultipleTables()
     {
         var input = string.Join("\n", new[]
         {
@@ -509,7 +510,7 @@ public sealed class TextTransformationServiceTests
             "Trailing line.",
         });
 
-        var result = TextTransformationService.Apply(TextTransformation.BoxTableToHtml, input);
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.BoxTableToHtml, input);
 
         // Two distinct tables produced.
         Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(result, "<table").Count);
@@ -523,26 +524,26 @@ public sealed class TextTransformationServiceTests
     }
 
     [Fact]
-    public void None_ReturnsInputUnchanged()
+    public async Task None_ReturnsInputUnchanged()
     {
         var input = "hello world";
-        Assert.Equal(input, TextTransformationService.Apply(TextTransformation.None, input));
+        Assert.Equal(input, await TextTransformationService.ApplyAsync(TextTransformation.None, input));
     }
 
     [Fact]
-    public void NullInput_ReturnsNull()
-        => Assert.Null(TextTransformationService.Apply(TextTransformation.UpperCase, null!));
+    public async Task NullInput_ReturnsNull()
+        => Assert.Null(await TextTransformationService.ApplyAsync(TextTransformation.UpperCase, null!));
 
     [Fact]
-    public void EmptyInput_ReturnsEmpty()
-        => Assert.Equal(string.Empty, TextTransformationService.Apply(TextTransformation.UpperCase, string.Empty));
+    public async Task EmptyInput_ReturnsEmpty()
+        => Assert.Equal(string.Empty, await TextTransformationService.ApplyAsync(TextTransformation.UpperCase, string.Empty));
 
     [Theory]
     [InlineData("hello", "\"hello\"")]
     [InlineData("a\nb", "\"a\\nb\"")]
     [InlineData("with \"quotes\"", "\"with \\u0022quotes\\u0022\"")]
-    public void JsonQuote(string input, string expected)
-        => Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.JsonQuote, input));
+    public async Task JsonQuote(string input, string expected)
+        => Assert.Equal(expected, await TextTransformationService.ApplyAsync(TextTransformation.JsonQuote, input));
 
     [Theory]
     [InlineData("\"hello\"", "hello")]
@@ -551,68 +552,68 @@ public sealed class TextTransformationServiceTests
     [InlineData("a\\nb", "a\nb")]
     [InlineData("plain text", "plain text")]
     [InlineData("a\\tb", "a\tb")]
-    public void JsonUnquote(string input, string expected)
-        => Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.JsonUnquote, input));
+    public async Task JsonUnquote(string input, string expected)
+        => Assert.Equal(expected, await TextTransformationService.ApplyAsync(TextTransformation.JsonUnquote, input));
 
     [Fact]
-    public void JsonMinify_RemovesWhitespace()
+    public async Task JsonMinify_RemovesWhitespace()
     {
         var input = "{\n  \"a\": 1,\n  \"b\": [1, 2, 3]\n}";
-        Assert.Equal("{\"a\":1,\"b\":[1,2,3]}", TextTransformationService.Apply(TextTransformation.JsonMinify, input));
+        Assert.Equal("{\"a\":1,\"b\":[1,2,3]}", await TextTransformationService.ApplyAsync(TextTransformation.JsonMinify, input));
     }
 
     [Fact]
-    public void JsonPretty_FormatsCompactJson()
+    public async Task JsonPretty_FormatsCompactJson()
     {
-        var result = TextTransformationService.Apply(TextTransformation.JsonPretty, "{\"a\":1,\"b\":2}");
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.JsonPretty, "{\"a\":1,\"b\":2}");
         Assert.Contains("\"a\": 1", result);
         Assert.Contains("\"b\": 2", result);
         Assert.Contains("\n", result);
     }
 
     [Fact]
-    public void JsonPretty_ReturnsInputUnchangedOnInvalid()
+    public async Task JsonPretty_ReturnsInputUnchangedOnInvalid()
     {
-        var result = TextTransformationService.Apply(TextTransformation.JsonPretty, "not json");
+        var result = await TextTransformationService.ApplyAsync(TextTransformation.JsonPretty, "not json");
         Assert.Equal("not json", result);
     }
 
     [Theory]
     [InlineData("hello world", "hello%20world")]
     [InlineData("a=b&c", "a%3Db%26c")]
-    public void UrlEncode(string input, string expected)
-        => Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.UrlEncode, input));
+    public async Task UrlEncode(string input, string expected)
+        => Assert.Equal(expected, await TextTransformationService.ApplyAsync(TextTransformation.UrlEncode, input));
 
     [Theory]
     [InlineData("hello%20world", "hello world")]
     [InlineData("a%3Db", "a=b")]
-    public void UrlDecode(string input, string expected)
-        => Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.UrlDecode, input));
+    public async Task UrlDecode(string input, string expected)
+        => Assert.Equal(expected, await TextTransformationService.ApplyAsync(TextTransformation.UrlDecode, input));
 
     [Fact]
-    public void Base64Encode_RoundTrips()
+    public async Task Base64Encode_RoundTrips()
     {
-        var encoded = TextTransformationService.Apply(TextTransformation.Base64Encode, "hello");
+        var encoded = await TextTransformationService.ApplyAsync(TextTransformation.Base64Encode, "hello");
         Assert.Equal("aGVsbG8=", encoded);
-        var decoded = TextTransformationService.Apply(TextTransformation.Base64Decode, encoded);
+        var decoded = await TextTransformationService.ApplyAsync(TextTransformation.Base64Decode, encoded);
         Assert.Equal("hello", decoded);
     }
 
     [Fact]
-    public void Base64Decode_AcceptsMissingPadding()
+    public async Task Base64Decode_AcceptsMissingPadding()
     {
         // "hello" -> "aGVsbG8=" — drop the padding and confirm it still decodes.
-        Assert.Equal("hello", TextTransformationService.Apply(TextTransformation.Base64Decode, "aGVsbG8"));
+        Assert.Equal("hello", await TextTransformationService.ApplyAsync(TextTransformation.Base64Decode, "aGVsbG8"));
     }
 
     [Fact]
-    public void Base64Decode_ReturnsInputOnInvalid()
+    public async Task Base64Decode_ReturnsInputOnInvalid()
     {
-        Assert.Equal("not base64!", TextTransformationService.Apply(TextTransformation.Base64Decode, "not base64!"));
+        Assert.Equal("not base64!", await TextTransformationService.ApplyAsync(TextTransformation.Base64Decode, "not base64!"));
     }
 
     [Fact]
-    public void CleanTerminalFormatting_StripsBoxBordersAndKeepsInnerContent()
+    public async Task CleanTerminalFormatting_StripsBoxBordersAndKeepsInnerContent()
     {
         var input =
             "┌────────────┐\n" +
@@ -622,11 +623,11 @@ public sealed class TextTransformationServiceTests
 
         var expected = "let x = 1;\nlet y = 2;";
 
-        Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.CleanTerminalFormatting, input));
+        Assert.Equal(expected, await TextTransformationService.ApplyAsync(TextTransformation.CleanTerminalFormatting, input));
     }
 
     [Fact]
-    public void CleanTerminalFormatting_HandlesDoubleBorderAndScrollbarColumn()
+    public async Task CleanTerminalFormatting_HandlesDoubleBorderAndScrollbarColumn()
     {
         // Mirrors the Kusto / Copilot CLI dashboard format with an outer box,
         // an inner box and a scrollbar character on the right.
@@ -637,25 +638,25 @@ public sealed class TextTransformationServiceTests
 
         var expected = "let lookback = 90d;\nlet bin = 1d;";
 
-        Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.CleanTerminalFormatting, input));
+        Assert.Equal(expected, await TextTransformationService.ApplyAsync(TextTransformation.CleanTerminalFormatting, input));
     }
 
     [Fact]
-    public void CleanTerminalFormatting_StripsAnsiColorEscapes()
+    public async Task CleanTerminalFormatting_StripsAnsiColorEscapes()
     {
         var input = "\x1B[31mred\x1B[0m and \x1B[1mbold\x1B[22m text";
-        Assert.Equal("red and bold text", TextTransformationService.Apply(TextTransformation.CleanTerminalFormatting, input));
+        Assert.Equal("red and bold text", await TextTransformationService.ApplyAsync(TextTransformation.CleanTerminalFormatting, input));
     }
 
     [Fact]
-    public void CleanTerminalFormatting_LeavesUnrelatedTextAlone()
+    public async Task CleanTerminalFormatting_LeavesUnrelatedTextAlone()
     {
         var input = "Just a regular paragraph.\nWith two lines.";
-        Assert.Equal(input, TextTransformationService.Apply(TextTransformation.CleanTerminalFormatting, input));
+        Assert.Equal(input, await TextTransformationService.ApplyAsync(TextTransformation.CleanTerminalFormatting, input));
     }
 
     [Fact]
-    public void CleanTerminalFormatting_PreservesKustoPipeOperator()
+    public async Task CleanTerminalFormatting_PreservesKustoPipeOperator()
     {
         // Real-world capture from a Copilot CLI / Kusto Workbench panel: each
         // line is wrapped in Unicode box-drawing borders with a scrollbar
@@ -678,15 +679,15 @@ public sealed class TextTransformationServiceTests
             "    | where ServiceName in (\"Kusto\",\"Fabric RTI\",\"ADX\")\n" +
             "    | extend Severity = tostring(Severity)";
 
-        Assert.Equal(expected, TextTransformationService.Apply(TextTransformation.CleanTerminalFormatting, input));
+        Assert.Equal(expected, await TextTransformationService.ApplyAsync(TextTransformation.CleanTerminalFormatting, input));
     }
 
     [Fact]
-    public void CleanTerminalFormatting_DoesNotStripAsciiPipeWhenNoUnicodeBorders()
+    public async Task CleanTerminalFormatting_DoesNotStripAsciiPipeWhenNoUnicodeBorders()
     {
         // Pure ASCII content with `|` characters (Kusto / SQL / shell pipes)
         // must survive untouched — ASCII '|' is not a terminal border.
         var input = "data\n| project x\n| where y == 1";
-        Assert.Equal(input, TextTransformationService.Apply(TextTransformation.CleanTerminalFormatting, input));
+        Assert.Equal(input, await TextTransformationService.ApplyAsync(TextTransformation.CleanTerminalFormatting, input));
     }
 }

@@ -110,7 +110,7 @@ public sealed class CopilotAuthService : ICopilotAuthService, IDisposable
             }
             var raw = System.Text.Encoding.UTF8.GetBytes(_gitHubToken);
             var protectedBytes = _dataProtection.Protect(raw);
-            File.WriteAllBytes(_tokenPath, protectedBytes);
+            AtomicFile.WriteAllBytes(_tokenPath, protectedBytes);
         }
         catch (Exception ex)
         {

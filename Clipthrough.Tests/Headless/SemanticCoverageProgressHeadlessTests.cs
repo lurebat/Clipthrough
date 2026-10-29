@@ -149,7 +149,6 @@ public class SemanticCoverageProgressHeadlessTests
         => new(
             scope.ClipStoreService,
             new TestClipboardMonitorService(),
-            new TestClipSampleDataService(),
             scope.SettingsService,
             new TestSystemInteractionService(),
             scope.StorageOptionsService,

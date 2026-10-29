@@ -5,20 +5,20 @@ Use this when adding columns, indexes, queries, or full-text-search behavior. It
 ## Files
 
 - `Clipthrough/Database/DatabaseInitializer.cs` — owns all `CREATE TABLE`, `CREATE INDEX`, `CREATE TRIGGER`, and forward-only `ALTER TABLE` migrations. Idempotent: every block uses `IF NOT EXISTS` or a `PRAGMA table_info` check before `ALTER`.
-- `Clipthrough/Database/SqliteConnectionFactory.cs` - single source of `SqliteConnection`. Sets `ForeignKeys=true` and, when configured, a SQLCipher key. `CreateConnection()` opens `ReadWriteCreate`; `CreateReadOnlyConnection()` opens `ReadOnly`. Re-applies `PRAGMA busy_timeout = 5000;` on every `StateChange` to Open.
+- `Clipthrough/Database/SqliteConnectionFactory.cs` - single source of `SqliteConnection`. Code that opens a database other than the configured one (backup copies, imports, exports) uses the static `SqliteConnectionFactory.Create(...)`; `ConnectionConstructionGuardTests` fails on any other `new SqliteConnection`, in tests too (they use `TestConnections.Create`). Turns the path into a URI carrying the cipher recipe (`DataSourceFor`), sets `ForeignKeys=true` and, when configured, the key. `CreateConnection()` opens `ReadWriteCreate`; `CreateReadOnlyConnection()` opens `ReadOnly`. Re-applies `PRAGMA busy_timeout = 5000;` on every `StateChange` to Open.
   **Do not add `Cache=Shared`.** The private cache is deliberate: shared cache reports in-process write contention as `SQLITE_LOCKED`, which `busy_timeout` does *not* retry, while private cache reports `SQLITE_BUSY`, which it does. The reasoning is recorded at the call site.
 - `Clipthrough/Services/Storage/ClipStoreService.cs` — all reads/writes go through this `IClipStoreService`. Capture, query, paste-tracking, sensitivity tagging, OCR / embedding status updates.
 
 ## Engine + connection settings
 
-- **Encryption**: SQLCipher via `SQLitePCLRaw.bundle_e_sqlcipher`. The password is supplied through `IStorageOptionsService.Current.DatabasePassword` and propagated by the connection factory. Workers must not start until the password has been applied — see "Service initialization order" in `AGENTS.md`.
+- **Encryption**: the SQLCipher 4 format, written by SQLite3 Multiple Ciphers (`SQLite3MC.PCLRaw.bundle`, with `SQLitePCLRaw.core` pinned to 3.x). Every connection needs the cipher recipe `cipher=sqlcipher&legacy=4`, which only the factory adds; without it a new library is written in a cipher SQLCipher cannot read (`docs/solutions/every-connection-carries-the-cipher-recipe.md`). Rekeying is a backup-API copy plus `PRAGMA rekey` - there is no `sqlcipher_export`. The password is supplied through `IStorageOptionsService.Current.DatabasePassword` and propagated by the connection factory. Workers must not start until the password has been applied — see "Service initialization order" in `AGENTS.md`.
 - **WAL mode**: enabled once during `DatabaseInitializer.InitializeAsync` (`PRAGMA journal_mode = WAL;`). Persistent per-database.
 - **`busy_timeout=5000`**: NOT persistent. Set per-connection from the `StateChange` handler in `SqliteConnectionFactory`. Don't rely on a one-shot pragma.
 - **One writer at a time**: SQLite serialises writers. Background workers (embedding, OCR) compete with UI-triggered writes. Keep transactions short, never hold them across `await` boundaries.
 
 ## UI threading rule
 
-`ClipStoreService` moves its own body to the thread pool — SQLite has no async I/O, so every method would otherwise run to completion on its caller. Just `await` store calls; do not wrap them in `Task.Run`. `ClipStoreThreadingTests` fails if a method stops delegating to `RunOffCallerAsync` or becomes `async` again. COM clipboard reads (e.g. `Clipboard.GetDataAsync`) MUST stay on the UI thread. Work that is *not* a store call is not covered — `ISensitivityService` and `ISearchHistoryService` use their own connection factory — so a mixed block still needs a `Task.Run` around the uncovered part. See `docs/solutions/storage-calls-hop-off-the-caller.md`.
+`ClipStoreService` moves its own body to the thread pool — SQLite has no async I/O, so every method would otherwise run to completion on its caller. Just `await` store calls; do not wrap them in `Task.Run`. `ClipStoreThreadingTests` fails if a method stops delegating to `RunOffCallerAsync` or becomes `async` again. COM clipboard reads (e.g. `Clipboard.GetDataAsync`) MUST stay on the UI thread. Work that is *not* a store call is not covered — `ISensitivityService` and `ISearchHistoryService` share the connection factory but do not hop — so a mixed block still needs a `Task.Run` around the uncovered part. See `docs/solutions/storage-calls-hop-off-the-caller.md`.
 
 ## Schema (current)
 
@@ -28,20 +28,21 @@ Use this when adding columns, indexes, queries, or full-text-search behavior. It
 | --------------------- | ------- | -------------------------------------------------------------- |
 | `id`                  | INTEGER | PK AUTOINCREMENT.                                              |
 | `content`             | TEXT    | UTF-8 text representation (also for OCR/AI inputs).            |
-| `content_bytes`       | BLOB    | Raw payload for images/files.                                  |
+| `content_bytes`       | BLOB    | Always NULL since U-E1: the payload is in `clip_payloads`. Kept because SQLite cannot reorder or cheaply drop it. |
 | `content_type`        | TEXT    | `Text` / `RichText` / `Image` / `Files`.                       |
 | `content_format`      | TEXT    | `text` / `html` / `rtf` / `image-png` / etc. Default `text`.   |
 | `source_app`          | TEXT    | Friendly app name.                                             |
 | `source_app_path`     | TEXT    | Resolved exe path (Windows).                                   |
-| `source_app_icon`     | BLOB    | PNG bytes for the app icon.                                    |
+| `source_app_icon`     | BLOB    | Always NULL since U-E1: icons are in `app_icons`.            |
 | `hash`                | TEXT    | NOT NULL — content hash used for dedup / paste tracking.       |
 | `is_favorite`         | INTEGER | 0/1.                                                           |
-| `is_sensitive`        | INTEGER | 0/1, set by `sensitivity_rules` matches.                       |
+| `is_sensitive`        | INTEGER | 0/1, set by sensitivity-rule matches or by hand.                       |
 | `captured_at`         | TEXT    | ISO-8601 UTC.                                                  |
 | `copy_count`          | INTEGER | Times the same content has been re-copied.                     |
 | `first_copied_at`     | TEXT    | NOT NULL.                                                      |
 | `last_copied_at`      | TEXT    | NOT NULL — drives default sort.                                |
 | `byte_size`           | INTEGER | Total bytes; powers size-sort and retention.                   |
+| `stored_bytes`        | INTEGER | `byte_size` + icon length. Kept by triggers `clips_stored_bytes_ai` / `_au` only; never write it directly. |
 | `image_width`         | INTEGER | Optional, image clips.                                         |
 | `image_height`        | INTEGER | Optional, image clips.                                         |
 | `source_window_title` | TEXT    | Optional.                                                      |
@@ -51,13 +52,17 @@ Use this when adding columns, indexes, queries, or full-text-search behavior. It
 | `last_pasted_at`      | TEXT    | Optional.                                                      |
 | `pinned_at`           | TEXT    | NULL = unpinned. Pinned clips sort to the top.                 |
 | `ocr_text`            | TEXT    | Recognised image text (also indexed in FTS).                   |
-| `ocr_status`          | TEXT    | `pending` / `done` / `failed`.                                 |
+| `ocr_status`          | TEXT    | NULL (never queued), `pending`, `running`, `succeeded`, `failed`, `rerun`. |
 | `ocr_attempted_at`    | TEXT    | Last OCR attempt.                                              |
 | `ocr_error`           | TEXT    | Last OCR error message.                                        |
+| `sensitivity_scanned_at` | TEXT | NULL until the deferred sensitivity scan has run. Every INSERT path must leave it NULL or set it deliberately: a NULL row is rescanned, a set one is trusted as clean. |
 | `source_clip_id`      | INTEGER | When this clip was created from a transform, points at parent. |
 | `transform_kind`      | TEXT    | `builtin:UpperCase`, `ai:Preset`, etc. Rows written before user scripting was removed may carry `script:Name`. |
 | `import_kind`         | TEXT    | NULL for clipboard captures; `"drag_drop"` for popup drag-and-drop imports. |
-| `embedding_status`    | TEXT    | `pending` / `done` / `failed`.                                 |
+| `embedding_status`    | TEXT    | NULL (not yet queued), `pending`, `processing`, `succeeded`, `failed`, `rerun`, `excluded` (sensitive; never embedded). |
+| `embedding_attempts`  | INTEGER | Failed embedding attempts; the worker gives up at `MaxEmbeddingAttempts`. Reset when a clip leaves `excluded`. |
+| `sensitivity_is_manual` | INTEGER | 0/1. The user marked or unmarked the clip by hand, so a rule change must not re-derive `is_sensitive`. |
+| `source_app_icon_hash` | TEXT   | SHA-256 (hex) of the icon PNG, the key into `app_icons`. NULL when there is no icon. |
 
 ### Indexes
 
@@ -94,6 +99,9 @@ Measured at 20k clips, Alphabetical went 118 ms (no new indexes) -> 206 ms
 (three of the four) -> 0.2 ms (all four).
 
 - `idx_clips_default_order` — `(pinned_at IS NULL, pinned_at DESC, COALESCE(last_copied_at, captured_at) DESC, id DESC)`. **The primary list-view ordering**; serves `MostRecent` and `BestMatching`.
+- `idx_clips_sensitivity_pending` — `(id) WHERE sensitivity_scanned_at IS NULL`. Startup sensitivity recovery (`ClipStoreService.PendingSensitivitySql`) reads only unscanned rows (F-25).
+- `idx_clips_ocr_images` — `(content_type, ocr_status) WHERE content_type = 'image'`; the queries check for a payload with an `EXISTS` on `clip_payloads`' primary key (U-E1). OCR coverage (`OcrCoverageSql`) reads image rows only, and `ocr_status` from the index rather than after the payload (F-25). The partial `WHERE` must stay identical to the query's terms or SQLite will not use it.
+- `idx_clips_type_default_order` — `(content_type, pinned_at IS NULL, pinned_at DESC, COALESCE(last_copied_at, captured_at) DESC, id DESC)`. Serves the type dropdown with `MostRecent` and nothing typed (F-09). With a type filter the other sorts also start here and sort the remainder; benchmark them (PerfProbes P1) rather than assume.
 - `idx_clips_oldest_order` — same, ASC. Serves `OldestFirst`.
 - `idx_clips_paste_order` — `(..., paste_count DESC, id DESC)`. Serves `MostPasted`.
 - `idx_clips_size_order` — `(..., byte_size DESC, id DESC)`. Serves `LargestFirst`.
@@ -134,12 +142,28 @@ Triggers `clips_ai`, `clips_ad`, `clips_au` keep FTS in sync on `INSERT` /
 columns and is dropped and recreated unconditionally, because
 `CREATE TRIGGER IF NOT EXISTS` would silently preserve an older unscoped
 trigger that re-tokenises the whole clip on every metadata-only write.
+Its `WHEN old.x IS NOT new.x OR ...` clause also skips an update that assigns
+the same values back (a re-copy, the deferred HTML/RTF update), which otherwise
+re-tokenised an identical clip under the write lock. A new searchable column
+belongs in that clause too.
 
 If you add a column you want searchable, you must:
 
 1. Add it to the FTS5 column list.
 2. Update all three triggers.
-3. Rebuild FTS for existing rows (`INSERT INTO clips_fts(clips_fts) VALUES('rebuild');`) inside a forward migration.
+3. Rebuild FTS for existing rows: raise `DatabaseInitializer.LastSearchIndexChangeVersion` to the new `CurrentSchemaVersion`, so the version-gated `'rebuild'` runs once for every library stored before it.
+
+### `clip_payloads` and `app_icons` (U-E1)
+
+- `clip_payloads(clip_id INTEGER PRIMARY KEY REFERENCES clips(id) ON DELETE CASCADE, content_bytes BLOB)` — the raw payload, out of the `clips` row so metadata reads never walk a blob's overflow chain (F-06). Read through a correlated subquery in `ClipSelectColumns`; written by `ClipStoreService.WritePayloadAsync` in the same transaction as the row. Trigger `clips_payload_ad` also deletes it, so a payload cannot outlive its clip on a connection with foreign keys off.
+- `app_icons(hash TEXT PRIMARY KEY, png BLOB NOT NULL)` — one row per distinct icon (F-39). Orphans are deleted at startup and after evictions.
+- `idx_clips_source_app_icon_hash` — partial, non-null only; finds orphaned icons.
+- The size cap counts each row's `stored_bytes` (now just `byte_size`) plus every distinct icon once: `TotalStoredBytesSql`.
+- Existing libraries move in `DatabaseInitializer.MovePayloadsOutOfClipsAsync`: id-ordered batches, one transaction each, progress in `app_metadata.payload_move_last_id`, resumable after a crash.
+- The move runs before every version-gated step that scans `clips` (stored-bytes, backfills, dedupe, FTS rebuild), because a scan over rows with inline payloads walks every overflow chain. A step after it that needs a payload's size must read `clip_payloads`, not `content_bytes` (see `BackfillClipPayloadColumnsAsync`). The backfills are gated: aggregation and content-format for libraries below schema 1, `byte_size` below schema 5, and dedupe while `idx_clips_hash_unique` is missing. `UpgradeStartOrderTests` covers the order, the gates and the size trap.
+- Until the move finishes, a library is in both layouts. Every payload and icon read falls back to the inline column (`COALESCE((SELECT ... FROM clip_payloads ...), c.content_bytes)`, the same for icons, and the OCR eligibility checks). Newer data wins: the move inserts payloads with `ON CONFLICT DO NOTHING` and skips the icon of a row that already has a hash, because a write to an unmoved clip goes to the new layout. An unmoved row keeps the schema-8 `stored_bytes` (payload plus its inline icon), and the move sets `stored_bytes = byte_size` on each row it clears, so the size cap is exact throughout. `PartlyMovedLibraryTests` covers both rules.
+- An upgrade from schema 8 or later does not move at startup: `InitializeAsync(progress, allowDeferredPayloadMove: true)`, which the app uses, records `move-payloads deferred`, writes the version and opens. `DatabaseInitializer.RunDeferredPayloadMoveAsync` then moves in the background, started by `StartBackgroundServices` and shown as a running job. Background batches are 8 MB or 100 ms of reading, whichever comes first, with a 25 ms pause between them; `app_metadata.payload_move_done = 1` marks the end. Older libraries still move before opening, because their backfills scan the table. A deferred start also skips `quick_check` (71.5 s cold on 1 GB), which `RunDeferredPayloadMoveAsync` runs before rewriting anything; on failure nothing is moved and the app raises an error notification. `DeferredPayloadMoveTests` and `LibraryUpgradeProgressHeadlessTests` cover it.
+- The first start after an upgrade reports its stages through `InitializeAsync(IProgress<LibraryUpgradeProgress>)`, and the move reports a fraction per batch (by id, since the rowid's MIN and MAX are free). The loading overlay shows them. Only a library that already has clips reports. A new long-running migration step should report a stage too.
 
 ### Other tables
 
@@ -173,7 +197,7 @@ if (!existingColumns.Contains("my_new_col"))
 
 For a new index or trigger, just emit `CREATE … IF NOT EXISTS …`. SQLite ALTER cannot drop columns; if you need to remove one, accept that it lingers or write a `CREATE TABLE clips_new (…) → INSERT SELECT → DROP → RENAME` block.
 
-When you change FTS columns or triggers, **always** run a `'rebuild'` once after the migration so existing rows reflect the new shape.
+When you change FTS columns, the tokenizer, or rewrite indexed text with the triggers bypassed, raise `LastSearchIndexChangeVersion` to the new `CurrentSchemaVersion` so the `'rebuild'` runs once after the migration and existing rows reflect the new shape. Any other version bump skips the rebuild: it was 17.2 s of a 28.5 s first start on a 420 MB library, and the triggers already keep the index current. `FtsRebuildGateTests` covers both sides. A rebuild ends mid-merge, and FTS5 would charge the leftover merges to the next large writes (2.6 s for the first 1.9 MB capture at 60k, against 0.4 s once merged). So `RebuildClipSearchIndexAsync` records `app_metadata.fts_merge_pending`, and after startup `DatabaseInitializer.DrainSearchIndexMergesAsync` runs `('merge', 64)` steps 50 ms apart until a step changes fewer than two rows. `SearchIndexMergeDrainTests` covers it; its fixture must need several steps, which takes about 15 segments of 30,000 characters, under crisismerge's 16.
 
 ### The FTS repair path is not the version-gated path
 

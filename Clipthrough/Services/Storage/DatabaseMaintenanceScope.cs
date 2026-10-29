@@ -30,6 +30,7 @@ public sealed class DatabaseMaintenanceScope : System.IAsyncDisposable
     private readonly bool _monitorWasRunning;
     private readonly bool _ocrQueueWasRunning;
     private readonly bool _embeddingWorkerWasRunning;
+    private System.IAsyncDisposable? _embeddingPause;
 
     private DatabaseMaintenanceScope(
         IClipboardMonitorService? monitor,
@@ -86,7 +87,15 @@ public sealed class DatabaseMaintenanceScope : System.IAsyncDisposable
                 await ocrQueue.StopAsync().ConfigureAwait(false);
             }
 
-            if (embeddingWorker is not null)
+            if (embeddingWorker is IPausableWorker pausable)
+            {
+                // A pause rather than a stop-and-restore (F-23): a settings
+                // change during the operation cannot restart the worker, and
+                // disposal applies what the user wants by then, not what was
+                // running on entry.
+                scope._embeddingPause = await pausable.PauseAsync().ConfigureAwait(false);
+            }
+            else if (embeddingWorker is not null)
             {
                 await embeddingWorker.StopAsync().ConfigureAwait(false);
             }
@@ -112,7 +121,7 @@ public sealed class DatabaseMaintenanceScope : System.IAsyncDisposable
     /// Clears the connection pool a second time (in case the body opened new
     /// connections), then restarts each worker that was running on entry.
     /// </summary>
-    public System.Threading.Tasks.ValueTask DisposeAsync()
+    public async System.Threading.Tasks.ValueTask DisposeAsync()
     {
         // Clear again so connections opened during the operation body don't
         // linger and reopen the now-replaced/moved database file.
@@ -128,11 +137,14 @@ public sealed class DatabaseMaintenanceScope : System.IAsyncDisposable
             _ocrQueue?.Start();
         }
 
-        if (_embeddingWorkerWasRunning)
+        if (_embeddingPause is { } pause)
+        {
+            _embeddingPause = null;
+            await pause.DisposeAsync().ConfigureAwait(false);
+        }
+        else if (_embeddingWorkerWasRunning && _embeddingWorker is not IPausableWorker)
         {
             _embeddingWorker?.Start();
         }
-
-        return System.Threading.Tasks.ValueTask.CompletedTask;
     }
 }

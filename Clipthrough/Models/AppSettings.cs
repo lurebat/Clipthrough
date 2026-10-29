@@ -1,4 +1,4 @@
-﻿using System.Linq;
+using System.Linq;
 
 namespace Clipthrough.Models;
 
@@ -136,6 +136,21 @@ public sealed record AppSettings
     public bool EnableSemanticSearch { get; init; }
 
     public bool UseFuzzySettingsSearch { get; init; } = true;
+
+    /// <summary>
+    /// Skip clipboard content its source marks as not for clipboard history
+    /// (<c>CanIncludeInClipboardHistory</c> = 0) - what Chrome, Edge and
+    /// Bitwarden publish for passwords (OD-10b, S39). On by default; a file
+    /// written before the setting existed reads as on too.
+    /// </summary>
+    public bool HonorClipboardHistoryOptOut { get; init; } = true;
+
+    /// <summary>
+    /// The engine regex search runs on (OD-7, S38). NonBacktracking by default:
+    /// it cannot hang. Backtracking supports backreferences and lookarounds,
+    /// bounded by a match timeout.
+    /// </summary>
+    public RegexSearchEngine RegexSearchEngine { get; init; } = RegexSearchEngine.NonBacktracking;
 
     // Persisted last-session filter toggle states. The two search toggles live
     // here and only here: an earlier pair of UseFuzzyClipSearch /
@@ -347,6 +362,7 @@ public sealed record AppSettings
         ExternalEditorPath = ExternalEditorPath?.Trim() ?? string.Empty,
         ExternalImageEditorPath = ExternalImageEditorPath?.Trim() ?? string.Empty,
         ExternalDiffToolPath = ExternalDiffToolPath?.Trim() ?? string.Empty,
+        RegexSearchEngine = System.Enum.IsDefined(RegexSearchEngine) ? RegexSearchEngine : RegexSearchEngine.NonBacktracking,
         LastContentDisplayMode = NormalizeContentDisplayMode(LastContentDisplayMode),
         LastImageViewMode = LastImageViewMode,
         LastShowFavoritesOnly = LastShowFavoritesOnly,

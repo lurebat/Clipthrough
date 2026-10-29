@@ -43,14 +43,75 @@ public static partial class ClipDisplayFormatter
             return BuildDisplayStrings(GetDisplayRichText(clip), ContentType.Text);
         }
 
-        return BuildDisplayStrings(clip.Content, clip.ContentType);
+        return BuildDisplayStrings(clip.ContentPrefix, clip.ContentType);
     }
 
+    /// <summary>
+    /// How much of a clip a list row formats (F-10). The row shows at most 140
+    /// characters, but formatting split and collapsed the whole text on the UI
+    /// thread: 40 ms and 20.7 MB for a 1.9 MB log, per row.
+    /// </summary>
+    internal const int DisplayPrefixLength = ClipEntry.ListContentLength;
+
     private static ClipDisplayStrings BuildDisplayStrings(string content, ContentType contentType)
-        => new(
+    {
+        if (content is { Length: > DisplayPrefixLength } && TryBuildFromPrefix(content, contentType, out var bounded))
+        {
+            return bounded;
+        }
+
+        return new(
             BuildTitle(content, contentType),
             BuildPreviewSnippet(content, contentType),
             BuildSingleLinePreview(content, contentType));
+    }
+
+    /// <summary>
+    /// Formats only the first <see cref="DisplayPrefixLength"/> characters when
+    /// that provably yields the strings the whole text would, and declines
+    /// otherwise.
+    /// </summary>
+    /// <remarks>
+    /// The title is the first non-blank line, cut at 90: the prefix decides it
+    /// once that line has ended inside the prefix or is already past the cut.
+    /// The snippet and single-line preview are cuts of the whitespace-collapsed
+    /// text, and the collapsed prefix is always a prefix of the collapsed whole,
+    /// so once it is longer than the longest cut (140) both are decided. A
+    /// prefix of blank lines, or a short first line still running at the
+    /// boundary, falls back to the full text.
+    /// </remarks>
+    private static bool TryBuildFromPrefix(string content, ContentType contentType, out ClipDisplayStrings strings)
+    {
+        strings = default;
+        var length = char.IsHighSurrogate(content[DisplayPrefixLength - 1]) ? DisplayPrefixLength - 1 : DisplayPrefixLength;
+        var prefix = content[..length];
+
+        var firstLine = prefix
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault();
+        if (firstLine is null)
+        {
+            return false;
+        }
+
+        var lineStart = prefix.IndexOf(firstLine, StringComparison.Ordinal);
+        var lineEndsInPrefix = prefix.IndexOfAny(['\r', '\n'], lineStart + firstLine.Length) >= 0;
+        if (!lineEndsInPrefix && firstLine.Length <= 90)
+        {
+            return false;
+        }
+
+        if (CollapseWhitespace(prefix).Length <= 140)
+        {
+            return false;
+        }
+
+        strings = new(
+            BuildTitle(prefix, contentType),
+            BuildPreviewSnippet(prefix, contentType),
+            BuildSingleLinePreview(prefix, contentType));
+        return true;
+    }
 
     public static string BuildTitle(ClipEntry clip) => BuildDisplayStrings(clip).Title;
 
@@ -98,6 +159,10 @@ public static partial class ClipDisplayFormatter
             : collapsed.Length <= 88 ? collapsed : $"{collapsed[..85]}...";
     }
 
+    /// <summary>
+    /// The rendered preview of a clip. Display only: for a list row that carries
+    /// a prefix of its text (F-10) it renders that prefix until the row is hydrated.
+    /// </summary>
     public static string BuildRenderedText(ClipEntry? clip, IReadOnlyList<string> fileItems)
     {
         if (clip is null)
@@ -105,7 +170,7 @@ public static partial class ClipDisplayFormatter
             return AppText.PreviewSelectContent;
         }
 
-        if (string.IsNullOrWhiteSpace(clip.Content))
+        if (string.IsNullOrWhiteSpace(clip.ContentPrefix))
         {
             return clip.ContentType switch
             {
@@ -120,9 +185,9 @@ public static partial class ClipDisplayFormatter
         {
             ContentType.RichText => GetDisplayRichText(clip),
             ContentType.Files => fileItems.Count == 0
-                ? NormalizePreviewText(clip.Content)
+                ? NormalizePreviewText(clip.ContentPrefix)
                 : AppText.FormatFileCount(fileItems.Count),
-            _ => NormalizePreviewText(clip.Content),
+            _ => NormalizePreviewText(clip.ContentPrefix),
         };
     }
 
@@ -214,12 +279,12 @@ public static partial class ClipDisplayFormatter
 
     public static string? TryGetPreferredImageLabel(ClipEntry? clip)
     {
-        if (clip?.ContentType != ContentType.Image || string.IsNullOrWhiteSpace(clip.Content))
+        if (clip?.ContentType != ContentType.Image || string.IsNullOrWhiteSpace(clip.ContentPrefix))
         {
             return null;
         }
 
-        var normalized = NormalizePreviewText(clip.Content);
+        var normalized = NormalizePreviewText(clip.ContentPrefix);
         if (string.IsNullOrWhiteSpace(normalized) || normalized == AppText.PreviewTextUnavailable)
         {
             return null;
@@ -349,9 +414,9 @@ public static partial class ClipDisplayFormatter
 
     private static string GetDisplayRichText(ClipEntry clip)
     {
-        if (!string.IsNullOrWhiteSpace(clip.Content) && !LooksLikeRawRichText(clip.Content))
+        if (!string.IsNullOrWhiteSpace(clip.ContentPrefix) && !LooksLikeRawRichText(clip.ContentPrefix))
         {
-            return NormalizePreviewText(clip.Content);
+            return NormalizePreviewText(clip.ContentPrefix);
         }
 
         var rawMarkup = GetRawMarkup(clip);
@@ -360,7 +425,7 @@ public static partial class ClipDisplayFormatter
             return RenderRichContent(rawMarkup);
         }
 
-        return RenderRichContent(clip.Content);
+        return RenderRichContent(clip.ContentPrefix);
     }
 
     private static bool LooksLikeRawRichText(string content) => LooksLikeCfHtml(content) || LooksLikeHtml(content) || LooksLikeRtf(content);

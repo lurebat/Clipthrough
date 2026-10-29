@@ -76,7 +76,7 @@
     "file": "Clipthrough/Services/Security/SensitivityService.cs",
     "why": "Strict compilation on load makes one bad stored pattern take down the entire rule set, leaving sensitivity scanning permanently unable to load.",
     "find": "_compiledRules = CompileStoredRules(rules);",
-    "replace": "_compiledRules = CompileRules(rules);",
+    "replace": "_compiledRules = Environment.ProcessorCount < 0 ? CompileStoredRules(rules) : CompileRules(rules);",
     "filter": "SensitivityServiceTests"
   },
   {
@@ -220,7 +220,7 @@
     "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
     "why": "Without the rollback, any failure after the stash leaves the live path empty and the user's history under a .before-restore name that nothing looks for.",
     "find": "        catch\n        {\n            RollBackRestore(stashed);\n            throw;\n        }",
-    "replace": "        catch\n        {\n            throw;\n        }",
+    "replace": "        catch\n        {\n            if (Environment.ProcessorCount < 0) RollBackRestore(stashed);\n            throw;\n        }",
     "filter": "DatabaseBackupServiceTests"
   },
   {
@@ -252,8 +252,8 @@
     "why": "Reverts the daily backup to a raw file copy. A checkpoint that cannot finish leaves committed frames in the WAL, and the copied .db then opens as 'database disk image is malformed' - an unopenable backup nobody notices until they need it.",
     "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
     "filter": "DatabaseBackupServiceTests",
-    "find": "                () => SqliteDatabaseCopier.CopyDatabase(dbPath, _storageOptionsService.Current.DatabasePassword, tempPath),",
-    "replace": "                () => File.Copy(dbPath, tempPath, overwrite: true),"
+    "find": "                    SqliteDatabaseCopier.CopyDatabase(dbPath, password, tempPath);",
+    "replace": "                    File.Copy(dbPath, tempPath, overwrite: true);"
   },
   {
     "id": "move-copies-the-file-instead-of-the-database",
@@ -276,8 +276,8 @@
     "why": "Leaves the connections in the pool, so the copied file is still held open and the caller's move or delete fails.",
     "file": "Clipthrough/Services/Storage/SqliteDatabaseCopier.cs",
     "filter": "DatabaseBackupServiceTests",
-    "find": "            Pooling = false,",
-    "replace": "            Pooling = true,"
+    "find": "Clipthrough.Database.SqliteConnectionFactory.Create(path, password, SqliteOpenMode.ReadWriteCreate, pooling: false);",
+    "replace": "Clipthrough.Database.SqliteConnectionFactory.Create(path, password, SqliteOpenMode.ReadWriteCreate, pooling: true);"
   },
   {
     "id": "database-copy-reuses-an-unopenable-destination",
@@ -389,15 +389,15 @@
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "filter": "SemanticSearchSetting_TogglingIt_StartsAndStopsTheEmbeddingWorker",
     "find": "        this.RaisePropertyChanged(nameof(IsAiMenuVisible));\n        ApplySemanticSearchWorkerState(settings.EnableSemanticSearch);",
-    "replace": "        this.RaisePropertyChanged(nameof(IsAiMenuVisible));"
+    "replace": "        this.RaisePropertyChanged(nameof(IsAiMenuVisible));\n        if (Environment.ProcessorCount < 0) ApplySemanticSearchWorkerState(settings.EnableSemanticSearch);"
   },
   {
     "id": "semantic-toggle-off-does-not-stop-worker",
     "why": "Drops the disable branch, so turning semantic search off leaves the embedding worker running and consuming CPU and the SQLite write lock.",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "filter": "SemanticSearchSetting_TogglingIt_StartsAndStopsTheEmbeddingWorker",
-    "find": "                    else if (worker.IsRunning)\n                    {\n                        await worker.StopAsync().ConfigureAwait(false);\n                    }",
-    "replace": "                    else if (worker.IsRunning && false)\n                    {\n                        await worker.StopAsync().ConfigureAwait(false);\n                    }"
+    "find": "                        await worker.StopAsync().ConfigureAwait(false);\n                    }\n",
+    "replace": "                        if (enabled) await worker.StopAsync().ConfigureAwait(false);\n                    }\n"
   },
   {
     "id": "semantic-toggle-transitions-not-serialised",
@@ -413,7 +413,7 @@
     "file": "Clipthrough/Services/Storage/DatabaseMaintenanceScope.cs",
     "filter": "DisposeAsync_RestartsOnlyTheWorkersThatWereRunningOnEntry",
     "find": "        if (_ocrQueueWasRunning)\n        {\n            _ocrQueue?.Start();\n        }",
-    "replace": "        {\n            _ocrQueue?.Start();\n        }"
+    "replace": "        if (_ocrQueueWasRunning || !_ocrQueueWasRunning)\n        {\n            _ocrQueue?.Start();\n        }"
   },
   {
     "id": "ocr-claim-reset-does-nothing",
@@ -500,7 +500,7 @@
     "why": "Drops the embedding purge from the sensitivity rebuild. A clip the user's new rules just classified as sensitive keeps the vector derived from its secret, and keeps counting as embedded.",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "filter": "RebuildSensitivityMatches_ReconcilesEmbeddingStateInBothDirections",
-    "find": "                DELETE FROM clip_embeddings WHERE clip_id IN (SELECT id FROM clips WHERE is_sensitive = 1);\n                UPDATE clips SET embedding_status = 'excluded' WHERE is_sensitive = 1;\n",
+    "find": "                DELETE FROM clip_embeddings WHERE clip_id IN (SELECT id FROM clips WHERE is_sensitive = 1);\n                UPDATE clips SET embedding_status = 'excluded' WHERE is_sensitive = 1 AND embedding_status IS NOT 'excluded';\n",
     "replace": ""
   },
   {
@@ -532,8 +532,8 @@
     "why": "Makes the rebuild blanket-clear is_sensitive instead of preserving hand-marked clips. Any sensitivity rule change silently declassifies every clip the user marked by hand, and the reconcile block below then hands those secrets to the embedding worker.",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "filter": "RebuildSensitivityMatches_KeepsHandMarkedClipsSensitiveAndUnembedded",
-    "find": "            resetSensitiveCommand.CommandText = \"UPDATE clips SET is_sensitive = sensitivity_is_manual;\";",
-    "replace": "            resetSensitiveCommand.CommandText = \"UPDATE clips SET is_sensitive = 0;\";"
+    "find": "                UPDATE clips SET is_sensitive = sensitivity_is_manual\n                WHERE is_sensitive IS NOT sensitivity_is_manual\n",
+    "replace": "                UPDATE clips SET is_sensitive = 0\n                WHERE is_sensitive IS NOT 0\n"
   },
   {
     "id": "manual-sensitivity-not-recorded",
@@ -669,7 +669,7 @@
     "file": "Clipthrough/Services/Platform/RichClipboardFormatting.cs",
     "filter": "LooksLikeHtml_IsFalseForCodeThatMerelyContainsAngleBrackets",
     "find": "           && (ClosingOrSelfClosingTagRegex().IsMatch(content)\n               || VoidElementRegex().IsMatch(content)\n               || content.Contains(\"<!DOCTYPE html\", StringComparison.OrdinalIgnoreCase));",
-    "replace": "           && Regex.IsMatch(content, @\"<\\s*([a-zA-Z][a-zA-Z0-9]*)\\b[^>]*>\", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);"
+    "replace": "           && (Regex.IsMatch(content, @\"<\\s*([a-zA-Z][a-zA-Z0-9]*)\\b[^>]*>\", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) || (Environment.ProcessorCount < 0 && (ClosingOrSelfClosingTagRegex().IsMatch(content) || VoidElementRegex().IsMatch(content))));"
   },
   {
     "id": "cfhtml-stops-recognising-void-elements",
@@ -677,7 +677,7 @@
     "file": "Clipthrough/Services/Platform/RichClipboardFormatting.cs",
     "filter": "LooksLikeHtml_IsTrueForRealMarkup",
     "find": "               || VoidElementRegex().IsMatch(content)\n",
-    "replace": ""
+    "replace": "               || (Environment.ProcessorCount < 0 && VoidElementRegex().IsMatch(content))\n"
   },
   {
     "id": "cfhtml-converts-only-the-platform-newline",
@@ -813,7 +813,7 @@
     "file": "Clipthrough/Controls/SyntaxTextEditor.cs",
     "filter": "SyntaxTextEditorHeadlessTests",
     "find": "        if (!_isAttached)\n        {\n            return;\n        }\n\n        var isDark = ActualThemeVariant != ThemeVariant.Light;",
-    "replace": "        var isDark = ActualThemeVariant != ThemeVariant.Light;"
+    "replace": "        if (!_isAttached && Environment.ProcessorCount < 0)\n        {\n            return;\n        }\n\n        var isDark = ActualThemeVariant != ThemeVariant.Light;"
   },
   {
     "id": "k19-grammar-update-reinstalls-after-detach",
@@ -853,7 +853,7 @@
     "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
     "filter": "DatabaseBackupServiceTests",
     "find": "        return (ParseBackupDay(file.Name) ?? written.Date, written);",
-    "replace": "        return (written.Date, written);"
+    "replace": "        return (ParseBackupDay(file.Name) is null ? written.Date : written.Date, written);"
   },
   {
     "id": "s16-prune-keeps-oldest",
@@ -979,16 +979,16 @@
     "id": "view-model-dispose-runs-twice",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "Dispose runs from Window.Closed and blocks on a settings flush with a timeout. Losing the idempotence guard makes a second call pay that wait again during shutdown.",
-    "find": "        if (_isDisposed)\n        {\n            return;\n        }\n\n        _isDisposed = true;\n        CancelAllPendingDeletes();",
-    "replace": "        _isDisposed = true;\n        CancelAllPendingDeletes();",
+    "find": "        if (_isDisposed)\n        {\n            return;\n        }\n\n        _isDisposed = true;\n        _deferredPayloadMoveCancellation.Cancel();\n        CommitPendingDeletesOnExit();",
+    "replace": "        _isDisposed = true;\n        _deferredPayloadMoveCancellation.Cancel();\n        CommitPendingDeletesOnExit();",
     "filter": "Dispose_IsIdempotent"
   },
   {
     "id": "embedding-cache-grows-to-exact-size",
     "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
     "why": "Without spare capacity every batch of 32 reallocates and copies the whole cache, which is the quadratic backfill the review measured at 223 GiB of memcpy over a 100k library.",
-    "find": "                var capacity = GrowCapacity(existing.Ids.Length, newCount, dim);",
-    "replace": "                var capacity = newCount;",
+    "find": "                var capacity = GrowCapacity(existing.Ids.Length, newLive, dim);",
+    "replace": "                var capacity = newLive;",
     "filter": "AppendEmbeddingsAsync_DoesNotReallocateTheCachePerBatch"
   },
   {
@@ -1011,8 +1011,8 @@
     "id": "icon-read-selects-the-wrong-column",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "The narrow icon read exists to return the icon blob and nothing else; selecting another column would hand callers the wrong bytes while still looking like a cheap single-column read.",
-    "find": "        command.CommandText = \"SELECT source_app_icon FROM clips WHERE id = $id LIMIT 1;\";",
-    "replace": "        command.CommandText = \"SELECT content_bytes FROM clips WHERE id = $id LIMIT 1;\";",
+    "find": "            SELECT COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), c.source_app_icon)\n            FROM clips c WHERE c.id = $id;",
+    "replace": "            SELECT COALESCE((SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id), c.source_app_icon)\n            FROM clips c WHERE c.id = $id;",
     "filter": "GetSourceAppIconAsync_ReturnsTheIconWithoutTheRestOfTheRow"
   },
   {
@@ -1027,8 +1027,8 @@
     "id": "scan-materializes-every-row",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "Building a full thirty-column ClipEntry - five timestamp parses included - before knowing whether the row matches was ~70% of the cost of a non-FTS search at 100k rows.",
-    "find": "                if (!MatchesSearch(SearchableFields.Read(reader), filters, matchers))\n                {\n                    continue;\n                }",
-    "replace": "                var eager = ReadClipMeta(reader);\n                if (!MatchesSearch(new SearchableFields { Content = eager.Content, SourceApp = eager.SourceApp, SourceWindowTitle = eager.SourceWindowTitle, SourceUrl = eager.SourceUrl, OcrText = eager.OcrText }, filters, matchers))\n                {\n                    continue;\n                }",
+    "find": "                    if (!MatchesSearch(SearchableFields.Read(reader), filters, matchers))\n                    {\n                        continue;\n                    }",
+    "replace": "                    var eager = ReadClipMeta(reader);\n                    if (!MatchesSearch(new SearchableFields { Content = eager.Content, SourceApp = eager.SourceApp, SourceWindowTitle = eager.SourceWindowTitle, SourceUrl = eager.SourceUrl, OcrText = eager.OcrText }, filters, matchers))\n                    {\n                        continue;\n                    }",
     "filter": "NonFtsSearch_DoesNotMaterializeRowsItDiscards"
   },
   {
@@ -1052,7 +1052,7 @@
     "file": "Clipthrough/Presentation/ClipDisplayFormatter.cs",
     "why": "The original interpreted Regex.Replace with IgnoreCase folds case using the CURRENT culture. Under tr-TR upper-case I does not fold to i, so <LI> and <DIV> stop matching: bullets and paragraph breaks vanish while the catch-all still strips the tags, so the damage is invisible.",
     "find": "            var withListItems = ListItemTagRegex().Replace(withoutScripts, \"• \");\n            var withBreaks = BlockLevelTagRegex().Replace(withListItems, Environment.NewLine);",
-    "replace": "            var withListItems = Regex.Replace(withoutScripts, @\"<li[^>]*>\", \"• \", RegexOptions.IgnoreCase);\n            var withBreaks = Regex.Replace(withListItems, @\"</?(br|p|div|section|article|ul|ol|h[1-6]|tr)[^>]*>\", Environment.NewLine, RegexOptions.IgnoreCase);",
+    "replace": "            var withListItems = Environment.ProcessorCount < 0 ? ListItemTagRegex().Replace(withoutScripts, \"• \") : Regex.Replace(withoutScripts, @\"<li[^>]*>\", \"• \", RegexOptions.IgnoreCase);\n            var withBreaks = Environment.ProcessorCount < 0 ? BlockLevelTagRegex().Replace(withListItems, Environment.NewLine) : Regex.Replace(withListItems, @\"</?(br|p|div|section|article|ul|ol|h[1-6]|tr)[^>]*>\", Environment.NewLine, RegexOptions.IgnoreCase);",
     "filter": "RenderRichContent_HandlesUpperCaseMarkup_UnderAnyCulture"
   },
   {
@@ -1180,7 +1180,7 @@
     "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
     "why": "After replacing the root the heap invariant is broken, so the root is no longer the weakest survivor and later candidates are compared against the wrong threshold.",
     "find": "            _scores[0] = score;\n            SiftDown();",
-    "replace": "            _scores[0] = score;",
+    "replace": "            _scores[0] = score;\n            if (Environment.ProcessorCount < 0) SiftDown();",
     "filter": "FullyQualifiedName~SemanticSearchServiceTests"
   },
   {
@@ -1188,7 +1188,7 @@
     "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
     "why": "While the heap is still filling, a new entry has to bubble up to its place. Without that the root is whatever landed at index zero first, not the weakest.",
     "find": "                SiftUp(_count++);",
-    "replace": "                _count++;",
+    "replace": "                if (Environment.ProcessorCount < 0) SiftUp(_count); _count++;",
     "filter": "FullyQualifiedName~SemanticSearchServiceTests"
   },
   {
@@ -1348,7 +1348,7 @@
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "Reverting the gate makes every launch read the whole database file again.",
     "find": "if (await HasPendingStructuralWorkAsync(connection, cancellationToken))",
-    "replace": "if (true)",
+    "replace": "if (await HasPendingStructuralWorkAsync(connection, cancellationToken) || true)",
     "filter": "FullyQualifiedName~DatabaseIntegrityCheckTests"
   },
   {
@@ -1356,7 +1356,7 @@
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "Skipping the check entirely lets a migration rewrite the pages of a corrupt database.",
     "find": "if (await HasPendingStructuralWorkAsync(connection, cancellationToken))",
-    "replace": "if (false)",
+    "replace": "if (await HasPendingStructuralWorkAsync(connection, cancellationToken) && false)",
     "filter": "FullyQualifiedName~DatabaseIntegrityCheckTests"
   },
   {
@@ -1499,23 +1499,15 @@
     "id": "schema-version-not-bumped-for-index-change",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "The migration gate skips every Ensure* helper when the stored version already matches, so a schema change that does not bump the version never reaches an installed database.",
-    "find": "    private const int CurrentSchemaVersion = 8;",
+    "find": "    private const int CurrentSchemaVersion = 10;",
     "replace": "    private const int CurrentSchemaVersion = 7;",
-    "filter": "FullyQualifiedName~ClipStoredBytesTests"
-  },
-  {
-    "id": "stored-bytes-trigger-ignores-the-late-icon",
-    "file": "Clipthrough/Database/DatabaseInitializer.cs",
-    "why": "The source-app icon is written by a background lookup after the clip lands; without the UPDATE trigger the stored total silently omits every icon.",
-    "find": "            CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF byte_size, source_app_icon ON clips BEGIN",
-    "replace": "            CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF byte_size ON clips BEGIN",
     "filter": "FullyQualifiedName~ClipStoredBytesTests"
   },
   {
     "id": "stored-bytes-not-maintained-on-insert",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "Without the insert trigger every new clip is totalled as zero bytes, so the library size cap never fires.",
-    "find": "                SET stored_bytes = new.byte_size + COALESCE(LENGTH(new.source_app_icon), 0)\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        await ExecuteNonQueryAsync(connection, \"DROP TRIGGER IF EXISTS clips_stored_bytes_au;\", cancellationToken);",
+    "find": "                SET stored_bytes = new.byte_size\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        await ExecuteNonQueryAsync(connection, \"DROP TRIGGER IF EXISTS clips_stored_bytes_au;\", cancellationToken);",
     "replace": "                SET stored_bytes = 0\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        await ExecuteNonQueryAsync(connection, \"DROP TRIGGER IF EXISTS clips_stored_bytes_au;\", cancellationToken);",
     "filter": "FullyQualifiedName~ClipStoredBytesTests"
   },
@@ -1531,7 +1523,7 @@
     "id": "stored-bytes-is-never-backfilled",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "An upgraded database would keep zeros for every existing clip, so the cap would think the library was empty.",
-    "find": "            UPDATE clips\n            SET stored_bytes = byte_size + COALESCE(LENGTH(source_app_icon), 0)\n            WHERE stored_bytes <> byte_size + COALESCE(LENGTH(source_app_icon), 0);",
+    "find": "            UPDATE clips\n            SET stored_bytes = byte_size\n            WHERE stored_bytes <> byte_size;",
     "replace": "            SELECT 1;",
     "filter": "FullyQualifiedName~ClipStoredBytesTests"
   },
@@ -1628,7 +1620,7 @@
     "file": "Clipthrough/Services/Search/SemanticIndexCoordinator.cs",
     "why": "The in-memory cache then only grows on a full reload, so every clip captured since the last refresh is invisible to semantic search.",
     "find": "                .Subscribe(records => _ = AppendAsync(records));",
-    "replace": "                .Subscribe(records => { });",
+    "replace": "                .Subscribe(records => { if (Environment.ProcessorCount < 0) _ = AppendAsync(records); });",
     "filter": "FullyQualifiedName~SemanticIndexCoordinatorTests"
   },
   {
@@ -1684,15 +1676,15 @@
     "file": "Clipthrough/Services/Search/SemanticIndexCoordinator.cs",
     "why": "The store announces the deletion but nothing acts on it, which is exactly the state this coordinator exists to prevent.",
     "find": "                .Subscribe(ids => _ = RemoveAsync(ids));",
-    "replace": "                .Subscribe(ids => { });",
+    "replace": "                .Subscribe(ids => { if (Environment.ProcessorCount < 0) _ = RemoveAsync(ids); });",
     "filter": "FullyQualifiedName~SemanticIndexCoordinatorTests"
   },
   {
     "id": "cache-removal-leaves-a-stale-slot-map",
     "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
-    "why": "Compacting the vectors without rebuilding the slot map points each shifted id at another clip's vector - search then answers with the wrong clip rather than merely losing one.",
-    "find": "            _slotById = slots;\n            Volatile.Write(ref _cache, new CacheSnapshot(newIds, newVectors, survivors, dim));",
-    "replace": "            Volatile.Write(ref _cache, new CacheSnapshot(newIds, newVectors, survivors, dim));",
+    "why": "A removal that leaves the id in the slot map treats re-embedding that clip as an update to a dead slot, so its new vector is lost or written over another clip's.",
+    "find": "                newIds[_slotById[id]] = Tombstone;\n                _slotById.Remove(id);\n",
+    "replace": "                newIds[_slotById[id]] = Tombstone;\n",
     "filter": "FullyQualifiedName~SemanticSearchServiceTests"
   },
   {
@@ -1724,7 +1716,7 @@
     "file": "Clipthrough/Presentation/ClipboardMarkupDecoder.cs",
     "why": "CF_HTML header values are UTF-8 byte offsets. Treating them as UTF-16 indexes silently truncates every clip containing non-ASCII text, and only a non-ASCII fixture catches it - an ASCII fixture is byte-identical either way.",
     "find": "        var start = ByteOffsetToCharIndex(html, startOffset.Value);\n        var end = ByteOffsetToCharIndex(html, endOffset.Value);",
-    "replace": "        var start = startOffset.Value <= html.Length ? startOffset : null;\n        var end = endOffset.Value <= html.Length ? endOffset : null;",
+    "replace": "        var start = Environment.ProcessorCount < 0 ? ByteOffsetToCharIndex(html, startOffset.Value) : startOffset.Value <= html.Length ? startOffset : null;\n        var end = Environment.ProcessorCount < 0 ? ByteOffsetToCharIndex(html, endOffset.Value) : endOffset.Value <= html.Length ? endOffset : null;",
     "filter": "FullyQualifiedName~ClipboardMarkupDecoderTests"
   },
   {
@@ -1836,7 +1828,7 @@
     "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
     "why": "The setting saves and displays fine but decides nothing, so the user believes their password manager is excluded while every copy from it is still captured.",
     "find": "        isExcluded = CaptureExclusionPolicy.IsExcluded(sourceInfo, _settingsService.Current.ExcludedCaptureApps);",
-    "replace": "        isExcluded = false;",
+    "replace": "        isExcluded = Environment.ProcessorCount < 0 && CaptureExclusionPolicy.IsExcluded(sourceInfo, _settingsService.Current.ExcludedCaptureApps);",
     "filter": "FullyQualifiedName~CaptureExclusionPolicyTests"
   },
   {
@@ -1892,7 +1884,7 @@
     "file": "Clipthrough/Services/Ocr/OcrService.cs",
     "why": "A blank request must fall back to AppSettings.OcrLanguages, otherwise the background queue silently OCRs in the wrong language.",
     "find": "        var requested = string.IsNullOrWhiteSpace(languages) ? _settingsService.Current.OcrLanguages : languages;\n        var key = requested?.Trim() ?? string.Empty;",
-    "replace": "        var requested = languages;\n        var key = requested?.Trim() ?? string.Empty;",
+    "replace": "        var requested = Environment.ProcessorCount < 0 ? _settingsService.Current.OcrLanguages : languages;\n        var key = requested?.Trim() ?? string.Empty;",
     "filter": "FullyQualifiedName~OcrServiceEngineCachingTests"
   },
   {
@@ -1908,7 +1900,7 @@
     "file": "Clipthrough/Services/Ocr/OcrEngineCache.cs",
     "why": "The cache exists solely to avoid reloading the language model; a lookup that never hits makes it dead weight.",
     "find": "            if (_engine is not null && string.Equals(_key, key, StringComparison.OrdinalIgnoreCase))\n            {\n                return _engine;\n            }",
-    "replace": "            if (_engine is not null && false)\n            {\n                return _engine;\n            }",
+    "replace": "            if (_engine is not null && string.Equals(_key, key, StringComparison.OrdinalIgnoreCase) && Environment.ProcessorCount < 0)\n            {\n                return _engine;\n            }",
     "filter": "FullyQualifiedName~OcrEngineCacheTests|FullyQualifiedName~OcrServiceEngineCachingTests"
   },
   {
@@ -1916,7 +1908,7 @@
     "file": "Clipthrough/Services/Ocr/OcrEngineCache.cs",
     "why": "Serving the cached engine regardless of key would OCR Hebrew clips with the English recognizer after one English clip warmed the cache.",
     "find": "            if (_engine is not null && string.Equals(_key, key, StringComparison.OrdinalIgnoreCase))",
-    "replace": "            if (_engine is not null)",
+    "replace": "            if (_engine is not null && (_key is null || _key is not null))",
     "filter": "FullyQualifiedName~OcrEngineCacheTests|FullyQualifiedName~OcrServiceEngineCachingTests"
   },
   {
@@ -2012,7 +2004,7 @@
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "Enabling the feature runs a full embedding pass and then changes nothing, because the search bar has a second toggle that defaults off.",
     "find": "        if (settings.EnableSemanticSearch && !_wasSemanticSearchEnabled)\n        {\n            UseSemanticClipSearch = true;\n        }",
-    "replace": "",
+    "replace": "        if (settings.EnableSemanticSearch && !_wasSemanticSearchEnabled && Environment.ProcessorCount < 0)\n        {\n            UseSemanticClipSearch = true;\n        }",
     "filter": "FullyQualifiedName~SemanticSearchOptInHeadlessTests"
   },
   {
@@ -2020,7 +2012,7 @@
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "Opting in on every save, not just the off->on edge, silently undoes a user who unticked the search-bar checkbox.",
     "find": "        if (settings.EnableSemanticSearch && !_wasSemanticSearchEnabled)",
-    "replace": "        if (settings.EnableSemanticSearch)",
+    "replace": "        if (settings.EnableSemanticSearch && (_wasSemanticSearchEnabled || !_wasSemanticSearchEnabled))",
     "filter": "FullyQualifiedName~SemanticSearchOptInHeadlessTests"
   },
   {
@@ -2091,7 +2083,7 @@
     "id": "rich-preview-renders-unbreakable-runs-as-a-document",
     "file": "Clipthrough/Controls/RichDocumentView.cs",
     "why": "Avalonia line breaking is quadratic in the length of a run with no break opportunity - 80,000 chars took 3s where the same size as words took 97ms - so a copied base64 blob or minified script rendered as a document freezes the UI for minutes.",
-    "find": "    private const int MaxUnbrokenRunChars = 10_000;",
+    "find": "    private const int MaxUnbrokenRunChars = ImportGuards.MaxUnbrokenRunChars;",
     "replace": "    private const int MaxUnbrokenRunChars = int.MaxValue;",
     "filter": "FullyQualifiedName~RichDocumentView"
   },
@@ -2299,7 +2291,7 @@
     "id": "an-image-clip-never-re-presents-after-hydrating",
     "why": "Hydration is the only thing that gives an image clip its bytes, and the preview is built before it finishes. Returning false unconditionally means the pane never rebuilds, so a selected image stays blank until something unrelated refreshes it. This is the risk taken by skipping the re-present for clips that did not hydrate.",
     "file": "Clipthrough/ViewModels/ClipItemViewModel.cs",
-    "find": "        return true;\n    }\n\n    // ContentBytes may be null on metadata-only list reads (U12); test ContentType only so the",
+    "find": "        return !_isDisposed;\n    }\n\n    // ContentBytes may be null on metadata-only list reads (U12); test ContentType only so the",
     "replace": "        return false;\n    }\n\n    // ContentBytes may be null on metadata-only list reads (U12); test ContentType only so the",
     "filter": "FullyQualifiedName~ClipHydrationTests"
   },
@@ -2523,8 +2515,8 @@
     "id": "settings-are-written-straight-over-the-live-file",
     "why": "Puts back the direct write. A crash or a full disk part-way through leaves settings.json truncated, and the recovery path for an unreadable settings file is a silent fallback rather than an error.",
     "file": "Clipthrough/Services/Storage/SettingsService.cs",
-    "find": "        var tempPath = _settingsPath + \".tmp\";\n        await File.WriteAllTextAsync(tempPath, json, cancellationToken);\n        File.Move(tempPath, _settingsPath, overwrite: true);",
-    "replace": "        var tempPath = _settingsPath + \".tmp\";\n        await File.WriteAllTextAsync(tempPath.Length > 0 ? _settingsPath : tempPath, json, cancellationToken);",
+    "find": "        await AtomicFile.WriteAllTextAsync(_settingsPath, json, cancellationToken);",
+    "replace": "        await File.WriteAllTextAsync(_settingsPath, json, cancellationToken);",
     "filter": "FullyQualifiedName~SettingsFileIntegrityTests"
   },
   {
@@ -2532,7 +2524,7 @@
     "why": "Restores the silent fallback: the parse failure becomes a trace line, the corrupt file stays where the next save will overwrite it, and the user is never told their configuration was replaced.",
     "file": "Clipthrough/Services/Storage/SettingsService.cs",
     "find": "                LoadFault = QuarantineCorruptSettings(ex);",
-    "replace": "                Trace.TraceWarning($\"Settings file load failed: {ex.Message}\");",
+    "replace": "                LoadFault = Environment.ProcessorCount < 0 ? QuarantineCorruptSettings(ex) : null;",
     "filter": "FullyQualifiedName~SettingsFileIntegrityTests"
   },
   {
@@ -2731,8 +2723,8 @@
     "id": "clipangel-decrypted-copy-left-in-temp",
     "file": "Clipthrough/Services/Storage/ClipAngelImportService.cs",
     "why": "F-34 (found by its tests). A pooled connection keeps the decrypted copy open, TryDelete fails silently, and a plaintext copy of the ClipAngel history stays in %TEMP%.",
-    "find": "        const int batchSize = 200;\n\n        try\n        {\n            // Pooling off: a pooled connection keeps the decrypted copy open after\n            // Dispose, TryDelete then fails silently, and a plaintext copy of the\n            // user's ClipAngel history is left in %TEMP% (found by F-34's tests).\n            await using var conn = new SqliteConnection($\"Data Source={temp};Mode=ReadOnly;Pooling=False\");\n",
-    "replace": "        const int batchSize = 200;\n\n        try\n        {\n            // Pooling off: a pooled connection keeps the decrypted copy open after\n            // Dispose, TryDelete then fails silently, and a plaintext copy of the\n            // user's ClipAngel history is left in %TEMP% (found by F-34's tests).\n            await using var conn = new SqliteConnection($\"Data Source={temp};Mode=ReadOnly;Pooling=True\");\n",
+    "find": "var conn = Clipthrough.Database.SqliteConnectionFactory.Create(path, password: null, SqliteOpenMode.ReadOnly, pooling: false);",
+    "replace": "var conn = Clipthrough.Database.SqliteConnectionFactory.Create(path, password: null, SqliteOpenMode.ReadOnly, pooling: true);",
     "filter": "FullyQualifiedName~ClipAngelImportServiceTests"
   },
   {
@@ -2758,5 +2750,1501 @@
     "find": "        pruneCommand.Parameters.AddWithValue(\"$limit\", MaxHistoryEntries);\n",
     "replace": "        pruneCommand.Parameters.AddWithValue(\"$limit\", MaxHistoryEntries * 1000);\n",
     "filter": "FullyQualifiedName~SearchHistoryCapTests"
+  },
+  {
+    "id": "stored-bytes-trigger-misses-a-size-change",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Since U-E1 a row costs its payload alone, so the UPDATE trigger's job is byte_size changes (a re-copy, deferred content); without it the stored total keeps the old size. The late icon is counted in app_icons instead (size-cap-ignores-stored-icons).",
+    "find": "        CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF byte_size ON clips BEGIN\n",
+    "replace": "        CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF hash ON clips BEGIN\n",
+    "filter": "FullyQualifiedName~ClipStoredBytesTests"
+  },
+  {
+    "id": "embedding-claim-plan-not-pinned",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-05. Without INDEXED BY the planner takes idx_clips_retention plus a temp B-tree and visits every row: 2.3 s per claim at 60k, 17 s encrypted.",
+    "find": "        FROM clips INDEXED BY idx_clips_embedding_backlog\n",
+    "replace": "        FROM clips\n",
+    "filter": "FullyQualifiedName~EmbeddingClaimIndexTests.EmbeddingClaim_UsesTheBacklogIndex"
+  },
+  {
+    "id": "embedding-claim-reads-under-the-write-lock",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-05. A claim that reads inside BEGIN IMMEDIATE holds the write lock for the whole scan, and every capture waits behind it.",
+    "find": "        var candidates = new List<ClipEmbeddingCandidate>(batchSize);\n",
+    "replace": "        await using var early = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);\n        var candidates = new List<ClipEmbeddingCandidate>(batchSize);\n",
+    "filter": "FullyQualifiedName~EmbeddingClaimIndexTests.AClaimWithNothingPending_DoesNotWaitForTheWriteLock"
+  },
+  {
+    "id": "no-type-prefixed-recency-index",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "F-09. Without a type-prefixed index the type dropdown sorts every clip of that type: 1.5-1.7 s at 60k, 9.7 s encrypted.",
+    "find": "        CREATE INDEX IF NOT EXISTS idx_clips_type_default_order ON clips(\n            content_type,\n",
+    "replace": "        CREATE INDEX IF NOT EXISTS idx_clips_type_default_order ON clips(\n            byte_size,\n",
+    "filter": "FullyQualifiedName~TypeFilter_MostRecent_WalksATypePrefixedIndexWithoutSorting"
+  },
+  {
+    "id": "broad-search-threshold-tuned-on-empty-rows",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-08. At 2000, terms matching 500-2,000 real clips sort every match: 0.6-0.75 s at 60k (4.2 s encrypted at 10k) against 53-126 ms on the ordered index.",
+    "find": "    private const int BroadSearchMatchThreshold = 200;\n",
+    "replace": "    private const int BroadSearchMatchThreshold = 2000;\n",
+    "filter": "FullyQualifiedName~SearchPlanTests.ATermMatchingFiveHundredClips_TakesTheOrderedIndexPlan"
+  },
+  {
+    "id": "prefiltered-search-skips-the-exact-match",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-07. The trigram prefilter is a case-insensitive substring superset; without the exact matcher a case-sensitive or whole-word search returns rows that do not match.",
+    "find": "                if (!MatchesSearch(SearchableFields.Read(reader), filters, matchers))\n",
+    "replace": "                if (prefilter is null && !MatchesSearch(SearchableFields.Read(reader), filters, matchers))\n",
+    "filter": "FullyQualifiedName~InMemorySearchPrefilterTests.PrefilteredSearch_ReturnsExactlyTheHandWrittenMatches"
+  },
+  {
+    "id": "in-memory-search-never-prefiltered",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-07. Without the prefilter a case-sensitive, whole-word or wildcard search reads every clip: 2.6-3.2 s and ~250 MB at 60k, 15.9 s encrypted.",
+    "find": "        if (terms.Length == 0 || terms.Any(static t => TrigramIndexableLength(t) < 3))\n",
+    "replace": "        if (terms.Length >= 0 || terms.Any(static t => TrigramIndexableLength(t) < 3))\n",
+    "filter": "FullyQualifiedName~InMemorySearchPrefilterTests"
+  },
+  {
+    "id": "prefilter-admits-sub-trigram-terms",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-07. The trigram index holds nothing for a term under three code points, so prefiltering on one would drop every real match.",
+    "find": "        if (terms.Length == 0 || terms.Any(static t => TrigramIndexableLength(t) < 3))\n",
+    "replace": "        if (terms.Length == 0 || terms.Any(static t => TrigramIndexableLength(t) < 1))\n",
+    "filter": "FullyQualifiedName~InMemorySearchPrefilterTests.NoPrefilter_WhenATermIsShorterThanATrigram"
+  },
+  {
+    "id": "list-row-formats-the-whole-clip",
+    "file": "Clipthrough/Presentation/ClipDisplayFormatter.cs",
+    "why": "F-10. Formatting a row split and collapsed the whole text on the UI thread to show 140 characters: 40 ms / 20.7 MB per 1.9 MB clip.",
+    "find": "        if (content is { Length: > DisplayPrefixLength } && TryBuildFromPrefix(content, contentType, out var bounded))\n",
+    "replace": "        if (content is { Length: > int.MaxValue - DisplayPrefixLength } && TryBuildFromPrefix(content, contentType, out var bounded))\n",
+    "filter": "FullyQualifiedName~ClipDisplayFormatterPrefixTests.ATwoMegabyteClip_IsFormattedWithoutTouchingAllOfIt"
+  },
+  {
+    "id": "list-row-prefix-trusted-when-it-cannot-decide",
+    "file": "Clipthrough/Presentation/ClipDisplayFormatter.cs",
+    "why": "F-10. A prefix too short to decide the snippet would show a row that differs from the clip's own text.",
+    "find": "        if (CollapseWhitespace(prefix).Length <= 140)\n",
+    "replace": "        if (CollapseWhitespace(prefix).Length <= 0)\n",
+    "filter": "FullyQualifiedName~ClipDisplayFormatterPrefixTests.WhenAPrefixCannotDecide"
+  },
+  {
+    "id": "fts-update-trigger-fires-on-unchanged-text",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "F-26. Without the WHEN, re-copying a clip re-tokenises identical text into FTS under the write lock: 714-763 ms for a 1.8 MB clip.",
+    "find": "        WHEN old.content IS NOT new.content\n",
+    "replace": "        WHEN old.content IS NOT new.content OR 1\n",
+    "filter": "FullyQualifiedName~FtsUpdateTriggerTests.AssigningTheSameIndexedText_DoesNoFtsWork"
+  },
+  {
+    "id": "fts-update-trigger-misses-a-column",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "F-26. A WHEN that leaves out an indexed column stops that column's changes reaching the index.",
+    "find": "          OR old.source_url IS NOT new.source_url\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~FtsUpdateTriggerTests.ChangingAnIndexedColumn_StillReindexesIt"
+  },
+  {
+    "id": "coverage-refreshes-stack-up",
+    "file": "Clipthrough/ViewModels/CoalescingRefresh.cs",
+    "why": "F-25. Each coverage refresh is a full-library aggregate (3.5 s at 60k, 17.8 s encrypted) fired per queue event; overlapping triggers must not stack identical queries.",
+    "find": "            if (state == RunningWithPending\n                || Interlocked.CompareExchange(ref _state, RunningWithPending, Running) == Running)\n            {\n                return;\n            }\n",
+    "replace": "            if (state == RunningWithPending && state == Idle)\n            {\n                return;\n            }\n\n            break;\n",
+    "filter": "FullyQualifiedName~CoalescingRefreshTests.TriggersDuringARefresh_CollapseIntoOneTrailingRun"
+  },
+  {
+    "id": "no-pending-sensitivity-index",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "F-25. Without it the startup sensitivity recovery reads every clip: 2.9 s at 60k with nothing pending, 16 s encrypted.",
+    "find": "            WHERE sensitivity_scanned_at IS NULL;\n",
+    "replace": "            WHERE sensitivity_scanned_at IS NOT NULL;\n",
+    "filter": "FullyQualifiedName~StartupScanIndexTests.PendingSensitivityRecovery_ReadsOnlyUnscannedRows"
+  },
+  {
+    "id": "no-ocr-coverage-index",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "F-25. Without it OCR coverage reads ocr_status from each image row, after the payload: 1.9 s at 60k, 9.9 s encrypted.",
+    "find": "            WHERE content_type = 'image';\n\n        -- Orphaned app_icons",
+    "replace": "            WHERE content_type = 'files';\n\n        -- Orphaned app_icons",
+    "filter": "FullyQualifiedName~StartupScanIndexTests.OcrCoverage_IsAnsweredFromTheImageIndex"
+  },
+  {
+    "id": "rerun-all-in-one-transaction",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-24. One transaction over the library held the write lock for 74 s at 60k clips; a capture issued meanwhile failed and was lost.",
+    "find": "        var batchSize = Math.Max(1, RerunBatchSize);\n",
+    "replace": "        var batchSize = RerunBatchSize > 0 ? int.MaxValue : RerunBatchSize;\n",
+    "filter": "FullyQualifiedName~LongWriteLockTests.ACaptureDuringRerunAll_CommitsBetweenBatches"
+  },
+  {
+    "id": "sensitivity-rebuild-rewrites-every-row",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-24. Resetting the flag on every row rewrote each record, payload included: 15 s and 277 MB of write lock per rule save at 60k.",
+    "find": "                WHERE is_sensitive IS NOT sensitivity_is_manual\n",
+    "replace": "                WHERE 1 = 1\n",
+    "filter": "FullyQualifiedName~LongWriteLockTests.ARebuildThatChangesNoVerdict_WritesNoClipRow"
+  },
+  {
+    "id": "semantic-removal-copies-the-vectors",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "why": "F-27. Copying every surviving vector per removal cost 25 ms and 90 MB of LOH at 60k x 384, once per capture at the library cap.",
+    "find": "            Volatile.Write(ref _cache, new CacheSnapshot(newIds, existing.Vectors, existing.Count, existing.Dim, live));\n",
+    "replace": "            Volatile.Write(ref _cache, new CacheSnapshot(newIds, (float[])existing.Vectors.Clone(), existing.Count, existing.Dim, live));\n",
+    "filter": "FullyQualifiedName~SemanticSearchServiceTests.RemovingAClip_KeepsTheSameVectorArray"
+  },
+  {
+    "id": "semantic-query-scores-tombstones",
+    "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
+    "why": "F-27. A tombstoned slot still holds the removed clip's vector; scoring it returns a hit for a clip that is gone.",
+    "find": "            if (ids[i] == Tombstone)\n            {\n                continue;\n            }\n\n            selector.Offer(ids[i], Dot(vectors.Slice(i * dim, dim), queryVector));\n",
+    "replace": "            selector.Offer(ids[i], Dot(vectors.Slice(i * dim, dim), queryVector));\n",
+    "filter": "FullyQualifiedName~SemanticSearchServiceTests.RemovingAClip_KeepsTheSameVectorArray"
+  },
+  {
+    "id": "list-read-unbounded",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-10 / U-D5. A list page carried every clip's whole text: a 2 MB log cost its string and UTF-16 copy per row, per refresh.",
+    "find": "            substr(c.content, 1, 4096),\n",
+    "replace": "            c.content,\n",
+    "filter": "FullyQualifiedName~BoundedListTextTests.ALongClipsListRow"
+  },
+  {
+    "id": "search-scan-matches-the-row-prefix",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-10 / U-D5 owner condition: search and filter must match the full text, not the prefix a row carries. The in-memory engines read the row to decide.",
+    "find": "    private const int SearchOrdinalContent = 31; // the full text, ClipScanSelectColumns only",
+    "replace": "    private const int SearchOrdinalContent = 1; // the full text, ClipScanSelectColumns only",
+    "filter": "FullyQualifiedName~BoundedListTextTests.ATermPastTheBound"
+  },
+  {
+    "id": "list-row-truncation-not-flagged",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-10. An unflagged prefix reads as the whole clip: copy, export and transform would silently hand over part of it.",
+    "find": "            IsContentTruncated = reader.GetInt64(30) == 1,",
+    "replace": "            IsContentTruncated = reader.GetInt64(30) == 2,",
+    "filter": "FullyQualifiedName~BoundedListTextTests.ALongClipsListRow"
+  },
+  {
+    "id": "plain-text-copy-skips-hydration",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-10. Copy as plain text read Clip.Content straight off the list row.",
+    "find": "            await clip.EnsureContentHydratedAsync();\n\n            // Clip.Content, not FullContent.",
+    "replace": "            await Task.CompletedTask;\n\n            // Clip.Content, not FullContent.",
+    "filter": "FullyQualifiedName~CopyingALongListRowAsPlainText_CopiesAllOfIt"
+  },
+  {
+    "id": "transform-skips-hydration",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-10. A transform saves its result as a new clip; started from a prefix it would save a clip missing everything after it.",
+    "find": "        await clip.EnsureContentHydratedAsync();\n        if (clip.Clip.ContentType != ContentType.Files)",
+    "replace": "        await Task.CompletedTask;\n        if (clip.Clip.ContentType != ContentType.Files)",
+    "filter": "FullyQualifiedName~TransformingALongListRow_TransformsAllOfIt"
+  },
+  {
+    "id": "export-skips-hydration",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-10. Export writes the clip to a file the user keeps; from a list row it must not be a prefix.",
+    "find": "        await SelectedClip.EnsureContentHydratedAsync();\n        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);\n        _clipboardMonitorService.SuppressNext(exportResult.PrimaryPath);",
+    "replace": "        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);\n        _clipboardMonitorService.SuppressNext(exportResult.PrimaryPath);",
+    "filter": "FullyQualifiedName~ExportingALongListRow_ExportsAllOfIt"
+  },
+  {
+    "id": "hydration-not-shared-with-a-second-caller",
+    "file": "Clipthrough/ViewModels/ClipItemViewModel.cs",
+    "why": "Copy runs while selection's hydration is in flight; answering it \"nothing to do\" made it read the row as it stood.",
+    "find": "        if (_hydration is { IsCompleted: false } running)",
+    "replace": "        if (_hydration is { IsCompleted: false } running && running.IsFaulted)",
+    "filter": "FullyQualifiedName~ASecondCaller_WaitsForTheHydrationAlreadyRunning"
+  },
+  {
+    "id": "prefix-row-is-editable",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-10. An edit is saved as a new clip; editing a row that holds a prefix would save a clip missing everything after it.",
+    "find": "        SelectedClip is { Clip.IsContentTruncated: false } selected",
+    "replace": "        SelectedClip is { } selected",
+    "filter": "FullyQualifiedName~SelectingALongListRow_ShowsThePrefixFirst"
+  },
+  {
+    "id": "hydration-skips-the-payload-join",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U-E1 plan mutant. A full read that takes content_bytes from the clips row gets NULL for every clip since the move: images and rich text lose their payload.",
+    "find": "            COALESCE((SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id), c.content_bytes),\n",
+    "replace": "            COALESCE(NULL, c.content_bytes),\n",
+    "filter": "FullyQualifiedName~PayloadLayoutTests"
+  },
+  {
+    "id": "icon-read-skips-app-icons",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U-E1 / F-39. Icons live in app_icons; reading the old inline column shows every clip without its app icon.",
+    "find": "            COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), c.source_app_icon),\n",
+    "replace": "            COALESCE(NULL, c.source_app_icon),\n",
+    "filter": "FullyQualifiedName~PayloadLayoutTests"
+  },
+  {
+    "id": "icons-not-deduplicated",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "F-39. The same icon PNG was stored again for every clip from that app; keying it by anything but its content stores it per clip again.",
+    "find": "    internal static string AppIconHash(byte[] png) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(png));",
+    "replace": "    internal static string AppIconHash(byte[] png) => png.Length >= 0 ? Guid.NewGuid().ToString(\"N\") : string.Empty;",
+    "filter": "FullyQualifiedName~PayloadLayoutTests.IdenticalIcons_AreStoredOnce"
+  },
+  {
+    "id": "payload-outlives-its-clip",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U-E1. Without the trigger a clip deleted on a connection with foreign keys off leaves its payload - a sensitive clip's included - in the file with nothing pointing at it.",
+    "find": "        CREATE TRIGGER IF NOT EXISTS clips_payload_ad AFTER DELETE ON clips BEGIN\n            DELETE FROM clip_payloads WHERE clip_id = old.id;\n        END;\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~PayloadLayoutTests.ADeletedClip_TakesItsPayloadWithIt"
+  },
+  {
+    "id": "payload-move-leaves-the-old-columns",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "F-06. Copying without NULLing the inline columns keeps every metadata read walking the blob, and doubles the file.",
+    "find": "                        SET content_bytes = NULL,\n                            source_app_icon = NULL,\n                            stored_bytes = byte_size,\n                            source_app_icon_hash",
+    "replace": "                        SET stored_bytes = byte_size,\n                            source_app_icon_hash",
+    "filter": "FullyQualifiedName~PayloadLayoutTests.AnExistingLibrary_IsMoved"
+  },
+  {
+    "id": "payload-move-in-one-transaction",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U-E1. One transaction over a 1 GB library holds the write lock for the whole move and a crash loses all of it; batches commit as they go.",
+    "find": "                    LIMIT $limit;\n",
+    "replace": "                    LIMIT -1 + ($limit * 0);\n",
+    "filter": "FullyQualifiedName~PayloadLayoutTests.AMoveInterruptedMidBatch"
+  },
+  {
+    "id": "orphaned-icons-kept-after-eviction",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-39. An icon whose last clip was evicted would keep counting against the size cap until the next start.",
+    "find": "            await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);\n",
+    "replace": "            await Task.CompletedTask;\n",
+    "filter": "FullyQualifiedName~PayloadLayoutTests.AnIconWhoseLastClipIsEvicted"
+  },
+  {
+    "id": "size-cap-ignores-stored-icons",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "The cap must bound what is on disk (the 12.5x under-count fixed earlier); since U-E1 icons are counted once, from app_icons.",
+    "find": " + \") FROM clips), 0) + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons), 0);\";",
+    "replace": " + \") FROM clips), 0) + 0;\";",
+    "filter": "FullyQualifiedName~Maintenance_LibrarySizeCap_CountsTheSourceAppIconsItStores"
+  },
+  {
+    "id": "fts-rebuilt-on-every-version-bump",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U-E1, owner decision (B). The full FTS rebuild was 17.2 s of a 28.5 s first start on 420 MB and ran on every version bump, although no bump after version 3 changed what the index holds.",
+    "find": "            if (ftsSchemaRecreated || storedVersion < LastSearchIndexChangeVersion)",
+    "replace": "            if (ftsSchemaRecreated || storedVersion < LastSearchIndexChangeVersion || storedVersion >= 0)",
+    "filter": "FullyQualifiedName~FtsRebuildGateTests.AVersionBumpThatChangesNoIndexedContent"
+  },
+  {
+    "id": "fts-not-rebuilt-for-a-library-older-than-the-index-change",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "A library stored before version 3 holds an index of the old shape; skipping its rebuild leaves its clips unfindable by keyword.",
+    "find": "            if (ftsSchemaRecreated || storedVersion < LastSearchIndexChangeVersion)",
+    "replace": "            if (ftsSchemaRecreated || storedVersion < LastSearchIndexChangeVersion - 1000)",
+    "filter": "FullyQualifiedName~FtsRebuildGateTests.ALibraryOlderThanTheLastSearchIndexChange"
+  },
+  {
+    "id": "fts-not-rebuilt-when-recreated-during-a-bump",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "A bump that also repairs an old FTS schema recreates the table empty; without the rebuild every stored clip stops being findable by keyword.",
+    "find": "            if (ftsSchemaRecreated || storedVersion < LastSearchIndexChangeVersion)",
+    "replace": "            if (storedVersion < LastSearchIndexChangeVersion)",
+    "filter": "FullyQualifiedName~FtsRebuildGateTests.AnFtsSchemaRecreatedDuringAVersionBump"
+  },
+  {
+    "id": "upgrade-move-reports-no-progress",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U-E1 (C). The payload move is the long stage of the first start after an upgrade; without its reports the overlay sits on an indeterminate bar for the whole move.",
+    "find": "        void ReportMoved(long reachedId) => progress?.Report(new LibraryUpgradeProgress(",
+    "replace": "        void ReportMoved(long reachedId) => (reachedId < long.MinValue + 1 ? progress : null)?.Report(new LibraryUpgradeProgress(",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests"
+  },
+  {
+    "id": "upgrade-reported-for-a-new-library",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U-E1 (C). A new or empty library is not being upgraded; reporting for it titles the first-run overlay \"Upgrading\".",
+    "find": "        if (progress is not null && !await HasStoredClipsAsync(connection, cancellationToken))",
+    "replace": "        if (progress is not null && Environment.ProcessorCount < 0 && !await HasStoredClipsAsync(connection, cancellationToken))",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressTests.ANewLibrary"
+  },
+  {
+    "id": "upgrade-progress-applied-on-the-worker-thread",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "U-E1 (C). The initializer reports from a worker thread; raising the overlay properties there touches Avalonia from the wrong thread.",
+    "find": "        public void Report(LibraryUpgradeProgress value) => Avalonia.Threading.Dispatcher.UIThread.Post(() => apply(value));",
+    "replace": "        public void Report(LibraryUpgradeProgress value) => apply(value);",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests"
+  },
+  {
+    "id": "upgrade-state-outlives-the-load",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "U-E1 (C). The upgrade state must end with the load, or the next load (after unlocking or moving the library) shows a stale upgrade.",
+    "find": "                IsLoadingDatabase = false;\n                SetLibraryUpgradeProgress(null);\n                IsWelcomeOpen = false;",
+    "replace": "                IsLoadingDatabase = false;\n                IsWelcomeOpen = false;",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests"
+  },
+  {
+    "id": "upgrade-runs-on-the-ui-thread",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "U-E1 (C). The owner asked that the app stay responsive during the first start after an upgrade; run on the UI thread, the window freezes for the whole upgrade.",
+    "find": "            await Task.Run(async () => await StartDatabaseAsync().ConfigureAwait(false)).ConfigureAwait(false);",
+    "replace": "            await StartDatabaseAsync();",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests"
+  },
+  {
+    "id": "byte-size-backfill-ignores-moved-payloads",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Option A puts the payload move before the byte_size backfill, so content_bytes is NULL by then. Reading only it records zero sizes, which also makes the size cap undercount.",
+    "find": "                (SELECT LENGTH(p.content_bytes) FROM clip_payloads p WHERE p.clip_id = clips.id),\n",
+    "replace": "                (SELECT NULL FROM clip_payloads p WHERE p.clip_id = clips.id),\n",
+    "filter": "FullyQualifiedName~UpgradeStartOrderTests.ARowWithoutASize"
+  },
+  {
+    "id": "upgrade-scans-before-the-payload-move",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Option A. Every full-table scan before the move walks each inline payload (F-06); the move has to come first.",
+    "find": "                await MovePayloadsOutOfClipsAsync(connection, progress, background: false, cancellationToken);\n                TraceStep(sw, \"move-payloads\");\n\n                await RepairClipStoredBytesAsync(connection, cancellationToken);\n                TraceStep(sw, \"ensure-stored-bytes\");\n",
+    "replace": "                await RepairClipStoredBytesAsync(connection, cancellationToken);\n                TraceStep(sw, \"ensure-stored-bytes\");\n                await MovePayloadsOutOfClipsAsync(connection, progress, background: false, cancellationToken);\n                TraceStep(sw, \"move-payloads\");\n\n",
+    "filter": "FullyQualifiedName~UpgradeStartOrderTests.ThePayloadMove_RunsBefore"
+  },
+  {
+    "id": "aggregation-backfill-always-runs",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Option A. A library stamped with any version already has the aggregation backfill; rerunning it is a full scan for nothing.",
+    "find": "            if (storedVersion < GateIntroducedVersion)",
+    "replace": "            if (storedVersion < GateIntroducedVersion || storedVersion >= 0)",
+    "filter": "FullyQualifiedName~UpgradeStartOrderTests.AnUpgradeFromARecentVersion"
+  },
+  {
+    "id": "aggregation-backfill-never-runs",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "A library from before the version gate still needs copy counts and first/last-copied times filled.",
+    "find": "            if (storedVersion < GateIntroducedVersion)",
+    "replace": "            if (storedVersion < GateIntroducedVersion - 1000)",
+    "filter": "FullyQualifiedName~UpgradeStartOrderTests.ALibraryFromBeforeTheVersionGate"
+  },
+  {
+    "id": "payload-backfill-never-runs",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "A library from before schema 5 has rows with byte_size 0; skipping the backfill leaves them unsized and uncounted by the size cap.",
+    "find": "            if (storedVersion < ByteSizeIntroducedVersion)",
+    "replace": "            if (storedVersion < ByteSizeIntroducedVersion - 1000)",
+    "filter": "FullyQualifiedName~UpgradeStartOrderTests.ARowWithoutASize"
+  },
+  {
+    "id": "dedupe-skipped-without-the-unique-index",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Dedupe has to run whenever the unique hash index is missing, or creating that index fails on the duplicates.",
+    "find": "            if (!await HasUniqueClipHashIndexAsync(connection, cancellationToken))",
+    "replace": "            if (!await HasUniqueClipHashIndexAsync(connection, cancellationToken) && Environment.ProcessorCount < 0)",
+    "filter": "FullyQualifiedName~UpgradeStartOrderTests.ALibraryWithoutTheUniqueHashIndex"
+  },
+  {
+    "id": "hydration-ignores-unmoved-payloads",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U3. While the move is unfinished, a clip it has not reached keeps its payload inline; a read that only looks in clip_payloads finds nothing.",
+    "find": "            COALESCE((SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id), c.content_bytes),",
+    "replace": "            COALESCE((SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id), NULL),",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.EveryClip_ReadsItsPayloadAndIcon"
+  },
+  {
+    "id": "hydration-ignores-unmoved-icons",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U3. An unmoved clip keeps its icon inline until the move reaches it.",
+    "find": "            COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), c.source_app_icon),",
+    "replace": "            COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), NULL),",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.EveryClip_ReadsItsPayloadAndIcon"
+  },
+  {
+    "id": "list-ignores-unmoved-icons",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U3. The list shows an icon only when it is flagged available; an unmoved clip has no hash yet.",
+    "find": "            (c.source_app_icon_hash IS NOT NULL OR c.source_app_icon IS NOT NULL),",
+    "replace": "            (c.source_app_icon_hash IS NOT NULL),",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.EveryClip_ReadsItsPayloadAndIcon"
+  },
+  {
+    "id": "icon-lookup-ignores-unmoved-icons",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U3. GetSourceAppIconAsync serves the icon column in the clip list; an unmoved clip's icon is still inline.",
+    "find": "            SELECT COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), c.source_app_icon)\n            FROM clips c WHERE c.id = $id;",
+    "replace": "            SELECT COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), NULL)\n            FROM clips c WHERE c.id = $id;",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.EveryClip_ReadsItsPayloadAndIcon"
+  },
+  {
+    "id": "ocr-misses-unmoved-images",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U3. OCR finds images by their payload; an image the move has not reached is still one.",
+    "find": "              AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id) OR clips.content_bytes IS NOT NULL)\n              AND (ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'failed' OR ocr_status = 'rerun')\n            ORDER BY COALESCE(last_copied_at, captured_at) DESC\n            LIMIT 500;",
+    "replace": "              AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id))\n              AND (ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'failed' OR ocr_status = 'rerun')\n            ORDER BY COALESCE(last_copied_at, captured_at) DESC\n            LIMIT 500;",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.EveryClip_ReadsItsPayloadAndIcon"
+  },
+  {
+    "id": "payload-move-overwrites-a-newer-payload",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U3, the lost edit. A clip written before the move reaches it has its new payload in clip_payloads and the old one still inline; an upsert copies the old over the new.",
+    "find": "                        ON CONFLICT(clip_id) DO NOTHING;",
+    "replace": "                        ON CONFLICT(clip_id) DO UPDATE SET content_bytes = excluded.content_bytes;",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.AnEditBeforeTheMoveReachesAClip"
+  },
+  {
+    "id": "payload-move-overwrites-a-newer-icon",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U3, the lost edit. An icon set before the move reaches the clip must not be replaced by the stale inline one.",
+    "find": "                if (icon is { Length: > 0 } && !hasNewerIcon)",
+    "replace": "                if (icon is { Length: > 0 } && (hasNewerIcon || !hasNewerIcon))",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.AnEditBeforeTheMoveReachesAClip"
+  },
+  {
+    "id": "upgrade-never-defers-the-move",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U4, owner decision (c). An upgrade from schema 8 opens at once and moves payloads in the background; deferring never means the 74 s / 5-7 min blocking start again.",
+    "find": "        var deferPayloadMove = allowDeferredPayloadMove && await CanDeferPayloadMoveAsync(connection, cancellationToken);",
+    "replace": "        var deferPayloadMove = allowDeferredPayloadMove && Environment.ProcessorCount < 0 && await CanDeferPayloadMoveAsync(connection, cancellationToken);",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.AnUpgradeFromSchema8_Opens"
+  },
+  {
+    "id": "old-library-defers-the-move",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U4. A library from before schema 8 runs scanning backfills that are only cheap after the move, so it must still move before opening.",
+    "find": "        return storedVersion >= StoredBytesIntroducedVersion\n",
+    "replace": "        return storedVersion >= StoredBytesIntroducedVersion - 1000\n",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.AnUpgradeFromBeforeSchema8"
+  },
+  {
+    "id": "background-move-ignores-its-time-budget",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U4. Each background batch is a write transaction captures wait behind (busy_timeout 5 s); an encrypted batch bounded only by size can take seconds.",
+    "find": "                    && (!background || rows.Count == 0 || batchClock.Elapsed < BackgroundPayloadMoveBatchBudget)",
+    "replace": "                    && (!background || rows.Count == 0 || batchClock.Elapsed >= TimeSpan.Zero || batchClock.Elapsed < BackgroundPayloadMoveBatchBudget)",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.TheBackgroundMove_CommitsInBatchesBoundedByItsTimeBudget"
+  },
+  {
+    "id": "payload-move-never-marked-done",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U4. Without the done marker every start re-runs the background move and scans for rows to move.",
+    "find": "                        INSERT INTO app_metadata (key, value) VALUES ('payload_move_done', '1')",
+    "replace": "                        INSERT INTO app_metadata (key, value) VALUES ('payload_move_done', '0')",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.AnUpgradeFromSchema8_Opens"
+  },
+  {
+    "id": "moved-row-keeps-counting-its-icon",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U4. While the move runs, a moved row's icon is counted once in app_icons; keeping it in the row too overcounts the library and can evict clips early.",
+    "find": "                            stored_bytes = byte_size,",
+    "replace": "                            stored_bytes = stored_bytes,",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.WhileTheBackgroundMoveRuns"
+  },
+  {
+    "id": "background-move-never-started",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "U4. The app opens without moving an upgraded library's payloads; nothing else ever moves them.",
+    "find": "        _ = RunDeferredPayloadMoveAsync();",
+    "replace": "        _ = Environment.ProcessorCount < 0 ? RunDeferredPayloadMoveAsync() : Task.CompletedTask;",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests.AnUpgradeFromSchema8"
+  },
+  {
+    "id": "app-start-forbids-the-deferred-move",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "U4. The app has to allow the deferral, or every upgrade blocks behind the overlay.",
+    "find": "        await _databaseInitializer.InitializeAsync(new UiThreadProgress(SetLibraryUpgradeProgress), allowDeferredPayloadMove: true);",
+    "replace": "        await _databaseInitializer.InitializeAsync(new UiThreadProgress(SetLibraryUpgradeProgress), allowDeferredPayloadMove: false);",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests.AnUpgradeFromSchema8"
+  },
+  {
+    "id": "merge-drain-stops-after-one-step",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "R1. A rebuild leaves many merge steps of work; stopping after one leaves the rest for the first large captures.",
+    "find": "            if (after - before < 2)",
+    "replace": "            if (after - before < 2 || after >= 0)",
+    "filter": "FullyQualifiedName~SearchIndexMergeDrainTests.AfterARebuild"
+  },
+  {
+    "id": "rebuild-records-no-pending-merges",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "R1. The drain only runs when a rebuild recorded that it left merges behind.",
+    "find": "            INSERT INTO app_metadata (key, value) VALUES ('fts_merge_pending', '1')",
+    "replace": "            INSERT INTO app_metadata (key, value) VALUES ('fts_merge_pending', '0')",
+    "filter": "FullyQualifiedName~SearchIndexMergeDrainTests.ARebuild_RecordsThatMergesArePending"
+  },
+  {
+    "id": "merge-drain-runs-without-a-rebuild",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "R1. Without a rebuild there is no debt to drain, and merging anyway is background write work for nothing.",
+    "find": "            if (await pending.ExecuteScalarAsync(cancellationToken) is not \"1\")",
+    "replace": "            if (await pending.ExecuteScalarAsync(cancellationToken) is not \"1\" && Environment.ProcessorCount < 0)",
+    "filter": "FullyQualifiedName~SearchIndexMergeDrainTests.WithoutARebuild"
+  },
+  {
+    "id": "merge-drain-never-started",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "R1. Nothing else drains the merges a rebuild leaves.",
+    "find": "                () => _databaseInitializer.DrainSearchIndexMergesAsync(_deferredPayloadMoveCancellation.Token),",
+    "replace": "                () => Environment.ProcessorCount < 0 ? _databaseInitializer.DrainSearchIndexMergesAsync(_deferredPayloadMoveCancellation.Token) : Task.FromResult(false),",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests"
+  },
+  {
+    "id": "background-move-skips-its-first-progress",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "U4. The first report is 0%, and -1 / 5 == 0 in C#, so a bucket check with no \"nothing shown yet\" guard drops it and the job line stays empty until the first 5%.",
+    "find": "(shownPercent >= 0 && percent / 5 == shownPercent / 5)",
+    "replace": "(percent / 5 == shownPercent / 5)",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests.AnUpgradeFromSchema8"
+  },
+  {
+    "id": "deferred-start-still-checks-every-page",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Owner decision on the integrity check (b). On the cold 1 GB fixture the full-file check was 71.5 s of a 73 s deferred upgrade start; it belongs ahead of the background rewrite, not the start.",
+    "find": "        else if (await HasPendingStructuralWorkAsync(connection, cancellationToken))",
+    "replace": "        if (await HasPendingStructuralWorkAsync(connection, cancellationToken))",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.ADeferredUpgradeStart_DoesNotReadEveryPageToCheckIt"
+  },
+  {
+    "id": "background-move-skips-the-integrity-check",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Owner decision on the integrity check (b). The check moved, it was not dropped: the move rewrites every row, and a corrupt library must not be rewritten.",
+    "find": "        await VerifyIntegrityAsync(connection, cancellationToken);\n        if (!moveDone)\n",
+    "replace": "        await (Environment.ProcessorCount < 0 ? VerifyIntegrityAsync(connection, cancellationToken) : Task.CompletedTask);\n        if (!moveDone)\n",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.TheBackgroundMove_ChecksTheLibraryFirst"
+  },
+  {
+    "id": "deferred-start-runs-the-utc-backfill",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Owner decision (b): a deferred upgrade start rewrites no row before the background integrity check. G's UTC backfill rewrites rows, so running it on the start instead of marking it owed rewrites the library unchecked.",
+    "find": "                    await ExecuteNonQueryAsync(connection, \"INSERT INTO app_metadata (key, value) VALUES ('utc_backfill_pending', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;\", cancellationToken);",
+    "replace": "                    await BackfillUtcTimestampsAsync(connection, cancellationToken);",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.ADeferredUpgradeStart_LeavesTimestampsAlone"
+  },
+  {
+    "id": "utc-backfill-rides-on-the-move-flag",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "The move commits payload_move_done with its last batch. If the background run treats that flag as 'nothing left', a run stopped between the move and the backfill leaves the offset timestamps unrepaired for good.",
+    "find": "        if (moveDone && !backfillPending)\n",
+    "replace": "        if (moveDone || !backfillPending && moveDone)\n",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.ABackgroundRunStoppedRightAfterTheMove"
+  },
+  {
+    "id": "utc-backfill-before-the-integrity-check",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Owner decision (b): the background run checks the library before it rewrites anything. A backfill ahead of the check rewrites rows of a library the check would have refused.",
+    "find": "        await VerifyIntegrityAsync(connection, cancellationToken);\n        if (!moveDone)\n",
+    "replace": "        if (backfillPending)\n        {\n            await BackfillUtcTimestampsAsync(connection, cancellationToken);\n        }\n\n        await VerifyIntegrityAsync(connection, cancellationToken);\n        if (!moveDone)\n",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.TheBackgroundMove_ChecksTheLibraryFirst"
+  },
+  {
+    "id": "blocking-upgrade-skips-the-utc-backfill",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "The blocking upgrade path (libraries older than schema 8, or no permission to defer) must still run G's UTC backfill once, after the move.",
+    "find": "                if (storedVersion < UtcTimestampsIntroducedVersion)\n                {\n                    await BackfillUtcTimestampsAsync(connection, cancellationToken);\n                    TraceStep(sw, \"backfill-utc-timestamps\");",
+    "replace": "                if (storedVersion < UtcTimestampsIntroducedVersion && storedVersion < 0)\n                {\n                    await BackfillUtcTimestampsAsync(connection, cancellationToken);\n                    TraceStep(sw, \"backfill-utc-timestamps\");",
+    "filter": "FullyQualifiedName~ImportedTimestampTests.RowsAlreadyImportedWithAnOffset"
+  },
+  {
+    "id": "background-move-failure-not-notified",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Owner decision on the integrity check (b). A failed background check means a corrupt library; a status-bar line alone is easily missed.",
+    "find": "            _notificationService.PublishError(AppText.LibraryOptimizeFailedTitle, ex.Message);",
+    "replace": "            _ = AppText.LibraryOptimizeFailedTitle;",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests.ACorruptLibrary"
+  },
+  {
+    "id": "payload-layout-shares-schema-nine",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Phase G's UTC backfill and Phase E's payload layout were both written as schema 9. A library G stamped 9 still has inline payloads; if the layout also called itself 9, that library would read as already moved and keep every payload in the clips row.",
+    "find": "    private const int CurrentSchemaVersion = 10;",
+    "replace": "    private const int CurrentSchemaVersion = 9;",
+    "filter": "FullyQualifiedName~PayloadLayoutTests.ALibraryStampedNineByTheUtcBackfill_IsStillMoved"
+  },
+  {
+    "id": "can-transform-reads-truncated-content",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "why": "Phase B's transform gate meets Phase D's bounded list rows. Reading Content on a row longer than the bound throws, so the Transform menus, toolbar and row context menu fail for every long clip.",
+    "find": "            && !string.IsNullOrEmpty(clip.ContentPrefix);",
+    "replace": "            && !string.IsNullOrEmpty(clip.Content);",
+    "filter": "FullyQualifiedName~BoundedListTextTests"
+  },
+  {
+    "id": "transform-html-decided-by-one-transform",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-04. Deciding HTML output by comparing against BoxTableToHtml alone stores Markdown -> HTML as plain text and puts the raw CF_HTML document on the clipboard as text.",
+    "find": "        var producesHtml = TextTransformationService.ProducesHtml(transformation);",
+    "replace": "        var producesHtml = transformation == TextTransformation.BoxTableToHtml;",
+    "filter": "FullyQualifiedName~RowTransform_MarkdownToHtml_StoresAndCopiesHtml"
+  },
+  {
+    "id": "row-transform-uses-the-selection",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "The row context menu applies to the row it was opened on. Dropping the explicit target makes it transform the selection or the checked clips instead - a different clip than the one the user right-clicked.",
+    "find": "                explicitTarget: explicitTarget);",
+    "replace": "                explicitTarget: explicitTarget is null ? null : null);",
+    "filter": "FullyQualifiedName~RowTransform_AppliesToTheClickedRowOnly"
+  },
+  {
+    "id": "custom-hotkey-ignores-eligibility",
+    "file": "Clipthrough/Services/Capture/HotkeyClipActions.cs",
+    "why": "F-12. Without the transform eligibility check a custom hotkey transforms an image clip's text - the title of the window it was copied from - puts it on the clipboard over the image and pastes it into the user's document.",
+    "find": "        if (!TextTransformationService.CanTransform(clip))",
+    "replace": "        if (string.IsNullOrEmpty(clip.Content))",
+    "filter": "FullyQualifiedName~HotkeyClipActionsTests.CustomTransformHotkey_OnAnImageClip"
+  },
+  {
+    "id": "step-paste-copies-content-as-text",
+    "file": "Clipthrough/Services/Capture/HotkeyClipActions.cs",
+    "why": "F-12. Step-paste copying clip.Content as text pastes an image's source window title instead of the picture, flattens rich text, and marks the clip pasted even when nothing reached the clipboard.",
+    "find": "        if (!await ClipClipboardWriter.TryCopyAsync(clip, interaction, monitor, maxImageBytes))\n        {\n            return StepPasteOutcome.NotCopied;\n        }",
+    "replace": "        monitor.SuppressNext();\n        if (!string.IsNullOrEmpty(clip.Content))\n        {\n            await interaction.CopyTextAsync(clip.Content);\n        }",
+    "filter": "FullyQualifiedName~HotkeyClipActionsTests.StepPaste_|FullyQualifiedName~ClipboardPipelineGuardTests"
+  },
+  {
+    "id": "recapture-keeps-pending-delete",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-13. Capture dedupes onto a row whose delete is pending, so without withdrawing it the undo-window commit deletes the copy the user just made, from the list and the database, with no undo left.",
+    "find": "        WithdrawPendingDelete(clip.Id);\n\n        if (!TryGetOptimisticInsertIndex(clip, out var targetIndex))",
+    "replace": "        if (Environment.ProcessorCount < 0) WithdrawPendingDelete(clip.Id);\n\n        if (!TryGetOptimisticInsertIndex(clip, out var targetIndex))",
+    "filter": "FullyQualifiedName~RecopyDuringUndoWindow"
+  },
+  {
+    "id": "exit-cancels-pending-deletes",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-14 / S41. Cancelling instead of committing pending deletes on exit brings a clip the user was told was deleted - a password, say - back on the next launch and into every backup.",
+    "find": "        var ids = _pendingDeletes.Keys.ToArray();",
+    "replace": "        var ids = _pendingDeletes.Keys.Take(0).ToArray();",
+    "filter": "FullyQualifiedName~DeleteThenQuitWithinUndoWindow"
+  },
+  {
+    "id": "embedding-save-ignores-sensitivity",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-17. The save must refuse a clip flagged sensitive since its claim, whatever path raised the flag; otherwise a vector derived from secret content is stored at rest.",
+    "find": "WHERE EXISTS (SELECT 1 FROM clips WHERE id = $id AND is_sensitive = 0 AND embedding_status = 'processing')",
+    "replace": "WHERE EXISTS (SELECT 1 FROM clips WHERE id = $id AND embedding_status = 'processing')",
+    "filter": "FullyQualifiedName~EmbeddingSensitivityTests"
+  },
+  {
+    "id": "embedding-save-ignores-claim",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-17. A vector for a clip no longer claimed (excluded, released, rerun) belongs to a batch nobody is waiting for; saving it stores stale or forbidden vectors.",
+    "find": "WHERE EXISTS (SELECT 1 FROM clips WHERE id = $id AND is_sensitive = 0 AND embedding_status = 'processing')",
+    "replace": "WHERE EXISTS (SELECT 1 FROM clips WHERE id = $id AND is_sensitive = 0)",
+    "filter": "FullyQualifiedName~EmbeddingSensitivityTests"
+  },
+  {
+    "id": "ocr-sensitive-keeps-vector",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-17. An OCR pass that marks an embedded image sensitive must purge its vector and exclude it, as marking it sensitive by hand does.",
+    "find": "                        UPDATE clips SET is_sensitive = 1, embedding_status = 'excluded' WHERE id = $id;\n                        DELETE FROM clip_embeddings WHERE clip_id = $id;",
+    "replace": "                        UPDATE clips SET is_sensitive = 1 WHERE id = $id;",
+    "filter": "FullyQualifiedName~EmbeddingSensitivityTests.OcrResult"
+  },
+  {
+    "id": "regex-default-engine-backtracking",
+    "file": "Clipthrough/Models/AppSettings.cs",
+    "why": "OD-7 / S38. The default engine must be NonBacktracking, which cannot hang; defaulting to backtracking puts every user back on the engine a nested quantifier can stall.",
+    "find": "    public RegexSearchEngine RegexSearchEngine { get; init; } = RegexSearchEngine.NonBacktracking;",
+    "replace": "    public RegexSearchEngine RegexSearchEngine { get; init; } = RegexSearchEngine.Backtracking;",
+    "filter": "FullyQualifiedName~RegexSearchEngineTests.TheDefaultEngineIsNonBacktracking"
+  },
+  {
+    "id": "regex-backtracking-without-timeout",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-11. Without the match timeout, (a+)+$ over a 41-character near-miss runs for good on the backtracking engine, spinning a core.",
+    "find": "            return new Regex(searchText, options | RegexOptions.Compiled, BacktrackingRegexTimeout);",
+    "replace": "            return new Regex(searchText, options | RegexOptions.Compiled, BacktrackingRegexTimeout > TimeSpan.Zero ? Regex.InfiniteMatchTimeout : BacktrackingRegexTimeout);",
+    "filter": "FullyQualifiedName~RegexSearchEngineTests.NestedQuantifiers_OnTheBacktrackingEngine"
+  },
+  {
+    "id": "regex-engine-setting-ignored",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "OD-7. If the store ignores the filters' engine, the setting does nothing: backreferences never work, or nested quantifiers hang, depending on which engine is hard-wired.",
+    "find": "            return [BuildSearchRegex(filters.SearchText, filters.CaseSensitive, filters.RegexEngine)];",
+    "replace": "            return [BuildSearchRegex(filters.SearchText, filters.CaseSensitive, RegexSearchEngine.NonBacktracking)];",
+    "filter": "FullyQualifiedName~RegexSearchEngineTests"
+  },
+  {
+    "id": "regex-timeout-swallowed-as-no-match",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-11 / S38. A regex that times out must be reported as too slow; treating it as 'no match' shows a truncated list as if it were the answer.",
+    "find": "            throw new SearchPatternException(SearchPatternProblem.TooSlow, ex);",
+    "replace": "            _ = ex;",
+    "filter": "FullyQualifiedName~RegexSearchEngineTests.NestedQuantifiers_OnTheBacktrackingEngine|FullyQualifiedName~ASlowRegexOnTheBacktrackingEngine"
+  },
+  {
+    "id": "superseded-search-not-cancelled",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-11. Refreshes run one at a time; without cancelling a search the user has moved on from, a slow one holds every later refresh - including clearing the search box - behind it.",
+    "find": "            else\n            {\n                CancelSupersededSearch();\n            }",
+    "replace": "            else\n            {\n                if (Environment.ProcessorCount < 0) CancelSupersededSearch();\n            }",
+    "filter": "FullyQualifiedName~ASupersededSearch_IsCancelled"
+  },
+  {
+    "id": "search-changes-dropped-while-refreshing",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-11. Through RefreshCommand, a query change made while a refresh is running is dropped (a ReactiveCommand cannot execute while executing), so the list stays on a query the user already left.",
+    "find": "                .Subscribe(unit => { _ = RefreshReportingErrorsAsync(); }, ex => ReportError(\"Search refresh subscription\", ex)));",
+    "replace": "                .Where(_ => Environment.ProcessorCount >= 0 || RefreshReportingErrorsAsync() is null).InvokeCommand(RefreshCommand));",
+    "filter": "FullyQualifiedName~ASupersededSearch_IsCancelled"
+  },
+  {
+    "id": "preview-import-not-reused",
+    "file": "Clipthrough/Controls/RichDocumentView.cs",
+    "why": "F-47. Identical content must reuse the import it already has; otherwise re-selecting a heavy clip pays the whole import again.",
+    "find": "            if (string.Equals(_lastImportMarkup, content, StringComparison.Ordinal) && _lastImportFormat == format)",
+    "replace": "            if (string.Equals(_lastImportMarkup, content, StringComparison.Ordinal) && _lastImportFormat != _lastImportFormat)",
+    "filter": "FullyQualifiedName~RichDocumentImportHeadlessTests.TheSameContentAgain"
+  },
+  {
+    "id": "preview-import-per-trigger",
+    "file": "Clipthrough/Controls/RichDocumentView.cs",
+    "why": "F-47. Markup and ContentFormat each start a render. Rendering on each trigger instead of once per turn imports the intermediate state too (new format, old markup) - an input reuse cannot catch - so one selection imports twice, the doubled import seen live.",
+    "find": "        if (_scheduledRender is not null)\n        {\n            // Already scheduled for this turn; it reads the latest values.\n            return;\n        }",
+    "replace": "        if (_scheduledRender is null)\n        {\n            _pendingRender = RenderContentAsync();\n            return;\n        }",
+    "filter": "FullyQualifiedName~RichDocumentImportHeadlessTests.OneSelectionChangingMarkupAndFormat"
+  },
+  {
+    "id": "preview-imports-run-side-by-side",
+    "file": "Clipthrough/Controls/RichDocumentView.cs",
+    "why": "F-47. A timed-out import keeps running; starting the next selection's import beside it is how memory compounded with every copy. At most one import may be in flight.",
+    "find": "                if (!_lastImport.IsCompleted)",
+    "replace": "                if (_lastImport.IsCompleted && !_lastImport.IsCompleted)",
+    "filter": "FullyQualifiedName~RichDocumentImportHeadlessTests.SelectionChangesDuringASlowImport"
+  },
+  {
+    "id": "markdown-to-html-unguarded",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "why": "F-48. Without the pre-scan, Markdown -> HTML on 8 KB of '[' overflows the importer's stack: exit 0xC00000FD, which no handler can catch - the whole app dies.",
+    "find": "        if (!Presentation.ImportGuards.IsSafeToImport(input))\n        {\n            return input;\n        }\n\n        try",
+    "replace": "        if (input.Length < 0)\n        {\n            return input;\n        }\n\n        try",
+    "filter": "FullyQualifiedName~TransformCrashGuardTests.MarkdownToHtml_OnDeeplyNested"
+  },
+  {
+    "id": "import-guard-ignores-nesting",
+    "file": "Clipthrough/Presentation/ImportGuards.cs",
+    "why": "F-48. The unbroken-run rule alone does not bound depth: '[ ' repeated, or nested blockquotes, pass it and still recurse.",
+    "find": "            && NestingDepth(content, MaxNestingDepth) <= MaxNestingDepth;",
+    "replace": "            && MaxNestingDepth > 0;",
+    "filter": "FullyQualifiedName~TransformCrashGuardTests.RefusalReason"
+  },
+  {
+    "id": "nesting-scan-fooled-by-stray-end-tags",
+    "file": "Clipthrough/Presentation/ImportGuards.cs",
+    "why": "A parser ignores a stray end tag. Letting </p> cancel an open tag hides arbitrarily deep <template> nesting from the scan.",
+    "find": "                        if (i + 2 < content.Length && IsNestingElement(content, i + 2))",
+    "replace": "                        if (i + 2 < content.Length)",
+    "filter": "FullyQualifiedName~TransformCrashGuardTests.NestingDepth_IsNotFooledByStrayEndTags"
+  },
+  {
+    "id": "transform-refusal-not-reported",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-48. A converter that declined to run must say why; otherwise the user sees an unexplained no-op.",
+    "find": "            if (refusal is not null)\n            {\n                StatusText = refusal;\n            }",
+    "replace": "            if (refusal is not null)\n            {\n                _ = refusal;\n            }",
+    "filter": "FullyQualifiedName~RowTransform_MarkdownToHtmlOnTooDeepInput"
+  },
+  {
+    "id": "hydration-keeps-stale-full-content",
+    "file": "Clipthrough/ViewModels/ClipItemViewModel.cs",
+    "why": "F-50. FullContent is memoised and read on selection before hydration lands; without clearing it, a rich clip keeps its plain-text fallback, so the clip a restart selects previews as one flattened paragraph.",
+    "find": "                _fullContent = null;\n                _previewThumbnailLoaded = false;",
+    "replace": "                _previewThumbnailLoaded = false;",
+    "filter": "FullyQualifiedName~AfterARestart_TheAutoSelectedRichClipPreviewsItsMarkup"
+  },
+  {
+    "id": "suppression-forgets-content",
+    "file": "Clipthrough/Services/Capture/ClipboardSuppressionGate.cs",
+    "why": "F-52. Count-only suppression swallows one notification per write; a redirector re-publishing the write (rdpclip over Remote Desktop) raises a second, so every paste is captured again and step-paste reorders the list.",
+    "find": "        return hash is not null\n            && _clock() <= expiresAt\n            && string.Equals(hash, Hash(content), StringComparison.Ordinal);",
+    "replace": "        return hash is not null && hash is null && _clock() <= expiresAt;",
+    "filter": "FullyQualifiedName~ClipboardSuppressionGateTests|FullyQualifiedName~ClipboardRepublishTests"
+  },
+  {
+    "id": "suppression-content-never-expires",
+    "file": "Clipthrough/Services/Capture/ClipboardSuppressionGate.cs",
+    "why": "F-52. The remembered self-write must expire with the window; otherwise the user re-copying the same text later is silently not captured.",
+    "find": "        return hash is not null\n            && _clock() <= expiresAt\n            && string.Equals(hash, Hash(content), StringComparison.Ordinal);",
+    "replace": "        return hash is not null\n            && expiresAt == expiresAt\n            && string.Equals(hash, Hash(content), StringComparison.Ordinal);",
+    "filter": "FullyQualifiedName~ClipboardSuppressionGateTests.TheSameContentAfterTheWindow"
+  },
+  {
+    "id": "writer-arms-without-content",
+    "file": "Clipthrough/Services/System/ClipClipboardWriter.cs",
+    "why": "F-52. The shared writer is how most pastes reach the clipboard; arming without the text written leaves their re-publish unrecognised.",
+    "find": "        monitor.SuppressNext(content);",
+    "replace": "        monitor.SuppressNext(content is null ? null : null);",
+    "filter": "FullyQualifiedName~ClipClipboardWriterTests.TheSuppressionCarriesTheTextBeingWritten"
+  },
+  {
+    "id": "markdown-to-html-export-returns-to-caller-thread",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "why": "VellumText 0.8's import is async; the export after it is synchronous. Resuming on the caller's context runs that export on the UI thread - the freeze the async import exists to remove.",
+    "find": ".ImportAsync(input, cancellationToken).ConfigureAwait(false);\n            var html",
+    "replace": ".ImportAsync(input, cancellationToken).ConfigureAwait(true);\n            var html",
+    "filter": "FullyQualifiedName~MarkdownTransformationTests.Conversion_CompletesWithoutTheCallersThread"
+  },
+  {
+    "id": "html-to-markdown-export-returns-to-caller-thread",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "why": "The HTML -> Markdown half of the same contract: the synchronous Markdown export must not be marshalled back to the UI thread that awaited the import.",
+    "find": ".ImportAsync(input, cancellationToken).ConfigureAwait(false);\n            var markdown",
+    "replace": ".ImportAsync(input, cancellationToken).ConfigureAwait(true);\n            var markdown",
+    "filter": "FullyQualifiedName~MarkdownTransformationTests.Conversion_CompletesWithoutTheCallersThread"
+  },
+  {
+    "id": "apply-async-drops-html-to-markdown",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "why": "The converters are dispatched by ApplyAsync, not by the synchronous switch, which returns its input for anything it does not list. Losing the dispatch arm makes HTML -> Markdown a silent no-op.",
+    "find": "            Models.TextTransformation.HtmlToMarkdown => HtmlToMarkdownAsync(input, cancellationToken),",
+    "replace": "            Models.TextTransformation.HtmlToMarkdown => input.Length < 0 ? HtmlToMarkdownAsync(input, cancellationToken) : Task.FromResult(input),",
+    "filter": "FullyQualifiedName~MarkdownTransformationTests.HtmlToMarkdown_ConvertsEmphasisAndHeadings"
+  },
+  {
+    "id": "apply-async-drops-markdown-to-html",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "why": "Same for Markdown -> HTML: without its dispatch arm the synchronous switch returns the input unchanged and the transform reports 'no change'.",
+    "find": "            Models.TextTransformation.MarkdownToHtml => MarkdownToHtmlAsync(input, cancellationToken),",
+    "replace": "            Models.TextTransformation.MarkdownToHtml => input.Length < 0 ? MarkdownToHtmlAsync(input, cancellationToken) : Task.FromResult(input),",
+    "filter": "FullyQualifiedName~MarkdownTransformationTests.MarkdownToHtml_ConvertsEmphasisAndHeadings"
+  },
+  {
+    "id": "preview-viewer-accepts-paste",
+    "file": "Clipthrough/Controls/RichDocumentView.cs",
+    "why": "VellumText 0.8 refuses a paste on a read-only editor before reading the clipboard. Our side of that is IsReadOnly; without it a paste imports another application's markup into the preview and lands.",
+    "find": "            IsReadOnly = true,\n            IsSelectionToolbarEnabled = false,",
+    "replace": "            IsReadOnly = false,\n            IsSelectionToolbarEnabled = false,",
+    "filter": "FullyQualifiedName~RichDocumentInteractionHeadlessTests.PasteIntoTheRenderedPreview_IsRefusedBeforeAnythingIsImported"
+  },
+  {
+    "id": "source-url-opened-as-a-path",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-20. Opening a clip's source URL with OpenPathAsync ShellExecutes whatever the content says - a UNC path leaks NetNTLM, a local script runs - and never opens a real https link.",
+    "find": "            await _systemInteractionService.OpenUrlAsync(url);\n            StatusText = $\"Opened {url}\";",
+    "replace": "            await _systemInteractionService.OpenPathAsync(url);\n            StatusText = $\"Opened {url}\";",
+    "filter": "FullyQualifiedName~OpenSourceUrl_UsesTheSchemeCheckedOpener"
+  },
+  {
+    "id": "update-feed-pinned-to-host-only",
+    "file": "Clipthrough/Services/System/UpdateService.cs",
+    "why": "F-38. A host-only allow-list accepts any GitHub account's releases as the update feed; the pin has to be to this repository's path.",
+    "find": "        if (!s_allowedFeedPrefixes.Any(prefix => (normalized + \"/\").StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))",
+    "replace": "        if (!s_allowedFeedPrefixes.Any(prefix => string.Equals(new Uri(prefix).Host, uri.Host, StringComparison.OrdinalIgnoreCase)))",
+    "filter": "FullyQualifiedName~UpdateServiceTests.ResolveFeedUrl_AFeedOutsideThisRepositoryIsRejected"
+  },
+  {
+    "id": "clipangel-accepts-any-clips-object",
+    "file": "Clipthrough/Services/Storage/ClipAngelImportService.cs",
+    "why": "F-21. Without requiring Clips to be a real table, a crafted file decides what the import reads - a view runs the author's SQL on the bundled SQLite.",
+    "find": "            if (!string.Equals(clipsType, \"table\", StringComparison.Ordinal) || viewsAndTriggers != 0)",
+    "replace": "            if (clipsType == \"view\" && viewsAndTriggers != 0)",
+    "filter": "FullyQualifiedName~ClipAngelImportHardeningTests"
+  },
+  {
+    "id": "clipangel-allows-views-and-triggers",
+    "file": "Clipthrough/Services/Storage/ClipAngelImportService.cs",
+    "why": "F-21. A real ClipAngel database has no views or triggers; allowing them lets attacker-written SQL run during the import.",
+    "find": "            if (!string.Equals(clipsType, \"table\", StringComparison.Ordinal) || viewsAndTriggers != 0)",
+    "replace": "            if (!string.Equals(clipsType, \"table\", StringComparison.Ordinal) || viewsAndTriggers < 0)",
+    "filter": "FullyQualifiedName~ClipAngelImportHardeningTests.ATriggerAnywhereInTheSchema"
+  },
+  {
+    "id": "history-opt-out-format-ignored",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "why": "F-03. Without honouring CanIncludeInClipboardHistory = 0, passwords copied from Chrome, Edge and Bitwarden are captured, indexed and kept.",
+    "find": "        return BitConverter.ToInt32(value, 0) == 0;",
+    "replace": "        return value.Length < 0;",
+    "filter": "FullyQualifiedName~ClipboardHistoryOptOutTests"
+  },
+  {
+    "id": "history-opt-out-setting-ignored",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "why": "OD-10b / S39. The opt-out is behind a setting; ignoring it removes the user's way to turn the behaviour off.",
+    "find": "        if (!honorHistoryOptOut\n",
+    "replace": "        if (honorHistoryOptOut && !honorHistoryOptOut\n",
+    "filter": "FullyQualifiedName~ClipboardHistoryOptOutTests.OptedOutContent_IsCaptured_WhenTheSettingIsOff"
+  },
+  {
+    "id": "history-opt-out-setting-not-saved",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "OD-10b. A setting the dialog shows but never saves leaves the user believing they turned the opt-out off.",
+    "find": "            HonorClipboardHistoryOptOut = Settings.HonorClipboardHistoryOptOut,\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~TheHistoryOptOutSetting_IsSaved"
+  },
+  {
+    "id": "tool-copies-are-ordinary-exports",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "F-18. A tool copy written as a full export lands in Documents (often OneDrive-synced) with a metadata.json of the raw content, and outlives the session.",
+    "find": "        => ExportCoreAsync(clip, _sessionRoot, includeMetadata: false, cancellationToken);\n",
+    "replace": "        => ExportAsync(clip, cancellationToken);\n",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AToolCopy_LandsInTheSessionFolder"
+  },
+  {
+    "id": "tool-copies-survive-exit",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "F-18. Session working copies of possibly sensitive clips must not outlive the session.",
+    "find": "        TryDeleteDirectory(_sessionRoot);\n    }\n",
+    "replace": "        _ = _sessionRoot;\n    }\n",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AToolCopy_LandsInTheSessionFolder"
+  },
+  {
+    "id": "crashed-session-tool-copies-are-kept",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "F-18. A session that crashed never ran Dispose; the next start is the only chance to remove its copies.",
+    "find": "        RemoveAbandonedSessionFolders();\n",
+    "replace": "        if (_sessionRoot.Length < 0) RemoveAbandonedSessionFolders();\n",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AFolderLeftByAProcessThatIsGone"
+  },
+  {
+    "id": "open-in-editor-writes-an-export",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-18. Open in editor is a working copy, not an export the user asked to keep.",
+    "find": "        var exportResult = await _clipExportService.ExportForToolAsync(SelectedClip.Clip);\n",
+    "replace": "        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);\n",
+    "filter": "FullyQualifiedName~OpenInEditor_UsesASessionToolCopy"
+  },
+  {
+    "id": "compare-writes-an-export",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-18. Compare writes working copies of both clips, not exports.",
+    "find": "        var left = await _clipExportService.ExportForToolAsync(checkedClips[0].Clip);\n",
+    "replace": "        var left = await _clipExportService.ExportAsync(checkedClips[0].Clip);\n",
+    "filter": "FullyQualifiedName~Compare_UsesSessionToolCopies"
+  },
+  {
+    "id": "sensitive-export-is-not-confirmed",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-18 / OD-3a. Exporting a sensitive clip writes plaintext that outlives its lifetime; the user must choose it knowingly.",
+    "find": "        if (SelectedClip.Clip.IsSensitive\n            && (ConfirmAsync is null\n",
+    "replace": "        if (SelectedClip.Clip.IsSensitive && !SelectedClip.Clip.IsSensitive\n            && (ConfirmAsync is null\n",
+    "filter": "FullyQualifiedName~ExportingASensitiveClip_AsksFirst|FullyQualifiedName~ExportingASensitiveClip_WithNoWayToAsk"
+  },
+  {
+    "id": "backups-keep-sensitive-clips",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "F-19 / OD-4a. A backup is kept for a week; a sensitive clip copied into it outlives its lifetime there.",
+    "find": "                    PurgeSensitiveClips(tempPath, password);\n",
+    "replace": "                    if (Environment.ProcessorCount < 0) PurgeSensitiveClips(tempPath, password);\n",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests"
+  },
+  {
+    "id": "backup-purge-leaves-free-pages",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "F-19. Deleted rows stay readable in free pages and in un-merged FTS segments until the copy is optimized and vacuumed.",
+    "find": "        if (removed > 0)\n        {\n            if (HasTable(connection, \"clips_fts\"))\n",
+    "replace": "        if (removed < 0)\n        {\n            if (HasTable(connection, \"clips_fts\"))\n",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WithTheLifetimeOn_TheDailyBackup_HoldsNoSensitiveClip"
+  },
+  {
+    "id": "backup-purge-keeps-vectors",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "F-19. The vector and rule matches go by the schema's ON DELETE CASCADE, which SQLite ignores unless the connection turns foreign keys on.",
+    "find": "SqliteOpenMode.ReadWrite, pooling: false, foreignKeys: true);",
+    "replace": "SqliteOpenMode.ReadWrite, pooling: false, foreignKeys: false);",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WithTheLifetimeOn_TheDailyBackup_HoldsNoSensitiveClip"
+  },
+  {
+    "id": "startup-backup-precedes-expiry",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-19 / OD-4a. The startup backup ran before the first expiry, copying clips that outlived their lifetime while the app was closed.",
+    "find": "                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n",
+    "replace": "                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n",
+    "filter": "FullyQualifiedName~StartupExpiresSensitiveClips_BeforeTakingTheDailyBackup"
+  },
+  {
+    "id": "backup-purge-ignores-the-lifetime-setting",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "OD-4a owner decision. With the sensitive lifetime off the user keeps sensitive clips; purging them from backups would lose them on restore.",
+    "find": "                    if (_settingsService?.Current.EnableSensitiveClipLifetime == true)\n",
+    "replace": "                    if (_settingsService?.Current.EnableSensitiveClipLifetime == true || _settingsService?.Current.EnableSensitiveClipLifetime != true)\n",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WithTheLifetimeOff_TheDailyBackup_KeepsSensitiveClips"
+  },
+  {
+    "id": "connection-factory-loses-the-cipher-key",
+    "file": "Clipthrough/Database/SqliteConnectionFactory.cs",
+    "why": "U-C8/U-C9. Every installed encrypted library must open through the factory; a connection that misses the key fails with error 26 and reads as a wrong password.",
+    "find": "            builder.Password = password;\n",
+    "replace": "            _ = password;\n",
+    "filter": "FullyQualifiedName~SqlCipherFixtureCompatibilityTests"
+  },
+  {
+    "id": "secure-delete-not-enabled",
+    "file": "Clipthrough/Database/SqliteConnectionFactory.cs",
+    "why": "U-C4b / F-19. Without secure_delete a deleted or expired clip stays readable in a free page of a plaintext library, and in every copy of the file.",
+    "find": "            cmd.CommandText = \"PRAGMA busy_timeout = 5000; PRAGMA secure_delete = ON;\";",
+    "replace": "            cmd.CommandText = \"PRAGMA busy_timeout = 5000;\";",
+    "filter": "FullyQualifiedName~SecureDeleteTests"
+  },
+  {
+    "id": "move-leaves-target-sidecars",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "F-01. Setting aside only the target's main file leaves its -wal beside the moved library; SQLite replays the foreign WAL on the next open and the user's history reads back as the old target's rows, with the source already deleted.",
+    "find": "                foreach (var suffix in new[] { string.Empty, \"-wal\", \"-shm\" })\n                {\n                    var existing = newPath + suffix;",
+    "replace": "                foreach (var suffix in new[] { string.Empty })\n                {\n                    var existing = newPath + suffix;",
+    "filter": "FullyQualifiedName~StorageLifecycleTests.PathMove_"
+  },
+  {
+    "id": "rekey-keys-with-raw-password",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "F-02. Keying and verifying with the raw new password while the session (and every later unlock) uses the trimmed one locks the user out of the whole history after a rekey to a passphrase ending in a space.",
+    "find": "        var newKey = StorageOptions.NormalizePassword(newPassword);",
+    "replace": "        var newKey = newPassword ?? string.Empty;",
+    "filter": "FullyQualifiedName~StorageLifecycleTests.Rekey_NewPasswordWithEdgeWhitespace"
+  },
+  {
+    "id": "rekey-dialog-accepts-edge-whitespace",
+    "file": "Clipthrough/Views/RekeyDialog.axaml.cs",
+    "why": "OD-12a / S42. The dialog must refuse a new password with leading or trailing whitespace instead of letting the service trim it silently, so the key on disk is always exactly what the user typed.",
+    "find": "            && (char.IsWhiteSpace(newPassword[0]) || char.IsWhiteSpace(newPassword[^1])))",
+    "replace": "            && (char.IsWhiteSpace(newPassword[0]) && !char.IsWhiteSpace(newPassword[0])))",
+    "filter": "FullyQualifiedName~RekeyDialogValidationTests"
+  },
+  {
+    "id": "rekey-skips-backups",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "F-15. Without re-keying the backups, every restore point Settings lists from before a rekey (or before encryption was turned on) fails with 'unreadable or requires a different password', and turning encryption on leaves the history in plaintext beside it.",
+    "find": "                await Task.Run(() => DatabaseBackupService.RekeyBackups(dbPath, currentKey, newKey), CancellationToken.None);",
+    "replace": "                await Task.CompletedTask;",
+    "filter": "FullyQualifiedName~StorageLifecycleTests.Rekey_BackupTakenBefore|FullyQualifiedName~StorageLifecycleTests.Rekey_PlaintextBackup"
+  },
+  {
+    "id": "storage-json-written-in-place",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "F-22. Rewriting storage.json in place truncates it first, so a crash, power loss or full disk mid-save leaves a torn file and the next start opens the default library instead of the user's.",
+    "find": "        await AtomicFile.WriteAllTextAsync(_configPath, JsonSerializer.Serialize(document, JsonOptions), cancellationToken);",
+    "replace": "        await File.WriteAllTextAsync(_configPath, JsonSerializer.Serialize(document, JsonOptions), cancellationToken);",
+    "filter": "FullyQualifiedName~StorageLifecycleTests.SavingStorage_"
+  },
+  {
+    "id": "torn-storage-json-recovered-silently",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "F-22. A torn storage.json must be set aside and reported; falling back to the default library silently drops the remembered password, keeps no copy, and lets the next save overwrite the evidence.",
+    "find": "            LoadFault = QuarantineUnreadableConfig(ex);",
+    "replace": "            LoadFault = Environment.ProcessorCount < 0 ? QuarantineUnreadableConfig(ex) : null;",
+    "filter": "FullyQualifiedName~StorageLifecycleTests.TornStorageJson"
+  },
+  {
+    "id": "storage-load-fault-not-shown",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-22. The storage load fault is only worth recording if the user is told: otherwise they are on the default library with no idea why their history is gone.",
+    "find": "                _notificationService.PublishError(AppText.StorageLoadFailedTitle, storageFault);",
+    "replace": "                Trace.TraceWarning(storageFault);",
+    "filter": "FullyQualifiedName~InitializeAsync_WhenStorageConfigWasUnreadable_TellsTheUser"
+  },
+  {
+    "id": "busy-timeout-pragma-reimplemented",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "F-28 / guard R7. A second copy of the busy_timeout pragma is how the copies drifted before (f450d9a left it out and failed with 'database is locked'); the source scan must catch one reappearing.",
+    "find": "        await ExecuteNonQueryAsync(connection, \"PRAGMA journal_mode = WAL;\", cancellationToken);\n",
+    "replace": "        await ExecuteNonQueryAsync(connection, \"PRAGMA journal_mode = WAL;\", cancellationToken);\n        await ExecuteNonQueryAsync(connection, \"PRAGMA busy_timeout = 5000;\", cancellationToken);\n",
+    "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
+  },
+  {
+    "id": "connection-built-outside-the-factory",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "F-28 / guard R7. A connection built by hand skips the factory's busy_timeout; the source scan must catch one reappearing.",
+    "find": "            using var connection = Clipthrough.Database.SqliteConnectionFactory.Create(dbPath, password: null, SqliteOpenMode.ReadOnly);\n",
+    "replace": "            using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath, Mode = SqliteOpenMode.ReadOnly }.ToString());\n",
+    "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
+  },
+  {
+    "id": "embedding-worker-starts-while-paused",
+    "file": "Clipthrough/Services/Search/EmbeddingWorker.cs",
+    "why": "F-23. A settings save during a rekey, move, restore or import must not start the embedding worker while the database is meant to be quiet.",
+    "find": "            if (_pauseCount > 0) return;\n",
+    "replace": "            if (_pauseCount < 0) return;\n",
+    "filter": "FullyQualifiedName~WhilePaused|FullyQualifiedName~EmbeddingWorkerLifetimeTests"
+  },
+  {
+    "id": "semantic-off-skipped-while-paused",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-23. A paused worker reports not running; guarding the stop on IsRunning drops a 'turn semantic search off' made during a pause, and the release restarts the worker against the setting.",
+    "find": "                        await worker.StopAsync().ConfigureAwait(false);\n                    }\n",
+    "replace": "                        if (worker.IsRunning) await worker.StopAsync().ConfigureAwait(false);\n                    }\n",
+    "filter": "FullyQualifiedName~WhilePaused"
+  },
+  {
+    "id": "maintenance-scope-restores-its-entry-snapshot",
+    "file": "Clipthrough/Services/Storage/DatabaseMaintenanceScope.cs",
+    "why": "F-23. The scope stopped the worker and restored what it saw on entry, so a setting changed during the operation was undone and a start during it was not held.",
+    "find": "            if (embeddingWorker is IPausableWorker pausable)\n",
+    "replace": "            if (embeddingWorker is IPausableWorker pausable && pausable is null)\n",
+    "filter": "FullyQualifiedName~EmbeddingWorkerLifetimeTests"
+  },
+  {
+    "id": "dropped-image-stored-verbatim",
+    "file": "Clipthrough/Services/Capture/DragDropService.cs",
+    "why": "F-43. A dropped JPEG/GIF/WebP/BMP stored verbatim is then exported as .png and sent to the AI as image/png.",
+    "find": "                ContentBytes = png,\n",
+    "replace": "                ContentBytes = png.Length >= 0 ? bytes : png,\n",
+    "filter": "FullyQualifiedName~DragDropImageEncodingTests"
+  },
+  {
+    "id": "clipangel-import-builds-its-own-connection",
+    "file": "Clipthrough/Services/Storage/ClipAngelImportService.cs",
+    "why": "Guard R7 across C and G/U-C9. Phase C's ClipAngel validation opened its own connection and set busy_timeout itself; once G and U-C9 made the factory the only place a connection is built, that copy bypassed it. The source scan must catch it coming back.",
+    "find": "var conn = Clipthrough.Database.SqliteConnectionFactory.Create(path, password: null, SqliteOpenMode.ReadOnly, pooling: false);",
+    "replace": "var conn = new SqliteConnection($\"Data Source={path};Mode=ReadOnly;Pooling=False\");",
+    "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
+  },
+  {
+    "id": "batch-capture-keeps-the-caller-offset",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-35. Timestamps are compared as text; an imported row that keeps its local offset sorts and expires wrong by that offset.",
+    "find": "            var capturedAt = (request.CapturedAtOverride?.ToUniversalTime() ?? DateTimeOffset.UtcNow).ToString(\"O\", CultureInfo.InvariantCulture);\n",
+    "replace": "            var capturedAt = (request.CapturedAtOverride ?? DateTimeOffset.UtcNow).ToString(\"O\", CultureInfo.InvariantCulture);\n",
+    "filter": "FullyQualifiedName~ImportedTimestampTests"
+  },
+  {
+    "id": "single-capture-keeps-the-caller-offset",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-35. The single-clip capture path (InsertClipAsync, behind CaptureAsync) takes the same override and must store it as UTC too.",
+    "find": "\n        var capturedAt = (request.CapturedAtOverride?.ToUniversalTime() ?? DateTimeOffset.UtcNow).ToString(\"O\", CultureInfo.InvariantCulture);\n",
+    "replace": "\n        var capturedAt = (request.CapturedAtOverride ?? DateTimeOffset.UtcNow).ToString(\"O\", CultureInfo.InvariantCulture);\n",
+    "filter": "FullyQualifiedName~ImportedTimestampTests"
+  },
+  {
+    "id": "utc-backfill-rewrites-nothing",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "F-35. Rows imported before the boundary fix keep their offset until the backfill rewrites them.",
+    "find": "                        && parsed.Offset != TimeSpan.Zero)\n",
+    "replace": "                        && parsed.Offset != TimeSpan.Zero && parsed.Offset == TimeSpan.Zero)\n",
+    "filter": "FullyQualifiedName~ImportedTimestampTests"
+  },
+  {
+    "id": "search-history-recorded-on-every-refresh",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-36 / OD-9b. Recording on refresh stores every pause-separated prefix of a query; history is recorded only when the user commits to a search.",
+    "find": "            if (sw is not null) Trace.TraceInformation($\"[refresh-timing] ui-applied={applied} @ {sw.ElapsedMilliseconds}ms\");\n",
+    "replace": "            if (sw is not null) Trace.TraceInformation($\"[refresh-timing] ui-applied={applied} @ {sw.ElapsedMilliseconds}ms\");\n            if (applied && !string.IsNullOrWhiteSpace(request.Filters.SearchText))\n            {\n                await _searchHistoryService.SaveSearchAsync(request.Filters.SearchText).ConfigureAwait(false);\n            }\n",
+    "filter": "FullyQualifiedName~TypingWithPauses_RecordsNothing"
+  },
+  {
+    "id": "storage-doc-drops-a-clips-column",
+    "file": ".github/copilot-cli-skills/clipthrough-storage-schema.md",
+    "why": "F-42 / R4. The table had silently omitted four columns, among them sensitivity_scanned_at, the one an INSERT path must not forget. Every clips column must have a row.",
+    "find": "| `sensitivity_is_manual` | INTEGER | 0/1. The user marked or unmarked the clip by hand, so a rule change must not re-derive `is_sensitive`. |\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~EveryClipsColumn_IsDocumented_AndNothingElse"
+  },
+  {
+    "id": "storage-doc-ocr-status-says-done",
+    "file": ".github/copilot-cli-skills/clipthrough-storage-schema.md",
+    "why": "F-42 / R4. The doc said ocr_status was pending/done/failed; the code never writes 'done', so a query written from the doc matched nothing.",
+    "find": "| `ocr_status`          | TEXT    | NULL (never queued), `pending`, `running`, `succeeded`, `failed`, `rerun`. |",
+    "replace": "| `ocr_status`          | TEXT    | NULL (never queued), `pending`, `running`, `done`, `failed`, `rerun`. |",
+    "filter": "FullyQualifiedName~TheDocumentedStatusValues_AreTheOnesTheCodeUses"
+  },
+  {
+    "id": "agents-doc-names-a-missing-settings-interface",
+    "file": "AGENTS.md",
+    "why": "F-42 / R4. AGENTS.md named IAppSettingsService, Data/ClipSchema.cs and s_transformMenuEntries long after all three had gone; an agent followed them to code that was not there.",
+    "find": "- **Settings**: `ISettingsService` loads/saves",
+    "replace": "- **Settings**: `IAppSettingsService` loads/saves",
+    "filter": "FullyQualifiedName~AgentDocReferenceTests"
+  },
+  {
+    "id": "password-warning-claims-plaintext-storage",
+    "file": "Clipthrough/Localization/AppText.cs",
+    "why": "F-42. The remembered password is DPAPI-protected or not persisted at all; the label told users it was saved as plaintext, steering them away from a safe feature.",
+    "find": "\"⚠ Saved in storage.json encrypted for your Windows account (DPAPI) so the database can unlock on startup.",
+    "replace": "\"⚠ Saved as plaintext in storage.json encrypted for your Windows account (DPAPI) so the database can unlock on startup.",
+    "filter": "FullyQualifiedName~PasswordStorageLabelTests"
+  },
+  {
+    "id": "rekey-dialog-label-is-a-plaintext-literal",
+    "file": "Clipthrough/Views/RekeyDialog.axaml",
+    "why": "F-42. The three password labels were AXAML literals, which is how the false plaintext claim escaped the AppText rule; a literal must not come back.",
+    "find": "Content=\"{x:Static loc:AppText.RekeyRememberNewPassword}\" />",
+    "replace": "Content=\"Remember new password (saved as plaintext in storage.json)\" />",
+    "filter": "FullyQualifiedName~ThePasswordViews_HoldNoPlaintextClaimOfTheirOwn"
+  },
+  {
+    "id": "cipher-recipe-dropped",
+    "file": "Clipthrough/Database/SqliteConnectionFactory.cs",
+    "why": "U-C9. Without the recipe SQLite3 Multiple Ciphers uses its default cipher: every installed library fails with error 26 (read as a wrong password) and a new one is written in a format no SQLCipher build reads.",
+    "find": "        return uri.Append('?').Append(CipherRecipe).ToString();",
+    "replace": "        return CipherRecipe.Length > 0 ? uri.ToString() : CipherRecipe;",
+    "filter": "FullyQualifiedName~SqlCipherFixtureCompatibilityTests|FullyQualifiedName~ANewEncryptedLibrary_IsWrittenAsSqlCipher4"
+  },
+  {
+    "id": "cipher-recipe-without-legacy",
+    "file": "Clipthrough/Database/SqliteConnectionFactory.cs",
+    "why": "U-C9. cipher=sqlcipher without legacy=4 is a different on-disk scheme the SQLCipher 4.5.2 build cannot read; it would make adoption one-way and rollback impossible. Killed by the independent page-1 decryption, not by a string compare.",
+    "find": "    internal const string CipherRecipe = \"cipher=sqlcipher&legacy=4\";",
+    "replace": "    internal const string CipherRecipe = \"cipher=sqlcipher\";",
+    "filter": "FullyQualifiedName~ANewEncryptedLibrary_IsWrittenAsSqlCipher4|FullyQualifiedName~SqlCipherFixtureCompatibilityTests"
+  },
+  {
+    "id": "cipher-recipe-only-for-keyed-connections",
+    "file": "Clipthrough/Database/SqliteConnectionFactory.cs",
+    "why": "U-C9. Encrypting a plaintext library opens it without a key and rekeys it; that connection needs the recipe too, or the new key is applied with the default cipher.",
+    "find": "            DataSource = DataSourceFor(path),",
+    "replace": "            DataSource = string.IsNullOrEmpty(password) ? path : DataSourceFor(path),",
+    "filter": "FullyQualifiedName~EncryptingAPlaintextWalLibrary_WritesSqlCipher4_AndKeepsItInWal"
+  },
+  {
+    "id": "rekey-encrypts-plaintext-in-wal",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "U-C9. SQLite3 Multiple Ciphers refuses PRAGMA rekey on a plaintext file in WAL mode, and the live library runs in WAL; encrypting it has to switch the copy to a rollback journal first.",
+    "find": "                ExecuteScalarText(copy, \"PRAGMA journal_mode = DELETE;\");\n",
+    "replace": "                _ = copy;\n",
+    "filter": "FullyQualifiedName~EncryptingAPlaintextWalLibrary_WritesSqlCipher4_AndKeepsItInWal|FullyQualifiedName~Rekey_PlaintextLibrary_BecomesEncryptedAndKeepsEverything"
+  },
+  {
+    "id": "rekey-leaves-the-copy-out-of-wal",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "U-C9. Journal mode is a property of the file: an encrypted copy left in DELETE mode becomes the live library and silently loses WAL concurrency for background workers.",
+    "find": "            if (restoreWal)\n",
+    "replace": "            if (restoreWal && !restoreWal)\n",
+    "filter": "FullyQualifiedName~EncryptingAPlaintextWalLibrary_WritesSqlCipher4_AndKeepsItInWal"
+  },
+  {
+    "id": "rekey-copy-is-not-rekeyed",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "U-C9. The rekey pragma is now the only step that changes the key, in every direction; without it decrypting leaves the copy encrypted.",
+    "find": "            ExecuteScalarText(copy, $\"PRAGMA rekey = '{EscapeSqlLiteral(newKey)}';\");\n",
+    "replace": "            _ = EscapeSqlLiteral(newKey);\n",
+    "filter": "FullyQualifiedName~DecryptingAnEncryptedWalLibrary_WritesPlaintext_AndKeepsItInWal"
+  },
+  {
+    "id": "a-test-builds-its-own-connection",
+    "file": "Clipthrough.Tests/TestConnections.cs",
+    "why": "U-C9. A test that builds its own keyed connection creates a library in the wrong cipher, reads it back and passes; the guard must see the test tree, not only shipping code.",
+    "find": "/// hand-built connection in tests too.",
+    "replace": "/// hand-built connection in tests too. new SqliteConnection(",
+    "filter": "FullyQualifiedName~TestsGetTheirConnectionsFromTheFactory_Too"
+  },
+  {
+    "id": "welcome-close-guards-on-raise-result",
+    "why": "RaiseAndSetIfChanged returns the new value, not a changed flag, so guarding on it returns early whenever the welcome screen closes. IsMainWorkspaceVisible is never raised and the window stays blank after Create library (audit F-46).",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "find": "            if (_isWelcomeOpen == value)\n            {\n                return;\n            }\n\n            this.RaiseAndSetIfChanged(ref _isWelcomeOpen, value);",
+    "replace": "            if (!this.RaiseAndSetIfChanged(ref _isWelcomeOpen, value))\n            {\n                return;\n            }",
+    "filter": "FullyQualifiedName~MainWorkspaceVisibilityHeadlessTests.CreatingTheLibraryFromTheWelcomeScreen_ShowsTheWorkspace"
+  },
+  {
+    "id": "password-prompt-close-guards-on-raise-result",
+    "why": "Same misuse on the password prompt: closing it after a correct password returns before IsMainWorkspaceVisible is raised, so every manual unlock of an encrypted library leaves the window blank (audit F-46).",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "find": "            if (_isPasswordPromptOpen == value)\n            {\n                return;\n            }\n\n            this.RaiseAndSetIfChanged(ref _isPasswordPromptOpen, value);",
+    "replace": "            if (!this.RaiseAndSetIfChanged(ref _isPasswordPromptOpen, value))\n            {\n                return;\n            }",
+    "filter": "FullyQualifiedName~MainWorkspaceVisibilityHeadlessTests.UnlockingWithTheCorrectPassword_ShowsTheWorkspace"
+  },
+  {
+    "id": "welcome-keeps-the-workspace-min-width",
+    "why": "Applies the workspace's 1100 DIP minimum to the welcome screen again. On a work area narrower than that, even a maximized window is laid out at 1100 DIP and Create library is drawn off-screen (audit F-49).",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "find": "            <Setter Property=\"MinWidth\" Value=\"480\" />",
+    "replace": "            <Setter Property=\"MinWidth\" Value=\"1100\" />",
+    "filter": "FullyQualifiedName~WelcomeNarrowWorkAreaHeadlessTests.OnANarrowWorkArea_CreateLibraryIsOnScreenAndTabReachable"
+  },
+  {
+    "id": "welcome-content-stops-tracking-the-viewport",
+    "why": "Without a finite width the sideways-scrolling welcome content is measured at infinity, wrapped text stops wrapping, and it scrolls sideways (2010 DIP in a 1282 DIP viewport) even at the default window size.",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "find": "                          Width=\"{Binding $parent[ScrollViewer].Viewport.Width}\">",
+    "replace": "                          >",
+    "filter": "FullyQualifiedName~WelcomeNarrowWorkAreaHeadlessTests.AtTheDefaultSize_TheWelcomeContentDoesNotScrollSideways"
+  },
+  {
+    "id": "settings-mirror-ignores-a-missing-database",
+    "why": "Mirrors settings into a database that does not exist yet. On every first run that logs 'Legacy settings mirror save failed: SQLite Error 14' to the user, or creates an empty database file when the folder already exists (audit F-51). The extra clause keeps DatabaseExists referenced while making the guard never return.",
+    "file": "Clipthrough/Services/Storage/SettingsService.cs",
+    "find": "        if (!_connectionFactory.DatabaseExists)",
+    "replace": "        if (!_connectionFactory.DatabaseExists && settings is null)",
+    "filter": "FullyQualifiedName~SettingsLegacyMirrorFirstRunTests"
+  },
+  {
+    "id": "window-fit-keeps-the-requested-width",
+    "why": "Keeps the requested width on a narrower working area: the window is laid out wider than the screen and right-aligned controls are off it (audit F-49).",
+    "file": "Clipthrough/Views/WindowGeometry.cs",
+    "find": "            Math.Max(minClientSize.Width, Math.Min(clientSize.Width, availableWidth)),",
+    "replace": "            Math.Max(minClientSize.Width, Math.Max(clientSize.Width, availableWidth)),",
+    "filter": "FullyQualifiedName~WindowGeometryTests|FullyQualifiedName~WindowFitHeadlessTests"
+  },
+  {
+    "id": "window-fit-ignores-the-minimum",
+    "why": "Fits a window below its minimum size; Avalonia then lays it out at the minimum anyway, so the fitted geometry and the real one disagree.",
+    "file": "Clipthrough/Views/WindowGeometry.cs",
+    "find": "            Math.Max(minClientSize.Height, Math.Min(clientSize.Height, availableHeight)));",
+    "replace": "            Math.Max(0 * minClientSize.Height, Math.Min(clientSize.Height, availableHeight)));",
+    "filter": "FullyQualifiedName~WindowGeometryTests.TheMinimumWins"
+  },
+  {
+    "id": "caret-placement-treats-dip-as-pixels",
+    "why": "Sizes the frame at scaling 1 when placing it beside the caret. On a 250% screen a 576 DIP window is treated as 576 px and lands hundreds of DIP past the right edge.",
+    "file": "Clipthrough/Views/WindowGeometry.cs",
+    "find": "        var outer = OuterPixels(clientSize, frameExtra, screen.Scaling);",
+    "replace": "        var outer = OuterPixels(clientSize, frameExtra, screen.Scaling > 0 ? 1.0 : screen.Scaling);",
+    "filter": "FullyQualifiedName~WindowGeometryTests.NearTheCaret|FullyQualifiedName~WindowFitHeadlessTests.NearTheCaret"
+  },
+  {
+    "id": "caret-placement-never-flips-above",
+    "why": "Opens the window below the caret even when there is no room, so it is pushed up over the caret by the clamp rather than placed above it.",
+    "file": "Clipthrough/Views/WindowGeometry.cs",
+    "find": "        if (y + outer.Height > screen.WorkingArea.Bottom)",
+    "replace": "        if (y + outer.Height > screen.WorkingArea.Bottom && caret.X < int.MinValue + 1)",
+    "filter": "FullyQualifiedName~WindowGeometryTests.NearTheCaret_NoRoomBelow"
+  },
+  {
+    "id": "restore-ignores-the-screen-it-was-on",
+    "why": "Always restores onto the primary screen, so a window left on a second monitor jumps to the first on every start.",
+    "file": "Clipthrough/Views/WindowGeometry.cs",
+    "find": "            .FirstOrDefault() ?? screens[0];",
+    "replace": "            .FirstOrDefault() is null ? screens[0] : screens[0];",
+    "filter": "FullyQualifiedName~WindowGeometryTests.ARememberedWindowGoesBackToTheScreenItWasOn"
+  },
+  {
+    "id": "dpi-change-is-not-refitted",
+    "why": "Ignores ScalingChanged: a window dragged onto a 250% monitor keeps its DIP size and runs off it.",
+    "file": "Clipthrough/Views/WindowFitter.cs",
+    "find": "            => Dispatcher.UIThread.Post(() => Fit(window, onlyIfTooLarge: true), DispatcherPriority.Background);",
+    "replace": "            => Dispatcher.UIThread.Post(() => _ = window, DispatcherPriority.Background);",
+    "filter": "FullyQualifiedName~WindowFitHeadlessTests.ADpiChange"
+  },
+  {
+    "id": "screen-change-is-not-refitted",
+    "why": "Ignores a change of monitors: a window on an unplugged monitor stays where no screen shows it.",
+    "file": "Clipthrough/Views/WindowFitter.cs",
+    "find": "            => Dispatcher.UIThread.Post(() => Fit(window), DispatcherPriority.Background);",
+    "replace": "            => Dispatcher.UIThread.Post(() => _ = window, DispatcherPriority.Background);",
+    "filter": "FullyQualifiedName~WindowFitHeadlessTests.UnpluggingTheMonitor"
+  },
+  {
+    "id": "main-window-is-not-refitted-on-show",
+    "why": "Skips the fit when the window opens, including when it comes back from the tray onto a screen that shrank while it was hidden.",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "find": "        WindowFitter.Fit(this);",
+    "replace": "        _ = this;",
+    "filter": "FullyQualifiedName~WindowFitHeadlessTests.ShowingFromTheTray|FullyQualifiedName~WindowFitHeadlessTests.OnOpen"
+  },
+  {
+    "id": "settings-is-not-fitted",
+    "why": "Settings opens at 960x720 on a 576 DIP screen with Save and Cancel off it.",
+    "file": "Clipthrough/Views/SettingsWindow.axaml.cs",
+    "find": "        WindowFitter.Attach(this);",
+    "replace": "        _ = this;",
+    "filter": "FullyQualifiedName~WindowFitHeadlessTests.Settings_|FullyQualifiedName~SettingsNarrowHeadlessTests"
+  },
+  {
+    "id": "rekey-is-not-fitted",
+    "why": "Re-encrypt opens taller than a 1280x720 laptop at 150%, with its buttons below the screen.",
+    "file": "Clipthrough/Views/RekeyDialog.axaml.cs",
+    "find": "        WindowFitter.Attach(this);",
+    "replace": "        _ = this;",
+    "filter": "FullyQualifiedName~WindowFitHeadlessTests.ReEncrypt"
+  },
+  {
+    "id": "narrow-breakpoint-never-applies",
+    "why": "Keeps the list and preview side by side on a portrait screen, squeezing both below usable widths.",
+    "file": "Clipthrough/Views/WorkspaceBreakpoints.cs",
+    "find": "    public const double NarrowBelowWidth = 760;",
+    "replace": "    public const double NarrowBelowWidth = 0;",
+    "filter": "FullyQualifiedName~ResponsiveWorkspaceHeadlessTests"
+  },
+  {
+    "id": "short-breakpoint-never-applies",
+    "why": "Keeps the footer, counters and six search modifiers on a 1280x720 laptop at 150%, leaving no room for the clip list.",
+    "file": "Clipthrough/Views/WorkspaceBreakpoints.cs",
+    "find": "    public const double ShortBelowHeight = 600;",
+    "replace": "    public const double ShortBelowHeight = 0;",
+    "filter": "FullyQualifiedName~ResponsiveWorkspaceHeadlessTests"
+  },
+  {
+    "id": "window-min-height-back-to-640",
+    "why": "Restores the old 640 DIP minimum height: on a 1280x720 laptop at 150% the window lays out taller than the screen and Create library and Unlock are below it (audit F-49).",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "find": "            <Setter Property=\"MinHeight\" Value=\"360\" />",
+    "replace": "            <Setter Property=\"MinHeight\" Value=\"640\" />",
+    "filter": "FullyQualifiedName~WelcomeNarrowWorkAreaHeadlessTests|FullyQualifiedName~ResponsiveWorkspaceHeadlessTests"
+  },
+  {
+    "id": "toasts-back-at-the-top",
+    "why": "Puts toasts back at the top-right, where they cover the type toggles for as long as they show.",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "find": "                VerticalAlignment=\"Bottom\"\n                Margin=\"0,0,16,16\"",
+    "replace": "                VerticalAlignment=\"Top\"\n                Margin=\"0,16,16,0\"",
+    "filter": "FullyQualifiedName~ResponsiveWorkspaceHeadlessTests.Toasts_"
+  },
+  {
+    "id": "search-box-is-not-capped",
+    "why": "Lets the search box grow without limit on a 2560+ DIP screen (B18).",
+    "file": "Clipthrough/Views/MainWindow.Layout.cs",
+    "find": "                heroRow.ColumnDefinitions[1].MaxWidth = WorkspaceBreakpoints.SearchMaxWidth;",
+    "replace": "                heroRow.ColumnDefinitions[1].MaxWidth = double.PositiveInfinity + (WorkspaceBreakpoints.SearchMaxWidth * 0);",
+    "filter": "FullyQualifiedName~ResponsiveWorkspaceHeadlessTests.Ultrawide"
+  },
+  {
+    "id": "preview-is-not-capped",
+    "why": "Lets the preview grow to 2200 DIP lines on an ultrawide screen (B18).",
+    "file": "Clipthrough/Views/MainWindow.Layout.cs",
+    "find": "                split.ColumnDefinitions[2].MaxWidth = WorkspaceBreakpoints.PreviewMaxWidth;",
+    "replace": "                split.ColumnDefinitions[2].MaxWidth = double.PositiveInfinity + (WorkspaceBreakpoints.PreviewMaxWidth * 0);",
+    "filter": "FullyQualifiedName~ResponsiveWorkspaceHeadlessTests.Ultrawide"
+  },
+  {
+    "id": "narrow-preview-not-below-the-list",
+    "why": "Puts the preview in the same cell as the list in Narrow, drawing one over the other.",
+    "file": "Clipthrough/Views/MainWindow.Layout.cs",
+    "find": "                Place(preview, 2, 0);",
+    "replace": "                Place(preview, 0, 0);",
+    "filter": "FullyQualifiedName~ResponsiveWorkspaceHeadlessTests.Narrow_"
+  },
+  {
+    "id": "wide-layout-changes-its-split",
+    "why": "Changes the Wide split from 1:2, which was meant to stay exactly as it always was.",
+    "file": "Clipthrough/Views/MainWindow.Layout.cs",
+    "find": "                    ? new ColumnDefinitions(\"*,6,2*\")",
+    "replace": "                    ? new ColumnDefinitions(\"2*,6,3*\")",
+    "filter": "FullyQualifiedName~ResponsiveWorkspaceHeadlessTests.Wide_"
+  },
+  {
+    "id": "search-options-do-not-change-the-search",
+    "why": "The Search options flyout shows the modifier but no longer sets it, so on a short screen the modifiers cannot be turned on at all.",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "find": "                                <CheckBox IsChecked=\"{Binding UseRegexSearch}\"",
+    "replace": "                                <CheckBox IsChecked=\"{Binding UseRegexSearch, Mode=OneWay}\"",
+    "filter": "FullyQualifiedName~ResponsiveWorkspaceHeadlessTests.SearchOptions_"
+  },
+  {
+    "id": "settings-hotkey-labels-do-not-wrap",
+    "why": "Hotkey labels stop wrapping, so on a portrait screen they run under their hotkey boxes (B11).",
+    "file": "Clipthrough/Views/SettingsWindow.axaml",
+    "find": "            <Setter Property=\"TextWrapping\" Value=\"Wrap\" />",
+    "replace": "            <Setter Property=\"TextWrapping\" Value=\"NoWrap\" />",
+    "filter": "FullyQualifiedName~SettingsNarrowHeadlessTests"
+  },
+  {
+    "id": "placement-is-not-saved-on-hide",
+    "why": "The window is hidden after every paste and to the tray; without a save there, its size is lost on the next start.",
+    "file": "Clipthrough/Views/MainWindow.Layout.cs",
+    "find": "        else if (change.Property == IsVisibleProperty && !IsVisible)",
+    "replace": "        else if (change.Property == IsVisibleProperty && !IsVisible && Content is null)",
+    "filter": "FullyQualifiedName~WindowPlacementHeadlessTests.Hiding"
+  },
+  {
+    "id": "placement-is-not-restored",
+    "why": "Ignores the remembered placement, so the window always opens at its 1360x860 default.",
+    "file": "Clipthrough/Views/MainWindow.Layout.cs",
+    "find": "        if (store?.Load() is not { } saved)",
+    "replace": "        if (store?.Load() is not { } saved || store is not null)",
+    "filter": "FullyQualifiedName~WindowPlacementHeadlessTests"
+  },
+  {
+    "id": "placement-records-the-maximized-size",
+    "why": "Remembers a maximized window's screen-sized bounds as its normal size, so un-maximizing after a restart does nothing.",
+    "file": "Clipthrough/Views/MainWindow.Layout.cs",
+    "find": "        if (WindowState == WindowState.Normal && IsVisible)",
+    "replace": "        if (IsVisible)",
+    "filter": "FullyQualifiedName~WindowPlacementHeadlessTests.HidingAMaximized"
+  },
+  {
+    "id": "placement-store-accepts-a-zero-size",
+    "why": "Loads a hand-edited or truncated window.json with a zero or negative size and opens the window at its minimum.",
+    "file": "Clipthrough/Services/System/WindowPlacementStore.cs",
+    "find": "            if (placement is null || !(placement.Width > 0) || !(placement.Height > 0))",
+    "replace": "            if (placement is null)",
+    "filter": "FullyQualifiedName~WindowPlacementStoreTests"
   }
 ]

@@ -127,17 +127,22 @@ public sealed class ClipRetentionTests
         var oldest = await CaptureAsync(scope, "oldest");
         var newest = await CaptureAsync(scope, "newest");
 
-        // Content alone fits the 1 MB cap twice over. The icons are what push the
-        // pair past it, so nothing is evicted unless they are counted.
+        // Content alone fits the 1 MB cap. The icon is what pushes the pair past it,
+        // so nothing is evicted unless it is counted - and since U-E1 both clips
+        // share one stored copy, so it counts once (2 x 400 KB + 300 KB > 1 MB).
         Execute(scope, "UPDATE clips SET byte_size = 400000;");
-        Execute(scope, $"UPDATE clips SET source_app_icon = zeroblob({300_000});");
+        var icon = new byte[300_000];
+        new Random(3).NextBytes(icon);
+        await scope.ClipStoreService.UpdateSourceAppIconAsync(oldest.Id, icon);
+        await scope.ClipStoreService.UpdateSourceAppIconAsync(newest.Id, icon);
 
         var result = await scope.ClipStoreService.ApplyMaintenanceAsync();
 
         Assert.Null(await scope.ClipStoreService.GetByIdAsync(oldest.Id));
         Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(newest.Id));
 
-        // And the size it reports is the size it evicted against.
+        // And the size it reports is the size it evicted against: the survivor's
+        // payload and the icon it still uses, once.
         Assert.Equal(400_000 + 300_000, result.TotalStoredBytes);
     }
 

@@ -17,9 +17,95 @@
         Icon="/Assets/avalonia-logo.ico"
         Title="{Binding WindowTitle}"
         Width="1360"
-        Height="860"
-        MinWidth="1100"
-        MinHeight="640">
+        Height="860">
+
+    <Window.Styles>
+        <!--
+          The window fits every screen down to 480x360 DIP (WorkspaceBreakpoints).
+          It used to hold the workspace at 1100x640, which on a portrait screen or
+          a 1280x720 laptop at 150% put half the workspace, "Create library" and
+          "Unlock" off-screen. Instead the layout reflows through the bp-* classes
+          MainWindow.Layout.cs sets from the client size; at 1100 DIP and wider
+          nothing changes. (audit F-49; docs/plans/2026-10-28-001)
+        -->
+        <Style Selector="Window">
+            <Setter Property="MinWidth" Value="480" />
+            <Setter Property="MinHeight" Value="360" />
+        </Style>
+
+        <Style Selector="Border.list-pane">
+            <Setter Property="MinWidth" Value="340" />
+        </Style>
+        <Style Selector="Border.preview-pane">
+            <Setter Property="MinWidth" Value="620" />
+        </Style>
+        <Style Selector="Window.bp-medium Border.list-pane">
+            <Setter Property="MinWidth" Value="260" />
+        </Style>
+        <Style Selector="Window.bp-medium Border.preview-pane">
+            <Setter Property="MinWidth" Value="360" />
+        </Style>
+        <Style Selector="Window.bp-narrow Border.list-pane, Window.bp-narrow Border.preview-pane">
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MinHeight" Value="120" />
+        </Style>
+
+        <!-- The caption already says Clipthrough; below Wide the search box needs the room. -->
+        <Style Selector="Window.bp-medium TextBlock#HeroTitle, Window.bp-narrow TextBlock#HeroTitle">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
+        <Style Selector="Window.bp-narrow Grid#HeroSearchHost">
+            <Setter Property="MinWidth" Value="0" />
+        </Style>
+        <Style Selector="Window.bp-medium Border#FilterSeparator, Window.bp-narrow Border#FilterSeparator">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
+        <Style Selector="Window.bp-medium TextBlock.filter-summary, Window.bp-narrow TextBlock.filter-summary">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
+        <Style Selector="Window.bp-medium Border.detail-stat-card, Window.bp-narrow Border.detail-stat-card">
+            <Setter Property="MinWidth" Value="150" />
+        </Style>
+        <Style Selector="Window.bp-narrow StackPanel#FooterStats">
+            <Setter Property="Orientation" Value="Vertical" />
+            <Setter Property="Spacing" Value="6" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+        </Style>
+
+        <!--
+          Short (under 600 DIP, e.g. 1280x720 at 150%): the clip list needs the
+          height more than the counters and meters do. The six search modifiers
+          collapse into the Search options button, and Settings and Logs stay
+          reachable from the File and View menus.
+        -->
+        <Style Selector="Button#SearchOptionsButton">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
+        <Style Selector="Window.bp-short Button#SearchOptionsButton">
+            <Setter Property="IsVisible" Value="True" />
+        </Style>
+        <Style Selector="Window.bp-short WrapPanel#SearchModifiers">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
+        <Style Selector="Window.bp-short Border.footer-panel, Window.bp-short Border.list-stats, Window.bp-short Border.preview-meta">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
+        <Style Selector="Window.bp-short TextBlock.preview-title">
+            <Setter Property="MaxLines" Value="1" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+
+        <!--
+          Narrow and short together (a window resized below 760x600) cannot
+          stack the list and the preview at any useful height, so they keep
+          one and scroll.
+        -->
+        <Style Selector="Window.bp-narrow.bp-short ScrollViewer#WorkspaceScroller">
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+        </Style>
+        <Style Selector="Window.bp-narrow.bp-short Grid#WorkspaceSplit">
+            <Setter Property="MinHeight" Value="520" />
+        </Style>    </Window.Styles>
 
     <Window.KeyBindings>
         <KeyBinding Gesture="Ctrl+I" Command="{Binding OpenAiPromptCommand}" />
@@ -91,13 +177,16 @@
                 Padding="12,8">
             <Grid RowDefinitions="Auto,Auto"
                   RowSpacing="6">
-            <Grid ColumnDefinitions="Auto,*,*"
+            <Grid x:Name="HeroSearchRow"
+                  ColumnDefinitions="Auto,*,*"
                   ColumnSpacing="10">
-                <TextBlock Classes="window-title"
+                <TextBlock x:Name="HeroTitle"
+                           Classes="window-title"
                            VerticalAlignment="Center"
                            Text="{Binding HeroTitle}" />
 
-                <Grid Grid.Column="1"
+                <Grid x:Name="HeroSearchHost"
+                      Grid.Column="1"
                       HorizontalAlignment="Stretch"
                       VerticalAlignment="Center"
                       MinWidth="360">
@@ -119,7 +208,8 @@
                     </primitives:Popup>
                 </Grid>
 
-                <UniformGrid Grid.Column="2"
+                <UniformGrid x:Name="HeroTypeSegments"
+                             Grid.Column="2"
                              Columns="5"
                              HorizontalAlignment="Stretch">
                     <ToggleButton Classes="segmented-left"
@@ -145,9 +235,10 @@
                 </UniformGrid>
             </Grid>
 
-            <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,*,Auto" ColumnSpacing="12">
+            <Grid x:Name="HeroFilterRow" Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,*,Auto" ColumnSpacing="12">
                 <!-- Category filters: which clips to show -->
-                <WrapPanel Grid.Column="0"
+                <WrapPanel x:Name="CategoryFilters"
+                           Grid.Column="0"
                            Orientation="Horizontal"
                            VerticalAlignment="Center"
                            ItemSpacing="8"
@@ -167,7 +258,8 @@
                               Content="{Binding PastedFilterLabel}" />
                 </WrapPanel>
 
-                <Border Grid.Column="1"
+                <Border x:Name="FilterSeparator"
+                        Grid.Column="1"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Stretch"
                         Width="1"
@@ -185,7 +277,8 @@
                           ToolTip.Tip="Sort order" />
 
                 <!-- Search modifier filters: how the search works -->
-                <WrapPanel Grid.Column="4"
+                <WrapPanel x:Name="SearchModifiers"
+                           Grid.Column="4"
                            Orientation="Horizontal"
                            VerticalAlignment="Center"
                            ItemSpacing="8"
@@ -217,51 +310,98 @@
                               ToolTip.Tip="{Binding SemanticFilterTooltip}"
                               Content="Semantic" />
                 </WrapPanel>
+
+                <!--
+                  Shown instead of the modifiers on a short window (bp-short). The
+                  same six bindings, so either place changes the one search.
+                -->
+                <Button x:Name="SearchOptionsButton"
+                        Grid.Column="4"
+                        Classes="secondary compact"
+                        VerticalAlignment="Center"
+                        Content="{x:Static loc:AppText.SearchOptionsButtonLabel}"
+                        ToolTip.Tip="{x:Static loc:AppText.SearchOptionsButtonTooltip}">
+                    <Button.Flyout>
+                        <Flyout Placement="BottomEdgeAlignedRight">
+                            <StackPanel x:Name="SearchOptionsPanel" Spacing="6">
+                                <CheckBox IsChecked="{Binding UseRegexSearch}"
+                                          ToolTip.Tip="{Binding RegexFilterTooltip}"
+                                          Content="{Binding RegexFilterLabel}" />
+                                <CheckBox IsChecked="{Binding CaseSensitiveSearch}"
+                                          ToolTip.Tip="{Binding CaseSensitiveFilterTooltip}"
+                                          Content="{Binding CaseSensitiveFilterLabel}" />
+                                <CheckBox IsChecked="{Binding UseWildcardSearch}"
+                                          ToolTip.Tip="{Binding WildcardFilterTooltip}"
+                                          Content="{Binding WildcardFilterLabel}" />
+                                <CheckBox IsChecked="{Binding WholeWordSearch}"
+                                          ToolTip.Tip="{Binding WholeWordFilterTooltip}"
+                                          Content="{Binding WholeWordFilterLabel}" />
+                                <CheckBox IsChecked="{Binding UseFuzzyClipSearch}"
+                                          ToolTip.Tip="{Binding FuzzyFilterTooltip}"
+                                          Content="Fuzzy" />
+                                <CheckBox IsChecked="{Binding UseSemanticClipSearch}"
+                                          IsEnabled="{Binding IsSemanticSearchEnabled}"
+                                          ToolTip.Tip="{Binding SemanticFilterTooltip}"
+                                          Content="Semantic" />
+                            </StackPanel>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
             </Grid>
             </Grid>
         </Border>
 
-        <Grid Grid.Row="2"
+        <!--
+          Scrolls only when the window is both narrow and short (resized below
+          760x600 DIP): the stacked list and preview cannot both fit, so they
+          keep a usable height and scroll instead of being squeezed to nothing.
+          Everywhere else scrolling is disabled, so the split is measured at
+          exactly the height it is given.
+        -->
+        <ScrollViewer x:Name="WorkspaceScroller"
+                      Grid.Row="2"
+                      HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Disabled">
+        <Grid x:Name="WorkspaceSplit"
+              Height="{Binding $parent[ScrollViewer].Viewport.Height}"
+              VerticalAlignment="Top"
               ColumnDefinitions="*,6,2*"
               ColumnSpacing="4">
-            <Border Grid.Column="0"
-                    Classes="surface-panel"
-                    MinWidth="340">
+            <Border x:Name="ClipListPane"
+                    Grid.Column="0"
+                    Classes="surface-panel list-pane">
                 <Grid RowDefinitions="Auto,*,Auto,Auto"
                       RowSpacing="10"
                       Margin="12">
-                    <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto"
-                          ColumnSpacing="4"
-                          HorizontalAlignment="Stretch">
+                    <!-- Wraps rather than running under the preview when the list pane is narrow. -->
+                    <WrapPanel x:Name="ListBulkActions"
+                               ItemSpacing="4"
+                               LineSpacing="4">
                         <Button Classes="secondary compact"
                                 VerticalAlignment="Center"
                                 Command="{Binding SelectAllClipsCommand}"
                                 Content="{Binding SelectAllButtonLabel}" />
                         <Button Classes="secondary compact"
-                                Grid.Column="1"
                                 VerticalAlignment="Center"
                                 Command="{Binding SelectNoClipsCommand}"
                                 Content="{Binding SelectNoneButtonLabel}" />
                         <Button Classes="secondary compact"
-                                 Grid.Column="2"
                                 VerticalAlignment="Center"
                                 Command="{Binding FavoriteCheckedClipsCommand}"
                                 IsEnabled="{Binding HasCheckedOrSelectedClip}"
                                 Content="{Binding FavoriteSelectedButtonLabel}" />
                         <Button Classes="secondary compact"
-                                 Grid.Column="3"
                                 VerticalAlignment="Center"
                                 Command="{Binding PinCheckedClipsCommand}"
                                 IsEnabled="{Binding HasCheckedOrSelectedClip}"
                                 ToolTip.Tip="Pin checked/selected clips to the top"
                                 Content="📌 Pin" />
                         <Button Classes="destructive compact"
-                                Grid.Column="4"
                                 VerticalAlignment="Center"
                                 Command="{Binding DeleteCheckedClipsCommand}"
                                 IsEnabled="{Binding HasCheckedOrSelectedClip}"
                                 Content="{Binding DeleteButtonLabel}" />
-                    </Grid>
+                    </WrapPanel>
 
                     <Grid Grid.Row="1">
                         <TextBlock Classes="empty-state"
@@ -565,7 +705,7 @@
                                  VerticalAlignment="Bottom" />
 
                     <Border Grid.Row="3"
-                            Classes="inset-panel"
+                            Classes="inset-panel list-stats"
                             Padding="8,6">
                         <WrapPanel Orientation="Horizontal"
                                    ItemSpacing="8"
@@ -618,14 +758,15 @@
                 </Grid>
             </Border>
 
-            <GridSplitter Grid.Column="1"
+            <GridSplitter x:Name="WorkspaceSplitter"
+                          Grid.Column="1"
                           ResizeDirection="Columns"
                           AutomationProperties.Name="{x:Static loc:AppText.SplitterAccessibleName}"
                           Width="6" />
 
-            <Border Grid.Column="2"
-                    Classes="surface-panel"
-                    MinWidth="620"
+            <Border x:Name="PreviewPane"
+                    Grid.Column="2"
+                    Classes="surface-panel preview-pane"
                     BorderBrush="{Binding SelectedClipAreaBorderBrush}"
                     BorderThickness="{Binding SelectedClipAreaBorderThickness}">
                 <Grid RowDefinitions="Auto,*,Auto"
@@ -638,7 +779,7 @@
                             <StackPanel Grid.Column="0" Spacing="4">
                                 <TextBlock Classes="panel-caption"
                                            Text="{Binding SelectedClipContentTypeText}" />
-                                <TextBlock Classes="panel-title"
+                                <TextBlock Classes="panel-title preview-title"
                                            Foreground="{Binding SelectedClipAccentBrush}"
                                            Text="{Binding SelectedClipTitleText}"
                                            TextWrapping="Wrap" />
@@ -998,7 +1139,7 @@
                     </Border>
 
                     <Border Grid.Row="2"
-                            Classes="inset-panel"
+                            Classes="inset-panel preview-meta"
                             Padding="10,6">
                         <WrapPanel Orientation="Horizontal"
                                    ItemSpacing="6"
@@ -1149,17 +1290,21 @@
                 </Grid>
             </Border>
         </Grid>
+        </ScrollViewer>
 
         <Border Grid.Row="3"
                 Classes="inset-panel footer-panel"
                 Padding="12,6">
-            <Grid ColumnDefinitions="Auto,*,Auto"
+            <Grid x:Name="FooterGrid"
+                  ColumnDefinitions="Auto,*,Auto"
                   ColumnSpacing="14"
+                  RowSpacing="6"
                   VerticalAlignment="Center">
-                <StackPanel Orientation="Horizontal"
+                <StackPanel x:Name="FooterStatus"
+                            Orientation="Horizontal"
                             Spacing="10"
                             VerticalAlignment="Center">
-                    <TextBlock Classes="body-muted"
+                    <TextBlock Classes="body-muted filter-summary"
                                VerticalAlignment="Center"
                                TextTrimming="CharacterEllipsis"
                                MaxWidth="300"
@@ -1188,7 +1333,8 @@
                     </Border>
                 </StackPanel>
 
-                <StackPanel Grid.Column="1"
+                <StackPanel x:Name="FooterStats"
+                            Grid.Column="1"
                             Orientation="Horizontal"
                             Spacing="16"
                             HorizontalAlignment="Center"
@@ -1236,7 +1382,8 @@
                     </Border>
                 </StackPanel>
 
-                <StackPanel Grid.Column="2"
+                <StackPanel x:Name="FooterActions"
+                            Grid.Column="2"
                             Orientation="Horizontal"
                             Spacing="8"
                             VerticalAlignment="Center">
@@ -1250,10 +1397,16 @@
             </Grid>
         </Border>
 
-        <Border Grid.RowSpan="3"
+        <!--
+          Bottom-right, above the footer: at the top they covered the type
+          toggles for as long as they were shown. The window's 480 DIP minimum
+          always leaves room for their 360.
+        -->
+        <Border x:Name="NotificationHost"
+                Grid.RowSpan="3"
                 HorizontalAlignment="Right"
-                VerticalAlignment="Top"
-                Margin="0,16,16,0"
+                VerticalAlignment="Bottom"
+                Margin="0,0,16,16"
                 IsHitTestVisible="True">
             <ItemsControl ItemsSource="{Binding Notifications}">
                 <ItemsControl.ItemTemplate>
@@ -1321,11 +1474,23 @@
                                TextWrapping="Wrap" />
                 </StackPanel>
 
+                <!--
+                  Scrolls sideways too: on a narrow work area the content keeps
+                  the 1024 DIP it had at the old 1100 window minimum instead of
+                  being squeezed beside the fixed left column. Above that it
+                  tracks the viewport, so text still wraps and nothing scrolls
+                  at ordinary sizes. The footer stays outside, so "Create
+                  library" is always within the window. (audit F-49)
+                -->
                 <ScrollViewer Grid.Row="1"
-                              HorizontalScrollBarVisibility="Disabled">
-                    <Grid ColumnDefinitions="340,*"
-                          ColumnSpacing="24">
-                        <StackPanel Spacing="14">
+                              HorizontalScrollBarVisibility="Auto">
+                    <Grid x:Name="WelcomeColumns"
+                          ColumnDefinitions="340,*"
+                          ColumnSpacing="24"
+                          RowSpacing="14"
+                          MinWidth="1024"
+                          Width="{Binding $parent[ScrollViewer].Viewport.Width}">
+                        <StackPanel x:Name="WelcomeInfoColumn" Spacing="14">
                             <Border Classes="surface-panel"
                                     Padding="18">
                                 <StackPanel Spacing="10">
@@ -1347,7 +1512,8 @@
                             </Border>
                         </StackPanel>
 
-                        <StackPanel Grid.Column="1"
+                        <StackPanel x:Name="WelcomeFormColumn"
+                                    Grid.Column="1"
                                     Spacing="14">
                             <Border Classes="surface-panel"
                                     Padding="18">
@@ -1389,7 +1555,7 @@
                                                    FontSize="11" />
                                         <CheckBox Content="{Binding SettingsShowPasswordLabel}"
                                                   IsChecked="{Binding IsDatabasePasswordVisible}" />
-                                        <CheckBox Content="Remember password (saved as plaintext in storage.json)"
+                                        <CheckBox Content="{x:Static loc:AppText.SettingsRememberDatabasePassword}"
                                                   IsChecked="{Binding SettingsRememberDatabasePassword, Mode=TwoWay}"
                                                   IsVisible="{Binding SettingsDatabasePassword, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                                         <TextBlock Classes="body-muted"
@@ -1489,6 +1655,13 @@
                 Margin="10"
                 Classes="hero-surface"
                 Padding="28">
+            <!--
+              Scrolls on a short work area (1280x720 at 150% leaves about 400
+              DIP) so Unlock stays reachable; the panel inside keeps the
+              viewport's height so the prompt is still centred when it fits.
+            -->
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <Panel MinHeight="{Binding $parent[ScrollViewer].Viewport.Height}">
             <Grid RowDefinitions="Auto,*,Auto"
                   RowSpacing="18"
                   MaxWidth="480"
@@ -1542,22 +1715,46 @@
                             Content="Unlock" />
                 </Grid>
             </Grid>
+            </Panel>
+            </ScrollViewer>
         </Border>
 
-        <!-- Loading Database Overlay -->
+        <!-- Loading Database Overlay. On the first start after an upgrade it
+             shows the stage and, where the stage knows it, how far it has got. -->
         <Border IsVisible="{Binding IsLoadingDatabase}"
                 Margin="10"
                 Classes="hero-surface"
                 Padding="28">
             <StackPanel HorizontalAlignment="Center"
                         VerticalAlignment="Center"
+                        MaxWidth="480"
                         Spacing="16">
                 <TextBlock Classes="hero-title"
                            HorizontalAlignment="Center"
+                           IsVisible="{Binding !IsUpgradingLibrary}"
                            Text="Loading Clipboard Library" />
-                <ProgressBar IsIndeterminate="True"
+                <TextBlock Name="LibraryUpgradeTitleTextBlock"
+                           Classes="hero-title"
+                           HorizontalAlignment="Center"
+                           IsVisible="{Binding IsUpgradingLibrary}"
+                           Text="{Binding LibraryUpgradeTitle}" />
+                <ProgressBar Name="LibraryUpgradeProgressBar"
+                             IsIndeterminate="{Binding IsLibraryUpgradeProgressIndeterminate}"
+                             Minimum="0"
+                             Maximum="100"
+                             Value="{Binding LibraryUpgradeProgressValue}"
                              Width="240"
                              HorizontalAlignment="Center" />
+                <TextBlock Name="LibraryUpgradeStageTextBlock"
+                           HorizontalAlignment="Center"
+                           IsVisible="{Binding IsUpgradingLibrary}"
+                           Text="{Binding LibraryUpgradeStageText}" />
+                <TextBlock Classes="body-muted"
+                           HorizontalAlignment="Center"
+                           TextAlignment="Center"
+                           IsVisible="{Binding IsUpgradingLibrary}"
+                           Text="{Binding LibraryUpgradeNote}"
+                           TextWrapping="Wrap" />
                 <TextBlock Classes="body-muted"
                            HorizontalAlignment="Center"
                            Text="{Binding StatusText}"

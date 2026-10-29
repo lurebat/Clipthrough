@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 using Clipthrough.Models;
 
@@ -51,7 +51,12 @@ public interface IClipboardMonitorService
     /// Suppresses the next clipboard change capture. Call before app-initiated clipboard writes
     /// to prevent the monitor from re-capturing content the app itself placed on the clipboard.
     /// </summary>
-    void SuppressNext();
+    /// <param name="content">
+    /// The text about to be written, when there is any. A later notification
+    /// carrying the same text within the suppression window is treated as a
+    /// re-publish of this write (Remote Desktop does that) and not captured.
+    /// </param>
+    void SuppressNext(string? content = null);
 
     /// <summary>
     /// Withdraws a suppression armed by <see cref="SuppressNext"/> when the write it was

@@ -49,7 +49,6 @@ public partial class App : Application
     private IAppNotificationService? _notificationService;
     private IUpdateService? _updateService;
     private IAiTransformService? _aiTransformService;
-    private Clipthrough.Services.Search.IEmbeddingWorker? _embeddingWorker;
     private Clipthrough.Services.Search.ISemanticIndexCoordinator? _semanticIndexCoordinator;
     private IDisposable? _notificationSubscription;
     private bool _isExitRequested;
@@ -96,7 +95,7 @@ public partial class App : Application
             _updateService = Services.GetRequiredService<IUpdateService>();
             _aiTransformService = Services.GetRequiredService<IAiTransformService>();
 
-            _mainWindow = desktop.MainWindow = new MainWindow(_systemInteractionService)
+            _mainWindow = desktop.MainWindow = new MainWindow(_systemInteractionService, Services.GetRequiredService<IWindowPlacementStore>())
             {
                 DataContext = mainWindowViewModel,
             };
@@ -110,8 +109,7 @@ public partial class App : Application
                 .ObserveOn(RxSchedulers.MainThreadScheduler)
                 .Subscribe(OnNotificationPublished);
 
-            _embeddingWorker = Services.GetRequiredService<Clipthrough.Services.Search.IEmbeddingWorker>();
-            // Don't start the embedding worker here — it's started in StartDatabaseAsync
+                // Don't start the embedding worker here — it's started in StartDatabaseAsync
             // after the DB is initialized and password is set. Connecting the pipeline is
             // independent of that: the coordinator only relays events.
             _semanticIndexCoordinator = Services.GetRequiredService<Clipthrough.Services.Search.ISemanticIndexCoordinator>();
@@ -235,6 +233,7 @@ public partial class App : Application
         services.AddSingleton<ISensitivityService, SensitivityService>();
         services.AddSingleton<ISettingsService, SettingsService>();
         services.AddSingleton<IAppNotificationService, AppNotificationService>();
+        services.AddSingleton<IWindowPlacementStore, WindowPlacementStore>();
         services.AddSingleton<ISessionLogService>(_ => SessionLogService.Instance);
         services.AddSingleton<ISystemInteractionService, SystemInteractionService>();
         services.AddSingleton<DatabaseInitializer>();
@@ -244,7 +243,6 @@ public partial class App : Application
         services.AddSingleton<IClipStoreService, ClipStoreService>();
         services.AddSingleton<IDatabaseBackupService, DatabaseBackupService>();
         services.AddSingleton<IClipAngelImportService, ClipAngelImportService>();
-        services.AddSingleton<IClipSampleDataService, ClipSampleDataService>();
         services.AddSingleton<IClipboardMonitorService, ClipboardMonitorService>();
         services.AddSingleton<IDragDropService, DragDropService>();
         services.AddSingleton<ICopilotAuthService, CopilotAuthService>();
@@ -372,6 +370,8 @@ public partial class App : Application
         _ = Services.GetService<IBackgroundOcrQueue>()?.StopAsync();
         _ = Services.GetService<Clipthrough.Services.Search.IEmbeddingWorker>()?.StopAsync();
         _updateService?.ApplyDownloadedUpdateOnExit();
+        // Removes this session's Open-in-editor / Compare working copies (OD-3a).
+        (Services.GetService<IClipExportService>() as IDisposable)?.Dispose();
         _trayIcon?.Dispose();
         _trayIcon = null;
 
@@ -696,7 +696,7 @@ public partial class App : Application
             // Deliberately NOT the shared writer: this hotkey exists to strip
             // formatting, so it copies the plain-text Content field whatever the
             // clip stored. Armed immediately before the write.
-            _clipboardMonitorService.SuppressNext();
+            _clipboardMonitorService.SuppressNext(clip.Content);
             await _systemInteractionService.CopyTextAsync(clip.Content);
             await _clipStoreService.MarkPastedAsync(clip.Id);
             await Task.Delay(PasteSettleDelayMs);
@@ -736,83 +736,29 @@ public partial class App : Application
             if (_mainWindow?.DataContext is MainWindowViewModel mvm
                 && mvm.HotkeyTargetClip is { } selected)
             {
-                clip = selected;
+                // A list row may carry only a prefix of its text (F-10); the
+                // transform saves its result, so read the whole clip.
+                clip = selected.IsContentTruncated
+                    ? await _clipStoreService.GetByIdAsync(selected.Id)
+                    : selected;
             }
             else
             {
                 clip = await _clipStoreService.GetClipAtOffsetAsync(0);
             }
-            if (clip is null || string.IsNullOrEmpty(clip.Content)) return;
+            if (clip is null) return;
 
-            var input = clip.Content;
-            string output;
-            var isHtmlOutput = false;
-
-            switch (parsed.Kind)
+            if (!await HotkeyClipActions.TransformAndCopyAsync(
+                    clip,
+                    parsed,
+                    binding.Gesture,
+                    _clipStoreService,
+                    _systemInteractionService,
+                    _clipboardMonitorService,
+                    _aiTransformService,
+                    _settingsService?.Current.AiPresets ?? Array.Empty<AiPreset>()))
             {
-                case CustomHotkeyKind.BuiltIn:
-                    if (!Enum.TryParse<TextTransformation>(name, ignoreCase: true, out var tx) || tx == TextTransformation.None)
-                    {
-                        Trace.TraceWarning($"Custom hotkey '{binding.Gesture}': unknown builtin transform '{name}'");
-                        return;
-                    }
-                    output = Clipthrough.Services.TextTransformationService.Apply(tx, input);
-                    isHtmlOutput = Clipthrough.Services.TextTransformationService.ProducesHtml(tx);
-                    break;
-                case CustomHotkeyKind.AiPreset:
-                {
-                    if (_aiTransformService is null || !_aiTransformService.IsConfigured) return;
-                    var preset = _settingsService?.Current.AiPresets.FirstOrDefault(p =>
-                        string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
-                    if (preset is null)
-                    {
-                        Trace.TraceWarning($"Custom hotkey '{binding.Gesture}': AI preset '{name}' not found");
-                        return;
-                    }
-                    output = await _aiTransformService.TransformAsync(preset.Prompt, input);
-                    break;
-                }
-                case CustomHotkeyKind.InlinePrompt:
-                {
-                    if (_aiTransformService is null || !_aiTransformService.IsConfigured) return;
-                    if (string.IsNullOrWhiteSpace(name)) return;
-                    output = await _aiTransformService.TransformAsync(name, input);
-                    break;
-                }
-                default:
-                    Trace.TraceWarning($"Custom hotkey '{binding.Gesture}': unknown target kind '{parsed.Token}'");
-                    return;
-            }
-
-            if (string.IsNullOrEmpty(output)) return;
-
-            // Persist the transformed result as a new clip
-            var outputBytes = System.Text.Encoding.UTF8.GetBytes(output);
-            await _clipStoreService.CaptureAsync(new ClipCaptureRequest
-            {
-                ContentBytes = outputBytes,
-                ContentText = output,
-                ContentType = isHtmlOutput ? ContentType.RichText : ContentType.Text,
-                ContentFormat = isHtmlOutput ? ClipContentFormat.Html : ClipContentFormat.PlainText,
-                SourceApp = clip.SourceApp,
-                SourceAppPath = clip.SourceAppPath,
-                SourceAppIconBytes = clip.SourceAppIconBytes,
-                SourceWindowTitle = clip.SourceWindowTitle,
-                IncrementExistingCopyCount = false,
-                SourceClipId = clip.Id,
-                TransformKind = $"{parsed.Token}:{name}",
-                SkipPostInsertMaintenance = true,
-            });
-
-            _clipboardMonitorService.SuppressNext();
-            if (isHtmlOutput)
-            {
-                var plain = Presentation.ClipDisplayFormatter.RenderRichContent(output);
-                await _systemInteractionService.CopyRichContentAsync(output, plain, ClipContentFormat.Html);
-            }
-            else
-            {
-                await _systemInteractionService.CopyTextAsync(output);
+                return;
             }
             if (binding.PasteAfter)
             {
@@ -936,21 +882,23 @@ public partial class App : Application
 
         try
         {
-            var clip = await _clipStoreService.GetClipAtOffsetAsync(offset);
-            if (clip is null)
+            var outcome = await HotkeyClipActions.CopyClipAtOffsetAsync(
+                offset,
+                _clipStoreService,
+                _systemInteractionService,
+                _clipboardMonitorService,
+                _settingsService?.Current.MaxClipSizeBytes);
+            if (outcome == HotkeyClipActions.StepPasteOutcome.NoClip)
             {
                 _incrementalPasteOffset = Math.Max(0, offset - 1);
                 return;
             }
 
-            _clipboardMonitorService.SuppressNext();
-
-            if (!string.IsNullOrEmpty(clip.Content))
+            if (outcome != HotkeyClipActions.StepPasteOutcome.Copied)
             {
-                await _systemInteractionService.CopyTextAsync(clip.Content);
+                Trace.TraceWarning($"Incremental paste: the clip at offset {offset} could not be copied; not pasting.");
+                return;
             }
-
-            await _clipStoreService.MarkPastedAsync(clip.Id);
 
             // Give the target window a moment to become ready and the clipboard
             // change to propagate before we synthesize the paste keystroke.
@@ -1029,45 +977,18 @@ public partial class App : Application
         });
     }
 
+    /// <summary>
+    /// Opens the window beside the text caret, on whichever screen the caret
+    /// is on. This used to mix units - the window's DIP width against pixel
+    /// screen bounds - and on a 250% screen placed it hundreds of DIP past the
+    /// right edge.
+    /// </summary>
     private void PositionWindowNearCaret(Window window)
     {
-        var caretPosition = _systemInteractionService?.GetCaretScreenPosition();
-        if (caretPosition is not { } caret)
+        if (_systemInteractionService?.GetCaretScreenPosition() is { } caret)
         {
-            return;
+            WindowFitter.PlaceNearCaret(window, caret);
         }
-
-        var screen = window.Screens.ScreenFromPoint(caret);
-        if (screen is null)
-        {
-            return;
-        }
-
-        var bounds = screen.WorkingArea;
-        var windowWidth = (int)window.Width;
-        var windowHeight = (int)window.Height;
-        if (windowWidth <= 0)
-        {
-            windowWidth = 800;
-        }
-
-        if (windowHeight <= 0)
-        {
-            windowHeight = 600;
-        }
-
-        // Position below and to the right of the caret, clamped to screen bounds
-        var x = Math.Min(caret.X, bounds.Right - windowWidth);
-        var y = caret.Y + 20;
-        if (y + windowHeight > bounds.Bottom)
-        {
-            y = caret.Y - windowHeight - 10;
-        }
-
-        x = Math.Max(bounds.X, x);
-        y = Math.Max(bounds.Y, y);
-
-        window.Position = new PixelPoint(x, y);
     }
 
     private void HideMainWindowToTray()
