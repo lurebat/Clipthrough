@@ -2611,8 +2611,8 @@
     "id": "html-to-markdown-mangles-plain-text",
     "why": "Converts everything rather than only markup, so ordinary prose containing angle brackets is run through the importer and comes back escaped - \"a < b\" becomes \"a \\\\< b\". This is the bug the first version of the probe actually had.",
     "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
-    "find": "        if (!LooksLikeHtml(input) || !Presentation.ImportGuards.IsSafeToImport(input))",
-    "replace": "        if ((LooksLikeHtml(input) && !LooksLikeHtml(input)) || !Presentation.ImportGuards.IsSafeToImport(input))",
+    "find": "        if (!LooksLikeHtml(input))",
+    "replace": "        if (LooksLikeHtml(input) && !LooksLikeHtml(input))",
     "filter": "FullyQualifiedName~MarkdownTransformationTests"
   },
   {
@@ -2798,14 +2798,6 @@
     "find": "                .Subscribe(unit => { _ = RefreshReportingErrorsAsync(); }, ex => ReportError(\"Search refresh subscription\", ex)));",
     "replace": "                .Where(_ => Environment.ProcessorCount >= 0 || RefreshReportingErrorsAsync() is null).InvokeCommand(RefreshCommand));",
     "filter": "FullyQualifiedName~ASupersededSearch_IsCancelled"
-  },
-  {
-    "id": "preview-span-prescreen-removed",
-    "file": "Clipthrough/Controls/RichDocumentView.cs",
-    "why": "F-47. Without the structural pre-screen, 1.2 KB of colspan=1000 rowspan=1000 cells reaches the importer and expands to tens of millions of grid slots - gigabytes, retained.",
-    "find": "        if (format == ClipContentFormat.Html && CountTableCells(content, MaxTableCells) > MaxTableCells)",
-    "replace": "        if (format == ClipContentFormat.Html && CountTableCells(content, MaxTableCells) < 0)",
-    "filter": "FullyQualifiedName~RichDocumentImportHeadlessTests.ASpanBomb"
   },
   {
     "id": "preview-import-not-reused",

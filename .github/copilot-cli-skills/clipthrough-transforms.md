@@ -36,8 +36,8 @@ All values live in the `Clipthrough.Models.TextTransformation` enum and are appl
 | Encoding   | `Base64Encode`              |                                                               |
 | Encoding   | `Base64Decode`              | Tolerates missing padding; returns input on bad payload       |
 | Tables     | `BoxTableToHtml`            | See below                                                     |
-| Convert    | `HtmlToMarkdown`            | Markup -> Markdown, via VellumText. Non-markup, and markup nested too deeply or with a >10,000-char unbroken run (`ImportGuards`), is returned unchanged. |
-| Convert    | `MarkdownToHtml`            | Markdown -> markup, via VellumText. Produces HTML. Input past `ImportGuards` is returned unchanged: deep nesting overflows the importer's stack (F-48). `RefusalReason` says why. |
+| Convert    | `HtmlToMarkdown`            | Markup -> Markdown, via VellumText. Non-markup is returned unchanged. No nesting refusal: VellumText 0.8 bounds deep markup itself (`HostileRichPayloadTests`). |
+| Convert    | `MarkdownToHtml`            | Markdown -> markup, via VellumText. Produces HTML. Input past `ImportGuards` is returned unchanged; on VellumText 0.7.0 deep nesting overflowed the importer's stack (F-48), and 0.8 survives it but returns a fragment, so the refusal stays for its message. `RefusalReason` says why. |
 
 ### `BoxTableToHtml` semantics
 

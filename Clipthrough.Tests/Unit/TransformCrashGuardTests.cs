@@ -18,9 +18,9 @@ namespace Clipthrough.Tests.Unit;
 /// <see cref="ChildEntry"/> - so an unguarded build fails the test by exit
 /// code instead of taking the test run down with it.
 ///
-/// HTML->Markdown has the same guard but no crash test: on VellumText 0.7.0
-/// its importer already survives the nesting (20,000 levels, exit 0), so a
-/// child-process test of it could not fail. Only its refusal is asserted.
+/// HTML->Markdown no longer has this guard: VellumText 0.8 converts deep
+/// markup without it, and HostileRichPayloadTests pins that in a child
+/// process. Its absence from RefusalReason is asserted here.
 /// </summary>
 public sealed class TransformCrashGuardTests
 {
@@ -102,10 +102,10 @@ public sealed class TransformCrashGuardTests
 
 
     [Fact]
-    public void RefusalReason_NamesTheRefusalOnlyForTheConvertersAndOnlyWhenTheyRefuse()
+    public void RefusalReason_NamesTheRefusalOnlyForMarkdownToHtmlAndOnlyWhenItRefuses()
     {
         Assert.Equal(Localization.AppText.TransformInputTooDeeplyNested, TextTransformationService.RefusalReason(TextTransformation.MarkdownToHtml, Brackets));
-        Assert.Equal(Localization.AppText.TransformInputTooDeeplyNested, TextTransformationService.RefusalReason(TextTransformation.HtmlToMarkdown, NestedTemplates));
+        Assert.Null(TextTransformationService.RefusalReason(TextTransformation.HtmlToMarkdown, NestedTemplates));
         Assert.Null(TextTransformationService.RefusalReason(TextTransformation.UpperCase, Brackets));
         Assert.Null(TextTransformationService.RefusalReason(TextTransformation.MarkdownToHtml, "# Title\n\nSome **bold** text."));
     }

@@ -74,67 +74,10 @@ public sealed class RichDocumentView : UserControl
     //
     // So a document is only built when the content actually has break opportunities;
     // otherwise it takes the same bounded plain-text path as an oversized clip. 10,000
-    // chars sits an order of magnitude below where the curve turns painful.
+    // chars sits an order of magnitude below where the curve turns painful. This is the
+    // one structural guard the preview keeps on VellumText 0.8: the importer bounds
+    // nesting and table spans itself, but line breaking is Avalonia's, after import.
     private const int MaxUnbrokenRunChars = ImportGuards.MaxUnbrokenRunChars;
-
-    /// <summary>
-    /// The most table cells an HTML preview may expand to, counting each cell as
-    /// colspan x rowspan. The size cap and the unbroken-run guard bound length;
-    /// this bounds structure. 1.2 KB of <c>&lt;td colspan=1000 rowspan=1000&gt;</c>
-    /// cells expanded to 32 million grid slots and took the app from 0.6 GB to
-    /// 3.7 GB, retained (F-47). An honest table under the 512 KB size cap has
-    /// well under 60,000 cells (a bare <c>&lt;td&gt;&lt;/td&gt;</c> is 9 chars),
-    /// so the cap only ever trips on spans.
-    /// </summary>
-    internal const long MaxTableCells = 200_000;
-
-    private const int MaxSpan = 65_534; // the HTML rowspan ceiling; colspan's is lower
-
-    private static readonly System.Text.RegularExpressions.Regex CellTag = new(
-        @"<t[dh]\b[^>]*>",
-        System.Text.RegularExpressions.RegexOptions.IgnoreCase
-            | System.Text.RegularExpressions.RegexOptions.CultureInvariant
-            | System.Text.RegularExpressions.RegexOptions.NonBacktracking);
-
-    private static readonly System.Text.RegularExpressions.Regex SpanAttribute = new(
-        @"\b(colspan|rowspan)\s*=\s*[""']?\s*(\d{1,9})",
-        System.Text.RegularExpressions.RegexOptions.IgnoreCase
-            | System.Text.RegularExpressions.RegexOptions.CultureInvariant
-            | System.Text.RegularExpressions.RegexOptions.NonBacktracking);
-
-    /// <summary>
-    /// Counts the grid slots the markup's table cells expand to, stopping as
-    /// soon as the count passes <paramref name="limit"/>.
-    /// </summary>
-    internal static long CountTableCells(string markup, long limit)
-    {
-        long cells = 0;
-        foreach (System.Text.RegularExpressions.ValueMatch cell in CellTag.EnumerateMatches(markup))
-        {
-            long colspan = 1, rowspan = 1;
-            var tag = markup.AsSpan(cell.Index, cell.Length).ToString();
-            foreach (System.Text.RegularExpressions.Match span in SpanAttribute.Matches(tag))
-            {
-                var value = Math.Clamp(long.Parse(span.Groups[2].ValueSpan, System.Globalization.CultureInfo.InvariantCulture), 1, MaxSpan);
-                if (span.Groups[1].ValueSpan.Equals("colspan", StringComparison.OrdinalIgnoreCase))
-                {
-                    colspan = value;
-                }
-                else
-                {
-                    rowspan = value;
-                }
-            }
-
-            cells += colspan * rowspan;
-            if (cells > limit)
-            {
-                return cells;
-            }
-        }
-
-        return cells;
-    }
 
     private readonly RichTextEditor _viewer;
     private readonly TextBlock _emptyState;
@@ -373,14 +316,6 @@ public sealed class RichDocumentView : UserControl
         {
             Trace.TraceWarning(
                 "Rich content contains a very long run with no break opportunity; falling back to plain text.");
-            ShowFallback(content);
-            return;
-        }
-
-        if (format == ClipContentFormat.Html && CountTableCells(content, MaxTableCells) > MaxTableCells)
-        {
-            Trace.TraceWarning(
-                $"Rich content tables expand to more than {MaxTableCells:N0} cells; falling back to plain text.");
             ShowFallback(content);
             return;
         }

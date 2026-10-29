@@ -24,19 +24,25 @@ namespace Clipthrough.Tests.Integration;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The payloads come from the 2026-10-25 audit's live and harness runs. Two of
-/// them got past every Clipthrough-side guard and are held only by VellumText
-/// 0.8: CSS whose parentheses nest thousands deep (no guard here counts a
-/// parenthesis, and with whitespace between them no unbroken run is long), and
-/// a 1.2 KB table whose cells span 1000x1000 (the preview counts table cells
-/// before importing; the HTML-&gt;Markdown transform never did). On VellumText
-/// 0.7.0 the first killed the process with a stack overflow on both paths and
-/// the second cost seconds and gigabytes in the transform.
+/// The payloads come from the 2026-10-25 audit's live and harness runs. Four
+/// of them reach VellumText with no Clipthrough guard in the way, and are held
+/// by VellumText 0.8 alone: CSS whose parentheses nest thousands deep (no
+/// guard here counts a parenthesis, and with whitespace between them no
+/// unbroken run is long); a 1.2 KB table whose cells span 1000x1000, through
+/// both the preview and HTML-&gt;Markdown; and deeply nested markup through
+/// HTML-&gt;Markdown. On VellumText 0.7.0 the CSS killed the process with a
+/// stack overflow on both paths and the span bomb cost seconds and gigabytes.
+/// The preview's table-cell pre-screen and HTML-&gt;Markdown's nesting refusal
+/// once stood in front of the last two; 0.8 made them redundant and they were
+/// removed (owner decision on #12), so these tests are now what pins the
+/// library to that job.
 /// </para>
 /// <para>
-/// The others are already refused or bounded by guards of ours, and are here
-/// so that removing one of those guards later is judged against the library
-/// rather than assumed safe.
+/// The rest are still refused or bounded by guards of ours that were kept on
+/// purpose - Markdown-&gt;HTML's nesting refusal for its user-facing message,
+/// and the preview's unbroken-run guard because it bounds Avalonia's line
+/// breaking, which the importer does not - and are here so that removing one
+/// of those later is judged against the library rather than assumed safe.
 /// </para>
 /// </remarks>
 public sealed class HostileRichPayloadTests
@@ -72,6 +78,9 @@ public sealed class HostileRichPayloadTests
     // one HTML->Markdown leaves the text alone before any guard is consulted,
     // which would make this payload prove nothing about that path.
     internal static readonly string NestedTemplates = string.Concat(Enumerable.Repeat("<template>", 5000)) + "x</template>";
+
+    internal static readonly string NestedDivs =
+        string.Concat(Enumerable.Repeat("<div>", 20_000)) + "deep text" + string.Concat(Enumerable.Repeat("</div>", 20_000));
 
     internal static readonly string ListStartNearIntMax =
         "<ol start=2147483646><li>a</li><li>b</li><li>c</li><li>d</li></ol>";
@@ -240,27 +249,56 @@ public sealed class HostileRichPayloadTests
     public void SpanBomb_HtmlToMarkdown_StaysWithinMemory()
         => AssertSurvived($"transform:{TextTransformation.HtmlToMarkdown}", SpanBomb);
 
-    // ---- already guarded on our side; pinned against the library ---------
-
+    /// <summary>
+    /// The preview used to count table cells and fall back before importing
+    /// anything that expanded past 200,000 (F-47). VellumText 0.8 budgets table
+    /// slots inside its importers, so that pre-screen was removed (owner
+    /// decision on #12) and the span bomb now reaches the importer. Asserting
+    /// "rendered" is what proves it does: the old pre-screen answered
+    /// "fallback" without importing.
+    /// </summary>
     [Fact]
-    public void NestedTemplates_ReachesTheConverterOnlyPastOurNestingGuard()
+    public void SpanBomb_Preview_ReachesTheImporterAndStaysWithinMemory()
     {
-        Assert.True(Services.Platform.RichClipboardFormatting.LooksLikeHtml(NestedTemplates),
-            "Setup: HTML->Markdown must treat the payload as markup, or its guard is never consulted.");
-        Assert.False(Presentation.ImportGuards.IsSafeToImport(NestedTemplates));
+        var report = AssertSurvived($"preview:{ClipContentFormat.Html}", SpanBomb);
+
+        Assert.Equal("rendered", report.Summary);
+    }
+
+    /// <summary>
+    /// HTML-&gt;Markdown used to refuse markup nested past
+    /// <see cref="Presentation.ImportGuards.MaxNestingDepth"/>. VellumText 0.8
+    /// drops tags nested past its own depth limit, keeps their text, and parses
+    /// on a 256 MiB stack, so that refusal was removed (owner decision on #12).
+    /// 20,000 nested divs is the shape that cost 0.7.0's quadratic tree
+    /// builder seconds; the text inside has to come out, which the old
+    /// refusal - returning the input unchanged - never let it.
+    /// </summary>
+    [Fact]
+    public void NestedDivs_HtmlToMarkdown_ConvertsWithinMemory()
+    {
+        Assert.False(Presentation.ImportGuards.IsSafeToImport(NestedDivs),
+            "Setup: the payload must be one the removed guard would have refused.");
+
+        var report = AssertSurvived($"transform:{TextTransformation.HtmlToMarkdown}", NestedDivs);
+
+        Assert.StartsWith("converted", report.Summary, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void SpanBomb_Preview_Survives()
-        => AssertSurvived($"preview:{ClipContentFormat.Html}", SpanBomb);
+    public void NestedTemplates_HtmlToMarkdown_Survives()
+    {
+        Assert.True(Services.Platform.RichClipboardFormatting.LooksLikeHtml(NestedTemplates),
+            "Setup: HTML->Markdown must treat the payload as markup, or it never reaches the importer.");
+
+        AssertSurvived($"transform:{TextTransformation.HtmlToMarkdown}", NestedTemplates);
+    }
+
+    // ---- still guarded on our side; pinned against the library -----------
 
     [Fact]
     public void Brackets_MarkdownToHtml_Survives()
         => AssertSurvived($"transform:{TextTransformation.MarkdownToHtml}", Brackets);
-
-    [Fact]
-    public void NestedTemplates_HtmlToMarkdown_Survives()
-        => AssertSurvived($"transform:{TextTransformation.HtmlToMarkdown}", NestedTemplates);
 
     [Fact]
     public void NestedTemplates_Preview_Survives()

@@ -18,20 +18,14 @@ namespace Clipthrough.Tests.Headless;
 /// retained, and a second copy to 9.1 GB: every selection imported twice, and
 /// a timed-out import kept running beside the next one.
 /// </summary>
+/// <remarks>
+/// A table-cell pre-screen once kept that span bomb from the importer here.
+/// VellumText 0.8 budgets table slots itself, so it was removed (owner
+/// decision on #12); HostileRichPayloadTests runs the span bomb through the
+/// real preview in a child process and bounds its memory.
+/// </remarks>
 public sealed class RichDocumentImportHeadlessTests
 {
-    private const string SpanBomb =
-        "<table><tr>" +
-        "<td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td>" +
-        "<td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td>" +
-        "<td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td>" +
-        "<td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td>" +
-        "<td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td>" +
-        "<td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td>" +
-        "<td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td>" +
-        "<td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td><td colspan=1000 rowspan=1000>x</td>" +
-        "</tr></table>";
-
     private sealed class RecordingImporter
     {
         private int _inFlight;
@@ -85,19 +79,6 @@ public sealed class RichDocumentImportHeadlessTests
     }
 
     [AvaloniaFact]
-    public async Task ASpanBomb_FallsBackWithoutEverReachingTheImporter()
-    {
-        var importer = new RecordingImporter();
-        var view = new RichDocumentView { Importer = importer.Import, ContentFormat = ClipContentFormat.Html, Markup = SpanBomb };
-
-        await view.PendingRender;
-
-        Assert.Empty(importer.Imported);
-        Assert.True(view.FallbackText.IsVisible);
-        Assert.False(view.Viewer.IsVisible);
-    }
-
-    [AvaloniaFact]
     public async Task AnOrdinaryTable_StillRendersAsADocument()
     {
         var table = "<table>" + string.Concat(Enumerable.Repeat("<tr><td>a</td><td colspan=2>b</td></tr>", 200)) + "</table>";
@@ -108,15 +89,6 @@ public sealed class RichDocumentImportHeadlessTests
 
         Assert.Single(importer.Imported);
         Assert.True(view.Viewer.IsVisible);
-    }
-
-    [Fact]
-    public void CountTableCells_MultipliesSpansAndStopsPastTheLimit()
-    {
-        Assert.Equal(3, RichDocumentView.CountTableCells("<td>a</td><TH COLSPAN='2'>b</TH>", long.MaxValue));
-        Assert.Equal(6, RichDocumentView.CountTableCells("<td rowspan=\"3\" colspan=\"2\">", long.MaxValue));
-        Assert.True(RichDocumentView.CountTableCells(SpanBomb, RichDocumentView.MaxTableCells) > RichDocumentView.MaxTableCells);
-        Assert.Equal(0, RichDocumentView.CountTableCells("<p>no tables, <tdx> is not a cell</p>", long.MaxValue));
     }
 
     /// <summary>

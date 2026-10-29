@@ -27,15 +27,17 @@ public static partial class TextTransformationService
     /// sources of truth that agree until someone adds a case to one of them.
     /// </remarks>
     /// <summary>
-    /// Why <see cref="Apply"/> will leave <paramref name="input"/> unchanged
+    /// Why <see cref="ApplyAsync"/> will leave <paramref name="input"/> unchanged
     /// for <paramref name="transformation"/> without trying, or null when it
-    /// will try. The HTML/Markdown converters refuse input nested too deeply
-    /// or with too long an unbroken run: on VellumText 0.7.0 the importer
-    /// overflowed the stack on it and killed the process (F-48). Callers show
-    /// this instead of a bare "no change".
+    /// will try. Markdown-&gt;HTML refuses input nested too deeply or with too
+    /// long an unbroken run: on VellumText 0.7.0 the importer overflowed the
+    /// stack on it and killed the process (F-48). 0.8 survives it, but converts
+    /// 8 KB of '[' into a fragment of its input, so the refusal is kept for the
+    /// message it gives (owner decision on #12). HTML-&gt;Markdown no longer
+    /// refuses anything. Callers show this instead of a bare "no change".
     /// </summary>
     public static string? RefusalReason(Models.TextTransformation transformation, string input)
-        => transformation is Models.TextTransformation.MarkdownToHtml or Models.TextTransformation.HtmlToMarkdown
+        => transformation is Models.TextTransformation.MarkdownToHtml
             && !string.IsNullOrEmpty(input)
             && !Presentation.ImportGuards.IsSafeToImport(input)
                 ? Localization.AppText.TransformInputTooDeeplyNested
@@ -341,11 +343,13 @@ public static partial class TextTransformationService
     /// </remarks>
     private static async Task<string> HtmlToMarkdownAsync(string input, CancellationToken cancellationToken)
     {
-        // VellumText 0.8 bounds nesting inside the importer, which parses on a
-        // thread with a 256 MiB stack; this guard is no longer what stops a
-        // stack overflow (HostileRichPayloadTests). It is kept because the
-        // failure it would prevent is a process kill.
-        if (!LooksLikeHtml(input) || !Presentation.ImportGuards.IsSafeToImport(input))
+        // No nesting refusal here, unlike Markdown -> HTML. VellumText 0.8 drops
+        // tags nested past its depth limit, keeps their text, and parses on a
+        // thread with a 256 MiB stack, so deep markup converts instead of
+        // killing the process; HostileRichPayloadTests pins that in a child
+        // process. The refusal this used to share with Markdown -> HTML was
+        // removed once that held (owner decision on #12).
+        if (!LooksLikeHtml(input))
         {
             return input;
         }
@@ -393,8 +397,9 @@ public static partial class TextTransformationService
         // 8 KB of '[' killed the whole process on VellumText 0.7.0 (F-48), and a
         // stack overflow cannot be caught. 0.8 walks the parsed tree with an
         // explicit stack and parses on a 256 MiB thread, so this guard is no
-        // longer what prevents the crash; it is kept because a process kill is
-        // the failure it would prevent.
+        // longer what prevents the crash. It is kept for what the user sees:
+        // without it 0.8 converts that input into a fragment of itself, where
+        // the refusal leaves the text alone and says why (owner decision on #12).
         if (!Presentation.ImportGuards.IsSafeToImport(input))
         {
             return input;
