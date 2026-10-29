@@ -560,6 +560,48 @@ public sealed class DeferredPayloadMoveTests
         }
     }
 
+    /// <summary>
+    /// Rubber-duck F-13-2: on a deferred start the UTC backfill waits for the
+    /// background, but startup maintenance runs at once, and the lifetime purge
+    /// compares timestamps as text - right only for UTC (F-35). Until the backfill
+    /// has run it has to compare instants: a clip copied ten minutes ago in a
+    /// -05:00 zone reads as five hours older, and one copied two hours ago at
+    /// +05:00 reads as three hours in the future.
+    /// </summary>
+    [Fact]
+    public async Task WhileTheUtcBackfillIsOwed_TheLifetimePurgeComparesInstants_NotOffsetText()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        var ids = SeedSchema8Library(scope, 2);
+        var now = DateTimeOffset.UtcNow;
+        var fresh = now.AddMinutes(-10).ToOffset(TimeSpan.FromHours(-5)).ToString("O", CultureInfo.InvariantCulture);
+        var expired = now.AddHours(-2).ToOffset(TimeSpan.FromHours(5)).ToString("O", CultureInfo.InvariantCulture);
+        Scalar(scope, $"UPDATE clips SET is_sensitive = 1, last_copied_at = '{fresh}' WHERE id = {ids[0]};");
+        Scalar(scope, $"UPDATE clips SET is_sensitive = 1, last_copied_at = '{expired}' WHERE id = {ids[1]};");
+
+        // The fixture only discriminates while text and instant order disagree.
+        var cutoff = now.AddMinutes(-60).ToString("O", CultureInfo.InvariantCulture);
+        Assert.True(string.CompareOrdinal(fresh, cutoff) < 0, "As text, the fresh clip must look expired.");
+        Assert.True(string.CompareOrdinal(expired, cutoff) > 0, "As text, the expired clip must look fresh.");
+
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+        Assert.Equal(1, Scalar(scope, "SELECT COUNT(*) FROM app_metadata WHERE key = 'utc_backfill_pending';"));
+        scope.SettingsService.SetCurrent(new AppSettings
+        {
+            EnableSensitiveClipLifetime = true,
+            SensitiveClipLifetimeMinutes = 60,
+            EnableNormalClipLifetime = false,
+            EnableMaxEntryCount = false,
+            EnableMaxLibrarySize = false,
+        });
+
+        await scope.ClipStoreService.ApplyMaintenanceAsync();
+
+        Assert.True(Scalar(scope, $"SELECT COUNT(*) FROM clips WHERE id = {ids[0]};") == 1, "A sensitive clip copied ten minutes ago was purged as expired.");
+        Assert.True(Scalar(scope, $"SELECT COUNT(*) FROM clips WHERE id = {ids[1]};") == 0, "A sensitive clip copied two hours ago outlived its one-hour lifetime.");
+    }
+
     private static string BackupDirectory(TemporaryDatabaseScope scope) =>
         System.IO.Path.Combine(System.IO.Path.GetDirectoryName(scope.DatabasePath)!, "backups");
 

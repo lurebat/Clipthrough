@@ -91,8 +91,8 @@
     "id": "retention-lifetime-deletes-user-kept",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "DATA LOSS. Age-based retention stops exempting pinned and favorited clips.",
-    "find": "AND ($keepUserKept = 0 OR NOT {UserKeptClipPredicate})\n        RETURNING id;",
-    "replace": "AND ($keepUserKept = 0 OR 1 = 1)\n        RETURNING id;",
+    "find": "AND last_copied_at < $cutoff\n          AND ($keepUserKept = 0 OR NOT {UserKeptClipPredicate})\n        RETURNING id;",
+    "replace": "AND last_copied_at < $cutoff\n          AND ($keepUserKept = 0 OR 1 = 1)\n        RETURNING id;",
     "filter": "ClipRetentionTests"
   },
   {
@@ -4310,5 +4310,13 @@
     "find": "            catch (Exception) when (stop!.IsCancellationRequested && !cancellationToken.IsCancellationRequested)",
     "replace": "            catch (Exception) when (stop!.IsCancellationRequested && !cancellationToken.IsCancellationRequested && body.Method.Name.Length < 0)",
     "filter": "FullyQualifiedName~ARestoreDuringTheBackgroundMove_PausesTheMove"
+  },
+  {
+    "id": "retention-ignores-pending-utc-backfill",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-13-2: while a deferred upgrade still owes the UTC backfill, rows can carry an offset and the text comparison purges unexpired sensitive clips in negative-offset zones (F-35 reopened). The purge must compare instants until the backfill has run.",
+    "find": "        command.CommandText = utcBackfillPending ? OffsetAwareRetentionDeleteStatement : RetentionDeleteStatement;",
+    "replace": "        command.CommandText = utcBackfillPending && RetentionDeleteStatement.Length < 0 ? OffsetAwareRetentionDeleteStatement : RetentionDeleteStatement;",
+    "filter": "FullyQualifiedName~WhileTheUtcBackfillIsOwed"
   }
 ]

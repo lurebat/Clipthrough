@@ -958,16 +958,21 @@ public sealed class ClipStoreService : IClipStoreService
         int? finalClipCount = null;
         long? finalStoredBytes = null;
 
+        // A deferred upgrade start leaves the UTC backfill to the background run,
+        // while maintenance runs at once (F-13-2).
+        var utcBackfillPending = (settings.EnableSensitiveClipLifetime || settings.EnableNormalClipLifetime)
+            && await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM app_metadata WHERE key = 'utc_backfill_pending' AND value = '1';", cancellationToken, transaction) > 0;
+
         if (settings.EnableSensitiveClipLifetime)
         {
             // Deliberately not preserving pinned/favorite clips: an expiring secret
             // outranks the user's intent to keep it around.
-            removedClipIds.AddRange(await DeleteOlderThanAsync(connection, transaction, isSensitive: true, now.AddMinutes(-settings.SensitiveClipLifetimeMinutes), preserveUserKeptClips: false, cancellationToken));
+            removedClipIds.AddRange(await DeleteOlderThanAsync(connection, transaction, isSensitive: true, now.AddMinutes(-settings.SensitiveClipLifetimeMinutes), preserveUserKeptClips: false, utcBackfillPending, cancellationToken));
         }
 
         if (settings.EnableNormalClipLifetime)
         {
-            removedClipIds.AddRange(await DeleteOlderThanAsync(connection, transaction, isSensitive: false, now.AddDays(-settings.NormalClipLifetimeDays), preserveUserKeptClips: true, cancellationToken));
+            removedClipIds.AddRange(await DeleteOlderThanAsync(connection, transaction, isSensitive: false, now.AddDays(-settings.NormalClipLifetimeDays), preserveUserKeptClips: true, utcBackfillPending, cancellationToken));
         }
 
         if (settings.EnableMaxEntryCount)
@@ -2403,13 +2408,27 @@ public sealed class ClipStoreService : IClipStoreService
         RETURNING id;
         """;
 
-    private static async Task<List<long>> DeleteOlderThanAsync(SqliteConnection connection, SqliteTransaction transaction, bool isSensitive, DateTimeOffset cutoff, bool preserveUserKeptClips, CancellationToken cancellationToken)
+    /// <summary>
+    /// The lifetime purge while an upgrade still owes the UTC backfill
+    /// (<c>utc_backfill_pending</c>, F-13-2). Until it has run, rows can carry a
+    /// non-zero offset, which the text comparison above orders wrong by up to that
+    /// offset (F-35): in a negative-offset zone it purged unexpired sensitive clips.
+    /// julianday reads the offset. It cannot use the index's date range, a cost
+    /// paid only for the minutes the background backfill takes.
+    /// </summary>
+    internal const string OffsetAwareRetentionDeleteStatement = $"""
+        DELETE FROM clips
+        WHERE is_sensitive = $isSensitive
+          AND julianday(last_copied_at) < julianday($cutoff)
+          AND ($keepUserKept = 0 OR NOT {UserKeptClipPredicate})
+        RETURNING id;
+        """;
+
+    private static async Task<List<long>> DeleteOlderThanAsync(SqliteConnection connection, SqliteTransaction transaction, bool isSensitive, DateTimeOffset cutoff, bool preserveUserKeptClips, bool utcBackfillPending, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = $"""
-            {RetentionDeleteStatement}
-            """;
+        command.CommandText = utcBackfillPending ? OffsetAwareRetentionDeleteStatement : RetentionDeleteStatement;
         command.Parameters.AddWithValue("$isSensitive", isSensitive ? 1 : 0);
         command.Parameters.AddWithValue("$cutoff", cutoff.ToString("O", CultureInfo.InvariantCulture));
         command.Parameters.AddWithValue("$keepUserKept", preserveUserKeptClips ? 1 : 0);
