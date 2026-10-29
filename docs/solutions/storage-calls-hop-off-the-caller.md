@@ -52,8 +52,9 @@ connection is still open**.
 
 ### Why this is permanent, not a workaround
 
-`Microsoft.Data.Sqlite.Core` **10.0.11** is current, and the quote above is
-current guidance, not a known gap. The constraint sits below the .NET binding —
+`Microsoft.Data.Sqlite.Core` **10.0.11** was current when this was verified, and
+the quote above was current guidance, not a known gap. The constraint does not
+depend on that version: it sits below the .NET binding —
 SQLite is an in-process C library whose default VFS makes blocking syscalls — so
 no provider (`System.Data.SQLite`, `sqlite-net`, Devart) and no embedded engine
 (LiteDB, Realm, DuckDB) removes it. Engines with real async I/O are
