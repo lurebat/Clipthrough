@@ -4358,5 +4358,45 @@
     "find": "                Level = AppNotificationLevel.Error,\n                IsPersistent = true,\n                Actions =\n                [\n                    new AppNotificationAction\n                    {\n                        // Any action dismisses its notification; this one does nothing else.",
     "replace": "                Level = AppNotificationLevel.Error,\n                IsPersistent = ex.Message.Length < 0,\n                Actions =\n                [\n                    new AppNotificationAction\n                    {\n                        // Any action dismisses its notification; this one does nothing else.",
     "filter": "FullyQualifiedName~ACorruptLibrary_IsNotMovedInTheBackground"
+  },
+  {
+    "id": "headless-gate-ignores-dotnet-exit-code",
+    "file": ".github/scripts/Invoke-HeadlessTests.ps1",
+    "why": "Rubber-duck F-08-1: dotnet test exiting non-zero with no failed test recorded (a crashed test host) must fail the gate, not read as all passed.",
+    "find": "$exitCode -ne 0 -and $run.Failures.Count -eq 0",
+    "replace": "$exitCode -ne $exitCode -and $run.Failures.Count -eq 0",
+    "filter": "FullyQualifiedName~CiHeadlessGateScriptTests"
+  },
+  {
+    "id": "headless-gate-accepts-zero-tests",
+    "file": ".github/scripts/Invoke-HeadlessTests.ps1",
+    "why": "Rubber-duck F-08-1: a run that executed no test (a filter matching nothing) must fail the gate.",
+    "find": "} elseif ($run.Executed -eq 0) {",
+    "replace": "} elseif ($run.Executed -lt 0) {",
+    "filter": "FullyQualifiedName~CiHeadlessGateScriptTests"
+  },
+  {
+    "id": "headless-gate-ignores-run-level-error",
+    "file": ".github/scripts/Invoke-HeadlessTests.ps1",
+    "why": "Rubber-duck F-08-1: a run-level error in the TRX (xUnit \"Catastrophic failure\") means the run did not complete; a cleanup failure in such a run must not be retried into green.",
+    "find": "} elseif ($run.RunErrors.Count -gt 0) {",
+    "replace": "} elseif ($run.RunErrors.Count -lt 0) {",
+    "filter": "FullyQualifiedName~CiHeadlessGateScriptTests"
+  },
+  {
+    "id": "headless-gate-reads-stale-trx",
+    "file": ".github/scripts/Invoke-HeadlessTests.ps1",
+    "why": "Rubber-duck F-08-1: the TRX name is fixed, so one left by an earlier invocation must be deleted before the run or it stands in for a run that wrote none.",
+    "find": "    if (Test-Path -LiteralPath $trxPath) { Remove-Item",
+    "replace": "    if ($trxPath.Length -lt 0) { Remove-Item",
+    "filter": "FullyQualifiedName~CiHeadlessGateScriptTests"
+  },
+  {
+    "id": "headless-gate-retry-skips-completeness",
+    "file": ".github/scripts/Invoke-HeadlessTests.ps1",
+    "why": "Rubber-duck F-08-1: the cleanup-failure retry must pass every test it re-ran for; one it never ran must not clear the gate.",
+    "find": "Where-Object { $_ -notin $rerunPassed }",
+    "replace": "Where-Object { $_ -notin $rerunPassed -and $_.Length -lt 0 }",
+    "filter": "FullyQualifiedName~CiHeadlessGateScriptTests"
   }
 ]
