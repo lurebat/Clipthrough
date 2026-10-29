@@ -2974,5 +2974,21 @@
     "find": "            if (placement is null || !(placement.Width > 0) || !(placement.Height > 0))",
     "replace": "            if (placement is null)",
     "filter": "FullyQualifiedName~WindowPlacementStoreTests"
+  },
+  {
+    "id": "startup-keeps-stale-key-on-plaintext-db",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "Removing encryption swaps the plaintext file in before storage.json is rewritten; a crash or failed write in between leaves the old remembered password, and keying a plaintext file fails every connection with 'file is not a database' at the next start (rubber-duck F-04-1).",
+    "find": "                && !RequiresPassword(options.DatabasePath))",
+    "replace": "                && !RequiresPassword(options.DatabasePath)\n                && options.DatabasePath.Length < 0)",
+    "filter": "Rekey_ToNoPassword_ConfigWriteFailsAfterTheSwap_NextStartOpensTheLibrary"
+  },
+  {
+    "id": "startup-drops-key-on-empty-db-file",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "An empty database file opens without a key, so dropping a remembered password whenever a keyless read succeeds would build the library unencrypted after a crash between file creation and the first write (rubber-duck F-04-1 review follow-up).",
+    "find": "                && new FileInfo(options.DatabasePath).Length > 0",
+    "replace": "                && new FileInfo(options.DatabasePath).Length >= 0",
+    "filter": "RememberedPassword_OnAnEmptyDatabaseFile_IsKept"
   }
 ]
