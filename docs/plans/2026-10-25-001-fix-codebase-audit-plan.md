@@ -436,6 +436,7 @@ Guard R3: a lifecycle matrix test class.
     - (B) Rebuild the FTS index on a version bump only when the FTS schema was just recreated, or when the stored version predates the last version that changed indexed content: `DatabaseInitializer.LastSearchIndexChangeVersion`, which is 3, the trigram tokenizer. Test: a bump without FTS changes leaves the index intact and searchable. Plus a mutant.
     - (C) A progress UI over the whole first start after an upgrade, with a headless test that progress shows and the app stays responsive.
     - Implemented on Phase E (#11); its description lists the commits, tests and mutants. Re-measure the 1 GB plaintext and encrypted first start on that code in a quiet window.
+    - **Integrity check on the deferred start (settled, user-confirmed 2026-10-29): option (b).** Measured cold on the 1 GB fixture, `quick_check` was 71.5 s of a 73 s time to a usable app (2.5 s warm). A deferred upgrade start skips it, and the background worker runs it before the payload move rewrites anything; if it fails, nothing is moved and the app raises an error notification. The blocking upgrade path keeps its check before opening. Implemented on #13 (c2d2ce8).
 
 *Readers*
 - `GetByIdAsync` and hydration join `clip_payloads`. Icons resolve through the hash.
