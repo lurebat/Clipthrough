@@ -4238,5 +4238,13 @@
     "find": "            if (Convert.ToInt64(await probe.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 0)",
     "replace": "            if (Convert.ToInt64(await probe.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) >= 0)",
     "filter": "FullyQualifiedName~ADeferredUpgradeStart_LeavesTheIconHashIndexToTheBackgroundRun"
+  },
+  {
+    "id": "stale-schema-not-refreshed-on-open",
+    "file": "Clipthrough/Database/SqliteConnectionFactory.cs",
+    "why": "Live check F2: a pooled connection with a schema another connection changed fails its first DELETE FROM clips with \"no such table\" (SQLite bug: FTS5 delete trigger + foreign keys). Reading sqlite_master on open reloads it; PRAGMA schema_version does not.",
+    "find": "                cmd.CommandText = \"SELECT COUNT(*) FROM sqlite_master WHERE 0;\";",
+    "replace": "                cmd.CommandText = \"PRAGMA schema_version;\";",
+    "filter": "FullyQualifiedName~StaleSchemaConnectionTests"
   }
 ]
