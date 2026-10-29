@@ -34,7 +34,7 @@ namespace Clipthrough.Tests.Headless;
 public sealed class RichHtmlImportSanitizationHeadlessTests
 {
     private static async Task<string> VisibleTextAsync(string html)
-        => DocumentText.Of((await HtmlFormat.Instance.ImportAsync(html)).Doc);
+        => DocumentText.Of((await HtmlFormat.Instance.ImportAsync(html, TestContext.Current.CancellationToken)).Doc);
 
     [AvaloniaTheory]
     [InlineData("<html><body><p>before</p><script>stealTheClipboard()</script><p>after</p></body></html>", "stealTheClipboard")]
