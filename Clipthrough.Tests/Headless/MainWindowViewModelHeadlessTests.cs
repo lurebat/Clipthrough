@@ -287,6 +287,9 @@ public sealed partial class MainWindowViewModelHeadlessTests
         Assert.Equal(ClipContentFormat.Html, stored.ContentFormat);
         Assert.Equal(ContentType.RichText, stored.ContentType);
         Assert.Equal("builtin:MarkdownToHtml", stored.TransformKind);
+
+        // Live check C3: the stored text began with the CF_HTML header.
+        Assert.DoesNotContain("StartHTML", stored.ContentPrefix, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

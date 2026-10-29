@@ -3579,8 +3579,8 @@
     "id": "markdown-to-html-export-returns-to-caller-thread",
     "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
     "why": "VellumText 0.8's import is async; the export after it is synchronous. Resuming on the caller's context runs that export on the UI thread - the freeze the async import exists to remove.",
-    "find": ".ImportAsync(input, cancellationToken).ConfigureAwait(false);\n            var html",
-    "replace": ".ImportAsync(input, cancellationToken).ConfigureAwait(true);\n            var html",
+    "find": ".ImportAsync(input, cancellationToken).ConfigureAwait(false);\n            // Export returns a CF_HTML",
+    "replace": ".ImportAsync(input, cancellationToken).ConfigureAwait(true);\n            // Export returns a CF_HTML",
     "filter": "FullyQualifiedName~MarkdownTransformationTests.Conversion_CompletesWithoutTheCallersThread"
   },
   {
@@ -4358,5 +4358,13 @@
     "find": "            var bytesValue = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(formatName));\n            if (bytesValue is { Length: > 0 })\n            {\n                var decoded = DecodeSourceUrl(formatName, bytesValue);",
     "replace": "            var bytesValue = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(formatName));\n            if (bytesValue is { Length: > 0 } && formatName.Length < 0)\n            {\n                var decoded = DecodeSourceUrl(formatName, bytesValue);",
     "filter": "FullyQualifiedName~ClipboardSourceUrlTests"
+  },
+  {
+    "id": "markdown-to-html-keeps-the-clipboard-header",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "why": "Live check C3: VellumText exports a CF_HTML document, and the Markdown -> HTML clip stored it header and all.",
+    "find": "            var html = Presentation.ClipboardMarkupDecoder.ExtractHtmlFragment(\n                VellumText.Interop.Html.HtmlFormat.Instance.Export(imported.Doc));",
+    "replace": "            var html = input.Length < 0 ? Presentation.ClipboardMarkupDecoder.ExtractHtmlFragment(\n                VellumText.Interop.Html.HtmlFormat.Instance.Export(imported.Doc)) : VellumText.Interop.Html.HtmlFormat.Instance.Export(imported.Doc);",
+    "filter": "FullyQualifiedName~MarkdownToHtml_ReturnsTheFragment|FullyQualifiedName~RowTransform_MarkdownToHtml_StoresAndCopiesHtml"
   }
 ]

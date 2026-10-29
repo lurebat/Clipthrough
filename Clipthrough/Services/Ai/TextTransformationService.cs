@@ -411,7 +411,12 @@ public static partial class TextTransformationService
         {
             var imported = await VellumText.Interop.Markdown.MarkdownFormat.Instance
                 .ImportAsync(input, cancellationToken).ConfigureAwait(false);
-            var html = VellumText.Interop.Html.HtmlFormat.Instance.Export(imported.Doc);
+            // Export returns a CF_HTML clipboard document, header and all. The
+            // result is stored as the clip, so keep only the fragment, as every
+            // other HTML-producing transform does; the clipboard copy wraps it
+            // again (live check C3).
+            var html = Presentation.ClipboardMarkupDecoder.ExtractHtmlFragment(
+                VellumText.Interop.Html.HtmlFormat.Instance.Export(imported.Doc));
             return string.IsNullOrWhiteSpace(html) ? input : html;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
