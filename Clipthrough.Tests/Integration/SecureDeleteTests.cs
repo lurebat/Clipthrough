@@ -50,6 +50,37 @@ public sealed class SecureDeleteTests
         Assert.False(FileContains(scope.DatabasePath, marker), "The deleted clip's text is still in the database file.");
     }
 
+    /// <summary>
+    /// The guarantee has to come from the factory, not from the engine. SQLite3
+    /// Multiple Ciphers (U-C9) is built with SQLITE_SECURE_DELETE, so a fresh
+    /// connection already reads 1 and the test above passes without our pragma;
+    /// a build without that option, or anything that turns it off, would leave
+    /// freed pages readable with nothing failing. A pooled connection keeps its
+    /// state between opens, so one switched off and opened again shows whether
+    /// the factory re-applies it every time.
+    /// </summary>
+    [Fact]
+    public async Task EveryOpen_TurnsSecureDeleteOn_WhateverTheConnectionHadBefore()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        using var connection = Clipthrough.Database.SqliteConnectionFactory.Create(scope.DatabasePath, password: null, SqliteOpenMode.ReadWrite, pooling: true);
+        connection.Open();
+        using (var off = connection.CreateCommand())
+        {
+            off.CommandText = "PRAGMA secure_delete = OFF; PRAGMA secure_delete;";
+            Assert.Equal(0L, off.ExecuteScalar());
+        }
+
+        connection.Close();
+        connection.Open();
+
+        using var read = connection.CreateCommand();
+        read.CommandText = "PRAGMA secure_delete;";
+        Assert.Equal(1L, read.ExecuteScalar());
+    }
+
     private static void Checkpoint(TemporaryDatabaseScope scope)
     {
         using var connection = scope.ConnectionFactory.CreateConnection();
