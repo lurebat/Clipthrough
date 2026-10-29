@@ -40,11 +40,11 @@
         <PackageReference Include="System.Drawing.Common" Version="10.0.14" />
         <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.2" />
         <PackageReference Include="Velopack" Version="1.2.0" />
-    <PackageReference Include="VellumText.Core" Version="0.8.0-audit.3" />
-    <PackageReference Include="VellumText.Avalonia" Version="0.8.0-audit.3" />
-    <PackageReference Include="VellumText.Interop.Html" Version="0.8.0-audit.3" />
-    <PackageReference Include="VellumText.Interop.Rtf" Version="0.8.0-audit.3" />
-    <PackageReference Include="VellumText.Interop.Markdown" Version="0.8.0-audit.3" />
+    <PackageReference Include="VellumText.Core" Version="0.8.0-audit.4" />
+    <PackageReference Include="VellumText.Avalonia" Version="0.8.0-audit.4" />
+    <PackageReference Include="VellumText.Interop.Html" Version="0.8.0-audit.4" />
+    <PackageReference Include="VellumText.Interop.Rtf" Version="0.8.0-audit.4" />
+    <PackageReference Include="VellumText.Interop.Markdown" Version="0.8.0-audit.4" />
     </ItemGroup>
 
     <ItemGroup>
