@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Reactive.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
@@ -476,6 +477,17 @@ public sealed class LibraryUpgradeProgressHeadlessTests
             Assert.Equal(AppText.LibraryOptimizeFailedTitle, notification.Title);
             Assert.Equal(AppNotificationLevel.Error, notification.Level);
             Assert.Contains("integrity check failed", notification.Message, StringComparison.OrdinalIgnoreCase);
+
+            // Owner decision (live check F3): this one stays until the user closes
+            // it. A non-persistent notification is removed after six seconds - long
+            // before someone looking away from the screen reads "restore a backup".
+            Assert.True(notification.IsPersistent, "The integrity-failure notification disappears on its own.");
+            var shown = Assert.Single(viewModel.Notifications, n => n.Title == AppText.LibraryOptimizeFailedTitle);
+            var close = Assert.Single(shown.Actions);
+            Assert.Equal(AppText.CloseButtonLabel, close.Label);
+            await close.ExecuteCommand.Execute().ToTask();
+            Dispatcher.UIThread.RunJobs();
+            Assert.DoesNotContain(viewModel.Notifications, n => n.Title == AppText.LibraryOptimizeFailedTitle);
 
             using var connection = scope.ConnectionFactory.CreateConnection();
             connection.Open();

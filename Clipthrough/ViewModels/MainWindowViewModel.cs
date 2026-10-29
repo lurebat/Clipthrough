@@ -6653,9 +6653,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             // An integrity failure lands here too (the background move checks the
             // library before rewriting it), so it is raised as a notification and
-            // not only as a status-bar line. Nothing was moved.
+            // not only as a status-bar line. Nothing was moved. It stays until the
+            // user closes it (owner decision after live check F3): it says to
+            // restore a backup, and a six-second toast is easily missed.
             ReportError("Library storage optimization", ex);
-            _notificationService.PublishError(AppText.LibraryOptimizeFailedTitle, ex.Message);
+            _notificationService.Publish(new AppNotification
+            {
+                Title = AppText.LibraryOptimizeFailedTitle,
+                Message = ex.Message,
+                Level = AppNotificationLevel.Error,
+                IsPersistent = true,
+                Actions =
+                [
+                    new AppNotificationAction
+                    {
+                        // Any action dismisses its notification; this one does nothing else.
+                        Label = AppText.CloseButtonLabel,
+                        ExecuteAsync = () => Task.CompletedTask,
+                    },
+                ],
+            });
         }
         finally
         {
