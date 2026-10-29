@@ -29,7 +29,7 @@ PasteCount tracks how many times Clipthrough pasted it back.
 its content. Sensitive clips are displayed with a warning badge in the UI.
 
 **SensitivityMatch** — A join result indicating which rule(s) triggered for a
-clip. Stored in a separate `sensitivity_matches` table; recomputed on rule
+clip. Stored in a separate `clip_sensitivity_matches` table; recomputed on rule
 change via `RebuildSensitivityMatchesAsync`.
 
 **SourceApp / SourceWindowTitle / SourceUrl** — Process name, window title, and
@@ -52,8 +52,10 @@ the original.
 **ClipCaptureRequest** — Input DTO for `IClipStoreService.CaptureAsync`. Carries
 content bytes, optional plain-text rendering, metadata, and flags.
 
-**CaptureFastAsync** — Variant of `CaptureAsync` that skips the FTS5 `INSERT`
-on duplicate content (used by the high-frequency clipboard monitor loop).
+**CaptureFastAsync** — Variant of `CaptureAsync` that skips the inline sensitivity
+scan and the retention sweep, leaving `sensitivity_scanned_at` NULL so the
+deferred scan picks the clip up. FTS indexing is unchanged. Used by the
+clipboard monitor and by drag-and-drop imports.
 
 **SuppressNext** — Called on `IClipboardMonitorService` before
 programmatically placing content on the clipboard (e.g. after a transform),
@@ -62,18 +64,27 @@ without reading the clipboard, and for the rest of the suppression window any
 event whose text matches is recognised as a re-publish of our own write (Remote
 Desktop raises one per write) and not captured. Different content is captured.
 
-**DragDropService** — Handles file and text drops onto the popup window. Calls
-`CaptureBatchAsync` so multiple dropped files land as individual clips in a
-single transaction.
+**DragDropService** — Turns a drop onto the popup window into one
+`ClipCaptureRequest` per item (`TryBuildCaptureRequestsAsync`). The view model
+captures each through `CaptureFastAsync`; there is no shared transaction.
 
 ---
 
 ## Storage and encryption
 
-**SQLCipher** — The encryption extension used for the SQLite database file when
-a password is set. Key derivation is performed once per connection open;
+**SQLCipher** — The on-disk encryption format of the database file when a
+password is set (SQLCipher 4: PBKDF2-HMAC-SHA512, 256000 iterations). It is
+written by SQLite3 Multiple Ciphers (`SQLite3MC.PCLRaw.bundle`), which supports
+several ciphers and needs the **cipher recipe** on every connection to pick this
+one. Key derivation is performed once per connection open;
 `busy_timeout=5000` is applied separately via `SqliteConnectionFactory`'s
 `StateChange` handler (not persisted, re-applied per connection).
+
+**cipher recipe** — `cipher=sqlcipher&legacy=4`, added to every connection's
+data source by `SqliteConnectionFactory.DataSourceFor`. Without it a connection
+silently uses another cipher: existing libraries fail to open and new ones are
+unreadable by SQLCipher. See
+`docs/solutions/every-connection-carries-the-cipher-recipe.md`.
 
 **WAL mode** — Write-Ahead Logging is enabled by `DatabaseInitializer` and is
 persistent per database file. It allows concurrent readers while a writer holds
@@ -82,11 +93,15 @@ retried `SQLITE_BUSY` waits.
 
 **DatabaseMaintenanceScope** — RAII-style async scope that quiesces all
 background workers and clears the SQLite connection pool before whole-database
-operations (rekey, path move, backup, restore). Workers are restarted on
-disposal even if the operation throws.
+operations (rekey, path move, restore). The daily backup does not enter it: it
+reads a consistent snapshot through SQLite while the app keeps running. On
+disposal - even if the operation throws - each worker returns to the state it
+had on entry; the embedding worker is paused rather than stopped.
 
-**StorageOptions / StorageOptionsService** — Manages the database path,
-encryption password (DPAPI-protected at rest), size caps, and retention policy.
+**StorageOptions / StorageOptionsService** — Manages the database path, the
+encryption password, and whether to remember it. A remembered password is
+DPAPI-protected at rest; where DPAPI is unavailable it is kept in memory only.
+Size caps and retention are `AppSettings`, not storage options.
 Resolves worker services lazily via `IServiceProvider` to avoid a circular DI
 dependency.
 
@@ -94,7 +109,8 @@ dependency.
 SQLCipher password (`storage.json`) and AI API key (sidecar `.bin` files). Non-Windows falls back to `NoOpDataProtectionService`,
 keeping secrets in memory only.
 
-**schema version** — Integer stored in `PRAGMA user_version`. Migrations in
+**schema version** — Integer stored in `app_metadata` under the key
+`schema_version` (not `PRAGMA user_version`). Migrations in
 `DatabaseInitializer` gate on the current value and apply idempotent `ALTER
 TABLE` statements. Bump only when adding a non-idempotent change.
 

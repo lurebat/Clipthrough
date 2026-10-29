@@ -1274,7 +1274,9 @@ public sealed class ClipStoreService : IClipStoreService
             var contentText = BuildStoredContentText(request);
             var hash = ComputeHash(request.ContentType, request.ContentFormat, request.ContentBytes);
             var matches = _sensitivityService.Scan(contentText);
-            var capturedAt = (request.CapturedAtOverride ?? DateTimeOffset.UtcNow).ToString("O", CultureInfo.InvariantCulture);
+            // UTC whatever the caller supplied (F-35): timestamps are compared as
+            // text, which orders correctly only when every value has the same offset.
+            var capturedAt = (request.CapturedAtOverride?.ToUniversalTime() ?? DateTimeOffset.UtcNow).ToString("O", CultureInfo.InvariantCulture);
             var byteSize = request.ContentBytes.LongLength;
 
             long clipId;
@@ -1366,7 +1368,9 @@ public sealed class ClipStoreService : IClipStoreService
         var contentText = BuildStoredContentText(request);
         var hash = ComputeHash(request.ContentType, request.ContentFormat, request.ContentBytes);
         var matches = scanSensitivity ? _sensitivityService.Scan(contentText) : Array.Empty<SensitivityMatch>();
-        var capturedAt = (request.CapturedAtOverride ?? DateTimeOffset.UtcNow).ToString("O", CultureInfo.InvariantCulture);
+        // UTC whatever the caller supplied (F-35): timestamps are compared as
+        // text, which orders correctly only when every value has the same offset.
+        var capturedAt = (request.CapturedAtOverride?.ToUniversalTime() ?? DateTimeOffset.UtcNow).ToString("O", CultureInfo.InvariantCulture);
         var byteSize = request.ContentBytes.LongLength;
 
         await using var connection = _connectionFactory.CreateConnection();
@@ -2202,20 +2206,6 @@ public sealed class ClipStoreService : IClipStoreService
         }
     }
 
-    private static async Task<int> ExecuteCountAsync(SqliteConnection connection, string sql, ClipSearchFilters filters, bool hasSearch, CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        if (hasSearch && !filters.UseRegex)
-        {
-            command.Parameters.AddWithValue("$search", BuildFtsExpression(filters.SearchText, filters.UseFuzzy));
-        }
-
-        AddContentTypeParameters(command, filters);
-
-        var scalar = await command.ExecuteScalarAsync(cancellationToken);
-        return Convert.ToInt32(scalar, CultureInfo.InvariantCulture);
-    }
 
     private static void AddContentTypeParameters(SqliteCommand command, ClipSearchFilters filters)
     {
@@ -2273,22 +2263,6 @@ public sealed class ClipStoreService : IClipStoreService
         return scalar is DBNull or null ? null : Convert.ToString(scalar, CultureInfo.InvariantCulture);
     }
 
-    private static async Task<string?> ExecuteScalarStringAsync(
-        SqliteConnection connection,
-        string sql,
-        CancellationToken cancellationToken,
-        params (string Name, object Value)[] parameters)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        foreach (var (name, value) in parameters)
-        {
-            command.Parameters.AddWithValue(name, value);
-        }
-
-        var scalar = await command.ExecuteScalarAsync(cancellationToken);
-        return scalar is DBNull or null ? null : Convert.ToString(scalar, CultureInfo.InvariantCulture);
-    }
 
     /// <summary>
     /// Pinning or favoriting a clip is an explicit "keep this" from the user, so

@@ -31,10 +31,17 @@ public sealed record StorageOptions
         return this with
         {
             DatabasePath = normalizedPath,
-            DatabasePassword = DatabasePassword?.Trim() ?? string.Empty,
+            DatabasePassword = NormalizePassword(DatabasePassword),
             RememberPassword = RememberPassword,
         };
     }
+
+    /// <summary>
+    /// The one rule for turning what a user typed into a database key. Unlock,
+    /// settings and rekey all go through it, so a key written by one can always
+    /// be entered through another.
+    /// </summary>
+    public static string NormalizePassword(string? password) => password?.Trim() ?? string.Empty;
 
     public static string GetDefaultDatabasePath()
     {

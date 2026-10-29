@@ -67,7 +67,6 @@ public sealed partial class MainWindowViewModelHeadlessTests
         using var viewModel = new MainWindowViewModel(
             clipStore,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -384,7 +383,6 @@ public sealed partial class MainWindowViewModelHeadlessTests
         using var viewModel = new MainWindowViewModel(
             gatedStore,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -733,6 +731,31 @@ public sealed partial class MainWindowViewModelHeadlessTests
 
         Assert.True(viewModel.IsWelcomeOpen);
         Assert.Equal(AppText.WelcomeStatusText, viewModel.StatusText);
+    }
+
+    /// <summary>
+    /// A torn storage.json leaves the app on the default library. That is the
+    /// only recovery there is, but it must not be a silent one (F-22).
+    /// </summary>
+    [AvaloniaFact]
+    public async Task InitializeAsync_WhenStorageConfigWasUnreadable_TellsTheUser()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        scope.StorageOptionsService.LoadFault = "storage.json could not be read and was moved to storage.json.corrupt-x.";
+
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+
+        await viewModel.InitializeAsync();
+
+        var notification = scope.NotificationService.LastNotification;
+        Assert.NotNull(notification);
+        Assert.Equal(AppText.StorageLoadFailedTitle, notification.Title);
+        Assert.Equal(scope.StorageOptionsService.LoadFault, notification.Message);
+        Assert.Equal(AppNotificationLevel.Error, notification.Level);
+        Assert.True(viewModel.IsWelcomeOpen);
     }
 
     [AvaloniaFact]
@@ -1821,12 +1844,12 @@ public sealed partial class MainWindowViewModelHeadlessTests
         Clipthrough.Services.IOcrService? ocrService = null,
         IClipStoreService? clipStore = null,
         Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null,
-        Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null)
+        Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null,
+        Clipthrough.Services.IDatabaseBackupService? databaseBackupService = null)
     {
         return new MainWindowViewModel(
             clipStore ?? scope.ClipStoreService,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -1843,6 +1866,7 @@ public sealed partial class MainWindowViewModelHeadlessTests
             scope.DatabaseInitializer,
             semanticSearchService: semanticSearchService,
             embeddingWorker: embeddingWorker,
+            databaseBackupService: databaseBackupService,
             dragDropService: dragDropService);
     }
 

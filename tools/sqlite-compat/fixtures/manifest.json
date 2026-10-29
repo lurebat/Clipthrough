@@ -1,0 +1,111 @@
+{
+  "GeneratedBy": "FixtureGen: Microsoft.Data.Sqlite.Core 10.0.11 + SQLitePCLRaw.bundle_e_sqlcipher 2.1.11 (resolves SQLitePCLRaw.core 2.1.12)",
+  "Versions": {
+    "sqlite_version()": "3.39.2",
+    "sqlite_source_id()": "2022-07-21 15:24:47 698edb77537b67c41adc68f9b892db56bcf9a55e00371a61420f3ddd668ealt1",
+    "PRAGMA cipher_version": "4.5.2 community",
+    "PRAGMA cipher_provider": "",
+    "PRAGMA cipher_provider_version": "",
+    "compile_options(selected)": "COMPILER=msvc-1929 DEFAULT_PAGE_SIZE=4096 ENABLE_FTS3 ENABLE_FTS3_PARENTHESIS ENABLE_FTS4 ENABLE_FTS5 HAS_CODEC MAX_ATTACHED=10 MAX_DEFAULT_PAGE_SIZE=8192 TEMP_STORE=2 THREADSAFE=1",
+    "compile_options(count)": "46"
+  },
+  "CipherSettings": {
+    "PRAGMA cipher_version": "4.5.2 community",
+    "PRAGMA kdf_iter": "256000",
+    "PRAGMA cipher_page_size": "4096",
+    "PRAGMA cipher_kdf_algorithm": "PBKDF2_HMAC_SHA512",
+    "PRAGMA cipher_hmac_algorithm": "HMAC_SHA512",
+    "PRAGMA cipher_use_hmac": "1",
+    "PRAGMA cipher_plaintext_header_size": "0",
+    "PRAGMA page_size": "4096",
+    "PRAGMA journal_mode": "wal",
+    "PRAGMA cipher_settings": "PRAGMA kdf_iter = 256000; PRAGMA cipher_page_size = 4096; PRAGMA cipher_use_hmac = 1; PRAGMA cipher_plaintext_header_size = 0; PRAGMA cipher_hmac_algorithm = HMAC_SHA512; PRAGMA cipher_kdf_algorithm = PBKDF2_HMAC_SHA512;",
+    "PRAGMA cipher_default_settings": "PRAGMA cipher_default_kdf_iter = 256000; PRAGMA cipher_default_page_size = 4096; PRAGMA cipher_default_use_hmac = 1; PRAGMA cipher_default_plaintext_header_size = 0; PRAGMA cipher_default_hmac_algorithm = HMAC_SHA512; PRAGMA cipher_default_kdf_algorithm = PBKDF2_HMAC_SHA512;"
+  },
+  "Fixtures": [
+    {
+      "Name": "a-plain-wal",
+      "File": "a-plain-wal.db",
+      "WalFile": null,
+      "Password": "",
+      "Description": "plaintext, journal_mode=WAL, checkpointed on close",
+      "Rows": 199,
+      "Tags": 99,
+      "Checksum": "7F5AFB5BC08F1BF5414DCBD5F8CBBE62",
+      "Fts": {
+        "Hello": 39,
+        "עולם": 20,
+        "日本語": 20,
+        "façade": 20,
+        "ünï": 20,
+        "\uD83D\uDE00\uD83D\uDE80✨": 20,
+        "Русский": 20,
+        "example.com": 20,
+        "edited": 1
+      }
+    },
+    {
+      "Name": "b-enc-sqlcipher452",
+      "File": "b-enc-sqlcipher452.db",
+      "WalFile": null,
+      "Password": "fixture-pass",
+      "Description": "SQLCipher 4.5.2 defaults, Password=fixture-pass, WAL, checkpointed on close",
+      "Rows": 199,
+      "Tags": 99,
+      "Checksum": "7F5AFB5BC08F1BF5414DCBD5F8CBBE62",
+      "Fts": {
+        "Hello": 39,
+        "עולם": 20,
+        "日本語": 20,
+        "façade": 20,
+        "ünï": 20,
+        "\uD83D\uDE00\uD83D\uDE80✨": 20,
+        "Русский": 20,
+        "example.com": 20,
+        "edited": 1
+      }
+    },
+    {
+      "Name": "c-enc-rekeyed",
+      "File": "c-enc-rekeyed.db",
+      "WalFile": null,
+      "Password": "fixture-pass-2",
+      "Description": "created with fixture-pass, PRAGMA rekey='fixture-pass-2' in journal_mode=wal; old password -> SQLite error 26",
+      "Rows": 199,
+      "Tags": 99,
+      "Checksum": "7F5AFB5BC08F1BF5414DCBD5F8CBBE62",
+      "Fts": {
+        "Hello": 39,
+        "עולם": 20,
+        "日本語": 20,
+        "façade": 20,
+        "ünï": 20,
+        "\uD83D\uDE00\uD83D\uDE80✨": 20,
+        "Русский": 20,
+        "example.com": 20,
+        "edited": 1
+      }
+    },
+    {
+      "Name": "d-enc-wal",
+      "File": "d-enc-wal.db",
+      "WalFile": "d-enc-wal.db-wal",
+      "Password": "fixture-pass",
+      "Description": "SQLCipher 4.5.2, Password=fixture-pass; rows 1-100 checkpointed into the .db, then wal_autocheckpoint=0 and rows 101-200 + an update + a cascading delete left only in the 156592-byte -wal (copied while the connection was open; no -shm)",
+      "Rows": 199,
+      "Tags": 99,
+      "Checksum": "7F5AFB5BC08F1BF5414DCBD5F8CBBE62",
+      "Fts": {
+        "Hello": 39,
+        "עולם": 20,
+        "日本語": 20,
+        "façade": 20,
+        "ünï": 20,
+        "\uD83D\uDE00\uD83D\uDE80✨": 20,
+        "Русский": 20,
+        "example.com": 20,
+        "edited": 1
+      }
+    }
+  ]
+}
