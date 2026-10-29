@@ -71,11 +71,10 @@ public sealed class SettingsService : ISettingsService
     private string QuarantineCorruptSettings(JsonException ex)
     {
         var fileName = Path.GetFileName(_settingsPath);
-        var quarantinePath = $"{_settingsPath}.corrupt-{DateTime.UtcNow:yyyyMMdd-HHmmss}";
 
         try
         {
-            File.Move(_settingsPath, quarantinePath, overwrite: true);
+            var quarantinePath = AtomicFile.Quarantine(_settingsPath);
             Trace.TraceError($"Settings file could not be parsed and was moved to '{quarantinePath}': {ex.Message}");
             return $"{fileName} could not be read and was moved to {Path.GetFileName(quarantinePath)}. " +
                 "Clipthrough started with the last settings it had stored, or defaults.";
@@ -353,9 +352,7 @@ public sealed class SettingsService : ISettingsService
         // falls back to a legacy mirror in the database. Losing settings is bad;
         // losing them and being told nothing is what makes the write worth
         // getting right. (arch-opus A23)
-        var tempPath = _settingsPath + ".tmp";
-        await File.WriteAllTextAsync(tempPath, json, cancellationToken);
-        File.Move(tempPath, _settingsPath, overwrite: true);
+        await AtomicFile.WriteAllTextAsync(_settingsPath, json, cancellationToken);
 
         // Everything except the named credentials is now on disk. Report the
         // credentials that are not, so the caller never shows an unqualified
@@ -396,7 +393,7 @@ public sealed class SettingsService : ISettingsService
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             var raw = Encoding.UTF8.GetBytes(secret);
             var protectedBytes = _dataProtection.Protect(raw);
-            File.WriteAllBytes(path, protectedBytes);
+            AtomicFile.WriteAllBytes(path, protectedBytes);
             return true;
         }
         catch (Exception ex)
@@ -431,6 +428,16 @@ public sealed class SettingsService : ISettingsService
     /// </remarks>
     private async Task TrySaveLegacyCopyToDatabaseAsync(AppSettings settings, CancellationToken cancellationToken)
     {
+        // On a fresh install settings are saved before the library is created.
+        // There is nothing to mirror into yet, and opening the connection would
+        // either fail (SQLite Error 14, logged to the user on every first run) or
+        // create an empty database file. The next save writes the mirror.
+        // (audit F-51)
+        if (!_connectionFactory.DatabaseExists)
+        {
+            return;
+        }
+
         try
         {
             await using var connection = _connectionFactory.CreateConnection();

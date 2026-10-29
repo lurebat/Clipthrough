@@ -276,7 +276,7 @@ public sealed class StorageOptionsServiceTests : IDisposable
             Password = password,
         };
 
-        await using var conn = new SqliteConnection(builder.ToString());
+        await using var conn = TestConnections.Create(builder.ToString());
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "CREATE TABLE IF NOT EXISTS marker (id INTEGER PRIMARY KEY); INSERT INTO marker DEFAULT VALUES;";
@@ -291,7 +291,7 @@ public sealed class StorageOptionsServiceTests : IDisposable
             Mode = SqliteOpenMode.ReadOnly,
             Password = password,
         };
-        var conn = new SqliteConnection(builder.ToString());
+        var conn = TestConnections.Create(builder.ToString());
         conn.Open();
         // Force decrypt by issuing a real read.
         using var cmd = conn.CreateCommand();
@@ -349,7 +349,7 @@ public sealed class StorageOptionsServicePhase2Tests : IDisposable
             Mode = SqliteOpenMode.ReadWriteCreate,
             Password = password,
         };
-        await using var conn = new SqliteConnection(builder.ToString());
+        await using var conn = TestConnections.Create(builder.ToString());
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "CREATE TABLE IF NOT EXISTS marker (id INTEGER PRIMARY KEY); " +
@@ -365,7 +365,7 @@ public sealed class StorageOptionsServicePhase2Tests : IDisposable
             Mode = SqliteOpenMode.ReadOnly,
             Password = password,
         };
-        using var conn = new SqliteConnection(builder.ToString());
+        using var conn = TestConnections.Create(builder.ToString());
         conn.Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT count(*) FROM sqlite_master;";
@@ -396,7 +396,7 @@ public sealed class StorageOptionsServicePhase2Tests : IDisposable
             Pooling = false,
         };
 
-        await using (var conn = new SqliteConnection(builder.ToString()))
+        await using (var conn = TestConnections.Create(builder.ToString()))
         {
             await conn.OpenAsync();
             await using (var cmd = conn.CreateCommand())
@@ -442,7 +442,7 @@ public sealed class StorageOptionsServicePhase2Tests : IDisposable
                 Password = password,
                 Pooling = false,
             };
-            using var conn = new SqliteConnection(builder.ToString());
+            using var conn = TestConnections.Create(builder.ToString());
             conn.Open();
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT v FROM marker LIMIT 1;";
@@ -697,7 +697,7 @@ public sealed class StorageOptionsServicePhase2Tests : IDisposable
             DataSource = _dbPath,
             Mode = SqliteOpenMode.ReadWriteCreate,
         };
-        await using (var conn = new SqliteConnection(builder.ToString()))
+        await using (var conn = TestConnections.Create(builder.ToString()))
         {
             await conn.OpenAsync();
             await using var cmd = conn.CreateCommand();
@@ -724,7 +724,7 @@ public sealed class StorageOptionsServicePhase2Tests : IDisposable
             DataSource = newPath,
             Mode = SqliteOpenMode.ReadOnly,
         };
-        using var newConn = new SqliteConnection(newBuilder.ToString());
+        using var newConn = TestConnections.Create(newBuilder.ToString());
         newConn.Open();
         using var sel = newConn.CreateCommand();
         sel.CommandText = "SELECT v FROM t;";
@@ -749,7 +749,7 @@ public sealed class StorageOptionsServicePhase2Tests : IDisposable
             DataSource = _dbPath,
             Mode = SqliteOpenMode.ReadWriteCreate,
         };
-        await using (var conn = new SqliteConnection(srcBuilder.ToString()))
+        await using (var conn = TestConnections.Create(srcBuilder.ToString()))
         {
             await conn.OpenAsync();
             await using var cmd = conn.CreateCommand();
@@ -765,7 +765,7 @@ public sealed class StorageOptionsServicePhase2Tests : IDisposable
             DataSource = newPath,
             Mode = SqliteOpenMode.ReadWriteCreate,
         };
-        await using (var conn = new SqliteConnection(dstBuilder.ToString()))
+        await using (var conn = TestConnections.Create(dstBuilder.ToString()))
         {
             await conn.OpenAsync();
             await using var cmd = conn.CreateCommand();
@@ -799,7 +799,7 @@ public sealed class StorageOptionsServicePhase2Tests : IDisposable
             DataSource = _dbPath,
             Mode = SqliteOpenMode.ReadWriteCreate,
         };
-        await using (var conn = new SqliteConnection(srcBuilder.ToString()))
+        await using (var conn = TestConnections.Create(srcBuilder.ToString()))
         {
             await conn.OpenAsync();
             await using var cmd = conn.CreateCommand();
@@ -833,7 +833,7 @@ public sealed class StorageOptionsServicePhase2Tests : IDisposable
             DataSource = _dbPath,
             Mode = SqliteOpenMode.ReadWriteCreate,
         };
-        await using (var conn = new SqliteConnection(builder.ToString()))
+        await using (var conn = TestConnections.Create(builder.ToString()))
         {
             await conn.OpenAsync();
             await using var cmd = conn.CreateCommand();

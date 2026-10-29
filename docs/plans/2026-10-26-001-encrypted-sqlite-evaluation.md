@@ -2,6 +2,8 @@
 
 > The harness, fixtures, per-check results and `run-log.txt` live in `tools/sqlite-compat/`; every relative path below (`run-log.txt`, `results/`, `fixtures/`, `Common/` ...) is relative to that folder. `Clipthrough.Tests/Compatibility/SqlCipherFixtureCompatibilityTests` opens the committed fixtures through the app's own connection factory on every test run, so an adoption unit has to keep it green.
 
+> **Adopted.** On 2026-10-27 the owner chose C1 (OD-2 in `2026-10-25-001-fix-codebase-audit-plan.md`, unit U-C9). This note is kept as the evidence for that decision and is not updated with it.
+
 **Evaluation only.** The evaluation changed no application code and installed nothing into the app,
 and nothing here authorises adoption: that needs a separate owner decision.
 

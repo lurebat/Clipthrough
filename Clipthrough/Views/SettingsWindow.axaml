@@ -2,17 +2,30 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Clipthrough.ViewModels"
         xmlns:ctrl="using:Clipthrough.Controls"
+        xmlns:loc="using:Clipthrough.Localization"
         x:Class="Clipthrough.Views.SettingsWindow"
         x:DataType="vm:MainWindowViewModel"
         x:CompileBindings="True"
         Title="{Binding SettingsTitleText}"
         Width="960"
         Height="720"
-        MinWidth="720"
-        MinHeight="480"
+        MinWidth="520"
+        MinHeight="320"
         Background="{DynamicResource AppBackgroundBrush}"
         ShowInTaskbar="True"
         WindowStartupLocation="CenterOwner">
+
+    <Window.Styles>
+        <!--
+          The label column used to be a fixed 260 DIP, so once the window was
+          narrower than about 640 DIP the hotkey boxes slid over the labels. The
+          labels now share the width and wrap; the boxes' column keeps enough
+          for a gesture and its Record and Clear buttons. (B11)
+        -->
+        <Style Selector="Grid.hotkey-grid > TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+    </Window.Styles>
 
     <Grid RowDefinitions="Auto,*,Auto"
           RowSpacing="12"
@@ -65,11 +78,16 @@
                                    FontSize="16"
                                    FontWeight="SemiBold" />
                     </Expander.Header>
-                    <Grid ColumnDefinitions="Auto,260,*"
+                    <Grid Classes="hotkey-grid"
                           RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                           ColumnSpacing="12"
                           RowSpacing="10"
                           Margin="8,10,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="2*" />
+                            <ColumnDefinition Width="3*" MinWidth="220" />
+                        </Grid.ColumnDefinitions>
                         <CheckBox Content="{Binding SettingsEnableShortcutLabel}"
                                   IsChecked="{Binding Settings.EnableToggleRegexHotkey}" />
                         <TextBlock Grid.Column="1" VerticalAlignment="Center"
@@ -138,10 +156,15 @@
                         <TextBlock Classes="body-muted"
                                    TextWrapping="Wrap"
                                    Text="Global hotkeys work from anywhere on the desktop. Incremental paste cycles backward through your clipboard history — press once to paste the previous clip, press again for the one before that, and so on. Decremental paste cycles the other way. Clipthrough puts the clip on the clipboard and synthesizes Ctrl+V into the currently-focused window, so make sure the target window has focus when you press the hotkey." />
-                        <Grid ColumnDefinitions="Auto,260,*"
+                        <Grid Classes="hotkey-grid"
                               RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                               ColumnSpacing="12"
                               RowSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="2*" />
+                                <ColumnDefinition Width="3*" MinWidth="220" />
+                            </Grid.ColumnDefinitions>
                         <CheckBox Content="{Binding SettingsEnableShortcutLabel}"
                                   IsChecked="{Binding Settings.EnableToggleWindowHotkey}" />
                         <TextBlock Grid.Column="1" VerticalAlignment="Center"
@@ -286,7 +309,7 @@
                                      RevealPassword="{Binding IsDatabasePasswordVisible}" />
                             <CheckBox Content="{Binding SettingsShowPasswordLabel}"
                                       IsChecked="{Binding IsDatabasePasswordVisible}" />
-                            <CheckBox Content="Remember password (saved as plaintext in storage.json)"
+                            <CheckBox Content="{x:Static loc:AppText.SettingsRememberDatabasePassword}"
                                       IsChecked="{Binding SettingsRememberDatabasePassword, Mode=TwoWay}" />
                             <TextBlock Classes="body-muted"
                                        Foreground="{DynamicResource DangerBrush}"
@@ -386,11 +409,16 @@
                                    FontSize="16"
                                    FontWeight="SemiBold" />
                     </Expander.Header>
-                    <Grid ColumnDefinitions="Auto,260,*"
+                    <Grid Classes="hotkey-grid"
                           RowDefinitions="Auto,Auto"
                           ColumnSpacing="12"
                           RowSpacing="10"
                           Margin="8,10,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="2*" />
+                            <ColumnDefinition Width="3*" MinWidth="220" />
+                        </Grid.ColumnDefinitions>
                         <CheckBox Content="{Binding SettingsEnableShortcutLabel}"
                                   IsChecked="{Binding Settings.EnableNormalClipLifetime}" />
                         <TextBlock Grid.Column="1" VerticalAlignment="Center"
@@ -415,11 +443,16 @@
                                    FontSize="16"
                                    FontWeight="SemiBold" />
                     </Expander.Header>
-                    <Grid ColumnDefinitions="Auto,260,*"
+                    <Grid Classes="hotkey-grid"
                           RowDefinitions="Auto,Auto,Auto"
                           ColumnSpacing="12"
                           RowSpacing="10"
                           Margin="8,10,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="2*" />
+                            <ColumnDefinition Width="3*" MinWidth="220" />
+                        </Grid.ColumnDefinitions>
                         <CheckBox Content="{Binding SettingsEnableShortcutLabel}"
                                   IsChecked="{Binding Settings.EnableMaxLibrarySize}" />
                         <TextBlock Grid.Column="1" VerticalAlignment="Center"
@@ -446,7 +479,7 @@
                           IsExpanded="{Binding Settings.SensitivitySection.IsExpanded, Mode=TwoWay}">
                     <Expander.Header>
                         <Grid ColumnDefinitions="*,Auto"
-                              MinWidth="500">
+                              ColumnSpacing="12">
                             <TextBlock Text="{Binding SettingsSensitivityTitle}"
                                        FontSize="16"
                                        FontWeight="SemiBold"

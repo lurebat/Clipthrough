@@ -47,10 +47,12 @@ public partial class MainWindow : Window
 
     public MainWindow() : this(null) { }
 
-    public MainWindow(ISystemInteractionService? systemInteractionService)
+    public MainWindow(ISystemInteractionService? systemInteractionService, IWindowPlacementStore? placementStore = null)
     {
         m_systemInteractionService = systemInteractionService;
         InitializeComponent();
+        ApplyWorkspaceBreakpoint(WorkspaceBreakpoints.Classify(ClientSize));
+        InitializePlacement(placementStore);
         Opened += OnOpened;
         Activated += OnActivated;
         Closed += OnClosed;
@@ -61,6 +63,11 @@ public partial class MainWindow : Window
 
     private void OnOpened(object? sender, EventArgs e)
     {
+        // Every show, not only the first: Opened is raised again when the window
+        // comes back from the tray, possibly onto a screen that has since shrunk
+        // or gone. (audit F-49)
+        WindowFitter.Fit(this);
+
         if (m_clipListScrollViewer is not null)
         {
             FocusInitialPopupTarget();
@@ -774,6 +781,13 @@ public partial class MainWindow : Window
 
     private void FocusSelectedClipInList()
     {
+        // Leaving the search box for its results commits the query (OD-9b).
+        // Only from the box: this also runs on paths that are not a search at all.
+        if (GetSearchBox()?.IsKeyboardFocusWithin == true && DataContext is MainWindowViewModel committing)
+        {
+            _ = committing.CommitSearchQueryAsync();
+        }
+
         if (m_clipsListBox is null)
         {
             return;
@@ -1183,6 +1197,15 @@ public partial class MainWindow : Window
 
     private bool TryHandleEnterToCopyShortcut(MainWindowViewModel viewModel, KeyEventArgs e)
     {
+        // Enter in the search box commits the query to history even when it found
+        // nothing to paste (OD-9b). Not handled: it still pastes when it can.
+        if (e.Key == Key.Enter
+            && (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Meta)) == KeyModifiers.None
+            && GetSearchBox()?.IsKeyboardFocusWithin == true)
+        {
+            _ = viewModel.CommitSearchQueryAsync();
+        }
+
         if (viewModel.SelectedClip is null || viewModel.IsSettingsOpen || viewModel.IsWelcomeOpen || viewModel.SessionLogs.IsOpen)
         {
             return false;

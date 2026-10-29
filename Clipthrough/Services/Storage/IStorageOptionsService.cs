@@ -10,6 +10,14 @@ public interface IStorageOptionsService
 
     bool HasSavedConfig { get; }
 
+    /// <summary>
+    /// Describes an unreadable storage.json found at load, or null when the
+    /// storage settings came from where they were supposed to. Set once, at
+    /// construction. When set, <see cref="Current"/> is the default library,
+    /// and the user has to be told so.
+    /// </summary>
+    string? LoadFault { get; }
+
     bool DatabaseExists { get; }
 
     Task SaveAsync(StorageOptions options, CancellationToken cancellationToken = default);

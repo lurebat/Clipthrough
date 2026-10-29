@@ -17,8 +17,8 @@ Two things this does *not* cover, and which still need their own `Task.Run`:
 - **COM clipboard reads** (e.g. `Clipboard.GetDataAsync`) MUST stay on the UI
   thread — they are UI-thread-affine, so offload only the DB portion.
 - **Other blocking work in the same block.** `ISensitivityService` and
-  `ISearchHistoryService` use their own connection factory and are *not* covered
-  by the store's hop, so a block that mixes them with a store call still needs
+  `ISearchHistoryService` share the connection factory but do not hop, so they are
+  *not* covered by the store's hop, so a block that mixes them with a store call still needs
   wrapping. Wrap the uncovered work, not the store call.
 
 Note that `await`ing an already-completed task resumes inline on the caller, so
