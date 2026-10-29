@@ -24,7 +24,7 @@ For `format == ClipContentFormat.Html`, `CopyRichContentAsync`:
 3. Otherwise it wraps the markup with `BuildCfHtml(html)` so the byte offsets in the CF_HTML header are correct. This is what makes Word/Outlook/Teams accept the paste as a real HTML document.
 4. Always also writes the plain-text fallback so apps that don't understand HTML still get sensible text.
 
-When you also want to insert the result into the active app, call `_clipboardMonitorService.SuppressNext()` **before** the write so the monitor doesn't immediately re-capture it as a new clip.
+When you also want to insert the result into the active app, call `_clipboardMonitorService.SuppressNext(text)` **before** the write, passing the text written, so the monitor doesn't re-capture it as a new clip - neither the immediate notification nor a re-publish of the same text (Remote Desktop's rdpclip raises one 100-300 ms later).
 
 ## Capturing the foreground app before showing the window
 
@@ -37,6 +37,17 @@ Showing the main window steals foreground focus, which would break Ctrl+V into "
    - Calls `SimulatePasteKeystroke()` to send Ctrl+V via `SendInput`.
 
 `RestoreCapturedForeground` uses the AttachThreadInput trick — see below — because plain `SetForegroundWindow` will fail when the calling process doesn't own the foreground.
+
+## Window placement, DPI and monitors
+
+Window sizes are DIP and positions are pixels: `Window.Width` is DIP, while `Window.Position`, `Screen.WorkingArea` and `GetCaretScreenPosition()` are pixels. Never compare one with the other directly. Use `Views/WindowGeometry.cs`, whose parameters state their units and which converts with the **target** screen's scaling.
+
+- The toggle hotkey places the window beside the caret with `WindowFitter.PlaceNearCaret`. That function first shrinks the window to fit the caret's screen.
+- Every window calls `WindowFitter.Attach(this)`. It fits the window on every `Opened`, which Avalonia raises on each `Show`, including from the tray. It also refits after `ScalingChanged` and `Screens.Changed`.
+- The main window's last normal geometry and maximized state are kept in `window.json`, beside `settings.json`, through `IWindowPlacementStore`. On restore they are clamped to the screens connected now.
+- Avalonia's `CenterOwner` does not clamp a window that is larger than its screen. That is why the fit runs again after the window opens.
+
+See `docs/solutions/windows-off-screen-on-small-or-scaled-monitors.md`.
 
 ## AttachThreadInput + SetForegroundWindow
 
@@ -66,9 +77,9 @@ Common ordering bugs (we hit each of these before — see commits `db1d332`, `2d
 
 ## SendInput struct layout
 
-`INPUT` size differs between architectures and contains a `KEYBDINPUT` / `MOUSEINPUT` / `HARDWAREINPUT` union. We've been bitten by `Marshal.SizeOf<INPUT>()` returning the wrong number on x64 (32 instead of 24 in some configs). The fix that ships in this codebase:
+`INPUT` size differs between architectures and contains a `KEYBDINPUT` / `MOUSEINPUT` / `HARDWAREINPUT` union. We were bitten by `Marshal.SizeOf<INPUT>()` returning 32 on x64 when `InputUnion` lacked `MOUSEINPUT`; Win32's `sizeof(INPUT)` is 40, and `SendInput` silently rejects every call whose `cbSize` does not match. The fix that ships in this codebase:
 
-- Use the explicit `cbSize` constant from the struct definition rather than `Marshal.SizeOf`.
+- Pass `Marshal.SizeOf<INPUT>()` as `cbSize` - correct once the union is complete - and `Debug.Assert` that it is 40.
 - Include all three union members (`KEYBDINPUT`, `MOUSEINPUT`, `HARDWAREINPUT`) in `InputUnion`, even though we only ever populate `KEYBDINPUT`. This forces the correct overall size.
 
 When `SendInput` returns fewer events than requested, log `Marshal.GetLastWin32Error()` — the most common causes are UIPI (the target window runs at a higher integrity level than us) or input being blocked by a `BlockInput` / secure-desktop transition.
@@ -85,7 +96,7 @@ Pair every successful `RegisterHotKey` with `UnregisterHotKey` on shutdown, and 
 
 ## Source-app resolution
 
-`WindowsSourceApplicationResolver` walks `GetForegroundWindow → GetWindowThreadProcessId → OpenProcess(QueryLimitedInformation) → QueryFullProcessImageName`, then loads the icon via `ExtractAssociatedIcon` / `Shell32`. It deliberately uses `PROCESS_QUERY_LIMITED_INFORMATION` (not `PROCESS_QUERY_INFORMATION`) so it works against elevated processes from a non-elevated Clipthrough.
+`WindowsSourceApplicationResolver.TryResolve(includeIcon)` starts from the **clipboard owner**, not the foreground window: `GetClipboardOwner → GetWindowThreadProcessId → Process.GetProcessById`, then `Process.MainModule.FileName` for the path and `Icon.ExtractAssociatedIcon` for the icon. `MainModule` throws `Win32Exception` for elevated or protected processes from a non-elevated Clipthrough; the path is then null and the name still resolves. The foreground window is only a fallback for the window title, because the owner is often a hidden helper window.
 
 When a process refuses to disclose its path (system processes, some store apps), fall back to the window class / `GetWindowText` instead of failing the capture.
 
@@ -105,7 +116,7 @@ When a process refuses to disclose its path (system processes, some store apps),
 | RTF → clipboard                                            | `CopyRichContentAsync(rtf, plainFallback, ClipContentFormat.Rtf)`    |
 | Restore the user's previous app and paste                  | `RestoreCapturedForeground()` then `SimulatePasteKeystroke()`        |
 | Bind a global hotkey                                       | `TryRegisterGlobalHotKey(window, gesture, callback)`                 |
-| Capture which app was foregrounded                         | `WindowsSourceApplicationResolver.Resolve()`                         |
+| Capture which app was foregrounded                         | `WindowsSourceApplicationResolver.TryResolve()`                         |
 | Encrypt secrets at rest (per-user)                         | `IDataProtectionService.Protect(bytes)` / `.Unprotect(bytes)`        |
 
 ## Don't

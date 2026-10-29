@@ -64,7 +64,7 @@ public static class ClipClipboardWriter
                 return false;
             }
 
-            await WriteAsync(monitor, () => interaction.CopyBitmapAsync(bitmap));
+            await WriteAsync(monitor, content: null, () => interaction.CopyBitmapAsync(bitmap));
             return true;
         }
 
@@ -76,14 +76,14 @@ public static class ClipClipboardWriter
         if (clip.ContentType == ContentType.RichText)
         {
             var plainText = ClipDisplayFormatter.RenderRichContent(clip.Content);
-            await WriteAsync(monitor, () => interaction.CopyRichContentAsync(clip.Content, plainText, clip.ContentFormat));
+            await WriteAsync(monitor, plainText, () => interaction.CopyRichContentAsync(clip.Content, plainText, clip.ContentFormat));
             return true;
         }
 
         // Text and file lists both go as text: a file clip's content is already
         // the newline-separated paths, and there is no file-drop write on
         // ISystemInteractionService to offer instead.
-        await WriteAsync(monitor, () => interaction.CopyTextAsync(clip.Content));
+        await WriteAsync(monitor, clip.Content, () => interaction.CopyTextAsync(clip.Content));
         return true;
     }
 
@@ -98,9 +98,9 @@ public static class ClipClipboardWriter
     /// is what leaves a failed write holding an armed suppression, so the failure
     /// is unwound here rather than left to the gate's expiry window.
     /// </remarks>
-    private static async Task WriteAsync(IClipboardMonitorService monitor, Func<Task> write)
+    private static async Task WriteAsync(IClipboardMonitorService monitor, string? content, Func<Task> write)
     {
-        monitor.SuppressNext();
+        monitor.SuppressNext(content);
         try
         {
             await write();

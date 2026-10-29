@@ -4,6 +4,8 @@
         <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
         <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
         <Nullable>enable</Nullable>
+    <!-- Lets .editorconfig's IDE0051/IDE0052 = error fail the build (F-40). -->
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
         <Version>0.17.1</Version>
         <ApplicationIcon>Assets\avalonia-logo.ico</ApplicationIcon>
         <ApplicationManifest>app.manifest</ApplicationManifest>
@@ -28,22 +30,34 @@
         <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
         <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.1" />
         <PackageReference Include="AvaloniaEdit.TextMate" Version="12.0.0" />
-        <PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.3" />
+        <!-- DevTools (F12) is wired only under #if DEBUG in Program.cs; Release does not ship it (F-41). -->
+    <PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.3" Condition="'$(Configuration)' == 'Debug'" />
         <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.11" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
         <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" />
         <PackageReference Include="Microsoft.ML.Tokenizers" Version="2.0.0" />
         <PackageReference Include="ReactiveUI.Avalonia" Version="12.0.3" />
         <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.11" />
-        <PackageReference Include="SQLitePCLRaw.bundle_e_sqlcipher" Version="2.1.11" />
+        <!--
+      SQLite3 Multiple Ciphers in SQLCipher v4 legacy mode (U-C9, owner decision
+      on OD-2). It replaces SQLitePCLRaw.bundle_e_sqlcipher 2.1.11, frozen at
+      SQLite 3.39.2. Every connection must carry the cipher recipe that
+      SqliteConnectionFactory adds: without it this library writes its own
+      default cipher, which no SQLCipher build can read
+      (docs/plans/2026-10-26-001-encrypted-sqlite-evaluation.md).
+      SQLitePCLRaw.core is pinned because Microsoft.Data.Sqlite 10.0.11 declares
+      core 2.1.x and this bundle needs 3.x; the pair is exercised by our tests,
+      not by Microsoft's.
+    -->
+    <PackageReference Include="SQLite3MC.PCLRaw.bundle" Version="2.6.1" />
+    <PackageReference Include="SQLitePCLRaw.core" Version="3.0.5" />
         <PackageReference Include="System.Drawing.Common" Version="10.0.11" />
-        <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.2" />
-        <PackageReference Include="Velopack" Version="1.2.0" />
-    <PackageReference Include="VellumText.Core" Version="0.7.0" />
-    <PackageReference Include="VellumText.Avalonia" Version="0.7.0" />
-    <PackageReference Include="VellumText.Interop.Html" Version="0.7.0" />
-    <PackageReference Include="VellumText.Interop.Rtf" Version="0.7.0" />
-    <PackageReference Include="VellumText.Interop.Markdown" Version="0.7.0" />
+            <PackageReference Include="Velopack" Version="1.2.0" />
+    <PackageReference Include="VellumText.Core" Version="0.8.0-audit.3" />
+    <PackageReference Include="VellumText.Avalonia" Version="0.8.0-audit.3" />
+    <PackageReference Include="VellumText.Interop.Html" Version="0.8.0-audit.3" />
+    <PackageReference Include="VellumText.Interop.Rtf" Version="0.8.0-audit.3" />
+    <PackageReference Include="VellumText.Interop.Markdown" Version="0.8.0-audit.3" />
     </ItemGroup>
 
     <ItemGroup>

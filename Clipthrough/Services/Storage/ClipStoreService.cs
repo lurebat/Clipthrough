@@ -15,6 +15,7 @@ using Clipthrough.Database;
 using Clipthrough.Localization;
 using Clipthrough.Models;
 using Clipthrough.Presentation;
+using Clipthrough.Services.Search;
 using Microsoft.Data.Sqlite;
 
 namespace Clipthrough.Services;
@@ -766,7 +767,12 @@ public sealed class ClipStoreService : IClipStoreService
                 await using (var markCommand = connection.CreateCommand())
                 {
                     markCommand.Transaction = transaction;
-                    markCommand.CommandText = "UPDATE clips SET is_sensitive = 1 WHERE id = $id;";
+                    // Sensitive now, so excluded from embedding like a clip marked
+                    // sensitive by hand: any vector derived from its OCR text goes.
+                    markCommand.CommandText = """
+                        UPDATE clips SET is_sensitive = 1, embedding_status = 'excluded' WHERE id = $id;
+                        DELETE FROM clip_embeddings WHERE clip_id = $id;
+                        """;
                     markCommand.Parameters.AddWithValue("$id", clipId);
                     await markCommand.ExecuteNonQueryAsync(cancellationToken);
                 }
@@ -1331,7 +1337,9 @@ public sealed class ClipStoreService : IClipStoreService
             var contentText = BuildStoredContentText(request);
             var hash = ComputeHash(request.ContentType, request.ContentFormat, request.ContentBytes);
             var matches = _sensitivityService.Scan(contentText);
-            var capturedAt = (request.CapturedAtOverride ?? DateTimeOffset.UtcNow).ToString("O", CultureInfo.InvariantCulture);
+            // UTC whatever the caller supplied (F-35): timestamps are compared as
+            // text, which orders correctly only when every value has the same offset.
+            var capturedAt = (request.CapturedAtOverride?.ToUniversalTime() ?? DateTimeOffset.UtcNow).ToString("O", CultureInfo.InvariantCulture);
             var byteSize = request.ContentBytes.LongLength;
 
             long clipId;
@@ -1424,7 +1432,9 @@ public sealed class ClipStoreService : IClipStoreService
         var contentText = BuildStoredContentText(request);
         var hash = ComputeHash(request.ContentType, request.ContentFormat, request.ContentBytes);
         var matches = scanSensitivity ? _sensitivityService.Scan(contentText) : Array.Empty<SensitivityMatch>();
-        var capturedAt = (request.CapturedAtOverride ?? DateTimeOffset.UtcNow).ToString("O", CultureInfo.InvariantCulture);
+        // UTC whatever the caller supplied (F-35): timestamps are compared as
+        // text, which orders correctly only when every value has the same offset.
+        var capturedAt = (request.CapturedAtOverride?.ToUniversalTime() ?? DateTimeOffset.UtcNow).ToString("O", CultureInfo.InvariantCulture);
         var byteSize = request.ContentBytes.LongLength;
 
         await using var connection = _connectionFactory.CreateConnection();
@@ -1600,50 +1610,59 @@ public sealed class ClipStoreService : IClipStoreService
         // Stop counting at Offset+Limit+1 so we know there are more without a full table scan. (U15)
         var countCap = filters.Offset + filters.Limit + 1;
 
-        await using (var queryCommand = connection.CreateCommand())
+        try
         {
-            // Use metadata-only columns (no content_bytes / source_app_icon BLOBs). (U12)
-            // Ordering has exactly one authority - BuildOrderClause. This path
-            // used to hardcode the MostRecent clause, so the sort dropdown
-            // silently stopped working the moment the user ticked Regex or Case
-            // (which is what diverts us here in the first place).
-            queryCommand.CommandText = $"""
-                SELECT {ClipScanSelectColumns}
-                FROM clips c
-                {whereClause}
-                {BuildOrderClause(filters.SortOption)};
-                """;
-            AddSearchParameters(queryCommand, filters, hasSearch: false);
-            if (prefilter is not null)
+            await using (var queryCommand = connection.CreateCommand())
             {
-                queryCommand.Parameters.AddWithValue("$prefilter", prefilter);
+                // Use metadata-only columns (no content_bytes / source_app_icon BLOBs). (U12)
+                // Ordering has exactly one authority - BuildOrderClause. This path
+                // used to hardcode the MostRecent clause, so the sort dropdown
+                // silently stopped working the moment the user ticked Regex or Case
+                // (which is what diverts us here in the first place).
+                queryCommand.CommandText = $"""
+                    SELECT {ClipScanSelectColumns}
+                    FROM clips c
+                    {whereClause}
+                    {BuildOrderClause(filters.SortOption)};
+                    """;
+                AddSearchParameters(queryCommand, filters, hasSearch: false);
+                if (prefilter is not null)
+                {
+                    queryCommand.Parameters.AddWithValue("$prefilter", prefilter);
+                }
+
+                await using var reader = await queryCommand.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    // Match against the five searched columns first. Only a row that survives
+                    // is worth turning into a ClipEntry - the other twenty-five columns and
+                    // five timestamp parses are pure waste for a row we are about to drop.
+                    if (!MatchesSearch(SearchableFields.Read(reader), filters, matchers))
+                    {
+                        continue;
+                    }
+
+                    totalMatchingCount++;
+                    if (totalMatchingCount <= filters.Offset)
+                    {
+                        continue;
+                    }
+
+                    if (items.Count < filters.Limit)
+                    {
+                        items.Add(ReadClipMeta(reader));
+                    }
+
+                    // Stop scanning once we've confirmed "at least one more beyond this page". (U15)
+                    if (totalMatchingCount >= countCap) break;
+                }
             }
-
-            await using var reader = await queryCommand.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                // Match against the five searched columns first. Only a row that survives
-                // is worth turning into a ClipEntry - the other twenty-five columns and
-                // five timestamp parses are pure waste for a row we are about to drop.
-                if (!MatchesSearch(SearchableFields.Read(reader), filters, matchers))
-                {
-                    continue;
-                }
-
-                totalMatchingCount++;
-                if (totalMatchingCount <= filters.Offset)
-                {
-                    continue;
-                }
-
-                if (items.Count < filters.Limit)
-                {
-                    items.Add(ReadClipMeta(reader));
-                }
-
-                // Stop scanning once we've confirmed "at least one more beyond this page". (U15)
-                if (totalMatchingCount >= countCap) break;
-            }
+        }
+        catch (RegexMatchTimeoutException ex)
+        {
+            // A partial scan is not an answer: stop and say so, so the caller
+            // keeps what it shows instead of displaying a truncated list.
+            throw new SearchPatternException(SearchPatternProblem.TooSlow, ex);
         }
 
         await LoadSensitivityMatchesAsync(connection, items, cancellationToken);
@@ -1766,7 +1785,7 @@ public sealed class ClipStoreService : IClipStoreService
     {
         if (filters.UseRegex)
         {
-            return [BuildSearchRegex(filters.SearchText, filters.CaseSensitive)];
+            return [BuildSearchRegex(filters.SearchText, filters.CaseSensitive, filters.RegexEngine)];
         }
 
         if (filters.UseWildcard)
@@ -2297,20 +2316,6 @@ public sealed class ClipStoreService : IClipStoreService
         }
     }
 
-    private static async Task<int> ExecuteCountAsync(SqliteConnection connection, string sql, ClipSearchFilters filters, bool hasSearch, CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        if (hasSearch && !filters.UseRegex)
-        {
-            command.Parameters.AddWithValue("$search", BuildFtsExpression(filters.SearchText, filters.UseFuzzy));
-        }
-
-        AddContentTypeParameters(command, filters);
-
-        var scalar = await command.ExecuteScalarAsync(cancellationToken);
-        return Convert.ToInt32(scalar, CultureInfo.InvariantCulture);
-    }
 
     private static void AddContentTypeParameters(SqliteCommand command, ClipSearchFilters filters)
     {
@@ -2368,22 +2373,6 @@ public sealed class ClipStoreService : IClipStoreService
         return scalar is DBNull or null ? null : Convert.ToString(scalar, CultureInfo.InvariantCulture);
     }
 
-    private static async Task<string?> ExecuteScalarStringAsync(
-        SqliteConnection connection,
-        string sql,
-        CancellationToken cancellationToken,
-        params (string Name, object Value)[] parameters)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        foreach (var (name, value) in parameters)
-        {
-            command.Parameters.AddWithValue(name, value);
-        }
-
-        var scalar = await command.ExecuteScalarAsync(cancellationToken);
-        return scalar is DBNull or null ? null : Convert.ToString(scalar, CultureInfo.InvariantCulture);
-    }
 
     /// <summary>
     /// Pinning or favoriting a clip is an explicit "keep this" from the user, so
@@ -2668,8 +2657,38 @@ public sealed class ClipStoreService : IClipStoreService
         return Convert.ToHexString(bytes);
     }
 
-    private static Regex BuildSearchRegex(string searchText, bool caseSensitive)
-        => new(searchText, (caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase) | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    /// <summary>
+    /// The backtracking engine's per-match budget. A pattern with nested
+    /// quantifiers against a long near-miss used to run for good, spinning a
+    /// core and parking every later refresh behind it (F-11).
+    /// </summary>
+    internal static readonly TimeSpan BacktrackingRegexTimeout = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>
+    /// Builds the user's regex on the engine they chose (OD-7, S38). The
+    /// default, NonBacktracking, runs in linear time, so no pattern can hang a
+    /// search; it rejects backreferences, lookarounds and atomic groups at
+    /// construction, which is reported as needing the other engine rather than
+    /// as an invalid pattern. Backtracking supports everything, bounded by
+    /// <see cref="BacktrackingRegexTimeout"/>.
+    /// </summary>
+    private static Regex BuildSearchRegex(string searchText, bool caseSensitive, RegexSearchEngine engine)
+    {
+        var options = (caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase) | RegexOptions.CultureInvariant;
+        if (engine == RegexSearchEngine.Backtracking)
+        {
+            return new Regex(searchText, options | RegexOptions.Compiled, BacktrackingRegexTimeout);
+        }
+
+        try
+        {
+            return new Regex(searchText, options | RegexOptions.NonBacktracking);
+        }
+        catch (NotSupportedException ex)
+        {
+            throw new SearchPatternException(SearchPatternProblem.NeedsBacktracking, ex);
+        }
+    }
 
     /// <summary>Checks all five columns indexed by FTS: content, source_app, source_window_title, source_url, ocr_text. (U13)</summary>
     private static bool IsRegexMatch(in SearchableFields row, Regex regex)
@@ -2905,10 +2924,15 @@ public sealed class ClipStoreService : IClipStoreService
             await using (var upsert = connection.CreateCommand())
             {
                 upsert.Transaction = transaction;
+                // Only for a clip that is still claimed and still not sensitive.
+                // Eligibility is checked at claim time; a clip marked sensitive
+                // while inference ran (by hand, by a rule rebuild, by OCR) must
+                // not get a vector derived from its content afterwards, nor read
+                // 'succeeded' instead of 'excluded' (F-17).
                 upsert.CommandText = """
                     INSERT INTO clip_embeddings (clip_id, model_version, dimensions, vector, created_at)
                     SELECT $id, $model, $dim, $vec, $at
-                    WHERE EXISTS (SELECT 1 FROM clips WHERE id = $id)
+                    WHERE EXISTS (SELECT 1 FROM clips WHERE id = $id AND is_sensitive = 0 AND embedding_status = 'processing')
                     ON CONFLICT(clip_id) DO UPDATE SET
                         model_version = excluded.model_version,
                         dimensions    = excluded.dimensions,
@@ -2931,7 +2955,7 @@ public sealed class ClipStoreService : IClipStoreService
             await using (var status = connection.CreateCommand())
             {
                 status.Transaction = transaction;
-                status.CommandText = "UPDATE clips SET embedding_status = 'succeeded' WHERE id = $id;";
+                status.CommandText = "UPDATE clips SET embedding_status = 'succeeded' WHERE id = $id AND embedding_status = 'processing';";
                 status.Parameters.AddWithValue("$id", record.ClipId);
                 await status.ExecuteNonQueryAsync(cancellationToken);
             }

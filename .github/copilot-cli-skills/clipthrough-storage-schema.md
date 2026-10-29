@@ -5,20 +5,20 @@ Use this when adding columns, indexes, queries, or full-text-search behavior. It
 ## Files
 
 - `Clipthrough/Database/DatabaseInitializer.cs` — owns all `CREATE TABLE`, `CREATE INDEX`, `CREATE TRIGGER`, and forward-only `ALTER TABLE` migrations. Idempotent: every block uses `IF NOT EXISTS` or a `PRAGMA table_info` check before `ALTER`.
-- `Clipthrough/Database/SqliteConnectionFactory.cs` - single source of `SqliteConnection`. Sets `ForeignKeys=true` and, when configured, a SQLCipher key. `CreateConnection()` opens `ReadWriteCreate`; `CreateReadOnlyConnection()` opens `ReadOnly`. Re-applies `PRAGMA busy_timeout = 5000;` on every `StateChange` to Open.
+- `Clipthrough/Database/SqliteConnectionFactory.cs` - single source of `SqliteConnection`. Code that opens a database other than the configured one (backup copies, imports, exports) uses the static `SqliteConnectionFactory.Create(...)`; `ConnectionConstructionGuardTests` fails on any other `new SqliteConnection`, in tests too (they use `TestConnections.Create`). Turns the path into a URI carrying the cipher recipe (`DataSourceFor`), sets `ForeignKeys=true` and, when configured, the key. `CreateConnection()` opens `ReadWriteCreate`; `CreateReadOnlyConnection()` opens `ReadOnly`. Re-applies `PRAGMA busy_timeout = 5000;` on every `StateChange` to Open.
   **Do not add `Cache=Shared`.** The private cache is deliberate: shared cache reports in-process write contention as `SQLITE_LOCKED`, which `busy_timeout` does *not* retry, while private cache reports `SQLITE_BUSY`, which it does. The reasoning is recorded at the call site.
 - `Clipthrough/Services/Storage/ClipStoreService.cs` — all reads/writes go through this `IClipStoreService`. Capture, query, paste-tracking, sensitivity tagging, OCR / embedding status updates.
 
 ## Engine + connection settings
 
-- **Encryption**: SQLCipher via `SQLitePCLRaw.bundle_e_sqlcipher`. The password is supplied through `IStorageOptionsService.Current.DatabasePassword` and propagated by the connection factory. Workers must not start until the password has been applied — see "Service initialization order" in `AGENTS.md`.
+- **Encryption**: the SQLCipher 4 format, written by SQLite3 Multiple Ciphers (`SQLite3MC.PCLRaw.bundle`, with `SQLitePCLRaw.core` pinned to 3.x). Every connection needs the cipher recipe `cipher=sqlcipher&legacy=4`, which only the factory adds; without it a new library is written in a cipher SQLCipher cannot read (`docs/solutions/every-connection-carries-the-cipher-recipe.md`). Rekeying is a backup-API copy plus `PRAGMA rekey` - there is no `sqlcipher_export`. The password is supplied through `IStorageOptionsService.Current.DatabasePassword` and propagated by the connection factory. Workers must not start until the password has been applied — see "Service initialization order" in `AGENTS.md`.
 - **WAL mode**: enabled once during `DatabaseInitializer.InitializeAsync` (`PRAGMA journal_mode = WAL;`). Persistent per-database.
 - **`busy_timeout=5000`**: NOT persistent. Set per-connection from the `StateChange` handler in `SqliteConnectionFactory`. Don't rely on a one-shot pragma.
 - **One writer at a time**: SQLite serialises writers. Background workers (embedding, OCR) compete with UI-triggered writes. Keep transactions short, never hold them across `await` boundaries.
 
 ## UI threading rule
 
-`ClipStoreService` moves its own body to the thread pool — SQLite has no async I/O, so every method would otherwise run to completion on its caller. Just `await` store calls; do not wrap them in `Task.Run`. `ClipStoreThreadingTests` fails if a method stops delegating to `RunOffCallerAsync` or becomes `async` again. COM clipboard reads (e.g. `Clipboard.GetDataAsync`) MUST stay on the UI thread. Work that is *not* a store call is not covered — `ISensitivityService` and `ISearchHistoryService` use their own connection factory — so a mixed block still needs a `Task.Run` around the uncovered part. See `docs/solutions/storage-calls-hop-off-the-caller.md`.
+`ClipStoreService` moves its own body to the thread pool — SQLite has no async I/O, so every method would otherwise run to completion on its caller. Just `await` store calls; do not wrap them in `Task.Run`. `ClipStoreThreadingTests` fails if a method stops delegating to `RunOffCallerAsync` or becomes `async` again. COM clipboard reads (e.g. `Clipboard.GetDataAsync`) MUST stay on the UI thread. Work that is *not* a store call is not covered — `ISensitivityService` and `ISearchHistoryService` share the connection factory but do not hop — so a mixed block still needs a `Task.Run` around the uncovered part. See `docs/solutions/storage-calls-hop-off-the-caller.md`.
 
 ## Schema (current)
 
@@ -36,12 +36,13 @@ Use this when adding columns, indexes, queries, or full-text-search behavior. It
 | `source_app_icon`     | BLOB    | Always NULL since U-E1: icons are in `app_icons`.            |
 | `hash`                | TEXT    | NOT NULL — content hash used for dedup / paste tracking.       |
 | `is_favorite`         | INTEGER | 0/1.                                                           |
-| `is_sensitive`        | INTEGER | 0/1, set by `sensitivity_rules` matches.                       |
+| `is_sensitive`        | INTEGER | 0/1, set by sensitivity-rule matches or by hand.                       |
 | `captured_at`         | TEXT    | ISO-8601 UTC.                                                  |
 | `copy_count`          | INTEGER | Times the same content has been re-copied.                     |
 | `first_copied_at`     | TEXT    | NOT NULL.                                                      |
 | `last_copied_at`      | TEXT    | NOT NULL — drives default sort.                                |
 | `byte_size`           | INTEGER | Total bytes; powers size-sort and retention.                   |
+| `stored_bytes`        | INTEGER | `byte_size` + icon length. Kept by triggers `clips_stored_bytes_ai` / `_au` only; never write it directly. |
 | `image_width`         | INTEGER | Optional, image clips.                                         |
 | `image_height`        | INTEGER | Optional, image clips.                                         |
 | `source_window_title` | TEXT    | Optional.                                                      |
@@ -51,13 +52,16 @@ Use this when adding columns, indexes, queries, or full-text-search behavior. It
 | `last_pasted_at`      | TEXT    | Optional.                                                      |
 | `pinned_at`           | TEXT    | NULL = unpinned. Pinned clips sort to the top.                 |
 | `ocr_text`            | TEXT    | Recognised image text (also indexed in FTS).                   |
-| `ocr_status`          | TEXT    | `pending` / `done` / `failed`.                                 |
+| `ocr_status`          | TEXT    | NULL (never queued), `pending`, `running`, `succeeded`, `failed`, `rerun`. |
 | `ocr_attempted_at`    | TEXT    | Last OCR attempt.                                              |
 | `ocr_error`           | TEXT    | Last OCR error message.                                        |
+| `sensitivity_scanned_at` | TEXT | NULL until the deferred sensitivity scan has run. Every INSERT path must leave it NULL or set it deliberately: a NULL row is rescanned, a set one is trusted as clean. |
 | `source_clip_id`      | INTEGER | When this clip was created from a transform, points at parent. |
 | `transform_kind`      | TEXT    | `builtin:UpperCase`, `ai:Preset`, etc. Rows written before user scripting was removed may carry `script:Name`. |
 | `import_kind`         | TEXT    | NULL for clipboard captures; `"drag_drop"` for popup drag-and-drop imports. |
-| `embedding_status`    | TEXT    | `pending` / `done` / `failed`.                                 |
+| `embedding_status`    | TEXT    | NULL (not yet queued), `pending`, `processing`, `succeeded`, `failed`, `rerun`, `excluded` (sensitive; never embedded). |
+| `embedding_attempts`  | INTEGER | Failed embedding attempts; the worker gives up at `MaxEmbeddingAttempts`. Reset when a clip leaves `excluded`. |
+| `sensitivity_is_manual` | INTEGER | 0/1. The user marked or unmarked the clip by hand, so a rule change must not re-derive `is_sensitive`. |
 | `source_app_icon_hash` | TEXT   | SHA-256 (hex) of the icon PNG, the key into `app_icons`. NULL when there is no icon. |
 
 ### Indexes

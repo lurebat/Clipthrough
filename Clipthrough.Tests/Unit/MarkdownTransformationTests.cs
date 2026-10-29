@@ -1,3 +1,6 @@
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 using Clipthrough.Models;
 using Clipthrough.Services;
 using Xunit;
@@ -17,13 +20,13 @@ namespace Clipthrough.Tests.Unit;
 /// </remarks>
 public sealed class MarkdownTransformationTests
 {
-    private static string Apply(TextTransformation transformation, string input)
-        => TextTransformationService.Apply(transformation, input);
+    private static Task<string> ApplyAsync(TextTransformation transformation, string input)
+        => TextTransformationService.ApplyAsync(transformation, input);
 
     [Fact]
-    public void HtmlToMarkdown_ConvertsEmphasisAndHeadings()
+    public async Task HtmlToMarkdown_ConvertsEmphasisAndHeadings()
     {
-        var markdown = Apply(
+        var markdown = await ApplyAsync(
             TextTransformation.HtmlToMarkdown,
             "<html><body><h1>Title</h1><p>Some <b>bold</b> text.</p></body></html>");
 
@@ -57,15 +60,15 @@ public sealed class MarkdownTransformationTests
     [InlineData("if (a < b && b > c) { return; }")]
     [InlineData("Dictionary<string, List<int>> map;")]
     [InlineData("fn parse<T: FromStr>(s: &str) -> Result<T, T::Err>")]
-    public void HtmlToMarkdown_LeavesTextThatIsNotHtmlAlone(string input)
+    public async Task HtmlToMarkdown_LeavesTextThatIsNotHtmlAlone(string input)
     {
-        Assert.Equal(input, Apply(TextTransformation.HtmlToMarkdown, input));
+        Assert.Equal(input, await ApplyAsync(TextTransformation.HtmlToMarkdown, input));
     }
 
     [Fact]
-    public void MarkdownToHtml_ConvertsEmphasisAndHeadings()
+    public async Task MarkdownToHtml_ConvertsEmphasisAndHeadings()
     {
-        var html = Apply(TextTransformation.MarkdownToHtml, "# Title\n\nSome **bold** text.");
+        var html = await ApplyAsync(TextTransformation.MarkdownToHtml, "# Title\n\nSome **bold** text.");
 
         Assert.Contains("Title", html, System.StringComparison.Ordinal);
         Assert.Contains("<", html, System.StringComparison.Ordinal);
@@ -88,9 +91,9 @@ public sealed class MarkdownTransformationTests
     [InlineData("before\n\n<script>stealTheClipboard()</script>\n\nafter", "stealTheClipboard")]
     [InlineData("before\n\n<style>.x{color:red}</style>\n\nafter", "color:red")]
     [InlineData("before <img src=x onerror=alert(1)> after", "onerror")]
-    public void MarkdownToHtml_DoesNotPassEmbeddedRawHtmlThrough(string markdown, string forbidden)
+    public async Task MarkdownToHtml_DoesNotPassEmbeddedRawHtmlThrough(string markdown, string forbidden)
     {
-        var html = Apply(TextTransformation.MarkdownToHtml, markdown);
+        var html = await ApplyAsync(TextTransformation.MarkdownToHtml, markdown);
 
         Assert.DoesNotContain(forbidden, html, System.StringComparison.OrdinalIgnoreCase);
 
@@ -110,10 +113,60 @@ public sealed class MarkdownTransformationTests
     [InlineData(TextTransformation.MarkdownToHtml, "[unclosed](")]
     [InlineData(TextTransformation.HtmlToMarkdown, "")]
     [InlineData(TextTransformation.MarkdownToHtml, "")]
-    public void EitherDirection_SurvivesInputItCannotConvert(TextTransformation transformation, string input)
+    public async Task EitherDirection_SurvivesInputItCannotConvert(TextTransformation transformation, string input)
     {
-        var result = Apply(transformation, input);
+        var result = await ApplyAsync(transformation, input);
         Assert.NotNull(result);
+    }
+
+    /// <summary>
+    /// The conversion finishes without the caller's thread. VellumText's
+    /// importers are async-only; the export that follows them is synchronous,
+    /// and it must not be marshalled back to the thread that awaited - in the
+    /// app, the UI thread - where it would cost the very freeze the async import
+    /// exists to remove.
+    /// </summary>
+    /// <remarks>
+    /// A synchronization context that never runs what is posted to it stands
+    /// in for a UI thread that is busy. Any continuation that insists on coming
+    /// back to it never runs, and the conversion never completes; one that
+    /// resumes on the pool completes as normal. That makes "where does the work
+    /// after the import run" observable without timing anything.
+    /// </remarks>
+    [Theory]
+    [InlineData(TextTransformation.MarkdownToHtml, "# Title\n\nSome **bold** text.")]
+    [InlineData(TextTransformation.HtmlToMarkdown, "<h1>Title</h1><p>Some <b>bold</b> text.</p>")]
+    public async Task Conversion_CompletesWithoutTheCallersThread(TextTransformation transformation, string input)
+    {
+        var previous = SynchronizationContext.Current;
+        var stuck = new NeverRunsContext();
+        Task<string> conversion;
+        SynchronizationContext.SetSynchronizationContext(stuck);
+        try
+        {
+            conversion = TextTransformationService.ApplyAsync(transformation, input);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+
+        var finished = await Task.WhenAny(conversion, Task.Delay(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken));
+        Assert.True(
+            finished == conversion,
+            $"The conversion waited for the caller's thread ({stuck.Posted} continuation(s) posted back to it).");
+        Assert.NotEqual(input, await conversion);
+    }
+
+    private sealed class NeverRunsContext : SynchronizationContext
+    {
+        private int _posted;
+
+        public int Posted => Volatile.Read(ref _posted);
+
+        public override void Post(SendOrPostCallback d, object? state) => Interlocked.Increment(ref _posted);
+
+        public override void Send(SendOrPostCallback d, object? state) => Interlocked.Increment(ref _posted);
     }
 
     /// <summary>

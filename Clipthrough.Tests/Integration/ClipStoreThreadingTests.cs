@@ -264,6 +264,8 @@ public sealed class ClipStoreThreadingTests
 
         public bool HasSavedConfig => inner.HasSavedConfig;
 
+        public string? LoadFault => inner.LoadFault;
+
         public bool DatabaseExists => inner.DatabaseExists;
 
         public Task SaveAsync(StorageOptions options, CancellationToken cancellationToken = default)
