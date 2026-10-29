@@ -988,7 +988,7 @@
     "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
     "why": "Without spare capacity every batch of 32 reallocates and copies the whole cache, which is the quadratic backfill the review measured at 223 GiB of memcpy over a 100k library.",
     "find": "                var capacity = GrowCapacity(existing.Ids.Length, newLive, dim);",
-    "replace": "                var capacity = newLive;",
+    "replace": "                var capacity = Math.Min(GrowCapacity(existing.Ids.Length, newLive, dim), newLive);",
     "filter": "AppendEmbeddingsAsync_DoesNotReallocateTheCachePerBatch"
   },
   {
