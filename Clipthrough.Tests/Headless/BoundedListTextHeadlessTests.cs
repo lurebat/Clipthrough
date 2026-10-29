@@ -57,13 +57,68 @@ public sealed partial class MainWindowViewModelHeadlessTests
         Assert.False(viewModel.IsSelectedClipTextEditable, "A row holding a prefix must not be editable: the edit would be saved as a clip missing everything after it.");
 
         await row.EnsureContentHydratedAsync();
-        Dispatcher.UIThread.RunJobs();
+        // The selection re-presents the clip a dispatcher turn after hydration
+        // replaces it, and under load that turn can come after a single RunJobs.
+        for (var i = 0; i < 80 && viewModel.SelectedClipRawContent != LongClipText; i++)
+        {
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
 
         Assert.False(row.Clip.IsContentTruncated);
         Assert.Equal(LongClipText, viewModel.SelectedClipRawContent);
         Assert.True(viewModel.IsSelectedClipTextEditable);
     }
 
+    /// <summary>
+    /// Hydration makes the row whole a dispatcher turn before the selection
+    /// re-presents it, and editability used to follow the row: in that gap the
+    /// editor was editable while it still held the 4096-character prefix. An edit
+    /// made there and committed by moving the selection was captured as a new clip
+    /// holding the prefix and the edit - everything after the prefix gone, the
+    /// loss the read-only prefix exists to prevent. Driven from the row's
+    /// FullImage notification, which hydration raises right after it replaces the row's\n    /// clip and before the selection's re-presentation runs.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task BetweenHydrationAndThePreview_TheEditorStaysReadOnly()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        var (viewModel, row) = await OpenOnALongListRowAsync(scope, new TestClipboardMonitorService(), new TestSystemInteractionService());
+        using var _ = viewModel;
+        var other = viewModel.Clips.First(c => c.Id != row.Id);
+
+        bool? editableInTheGap = null;
+        int? editorLengthInTheGap = null;
+        row.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(ClipItemViewModel.FullImage) || editableInTheGap is not null || row.Clip.IsContentTruncated)
+            {
+                return;
+            }
+
+            editableInTheGap = viewModel.IsSelectedClipTextEditable;
+            editorLengthInTheGap = viewModel.EditedClipText.Length;
+            if (viewModel.IsSelectedClipTextEditable)
+            {
+                viewModel.EditedClipText += " edited";
+                viewModel.SelectedClip = other;
+            }
+        };
+
+        viewModel.SelectedClip = row;
+        await row.EnsureContentHydratedAsync();
+        for (var i = 0; i < 40; i++)
+        {
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.NotNull(editableInTheGap);
+        Assert.True(editorLengthInTheGap < LongClipText.Length, "Setup: the gap must be observed while the editor still holds the prefix.");
+        Assert.False(editableInTheGap, "The editor was editable while it held only the prefix.");
+        var everything = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters { Limit = 50 });
+        Assert.DoesNotContain(everything.Items, c => c.ContentPrefix.StartsWith("line 0000", StringComparison.Ordinal) && c.Id != row.Id);
+    }
     [AvaloniaFact]
     public async Task CopyingALongListRow_CopiesAllOfIt()
     {
