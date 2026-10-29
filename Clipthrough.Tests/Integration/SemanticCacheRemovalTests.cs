@@ -37,6 +37,8 @@ public sealed partial class SemanticSearchServiceTests
 
         var emb = new DeterministicEmbeddingService(dims: 8);
         var semantic = new SemanticSearchService(scope.ClipStoreService, emb);
+        // Claim first: a save lands only on a clip the worker claimed (U-B5, F-17).
+        await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(ids.Count);
         await scope.ClipStoreService.SaveEmbeddingBatchAsync(
             [.. ids.Select((id, i) => new ClipEmbeddingRecord(id, emb.VectorFor(phrases[i])))],
             "test");
