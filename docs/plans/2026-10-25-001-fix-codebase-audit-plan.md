@@ -91,6 +91,14 @@ Changes from the pre-decision plan:
 - **Phases B and C** each gain a user setting: the regex engine and the clipboard-history opt-out.
 - **Phase G's search-history unit** now changes when history is recorded, instead of de-duplicating prefixes.
 
+### Landing order
+
+The draft PRs land in this order (adopted 2026-10-29, after a local integration merge of every open draft):
+
+#3 -> #14 (multi-monitor fit) -> #4 A -> #9 G -> #10 U-C9 -> #6 C -> #5 B -> #12 (VellumText 0.8) -> #12's stacked dependency PR -> #7 D -> #11 E -> #13 upgrade start -> #8 F
+
+Each PR merges its predecessor and targets it as its base, so each lands on master without conflicts and with green suites. A problem that appears only when two PRs are combined is fixed on the one that lands later.
+
 ### How every unit is done
 
 Every unit follows Phase 6 of the skill:
