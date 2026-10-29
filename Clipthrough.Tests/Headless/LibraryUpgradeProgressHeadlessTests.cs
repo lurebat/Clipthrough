@@ -126,6 +126,34 @@ public sealed class LibraryUpgradeProgressHeadlessTests
             Assert.NotNull(stageText);
             Assert.NotNull(bar);
             Assert.NotNull(title);
+
+            // The bound controls cannot tell where a change was raised: since
+            // Avalonia 12.1.4 a binding marshals a PropertyChanged from another
+            // thread itself, so the overlay looks right either way. Every other
+            // subscriber still runs on whatever thread raised it, so the thread is
+            // asserted directly.
+            var stageRaises = 0;
+            var offThreadRaises = new List<string>();
+            viewModel.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName is not (nameof(MainWindowViewModel.IsUpgradingLibrary)
+                    or nameof(MainWindowViewModel.LibraryUpgradeStageText)
+                    or nameof(MainWindowViewModel.LibraryUpgradeProgressValue)
+                    or nameof(MainWindowViewModel.IsLibraryUpgradeProgressIndeterminate)))
+                {
+                    return;
+                }
+
+                lock (offThreadRaises)
+                {
+                    stageRaises++;
+                    if (!Dispatcher.UIThread.CheckAccess())
+                    {
+                        offThreadRaises.Add($"{e.PropertyName} on thread {Environment.CurrentManagedThreadId}");
+                    }
+                }
+            };
+
             var seen = new List<string>();
             using var subscription = stageText.GetObservable(TextBlock.TextProperty).Subscribe(t =>
             {
@@ -185,6 +213,12 @@ public sealed class LibraryUpgradeProgressHeadlessTests
             Assert.Equal(100, movePercents.Last());
             Assert.Equal(movePercents.OrderBy(p => p), movePercents);
             Assert.True(movePercents.Distinct().Count() > 2, $"Expected the move to report its batches; saw {string.Join(", ", seen)}.");
+
+            lock (offThreadRaises)
+            {
+                Assert.True(stageRaises > 2, $"Expected the upgrade to raise its progress properties; saw {stageRaises}.");
+                Assert.True(offThreadRaises.Count == 0, $"Progress was applied off the UI thread: {string.Join("; ", offThreadRaises.Take(4))}");
+            }
         }
         finally
         {
