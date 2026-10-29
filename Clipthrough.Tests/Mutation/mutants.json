@@ -2771,8 +2771,8 @@
     "id": "no-ocr-coverage-index",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "F-25. Without it OCR coverage reads ocr_status from each image row, after the payload: 1.9 s at 60k, 9.9 s encrypted.",
-    "find": "            WHERE content_type = 'image';\n\n        -- Orphaned app_icons",
-    "replace": "            WHERE content_type = 'files';\n\n        -- Orphaned app_icons",
+    "find": "            WHERE content_type = 'image';\n\n        -- idx_clips_source_app_icon_hash is not here",
+    "replace": "            WHERE content_type = 'files';\n\n        -- idx_clips_source_app_icon_hash is not here",
     "filter": "FullyQualifiedName~StartupScanIndexTests.OcrCoverage_IsAnsweredFromTheImageIndex"
   },
   {
@@ -4214,5 +4214,29 @@
     "find": "        _presentedClipIsComplete = SelectedClip is { Clip.IsContentTruncated: false };",
     "replace": "        _presentedClipIsComplete = SelectedClip is not null || _presentedClipIsComplete;",
     "filter": "FullyQualifiedName~BetweenHydrationAndThePreview_TheEditorStaysReadOnly"
+  },
+  {
+    "id": "icon-hash-index-built-at-a-deferred-start",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Live check F2: building idx_clips_source_app_icon_hash reads every row; before the move each row spans a page, 19.5-20.7 s on the deferred start of a 60k upgrade. It waits for the background run.",
+    "find": "        if (!allowDeferredPayloadMove || await IsPayloadMoveDoneAsync(connection, cancellationToken))",
+    "replace": "        if (!allowDeferredPayloadMove || await IsPayloadMoveDoneAsync(connection, cancellationToken) || allowDeferredPayloadMove)",
+    "filter": "FullyQualifiedName~ADeferredUpgradeStart_LeavesTheIconHashIndexToTheBackgroundRun"
+  },
+  {
+    "id": "icon-hash-index-never-built-after-the-move",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "The deferred start leaves the icon-hash index to the background run; without it orphaned icons are never removed and the size cap counts them.",
+    "find": "        await ExecuteNonQueryAsync(connection, AppIconHashIndex, cancellationToken);\n        await DeleteOrphanedAppIconsAsync(connection, cancellationToken);\n        return true;",
+    "replace": "        await DeleteOrphanedAppIconsAsync(connection, cancellationToken);\n        return true;",
+    "filter": "FullyQualifiedName~ADeferredUpgradeStart_LeavesTheIconHashIndexToTheBackgroundRun"
+  },
+  {
+    "id": "orphan-icons-never-removed",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "DeleteOrphanedAppIconsAsync waits for the icon-hash index, and must run once it exists.",
+    "find": "            if (Convert.ToInt64(await probe.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 0)",
+    "replace": "            if (Convert.ToInt64(await probe.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) >= 0)",
+    "filter": "FullyQualifiedName~ADeferredUpgradeStart_LeavesTheIconHashIndexToTheBackgroundRun"
   }
 ]

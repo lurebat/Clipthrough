@@ -171,6 +171,22 @@ public sealed class DatabaseInitializer
     /// so an index missing for any reason is restored on the next launch. The
     /// statements are all IF NOT EXISTS and cost one round trip in total.
     /// </summary>
+    /// <summary>
+    /// Orphaned app_icons rows are found through this (U-E1).
+    /// </summary>
+    /// <remarks>
+    /// Built only once nothing is left inline. The column is new, so building the
+    /// index still reads every row of clips, and before the payload move each row
+    /// spans a page: 19.5-20.7 s cold on the 60k fixture, on the deferred upgrade
+    /// start that is meant to open at once, against 0.85 s after the move. Until
+    /// it exists, <see cref="DeleteOrphanedAppIconsAsync"/> does nothing, and the
+    /// background run builds it and then removes the orphans.
+    /// </remarks>
+    private const string AppIconHashIndex = """
+        CREATE INDEX IF NOT EXISTS idx_clips_source_app_icon_hash ON clips(source_app_icon_hash)
+            WHERE source_app_icon_hash IS NOT NULL;
+        """;
+
     private const string SortOrderIndexes = """
         -- One index per BuildOrderClause arm. Every arm leads with the pinned
         -- prefix, so an index lacking it can never satisfy the ORDER BY - which
@@ -271,9 +287,7 @@ public sealed class DatabaseInitializer
         CREATE INDEX IF NOT EXISTS idx_clips_ocr_images ON clips(content_type, ocr_status)
             WHERE content_type = 'image';
 
-        -- Orphaned app_icons rows are found through this (U-E1).
-        CREATE INDEX IF NOT EXISTS idx_clips_source_app_icon_hash ON clips(source_app_icon_hash)
-            WHERE source_app_icon_hash IS NOT NULL;
+        -- idx_clips_source_app_icon_hash is not here: see AppIconHashIndex.
 
         -- Retention purges, which run after every capture. Both lifetime deletes
         -- filter on exactly this pair.
@@ -587,6 +601,17 @@ public sealed class DatabaseInitializer
             await indexCommand.ExecuteNonQueryAsync(cancellationToken);
         }
         TraceStep(sw, "sort-order-indexes");
+
+        // A move the background still owes leaves this to it (AppIconHashIndex).
+        if (!allowDeferredPayloadMove || await IsPayloadMoveDoneAsync(connection, cancellationToken))
+        {
+            await ExecuteNonQueryAsync(connection, AppIconHashIndex, cancellationToken);
+            TraceStep(sw, "app-icon-hash-index");
+        }
+        else
+        {
+            TraceStep(sw, "app-icon-hash-index deferred");
+        }
 
         await DeleteOrphanedAppIconsAsync(connection, cancellationToken);
 
@@ -1027,6 +1052,7 @@ public sealed class DatabaseInitializer
         // After the move, these read small rows and are cheap. Every row the move
         // cleared already has its stored_bytes; this is the safety net.
         await RepairClipStoredBytesAsync(connection, cancellationToken);
+        await ExecuteNonQueryAsync(connection, AppIconHashIndex, cancellationToken);
         await DeleteOrphanedAppIconsAsync(connection, cancellationToken);
         return true;
     }
@@ -1282,8 +1308,25 @@ public sealed class DatabaseInitializer
     /// Removes icons no clip refers to any more. Icons are not sensitive, but an
     /// orphan would still count against the library size cap.
     /// </summary>
+    /// <remarks>
+    /// Does nothing until <see cref="AppIconHashIndex"/> exists. Without it each icon
+    /// costs a scan of clips, and the index is only missing while a deferred payload
+    /// move is owed - when those scans walk every inline payload, under the write
+    /// lock of the maintenance that called this. The background run removes the
+    /// orphans as soon as it has built the index.
+    /// </remarks>
     internal static async Task DeleteOrphanedAppIconsAsync(SqliteConnection connection, CancellationToken cancellationToken, SqliteTransaction? transaction = null)
     {
+        await using (var probe = connection.CreateCommand())
+        {
+            probe.Transaction = transaction;
+            probe.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_clips_source_app_icon_hash';";
+            if (Convert.ToInt64(await probe.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 0)
+            {
+                return;
+            }
+        }
+
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """

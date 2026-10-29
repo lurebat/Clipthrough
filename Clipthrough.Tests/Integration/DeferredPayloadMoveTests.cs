@@ -235,7 +235,59 @@ public sealed class DeferredPayloadMoveTests
         Assert.False(await scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(progress: null));
     }
 
-    /// <summary>Older libraries need scanning backfills that are only cheap after the move.</summary>
+    private static long AppIconHashIndexCount(TemporaryDatabaseScope scope) =>
+        Scalar(scope, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_clips_source_app_icon_hash';");
+
+    /// <summary>
+    /// Live check F2 (60k, schema 8): the deferred upgrade start spent 19.5-20.7 s
+    /// building U-E1's icon-hash index, because building it reads every row of
+    /// clips and before the move each row spans a page. After the move the same
+    /// build took 0.85 s. So the start leaves it, a restart before the move has
+    /// finished leaves it too, and the background run builds it after the move -
+    /// and only then removes orphaned icons, which it finds through it.
+    /// </summary>
+    [Fact]
+    public async Task ADeferredUpgradeStart_LeavesTheIconHashIndexToTheBackgroundRun()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        var ids = SeedSchema8Library(scope, 3);
+        // Schema 8 never had the index; the scope's current-schema start made one.
+        Scalar(scope, "DROP INDEX idx_clips_source_app_icon_hash;");
+        Scalar(scope, "INSERT INTO app_icons (hash, png) VALUES ('orphan', x'00');");
+
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+        Assert.Equal(0, AppIconHashIndexCount(scope));
+
+        // Closed before the background run got anywhere: the version is current now,
+        // but the move is still owed, and so is the index.
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+        Assert.Equal(0, AppIconHashIndexCount(scope));
+        Assert.Equal(ids.Length, InlineRows(scope));
+
+        Assert.True(await scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(progress: null));
+
+        Assert.Equal(0, InlineRows(scope));
+        Assert.Equal(1, AppIconHashIndexCount(scope));
+        Assert.Equal(0, Scalar(scope, "SELECT COUNT(*) FROM app_icons WHERE hash = 'orphan';"));
+        Assert.Equal(1, Scalar(scope, "SELECT COUNT(*) FROM app_icons;"));
+        await AssertEveryClipReadsAsync(scope, ids);
+    }
+
+    /// <summary>The blocking start moves first, so it can build the index itself.</summary>
+    [Fact]
+    public async Task ABlockingUpgradeStart_BuildsTheIconHashIndexAfterItsMove()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        SeedSchema8Library(scope, 3, version: 7);
+        Scalar(scope, "DROP INDEX idx_clips_source_app_icon_hash;");
+
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+
+        Assert.Equal(0, InlineRows(scope));
+        Assert.Equal(1, AppIconHashIndexCount(scope));
+    }
     [Fact]
     public async Task AnUpgradeFromBeforeSchema8_StillMovesBeforeOpening()
     {
