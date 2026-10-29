@@ -505,6 +505,61 @@ public sealed class DeferredPayloadMoveTests
         Assert.Equal(OffsetTimestamps, Timestamps(scope, ids[0]));
     }
 
+    /// <summary>
+    /// Rubber-duck F-13-1: the background upgrade holds a connection of its own, so
+    /// a whole-database operation has to pause it as it pauses the other workers.
+    /// A restore renames the live file aside, which fails while any handle is open
+    /// on it (Windows) or leaves the upgrader writing to the renamed file
+    /// (elsewhere). Paused, the run resumes after the restore, from the start and
+    /// against the library that is live by then.
+    /// </summary>
+    [Fact]
+    public async Task ARestoreDuringTheBackgroundMove_PausesTheMove_WhichFinishesOnTheRestoredLibrary()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        var ids = SeedSchema8Library(scope, 4);
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+
+        // The library as it is before anything moved is what gets restored.
+        var backupPath = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(scope.DatabasePath)!, "before-move.db");
+        Scalar(scope, $"VACUUM INTO '{backupPath.Replace("'", "''", StringComparison.Ordinal)}';");
+
+        using var held = new SemaphoreSlim(0);
+        var heldTokens = new ConcurrentQueue<CancellationToken>();
+        using var closing = new CancellationTokenSource();
+        DatabaseInitializer.BackgroundPayloadMoveBatchBudget = TimeSpan.Zero;
+        DatabaseInitializer.BetweenBackgroundPayloadBatches = async token =>
+        {
+            heldTokens.Enqueue(token);
+            held.Release();
+            await Task.Delay(Timeout.Infinite, token);
+        };
+        try
+        {
+            var move = Task.Run(() => scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(progress: null, closing.Token));
+            Assert.True(await held.WaitAsync(TimeSpan.FromSeconds(20)), "The move never reached its first pause.");
+
+            // Only the invocation already holding stays held; a resumed run goes through.
+            DatabaseInitializer.BetweenBackgroundPayloadBatches = null;
+
+            var backup = new Clipthrough.Services.DatabaseBackupService(scope.StorageOptionsService, null, null, null, settingsService: scope.SettingsService, databaseInitializer: scope.DatabaseInitializer);
+            await backup.RestoreAsync(backupPath);
+
+            Assert.True(heldTokens.TryPeek(out var heldToken) && heldToken.IsCancellationRequested, "The restore ran without stopping the background move.");
+            Assert.True(await move.WaitAsync(TimeSpan.FromSeconds(30)), "The move did not run after the restore.");
+            Assert.Equal(0, InlineRows(scope));
+            Assert.Equal(ids.Length, Scalar(scope, "SELECT COUNT(*) FROM clip_payloads;"));
+            await AssertEveryClipReadsAsync(scope, ids);
+        }
+        finally
+        {
+            DatabaseInitializer.BetweenBackgroundPayloadBatches = null;
+            DatabaseInitializer.BackgroundPayloadMoveBatchBudget = TimeSpan.FromMilliseconds(100);
+            closing.Cancel();
+        }
+    }
+
     private static string BackupDirectory(TemporaryDatabaseScope scope) =>
         System.IO.Path.Combine(System.IO.Path.GetDirectoryName(scope.DatabasePath)!, "backups");
 

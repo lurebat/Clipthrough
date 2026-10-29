@@ -4294,5 +4294,21 @@
     "find": "                Level = AppNotificationLevel.Error,\n                IsPersistent = true,\n                Actions =\n                [\n                    new AppNotificationAction\n                    {\n                        // Any action dismisses its notification; this one does nothing else.",
     "replace": "                Level = AppNotificationLevel.Error,\n                IsPersistent = ex.Message.Length < 0,\n                Actions =\n                [\n                    new AppNotificationAction\n                    {\n                        // Any action dismisses its notification; this one does nothing else.",
     "filter": "FullyQualifiedName~ACorruptLibrary_IsNotMovedInTheBackground"
+  },
+  {
+    "id": "maintenance-scope-skips-background-upgrade",
+    "file": "Clipthrough/Services/Storage/DatabaseMaintenanceScope.cs",
+    "why": "Rubber-duck F-13-1: the background upgrade holds its own connection, so a rekey/restore/move entered while it ran renamed or rewrote a file under a live writer. The scope must pause it before the pool clear.",
+    "find": "            if (backgroundUpgrade is not null)\n            {\n                scope._backgroundUpgradePause",
+    "replace": "            if (backgroundUpgrade is not null && backgroundUpgrade.ToString()!.Length < 0)\n            {\n                scope._backgroundUpgradePause",
+    "filter": "FullyQualifiedName~ARestoreDuringTheBackgroundMove_PausesTheMove"
+  },
+  {
+    "id": "paused-background-upgrade-never-resumes",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-13-1: a background upgrade stopped by a maintenance pause must wait and start again afterwards, not end as if the app were closing.",
+    "find": "            catch (Exception) when (stop!.IsCancellationRequested && !cancellationToken.IsCancellationRequested)",
+    "replace": "            catch (Exception) when (stop!.IsCancellationRequested && !cancellationToken.IsCancellationRequested && body.Method.Name.Length < 0)",
+    "filter": "FullyQualifiedName~ARestoreDuringTheBackgroundMove_PausesTheMove"
   }
 ]

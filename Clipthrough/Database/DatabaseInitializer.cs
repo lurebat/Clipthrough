@@ -10,7 +10,7 @@ using Microsoft.Data.Sqlite;
 
 namespace Clipthrough.Database;
 
-public sealed class DatabaseInitializer
+public sealed class DatabaseInitializer : Clipthrough.Services.Search.IPausableWorker
 {
     private const string Schema = """
         PRAGMA foreign_keys = ON;
@@ -387,6 +387,14 @@ public sealed class DatabaseInitializer
 
     private readonly SqliteConnectionFactory _connectionFactory;
     private readonly ISensitivityService _sensitivityService;
+
+    // The background upgrade's pause state (F-13-1). Each running attempt is
+    // listed with the token that stops it and the task that completes once it
+    // has closed its connection.
+    private readonly object _backgroundGate = new();
+    private readonly List<(CancellationTokenSource Stop, Task Done)> _backgroundAttempts = [];
+    private int _backgroundPauseCount;
+    private TaskCompletionSource _backgroundResumed = CompletedSignal();
 
     public DatabaseInitializer(SqliteConnectionFactory connectionFactory, ISensitivityService sensitivityService)
     {
@@ -1025,7 +1033,14 @@ public sealed class DatabaseInitializer
     /// the synchronous move does; reads and writes in the meantime follow the
     /// partly-moved rules (PartlyMovedLibraryTests).
     /// </summary>
-    public async Task<bool> RunDeferredPayloadMoveAsync(IProgress<LibraryUpgradeProgress>? progress, CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// Paused by <see cref="PauseAsync"/> for a whole-database operation, after
+    /// which it starts over against whatever library is live by then.
+    /// </remarks>
+    public Task<bool> RunDeferredPayloadMoveAsync(IProgress<LibraryUpgradeProgress>? progress, CancellationToken cancellationToken = default)
+        => RunPausableAsync(token => RunDeferredPayloadMoveCoreAsync(progress, token), cancellationToken);
+
+    private async Task<bool> RunDeferredPayloadMoveCoreAsync(IProgress<LibraryUpgradeProgress>? progress, CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -1119,6 +1134,132 @@ public sealed class DatabaseInitializer
     /// The daily backup waits for it.
     /// </summary>
     public bool IsIntegrityCheckOwed { get; private set; }
+
+    /// <summary>
+    /// Stops the background upgrade - the deferred move and the merge drain - and
+    /// waits until it has closed its connection, for a whole-database operation
+    /// (rekey, restore, library move) that must not run beside a writer (F-13-1).
+    /// A run stopped this way is not over: it waits, and when the last pause is
+    /// released it starts again from the top - every step resumes from what it
+    /// committed - against the library that is live by then.
+    /// </summary>
+    public async Task<IAsyncDisposable> PauseAsync()
+    {
+        CancellationTokenSource[] running;
+        Task[] stopped;
+        lock (_backgroundGate)
+        {
+            if (_backgroundPauseCount++ == 0)
+            {
+                _backgroundResumed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+
+            running = _backgroundAttempts.Select(static a => a.Stop).ToArray();
+            stopped = _backgroundAttempts.Select(static a => a.Done).ToArray();
+        }
+
+        // Outside the lock: cancelling can run the attempt's unwinding inline.
+        foreach (var stop in running)
+        {
+            try
+            {
+                stop.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // That attempt finished meanwhile.
+            }
+        }
+
+        await Task.WhenAll(stopped).ConfigureAwait(false);
+        return new BackgroundPause(this);
+    }
+
+    private void ReleasePause()
+    {
+        lock (_backgroundGate)
+        {
+            if (--_backgroundPauseCount == 0)
+            {
+                _backgroundResumed.TrySetResult();
+            }
+        }
+    }
+
+    private static TaskCompletionSource CompletedSignal()
+    {
+        var signal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        signal.SetResult();
+        return signal;
+    }
+
+    /// <summary>
+    /// Runs one piece of background upgrade work so that <see cref="PauseAsync"/>
+    /// can stop it and it then starts over once the pause is released. Only the
+    /// caller's own token ends it for good.
+    /// </summary>
+    private async Task<T> RunPausableAsync<T>(Func<CancellationToken, Task<T>> body, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            Task? resumed = null;
+            CancellationTokenSource? stop = null;
+            TaskCompletionSource? done = null;
+            lock (_backgroundGate)
+            {
+                if (_backgroundPauseCount > 0)
+                {
+                    resumed = _backgroundResumed.Task;
+                }
+                else
+                {
+                    stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    _backgroundAttempts.Add((stop, done.Task));
+                }
+            }
+
+            if (resumed is not null)
+            {
+                await resumed.WaitAsync(cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            try
+            {
+                return await body(stop!.Token).ConfigureAwait(false);
+            }
+            catch (Exception) when (stop!.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                // Paused. Whatever the stop interrupted rolled back; go round and wait.
+            }
+            finally
+            {
+                lock (_backgroundGate)
+                {
+                    _backgroundAttempts.RemoveAll(a => a.Stop == stop);
+                }
+
+                stop!.Dispose();
+                done!.SetResult();
+            }
+        }
+    }
+
+    private sealed class BackgroundPause(DatabaseInitializer owner) : IAsyncDisposable
+    {
+        private int _released;
+
+        public ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0)
+            {
+                owner.ReleasePause();
+            }
+
+            return ValueTask.CompletedTask;
+        }
+    }
 
     private static async Task EnsureSourceAppIconHashColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
@@ -1743,7 +1884,10 @@ public sealed class DatabaseInitializer
     /// Returns false at once when no rebuild left work; stops when a step does
     /// nothing, which FTS5 reports as fewer than two changes.
     /// </summary>
-    public async Task<bool> DrainSearchIndexMergesAsync(CancellationToken cancellationToken = default)
+    public Task<bool> DrainSearchIndexMergesAsync(CancellationToken cancellationToken = default)
+        => RunPausableAsync(DrainSearchIndexMergesCoreAsync, cancellationToken);
+
+    private async Task<bool> DrainSearchIndexMergesCoreAsync(CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -1904,15 +2048,19 @@ public sealed class DatabaseInitializer
         {
             await VerifyIntegrityAsync(connection, cancellationToken);
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException) when (!cancellationToken.IsCancellationRequested)
         {
             HasFailedIntegrityCheck = true;
             throw;
         }
         finally
         {
-            // Run, whatever its outcome: a failure is HasFailedIntegrityCheck's to report.
-            IsIntegrityCheckOwed = false;
+            // Run, whatever its outcome: a failure is HasFailedIntegrityCheck's to
+            // report. A check stopped part-way (a pause, F-13-1) has not run.
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                IsIntegrityCheckOwed = false;
+            }
         }
     }
 
@@ -1933,7 +2081,7 @@ public sealed class DatabaseInitializer
                 }
             }
         }
-        catch (SqliteException ex)
+        catch (SqliteException ex) when (!cancellationToken.IsCancellationRequested)
         {
             // Damage bad enough to break the walk itself aborts the pragma instead
             // of reporting rows, so without this the user gets a bare "SQLite Error

@@ -427,7 +427,7 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         // Step 1: Enter maintenance scope — stops workers and clears the pool
         // so no pooled connection holds the live file open during the swap.
         await using var scope = await DatabaseMaintenanceScope.EnterAsync(
-            _clipboardMonitor, _ocrQueue, _embeddingWorker);
+            _clipboardMonitor, _ocrQueue, _embeddingWorker, _databaseInitializer);
 
         await Task.Run(() => RestoreCore(backupPath, dbPath), cancellationToken).ConfigureAwait(false);
     }
