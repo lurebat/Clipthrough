@@ -162,10 +162,13 @@ public sealed class SqliteConnectionFactory
             // A pooled connection keeps the schema it last read. After another
             // connection changes it - the background payload move drops and builds
             // indexes - SQLite fails the first DELETE on such a connection with
-            // "no such table" when the table has an FTS5 delete trigger and foreign
-            // keys are on (SQLite 3.50.4 and 3.54.0; live check F2, where it ended
-            // the maintenance loop). Reading sqlite_master checks the schema cookie
-            // and reloads a stale schema; on a current one it costs one empty read.
+            // "no such table" when the table has an FTS5 delete trigger, foreign
+            // keys are on and another table references it (live check F2, where it
+            // ended the maintenance loop). An upstream bug, fixed in SQLite 3.54.1
+            // (check-in e6b9a40732), so this is needed while the bundled engine is
+            // older. Reading sqlite_master checks the schema cookie and reloads a
+            // stale schema; on a current one it costs one empty read. When it can
+            // be removed: docs/solutions/stale-schema-delete-no-such-table.md.
             // A failure here (a wrong key, a file that is not a database) is left
             // for the caller's first statement to raise, where it always surfaced.
             try

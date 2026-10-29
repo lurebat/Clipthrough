@@ -19,16 +19,21 @@ the live window, check F2; reproduced on an untouched 60k upgrade).
 ## Cause
 
 A bug in SQLite itself, reproduced on 3.50.4 (Python's sqlite3) and 3.54.0
-(SQLite3 Multiple Ciphers 2.6.1) with no app code:
+(SQLite3 Multiple Ciphers 2.6.1) with no app code. It is fixed upstream in
+**SQLite 3.54.1**, check-in
+[e6b9a40732](https://sqlite.org/src/info/e6b9a40732); official builds from
+3.35.5 to 3.54.0 fail the reproduction below and 3.54.1 passes it (verified
+2026-10-29 against official builds).
 
 1. Connection S reads a table, so it holds that schema.
 2. Another connection changes the schema - any DDL, here the move's
    `DROP INDEX idx_clips_ocr_images` (or the icon-hash index built after it).
 3. S runs `DELETE FROM` the table. The prepare fails with "no such table" when
-   the table has an FTS5 `'delete'` trigger (`clips_ad`) **and** foreign keys
-   are on (S cascades into `clip_payloads` and others).
+   the table has an AFTER DELETE trigger that writes to FTS5 (`clips_ad`),
+   foreign keys are on, **and** another table has a foreign key to it (S
+   cascades into `clip_payloads` and others).
 
-Drop either ingredient and the DELETE succeeds. `SELECT` and `UPDATE` succeed.
+Drop any one ingredient and the DELETE succeeds. `SELECT` and `UPDATE` succeed.
 Normally a stale schema is harmless - SQLite notices the cookie change and
 re-prepares - but here the FTS5 table is connected for the first time inside
 the DELETE's prepare, and the error escapes as a parse error instead.
@@ -80,5 +85,20 @@ sqlite3.connect(p, isolation_level=None).execute("DROP INDEX p_body")
 stale.execute("DELETE FROM p WHERE id < 0")   # sqlite3.OperationalError: no such table: p
 ```
 
-Worth reporting upstream; check whether a newer SQLite still fails before
-removing the refresh.
+## When the workaround can go
+
+The refresh in `SqliteConnectionFactory` is only needed while the bundled
+engine predates SQLite 3.54.1. When this was written, the bundled SQLite3
+Multiple Ciphers 2.6.1 was built on 3.54.0; don't rely on that, check the
+engine you actually bundle:
+
+1. Run the mutant that removes the refresh:
+   `pwsh Clipthrough.Tests\Mutation\Invoke-MutationCheck.ps1 -Id stale-schema-not-refreshed-on-open`.
+   **KILLED** means the bundled engine still has the bug, so keep the refresh.
+   **SURVIVED** means it no longer matters.
+2. Only if it survived: delete the refresh (the `sqlite_master` read in
+   `ApplyBusyTimeoutOnOpen`) and that mutant. Keep `StaleSchemaConnectionTests`:
+   they now pin the engine's own fix.
+
+To confirm which engine a build bundles, `SELECT sqlite_version()` on any
+factory connection; the fix is in 3.54.1 and later.
