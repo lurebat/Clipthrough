@@ -61,7 +61,7 @@ To add a new transformation:
 1. Add an enum value to `Clipthrough/Models/TextTransformation.cs`.
 2. Implement it in `Clipthrough/Services/Ai/TextTransformationService.cs#Apply`.
 3. Add a display label in `Clipthrough/Converters/TextTransformationDisplayConverter.cs`.
-4. Add an entry to `s_transformMenuEntries` in `Clipthrough/Views/MainWindow.axaml.cs` (drives the top menu and toolbar flyout).
+4. Add an entry to `TransformMenuCatalog.Entries` in `Clipthrough/Views/TransformMenuCatalog.cs` (drives the top menu and toolbar flyout).
 5. Add a matching `<MenuItem ... CommandParameter="{x:Static models:TextTransformation.YourValue}"/>` to the right-click context menu in `Clipthrough/Views/MainWindow.axaml`.
 6. Add unit tests in `Clipthrough.Tests/Unit/TextTransformationServiceTests.cs`.
 

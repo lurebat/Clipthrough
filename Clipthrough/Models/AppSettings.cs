@@ -138,6 +138,14 @@ public sealed record AppSettings
     public bool UseFuzzySettingsSearch { get; init; } = true;
 
     /// <summary>
+    /// Skip clipboard content its source marks as not for clipboard history
+    /// (<c>CanIncludeInClipboardHistory</c> = 0) - what Chrome, Edge and
+    /// Bitwarden publish for passwords (OD-10b, S39). On by default; a file
+    /// written before the setting existed reads as on too.
+    /// </summary>
+    public bool HonorClipboardHistoryOptOut { get; init; } = true;
+
+    /// <summary>
     /// The engine regex search runs on (OD-7, S38). NonBacktracking by default:
     /// it cannot hang. Backtracking supports backreferences and lookarounds,
     /// bounded by a match timeout.

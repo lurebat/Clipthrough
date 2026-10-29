@@ -80,13 +80,32 @@ public sealed class UpdateServiceTests
         Assert.Equal(AppSettings.DefaultUpdateFeedUrl, feedUrl);
     }
 
-    [Fact]
-    public void ResolveFeedUrl_AllowlistedHttpsFeedIsAccepted()
+    /// <summary>
+    /// The pin is to this repository, not to GitHub (F-38, OD-5a). A host-only
+    /// check accepted any account's releases as an update source, so a
+    /// tampered settings.json or environment variable could point the app at
+    /// a feed anyone can publish to.
+    /// </summary>
+    [Theory]
+    [InlineData("https://github.com/some-org/some-repo/releases/latest/download")]
+    [InlineData("https://github.com/lurebat/ClipthroughEvil/releases/latest/download")]
+    [InlineData("https://github.com/lurebat/Clipthrough/../../other/repo/releases/latest/download")]
+    [InlineData("https://raw.githubusercontent.com/other/repo/main")]
+    [InlineData("https://objects.githubusercontent.com/github-production-release-asset-2e65be/1")]
+    public void ResolveFeedUrl_AFeedOutsideThisRepositoryIsRejected(string configuredFeedUrl)
     {
-        const string customGitHubFeed = "https://github.com/some-org/some-repo/releases/latest/download";
-        var feedUrl = UpdateService.ResolveFeedUrl(customGitHubFeed, null);
+        var feedUrl = UpdateService.ResolveFeedUrl(configuredFeedUrl, null);
 
-        Assert.Equal(customGitHubFeed, feedUrl);
+        Assert.Equal(AppSettings.DefaultUpdateFeedUrl, feedUrl);
+    }
+
+    [Fact]
+    public void ResolveFeedUrl_AnotherFeedInThisRepositoryIsAccepted()
+    {
+        const string tagFeed = "https://github.com/lurebat/Clipthrough/releases/download/v0.17.1";
+        var feedUrl = UpdateService.ResolveFeedUrl(tagFeed, null);
+
+        Assert.Equal(tagFeed, feedUrl);
     }
 
     [Theory]

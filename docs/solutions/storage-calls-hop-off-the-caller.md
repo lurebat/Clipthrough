@@ -81,8 +81,8 @@ provable no-op. The wrappers are expression-bodied and contain no `await` at all
 
 - **COM clipboard reads** (`Clipboard.GetDataAsync`) are UI-thread-affine and
   must stay there. Offload only the database portion.
-- **Other services.** `ISensitivityService` and `ISearchHistoryService` use their
-  own connection factory and block exactly the same way. A block that mixes them
+- **Other services.** `ISensitivityService` and `ISearchHistoryService` share the
+  connection factory but do not hop, so they block exactly the same way. A block that mixes them
   with a store call still needs a `Task.Run` around the uncovered work — see the
   settings-save path in `MainWindowViewModel`.
 - **CPU work following a store call.** Awaiting an already-completed task resumes

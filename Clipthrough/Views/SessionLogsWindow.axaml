@@ -7,8 +7,8 @@
         Title="{Binding TitleText}"
         Width="1080"
         Height="680"
-        MinWidth="720"
-        MinHeight="420"
+        MinWidth="420"
+        MinHeight="320"
         ShowInTaskbar="True"
         WindowStartupLocation="CenterOwner">
 
@@ -24,21 +24,24 @@
                        Text="{Binding CountText}" />
         </StackPanel>
 
-        <StackPanel Grid.Row="1"
-                    Orientation="Horizontal"
-                    Spacing="10">
-            <TextBox Width="420"
+        <Grid Grid.Row="1"
+              ColumnDefinitions="*,Auto,Auto"
+              ColumnSpacing="10">
+            <TextBox MaxWidth="420"
+                     HorizontalAlignment="Stretch"
                      AutomationProperties.Name="Search logs"
                      PlaceholderText="{Binding SearchWatermark}"
                      Text="{Binding SearchText}" />
-            <ComboBox Width="160"
+            <ComboBox Grid.Column="1"
+                      Width="160"
                       AutomationProperties.Name="Log level filter"
                       ItemsSource="{Binding LogLevelOptions}"
                       SelectedItem="{Binding SelectedLogLevelOption}" />
-            <Button Classes="secondary compact"
+            <Button Grid.Column="2"
+                    Classes="secondary compact"
                     Content="📋 Copy All"
                     Click="OnCopyAllLogsClick" />
-        </StackPanel>
+        </Grid>
 
         <Border Grid.Row="2"
                 Classes="inset-panel"

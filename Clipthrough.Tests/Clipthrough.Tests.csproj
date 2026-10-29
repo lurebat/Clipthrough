@@ -33,4 +33,9 @@
   <ItemGroup>
     <ProjectReference Include="..\Clipthrough\Clipthrough.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- U-C8: databases written by the current SQLCipher build; see SqlCipherFixtureCompatibilityTests. -->
+    <None Include="..\tools\sqlite-compat\fixtures\**" LinkBase="Fixtures\SqliteCompat" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
