@@ -69,6 +69,14 @@ overloads, and `CA2201` where raising a reserved exception type *is* the
 behaviour under test). `external/.editorconfig` is a `root = true` shield so
 none of this fires on vendored code.
 
+Because analyzers are enforced at `error`, the SDK feature band is pinned in
+`global.json` (`rollForward: latestPatch`): a new band can ship new analyzer
+diagnostics and break a release build with no commit here. CI reads the same
+file through `setup-dotnet`'s `global-json-file`. Moving to a new band is a
+deliberate edit to `global.json`, made together with whatever it newly flags.
+If `dotnet` reports that no compatible SDK was found, install the newest SDK in
+that band rather than editing the file.
+
 The headless filter is there because a few Avalonia headless tests still fail
 intermittently — a couple of percent of runs — with a `[Test Case Cleanup
 Failure]` naming an innocent test. That is work outliving a previous test, not
