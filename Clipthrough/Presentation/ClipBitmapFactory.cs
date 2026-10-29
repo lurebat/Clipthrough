@@ -49,5 +49,14 @@ public static class ClipBitmapFactory
             Trace.TraceWarning($"Bitmap decode failed: {ex.Message}");
             return null;
         }
+        catch (NullReferenceException ex) when (decodeWidth is > 0)
+        {
+            // Avalonia.Skia's scaled decode reads SKCodec.Create's result without a
+            // null check, and SKCodec.Create returns null for data it does not
+            // recognise - so undecodable bytes surface here, not as the
+            // ArgumentException the full-size path throws (live check G1).
+            Trace.TraceWarning($"Bitmap decode failed: no decoder recognised the data ({ex.Message})");
+            return null;
+        }
     }
 }

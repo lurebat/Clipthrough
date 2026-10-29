@@ -158,6 +158,24 @@ public sealed class SqliteConnectionFactory
             // does not depend on a build option (SecureDeleteTests).
             cmd.CommandText = "PRAGMA busy_timeout = 5000; PRAGMA secure_delete = ON;";
             cmd.ExecuteNonQuery();
+
+            // A pooled connection keeps the schema it last read. After another
+            // connection changes it - the background payload move drops and builds
+            // indexes - SQLite fails the first DELETE on such a connection with
+            // "no such table" when the table has an FTS5 delete trigger and foreign
+            // keys are on (SQLite 3.50.4 and 3.54.0; live check F2, where it ended
+            // the maintenance loop). Reading sqlite_master checks the schema cookie
+            // and reloads a stale schema; on a current one it costs one empty read.
+            // A failure here (a wrong key, a file that is not a database) is left
+            // for the caller's first statement to raise, where it always surfaced.
+            try
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE 0;";
+                cmd.ExecuteScalar();
+            }
+            catch (SqliteException)
+            {
+            }
         }
     }
 }

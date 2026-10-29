@@ -307,7 +307,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         JumpToTopCommand = ReactiveCommand.Create(() => { if (Clips.Count > 0) SelectedClip = Clips[0]; });
         OpenHelpCommand = ReactiveCommand.Create(OpenHelp);
         OpenAboutCommand = ReactiveCommand.Create(OpenAbout);
-        Maintenance = new DatabaseMaintenanceViewModel(databaseBackupService ?? new DatabaseBackupService(storageOptionsService, null, null, null, settingsService: settingsService), _storageOptionsService, _systemInteractionService, _notificationService, ReportError);
+        Maintenance = new DatabaseMaintenanceViewModel(databaseBackupService ?? new DatabaseBackupService(storageOptionsService, null, null, null, settingsService: settingsService, databaseInitializer: databaseInitializer), _storageOptionsService, _systemInteractionService, _notificationService, ReportError);
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
         SaveSettingsCommand = ReactiveCommand.CreateFromTask(SaveSettingsAsync);
         BrowseDatabasePathCommand = ReactiveCommand.CreateFromTask<Window?>(BrowseDatabasePathAsync);
@@ -6631,6 +6631,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             await Task.Run(
                 () => _databaseInitializer.DrainSearchIndexMergesAsync(_deferredPayloadMoveCancellation.Token),
                 _deferredPayloadMoveCancellation.Token).ConfigureAwait(false);
+
+            // The startup backup waited for the integrity check this run has now
+            // passed (live check F3); without this the day would go unbacked-up.
+            // Expired clips first, as at startup (OD-4a).
+            try
+            {
+                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);
+                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);
+            }
+            catch (Exception backupFailure) when (backupFailure is not OperationCanceledException)
+            {
+                Trace.TraceWarning($"Daily backup failed: {backupFailure.Message}");
+            }
         }
         catch (OperationCanceledException)
         {
@@ -7060,6 +7073,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await RefreshAsync();
     }
 
+    /// <summary>How often the retention and size-cap maintenance runs on its own. Tests shorten it.</summary>
+    internal TimeSpan MaintenanceInterval { get; set; } = TimeSpan.FromMinutes(1);
+
     private void StartMaintenanceLoop()
     {
         if (_subscriptions.OfType<SerialDisposable>().Any())
@@ -7068,10 +7084,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         var maintenanceSubscription = new SerialDisposable();
-        maintenanceSubscription.Disposable = Observable.Interval(TimeSpan.FromMinutes(1), RxSchedulers.TaskpoolScheduler)
-            .SelectMany(_ => Observable.FromAsync(() => ApplyMaintenanceAndRefreshAsync(false)))
+        // A failed tick is reported and the next one still runs. Without the Catch
+        // inside the SelectMany the error reached this subscription, and OnError is
+        // terminal in Rx: live check F2 lost the periodic retention and size cap for
+        // the rest of the session after one failure.
+        maintenanceSubscription.Disposable = Observable.Interval(MaintenanceInterval, RxSchedulers.TaskpoolScheduler)
+            .SelectMany(_ => Observable.FromAsync(() => ApplyMaintenanceAndRefreshAsync(false))
+                .Select(static _ => (Exception?)null)
+                .Catch(static (Exception ex) => Observable.Return<Exception?>(ex)))
             .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => { }, ex => ReportError("Maintenance loop", ex));
+            .Subscribe(
+                failure =>
+                {
+                    if (failure is not null)
+                    {
+                        ReportError("Maintenance loop", failure);
+                    }
+                },
+                ex => ReportError("Maintenance loop", ex));
         _subscriptions.Add(maintenanceSubscription);
     }
 

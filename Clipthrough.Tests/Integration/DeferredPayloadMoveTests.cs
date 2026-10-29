@@ -235,7 +235,59 @@ public sealed class DeferredPayloadMoveTests
         Assert.False(await scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(progress: null));
     }
 
-    /// <summary>Older libraries need scanning backfills that are only cheap after the move.</summary>
+    private static long AppIconHashIndexCount(TemporaryDatabaseScope scope) =>
+        Scalar(scope, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_clips_source_app_icon_hash';");
+
+    /// <summary>
+    /// Live check F2 (60k, schema 8): the deferred upgrade start spent 19.5-20.7 s
+    /// building U-E1's icon-hash index, because building it reads every row of
+    /// clips and before the move each row spans a page. After the move the same
+    /// build took 0.85 s. So the start leaves it, a restart before the move has
+    /// finished leaves it too, and the background run builds it after the move -
+    /// and only then removes orphaned icons, which it finds through it.
+    /// </summary>
+    [Fact]
+    public async Task ADeferredUpgradeStart_LeavesTheIconHashIndexToTheBackgroundRun()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        var ids = SeedSchema8Library(scope, 3);
+        // Schema 8 never had the index; the scope's current-schema start made one.
+        Scalar(scope, "DROP INDEX idx_clips_source_app_icon_hash;");
+        Scalar(scope, "INSERT INTO app_icons (hash, png) VALUES ('orphan', x'00');");
+
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+        Assert.Equal(0, AppIconHashIndexCount(scope));
+
+        // Closed before the background run got anywhere: the version is current now,
+        // but the move is still owed, and so is the index.
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+        Assert.Equal(0, AppIconHashIndexCount(scope));
+        Assert.Equal(ids.Length, InlineRows(scope));
+
+        Assert.True(await scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(progress: null));
+
+        Assert.Equal(0, InlineRows(scope));
+        Assert.Equal(1, AppIconHashIndexCount(scope));
+        Assert.Equal(0, Scalar(scope, "SELECT COUNT(*) FROM app_icons WHERE hash = 'orphan';"));
+        Assert.Equal(1, Scalar(scope, "SELECT COUNT(*) FROM app_icons;"));
+        await AssertEveryClipReadsAsync(scope, ids);
+    }
+
+    /// <summary>The blocking start moves first, so it can build the index itself.</summary>
+    [Fact]
+    public async Task ABlockingUpgradeStart_BuildsTheIconHashIndexAfterItsMove()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        SeedSchema8Library(scope, 3, version: 7);
+        Scalar(scope, "DROP INDEX idx_clips_source_app_icon_hash;");
+
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+
+        Assert.Equal(0, InlineRows(scope));
+        Assert.Equal(1, AppIconHashIndexCount(scope));
+    }
     [Fact]
     public async Task AnUpgradeFromBeforeSchema8_StillMovesBeforeOpening()
     {
@@ -451,6 +503,69 @@ public sealed class DeferredPayloadMoveTests
         Assert.Equal(ids.Length, InlineRows(scope));
         Assert.Equal(0, Scalar(scope, "SELECT COUNT(*) FROM clip_payloads;"));
         Assert.Equal(OffsetTimestamps, Timestamps(scope, ids[0]));
+    }
+
+    private static string BackupDirectory(TemporaryDatabaseScope scope) =>
+        System.IO.Path.Combine(System.IO.Path.GetDirectoryName(scope.DatabasePath)!, "backups");
+
+    private static string TodaysBackup(TemporaryDatabaseScope scope) =>
+        System.IO.Path.Combine(BackupDirectory(scope), $"clipthrough-{DateTime.UtcNow.ToString("yyyyMMdd", CultureInfo.InvariantCulture)}.db");
+
+    /// <summary>
+    /// Live check F3: the daily backup was written from the library seconds after it
+    /// failed its background quick_check, and rotation keeps only a week - so a few
+    /// days on a damaged library would replace every good backup with a copy of the
+    /// damage. A library that failed its check this session is not backed up, and
+    /// nothing is pruned.
+    /// </summary>
+    [Fact]
+    public async Task TheDailyBackup_IsSkipped_AfterTheLibraryFailedItsCheck_AndKeepsTheOlderBackups()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        SeedSchema8Library(scope, 3);
+        await SeedFillerPagesAsync(scope);
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+        CorruptTheMiddleOfTheFile(scope);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(progress: null));
+
+        // More than the retention keeps, so a backup run would also prune.
+        System.IO.Directory.CreateDirectory(BackupDirectory(scope));
+        var older = Enumerable.Range(1, Clipthrough.Services.DatabaseBackupService.DefaultRetention + 1)
+            .Select(d => System.IO.Path.Combine(BackupDirectory(scope), $"clipthrough-202501{d:00}.db"))
+            .ToArray();
+        foreach (var path in older)
+        {
+            System.IO.File.WriteAllBytes(path, [1, 2, 3]);
+        }
+
+        var backup = new Clipthrough.Services.DatabaseBackupService(scope.StorageOptionsService, null, null, null, settingsService: scope.SettingsService, databaseInitializer: scope.DatabaseInitializer);
+        await backup.EnsureDailyBackupAsync();
+
+        Assert.False(System.IO.File.Exists(TodaysBackup(scope)), "A backup was taken from a library that failed its integrity check.");
+        Assert.All(older, path => Assert.True(System.IO.File.Exists(path), $"{System.IO.Path.GetFileName(path)} was pruned."));
+    }
+
+    /// <summary>
+    /// The startup backup ran while the background check was still reading the file
+    /// (F2: written at t+43 s, the move began at t+46 s), so it could copy a library
+    /// about to fail. Until the owed check has passed it waits; afterwards it runs.
+    /// </summary>
+    [Fact]
+    public async Task TheDailyBackup_WaitsForTheBackgroundCheck_ThenRuns()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        SeedSchema8Library(scope, 3);
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+        var backup = new Clipthrough.Services.DatabaseBackupService(scope.StorageOptionsService, null, null, null, settingsService: scope.SettingsService, databaseInitializer: scope.DatabaseInitializer);
+
+        await backup.EnsureDailyBackupAsync();
+        Assert.False(System.IO.File.Exists(TodaysBackup(scope)), "The backup ran before the owed integrity check.");
+
+        Assert.True(await scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(progress: null));
+        await backup.EnsureDailyBackupAsync();
+        Assert.True(System.IO.File.Exists(TodaysBackup(scope)));
     }
 
     /// <summary>

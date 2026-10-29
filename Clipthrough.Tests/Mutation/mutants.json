@@ -2851,8 +2851,8 @@
     "id": "no-ocr-coverage-index",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "F-25. Without it OCR coverage reads ocr_status from each image row, after the payload: 1.9 s at 60k, 9.9 s encrypted.",
-    "find": "            WHERE content_type = 'image';\n\n        -- Orphaned app_icons",
-    "replace": "            WHERE content_type = 'files';\n\n        -- Orphaned app_icons",
+    "find": "            WHERE content_type = 'image';\n\n        -- idx_clips_source_app_icon_hash is not here",
+    "replace": "            WHERE content_type = 'files';\n\n        -- idx_clips_source_app_icon_hash is not here",
     "filter": "FullyQualifiedName~StartupScanIndexTests.OcrCoverage_IsAnsweredFromTheImageIndex"
   },
   {
@@ -3058,7 +3058,7 @@
   {
     "id": "upgrade-progress-applied-on-the-worker-thread",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
-    "why": "U-E1 (C). The initializer reports from a worker thread; raising the overlay properties there touches Avalonia from the wrong thread.",
+    "why": "U-E1 (C). The initializer reports from a worker thread; raising the overlay properties there touches Avalonia from the wrong thread. Since Avalonia 12.1.4 a binding marshals an off-thread PropertyChanged itself, so the test asserts the raising thread directly.",
     "find": "        public void Report(LibraryUpgradeProgress value) => Avalonia.Threading.Dispatcher.UIThread.Post(() => apply(value));",
     "replace": "        public void Report(LibraryUpgradeProgress value) => apply(value);",
     "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests"
@@ -3291,8 +3291,8 @@
     "id": "background-move-skips-the-integrity-check",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "Owner decision on the integrity check (b). The check moved, it was not dropped: the move rewrites every row, and a corrupt library must not be rewritten.",
-    "find": "        await VerifyIntegrityAsync(connection, cancellationToken);\n        if (!moveDone)\n",
-    "replace": "        await (Environment.ProcessorCount < 0 ? VerifyIntegrityAsync(connection, cancellationToken) : Task.CompletedTask);\n        if (!moveDone)\n",
+    "find": "        await VerifyIntegrityRecordingFailureAsync(connection, cancellationToken);\n        if (!moveDone)\n",
+    "replace": "        await (Environment.ProcessorCount < 0 ? VerifyIntegrityRecordingFailureAsync(connection, cancellationToken) : Task.CompletedTask);\n        if (!moveDone)\n",
     "filter": "FullyQualifiedName~DeferredPayloadMoveTests.TheBackgroundMove_ChecksTheLibraryFirst"
   },
   {
@@ -3315,8 +3315,8 @@
     "id": "utc-backfill-before-the-integrity-check",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "Owner decision (b): the background run checks the library before it rewrites anything. A backfill ahead of the check rewrites rows of a library the check would have refused.",
-    "find": "        await VerifyIntegrityAsync(connection, cancellationToken);\n        if (!moveDone)\n",
-    "replace": "        if (backfillPending)\n        {\n            await BackfillUtcTimestampsAsync(connection, cancellationToken);\n        }\n\n        await VerifyIntegrityAsync(connection, cancellationToken);\n        if (!moveDone)\n",
+    "find": "        await VerifyIntegrityRecordingFailureAsync(connection, cancellationToken);\n        if (!moveDone)\n",
+    "replace": "        if (backfillPending)\n        {\n            await BackfillUtcTimestampsAsync(connection, cancellationToken);\n        }\n\n        await VerifyIntegrityRecordingFailureAsync(connection, cancellationToken);\n        if (!moveDone)\n",
     "filter": "FullyQualifiedName~DeferredPayloadMoveTests.TheBackgroundMove_ChecksTheLibraryFirst"
   },
   {
@@ -3771,8 +3771,8 @@
     "id": "startup-backup-precedes-expiry",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "F-19 / OD-4a. The startup backup ran before the first expiry, copying clips that outlived their lifetime while the app was closed.",
-    "find": "                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n",
-    "replace": "                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n",
+    "find": "                // tick a minute later removes it from the live library.\n                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n",
+    "replace": "                // tick a minute later removes it from the live library.\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n",
     "filter": "FullyQualifiedName~StartupExpiresSensitiveClips_BeforeTakingTheDailyBackup"
   },
   {
@@ -4278,5 +4278,77 @@
     "find": "        _presentedClipIsComplete = SelectedClip is { Clip.IsContentTruncated: false };",
     "replace": "        _presentedClipIsComplete = SelectedClip is not null || _presentedClipIsComplete;",
     "filter": "FullyQualifiedName~BetweenHydrationAndThePreview_TheEditorStaysReadOnly"
+  },
+  {
+    "id": "icon-hash-index-built-at-a-deferred-start",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Live check F2: building idx_clips_source_app_icon_hash reads every row; before the move each row spans a page, 19.5-20.7 s on the deferred start of a 60k upgrade. It waits for the background run.",
+    "find": "        if (!allowDeferredPayloadMove || payloadMoveDone)",
+    "replace": "        if (!allowDeferredPayloadMove || payloadMoveDone || allowDeferredPayloadMove)",
+    "filter": "FullyQualifiedName~ADeferredUpgradeStart_LeavesTheIconHashIndexToTheBackgroundRun"
+  },
+  {
+    "id": "icon-hash-index-never-built-after-the-move",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "The deferred start leaves the icon-hash index to the background run; without it orphaned icons are never removed and the size cap counts them.",
+    "find": "        await ExecuteNonQueryAsync(connection, AppIconHashIndex, cancellationToken);\n        await DeleteOrphanedAppIconsAsync(connection, cancellationToken);\n        return true;",
+    "replace": "        await DeleteOrphanedAppIconsAsync(connection, cancellationToken);\n        return true;",
+    "filter": "FullyQualifiedName~ADeferredUpgradeStart_LeavesTheIconHashIndexToTheBackgroundRun"
+  },
+  {
+    "id": "orphan-icons-never-removed",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "DeleteOrphanedAppIconsAsync waits for the icon-hash index, and must run once it exists.",
+    "find": "            if (Convert.ToInt64(await probe.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 0)",
+    "replace": "            if (Convert.ToInt64(await probe.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) >= 0)",
+    "filter": "FullyQualifiedName~ADeferredUpgradeStart_LeavesTheIconHashIndexToTheBackgroundRun"
+  },
+  {
+    "id": "stale-schema-not-refreshed-on-open",
+    "file": "Clipthrough/Database/SqliteConnectionFactory.cs",
+    "why": "Live check F2: a pooled connection with a schema another connection changed fails its first DELETE FROM clips with \"no such table\" (SQLite bug: FTS5 delete trigger + foreign keys). Reading sqlite_master on open reloads it; PRAGMA schema_version does not.",
+    "find": "                cmd.CommandText = \"SELECT COUNT(*) FROM sqlite_master WHERE 0;\";",
+    "replace": "                cmd.CommandText = \"PRAGMA schema_version;\";",
+    "filter": "FullyQualifiedName~StaleSchemaConnectionTests"
+  },
+  {
+    "id": "maintenance-loop-dies-on-a-failed-tick",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Live check F2: one failed maintenance tick ended the periodic retention and size cap for the session, because OnError is terminal in Rx.",
+    "find": "                .Catch(static (Exception ex) => Observable.Return<Exception?>(ex)))",
+    "replace": "                .Catch(static (Exception ex) => Observable.Throw<Exception?>(ex)))",
+    "filter": "FullyQualifiedName~MaintenanceLoop_SurvivesAFailingTick"
+  },
+  {
+    "id": "backup-taken-after-a-failed-check",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Live check F3: the daily backup copied a library that had just failed quick_check; a week of that rotates every good backup out.",
+    "find": "        if (_databaseInitializer is { HasFailedIntegrityCheck: true })",
+    "replace": "        if (_databaseInitializer is { HasFailedIntegrityCheck: true } && _retention < 0)",
+    "filter": "FullyQualifiedName~TheDailyBackup_IsSkipped_AfterTheLibraryFailedItsCheck|FullyQualifiedName~ACorruptLibrary_IsNotMovedInTheBackground"
+  },
+  {
+    "id": "backup-taken-before-the-owed-check",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Live check F2/F3: the startup backup ran while the background quick_check was still reading the file, so it could copy a library about to fail.",
+    "find": "        if (_databaseInitializer is { IsIntegrityCheckOwed: true })",
+    "replace": "        if (_databaseInitializer is { IsIntegrityCheckOwed: true } && _retention < 0)",
+    "filter": "FullyQualifiedName~TheDailyBackup_WaitsForTheBackgroundCheck|FullyQualifiedName~AnUpgradeFromSchema8_OpensAtOnce"
+  },
+  {
+    "id": "no-backup-after-the-background-run",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "The startup backup waits for the background check; without asking again after the run, the day goes without a backup.",
+    "find": "                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n            }\n            catch (Exception backupFailure)",
+    "replace": "                await Task.CompletedTask.ConfigureAwait(false);\n            }\n            catch (Exception backupFailure)",
+    "filter": "FullyQualifiedName~AnUpgradeFromSchema8_OpensAtOnce"
+  },
+  {
+    "id": "undecodable-thumbnail-throws",
+    "file": "Clipthrough/Presentation/ClipBitmapFactory.cs",
+    "why": "Live check G1: Avalonia.Skia scaled decode throws NullReferenceException for data no codec recognises; uncaught, the row thumbnail task faulted unobserved.",
+    "find": "        catch (NullReferenceException ex) when (decodeWidth is > 0)",
+    "replace": "        catch (NullReferenceException ex) when (decodeWidth is < 0)",
+    "filter": "FullyQualifiedName~ClipBitmapFactoryHeadlessTests"
   }
 ]

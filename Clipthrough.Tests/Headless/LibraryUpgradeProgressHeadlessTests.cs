@@ -73,6 +73,11 @@ public sealed class LibraryUpgradeProgressHeadlessTests
         return match.Success ? int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) : null;
     }
 
+    private static string TodaysBackup(TemporaryDatabaseScope scope) => System.IO.Path.Combine(
+        System.IO.Path.GetDirectoryName(scope.DatabasePath)!,
+        "backups",
+        $"clipthrough-{DateTime.UtcNow.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture)}.db");
+
     [AvaloniaFact]
     public async Task TheFirstStartAfterAnUpgrade_ShowsItsProgress_AndKeepsTheWindowLive()
     {
@@ -126,6 +131,34 @@ public sealed class LibraryUpgradeProgressHeadlessTests
             Assert.NotNull(stageText);
             Assert.NotNull(bar);
             Assert.NotNull(title);
+
+            // The bound controls cannot tell where a change was raised: since
+            // Avalonia 12.1.4 a binding marshals a PropertyChanged from another
+            // thread itself, so the overlay looks right either way. Every other
+            // subscriber still runs on whatever thread raised it, so the thread is
+            // asserted directly.
+            var stageRaises = 0;
+            var offThreadRaises = new List<string>();
+            viewModel.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName is not (nameof(MainWindowViewModel.IsUpgradingLibrary)
+                    or nameof(MainWindowViewModel.LibraryUpgradeStageText)
+                    or nameof(MainWindowViewModel.LibraryUpgradeProgressValue)
+                    or nameof(MainWindowViewModel.IsLibraryUpgradeProgressIndeterminate)))
+                {
+                    return;
+                }
+
+                lock (offThreadRaises)
+                {
+                    stageRaises++;
+                    if (!Dispatcher.UIThread.CheckAccess())
+                    {
+                        offThreadRaises.Add($"{e.PropertyName} on thread {Environment.CurrentManagedThreadId}");
+                    }
+                }
+            };
+
             var seen = new List<string>();
             using var subscription = stageText.GetObservable(TextBlock.TextProperty).Subscribe(t =>
             {
@@ -185,6 +218,12 @@ public sealed class LibraryUpgradeProgressHeadlessTests
             Assert.Equal(100, movePercents.Last());
             Assert.Equal(movePercents.OrderBy(p => p), movePercents);
             Assert.True(movePercents.Distinct().Count() > 2, $"Expected the move to report its batches; saw {string.Join(", ", seen)}.");
+
+            lock (offThreadRaises)
+            {
+                Assert.True(stageRaises > 2, $"Expected the upgrade to raise its progress properties; saw {stageRaises}.");
+                Assert.True(offThreadRaises.Count == 0, $"Progress was applied off the UI thread: {string.Join("; ", offThreadRaises.Take(4))}");
+            }
         }
         finally
         {
@@ -310,6 +349,9 @@ public sealed class LibraryUpgradeProgressHeadlessTests
             });
             Assert.NotNull(captured);
 
+            // The startup backup waits for the background integrity check (live check F3).
+            Assert.False(System.IO.File.Exists(TodaysBackup(scope)), "The daily backup ran before the background integrity check.");
+
             DatabaseInitializer.BetweenBackgroundPayloadBatches = null;
             release.Set();
             clock.Restart();
@@ -338,6 +380,16 @@ public sealed class LibraryUpgradeProgressHeadlessTests
             }
             while (pendingMerges > 0 && clock.Elapsed < TimeSpan.FromSeconds(10));
             Assert.Equal(0L, pendingMerges);
+
+            // ...and is taken once the run has finished.
+            clock.Restart();
+            while (!System.IO.File.Exists(TodaysBackup(scope)) && clock.Elapsed < TimeSpan.FromSeconds(10))
+            {
+                await Task.Delay(20);
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            Assert.True(System.IO.File.Exists(TodaysBackup(scope)), "No daily backup after the background run passed its check.");
         }
         finally
         {
@@ -433,6 +485,15 @@ public sealed class LibraryUpgradeProgressHeadlessTests
             Assert.True(reader.Read());
             Assert.Equal(LegacyRows, reader.GetInt64(0));
             Assert.Equal(0, reader.GetInt64(1));
+
+            // Live check F3: nothing is backed up from a library that failed its check.
+            for (var i = 0; i < 10; i++)
+            {
+                await Task.Delay(20);
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            Assert.False(System.IO.File.Exists(TodaysBackup(scope)), "A daily backup was taken from a library that failed its integrity check.");
         }
         finally
         {
