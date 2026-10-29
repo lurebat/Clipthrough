@@ -2848,6 +2848,14 @@
     "filter": "FullyQualifiedName~BoundedListTextTests.ALongClipsListRow"
   },
   {
+    "id": "can-transform-reads-truncated-content",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "why": "Phase B's transform gate meets Phase D's bounded list rows. Reading Content on a row longer than the bound throws, so the Transform menus, toolbar and row context menu fail for every long clip.",
+    "find": "            && !string.IsNullOrEmpty(clip.ContentPrefix);",
+    "replace": "            && !string.IsNullOrEmpty(clip.Content);",
+    "filter": "FullyQualifiedName~BoundedListTextTests"
+  },
+  {
     "id": "plain-text-copy-skips-hydration",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "F-10. Copy as plain text read Clip.Content straight off the list row.",
