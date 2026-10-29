@@ -16,6 +16,7 @@ public partial class RekeyDialog : Window
     public RekeyDialog()
     {
         InitializeComponent();
+        WindowFitter.Attach(this);
 
         var rememberBox = this.FindControl<CheckBox>("RememberPasswordBox")!;
         var warning = this.FindControl<TextBlock>("WarningText")!;

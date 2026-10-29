@@ -38,6 +38,17 @@ Showing the main window steals foreground focus, which would break Ctrl+V into "
 
 `RestoreCapturedForeground` uses the AttachThreadInput trick — see below — because plain `SetForegroundWindow` will fail when the calling process doesn't own the foreground.
 
+## Window placement, DPI and monitors
+
+Window sizes are DIP and positions are pixels: `Window.Width` is DIP, while `Window.Position`, `Screen.WorkingArea` and `GetCaretScreenPosition()` are pixels. Never compare one with the other directly. Use `Views/WindowGeometry.cs`, whose parameters state their units and which converts with the **target** screen's scaling.
+
+- The toggle hotkey places the window beside the caret with `WindowFitter.PlaceNearCaret`. That function first shrinks the window to fit the caret's screen.
+- Every window calls `WindowFitter.Attach(this)`. It fits the window on every `Opened`, which Avalonia raises on each `Show`, including from the tray. It also refits after `ScalingChanged` and `Screens.Changed`.
+- The main window's last normal geometry and maximized state are kept in `window.json`, beside `settings.json`, through `IWindowPlacementStore`. On restore they are clamped to the screens connected now.
+- Avalonia's `CenterOwner` does not clamp a window that is larger than its screen. That is why the fit runs again after the window opens.
+
+See `docs/solutions/windows-off-screen-on-small-or-scaled-monitors.md`.
+
 ## AttachThreadInput + SetForegroundWindow
 
 ```csharp

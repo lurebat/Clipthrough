@@ -47,10 +47,12 @@ public partial class MainWindow : Window
 
     public MainWindow() : this(null) { }
 
-    public MainWindow(ISystemInteractionService? systemInteractionService)
+    public MainWindow(ISystemInteractionService? systemInteractionService, IWindowPlacementStore? placementStore = null)
     {
         m_systemInteractionService = systemInteractionService;
         InitializeComponent();
+        ApplyWorkspaceBreakpoint(WorkspaceBreakpoints.Classify(ClientSize));
+        InitializePlacement(placementStore);
         Opened += OnOpened;
         Activated += OnActivated;
         Closed += OnClosed;
@@ -61,6 +63,11 @@ public partial class MainWindow : Window
 
     private void OnOpened(object? sender, EventArgs e)
     {
+        // Every show, not only the first: Opened is raised again when the window
+        // comes back from the tray, possibly onto a screen that has since shrunk
+        // or gone. (audit F-49)
+        WindowFitter.Fit(this);
+
         if (m_clipListScrollViewer is not null)
         {
             FocusInitialPopupTarget();
