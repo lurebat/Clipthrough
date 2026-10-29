@@ -157,9 +157,10 @@ Measured on the VellumText 0.4.1 -> 0.5.0 upgrade: 0.5.0 gates Cut inside
 `CutAsync`, so `RichDocumentView`'s own Ctrl+X handler became redundant and its
 mutant went from KILLED to SURVIVED. **The suite was green, the build was clean,
 and `-ValidateOnly` passed all 284 anchors.** Nothing short of running the
-mutants against the new package would have shown it. We pin Avalonia too
-(`12.1.1`), so the same thing is waiting on that bump: a test that passes because
-Avalonia grew a guard is not a test of our code.
+mutants against the new package would have shown it. We pin Avalonia too (the
+`Avalonia*` references in `Clipthrough.csproj`), so the same thing can happen on
+every Avalonia bump: a test that passes because Avalonia grew a guard is not a
+test of our code.
 
 So a dependency bump is not done when the suite is green. Run the sweep, or at
 minimum re-run the mutants covering anything we implemented *because* of that
