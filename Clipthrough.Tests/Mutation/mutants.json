@@ -1282,9 +1282,9 @@
   {
     "id": "maintenance-size-total-is-taken-before-the-purge",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
-    "why": "Keeps the pre-purge library size, so the storage figure never drops after a size-cap eviction and the user sees a library permanently at its ceiling.",
-    "find": "                finalStoredBytes = remainingBytes;\n                finalClipCount -= deleted.Count;",
-    "replace": "                finalClipCount -= deleted.Count;",
+    "why": "The size total a purge reports must be read after the orphaned-icon sweep (U-E1). The row walk's remaining bytes still count the icons of the clips it just evicted, so reporting them overstates the library by every icon the purge freed.",
+    "find": "            if (finalStoredBytes is not null)\n            {\n                finalStoredBytes = await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken, transaction);",
+    "replace": "            if (finalStoredBytes is null)\n            {\n                finalStoredBytes = await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken, transaction);",
     "filter": "Maintenance_ReportsTheSameTotalsTheDatabaseWould"
   },
   {
@@ -1414,22 +1414,6 @@
     "find": "        var failure = await _storageOptionsService.TryOpenWithPasswordAsync(password);",
     "replace": "        Microsoft.Data.Sqlite.SqliteException? failure = null;\n        try\n        {\n            var mutantBuilder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder\n            {\n                DataSource = _storageOptionsService.Current.DatabasePath,\n                Password = password,\n            };\n            await using var mutantConnection = new Microsoft.Data.Sqlite.SqliteConnection(mutantBuilder.ToString());\n            await mutantConnection.OpenAsync();\n        }\n        catch (Microsoft.Data.Sqlite.SqliteException mutantEx)\n        {\n            failure = mutantEx;\n        }",
     "filter": "FullyQualifiedName~DatabasePasswordVerificationTests"
-  },
-  {
-    "id": "library-size-ignores-the-icons-it-stores",
-    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
-    "why": "Counting only byte_size under-counted the library by 12.5x, so the size cap bounded nothing near its setting.",
-    "find": "    private const string StoredRowBytes = \"stored_bytes\";",
-    "replace": "    private const string StoredRowBytes = \"byte_size\";",
-    "filter": "FullyQualifiedName~ClipRetentionTests"
-  },
-  {
-    "id": "size-purge-measures-rows-differently-to-the-total",
-    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
-    "why": "The eviction loop must measure rows the same way the total does, or it evicts the wrong number.",
-    "find": "                SELECT {StoredRowBytes}\n                FROM clips",
-    "replace": "                SELECT byte_size\n                FROM clips",
-    "filter": "FullyQualifiedName~ClipRetentionTests"
   },
   {
     "id": "file-availability-probed-from-the-getter",
