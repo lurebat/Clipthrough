@@ -20,7 +20,7 @@ namespace Clipthrough.Services.Search;
 /// coordination (single writer). Claim is transactional in <see cref="IClipStoreService"/> so
 /// restarting mid-batch does not lose work.
 /// </summary>
-public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
+public sealed class EmbeddingWorker : IEmbeddingWorker, IPausableWorker, IDisposable
 {
     /// <summary>Bumped when the embedding format or model changes so existing vectors get re-run on upgrade.</summary>
     public const string ModelVersion = "minilm-l6-v2-int8-v1";
@@ -58,11 +58,66 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
 
     public IObservable<IReadOnlyList<ClipEmbeddingRecord>> BatchRecordsCompleted => _batchRecordsCompleted.AsObservable();
 
+    // Single owner of the worker's lifetime (F-23). Settings changes, startup,
+    // the ClipAngel import and DatabaseMaintenanceScope used to start and stop
+    // it independently, so a settings save during a rekey or an import restarted
+    // it mid-operation, and a scope restored the state it saw on entry even if
+    // the user had changed the setting meanwhile. Now Start/StopAsync record what
+    // is wanted, pauses hold it stopped, and the last release applies the wish.
+    private readonly object _lifetimeGate = new();
+    private bool _desired;
+    private int _pauseCount;
+
     public bool IsRunning => _started;
 
+    /// <summary>Wants the worker running, and runs it unless a pause is held.</summary>
     public void Start()
     {
-        if (_disposed) return;
+        lock (_lifetimeGate)
+        {
+            if (_disposed) return;
+            _desired = true;
+            if (_pauseCount > 0) return;
+            StartLoopLocked();
+        }
+    }
+
+    /// <summary>Wants the worker stopped, and stops it.</summary>
+    public Task StopAsync()
+    {
+        lock (_lifetimeGate)
+        {
+            _desired = false;
+        }
+
+        return StopLoopAsync();
+    }
+
+    public async Task<IAsyncDisposable> PauseAsync()
+    {
+        lock (_lifetimeGate)
+        {
+            _pauseCount++;
+        }
+
+        await StopLoopAsync().ConfigureAwait(false);
+        return new PauseHandle(this);
+    }
+
+    private void ReleasePause()
+    {
+        lock (_lifetimeGate)
+        {
+            _pauseCount--;
+            if (_pauseCount == 0 && _desired && !_disposed)
+            {
+                StartLoopLocked();
+            }
+        }
+    }
+
+    private void StartLoopLocked()
+    {
         if (_started) return;
         _started = true;
         _claimsResetPending = true;
@@ -70,18 +125,39 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IDisposable
         _loop = Task.Run(() => RunAsync(_cts.Token));
     }
 
-    public async Task StopAsync()
+    private async Task StopLoopAsync()
     {
-        if (!_started) return;
-        _started = false;
-        _cts.Cancel();
+        Task? loop;
+        lock (_lifetimeGate)
+        {
+            if (!_started) return;
+            _started = false;
+            _cts.Cancel();
+            loop = _loop;
+            _loop = null;
+        }
+
         SignalWake();
         try
         {
-            if (_loop is not null) await _loop.ConfigureAwait(false);
+            if (loop is not null) await loop.ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }
-        _loop = null;
+    }
+
+    private sealed class PauseHandle(EmbeddingWorker owner) : IAsyncDisposable
+    {
+        private int _released;
+
+        public ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0)
+            {
+                owner.ReleasePause();
+            }
+
+            return ValueTask.CompletedTask;
+        }
     }
 
     public void Poke()

@@ -59,7 +59,7 @@ public sealed class DatabaseBackupServiceTests : IDisposable
             Mode = SqliteOpenMode.ReadWriteCreate,
             Password = password,
         };
-        await using var conn = new SqliteConnection(builder.ToString());
+        await using var conn = TestConnections.Create(builder.ToString());
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "CREATE TABLE IF NOT EXISTS clips (v TEXT); INSERT INTO clips VALUES (@v);";
@@ -77,7 +77,7 @@ public sealed class DatabaseBackupServiceTests : IDisposable
             Mode = SqliteOpenMode.ReadOnly,
             Password = password,
         };
-        using var conn = new SqliteConnection(builder.ToString());
+        using var conn = TestConnections.Create(builder.ToString());
         conn.Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT v FROM clips LIMIT 1;";
@@ -95,7 +95,7 @@ public sealed class DatabaseBackupServiceTests : IDisposable
             DataSource = dbPath,
             Mode = SqliteOpenMode.ReadWriteCreate,
         };
-        await using var conn = new SqliteConnection(builder.ToString());
+        await using var conn = TestConnections.Create(builder.ToString());
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "CREATE TABLE IF NOT EXISTS clips (v TEXT); INSERT INTO clips VALUES (@v);";
@@ -113,7 +113,7 @@ public sealed class DatabaseBackupServiceTests : IDisposable
             DataSource = dbPath,
             Mode = SqliteOpenMode.ReadOnly,
         };
-        using var conn = new SqliteConnection(builder.ToString());
+        using var conn = TestConnections.Create(builder.ToString());
         conn.Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT v FROM clips ORDER BY rowid;";
@@ -134,7 +134,7 @@ public sealed class DatabaseBackupServiceTests : IDisposable
             DataSource = dbPath,
             Mode = SqliteOpenMode.ReadOnly,
         };
-        using var conn = new SqliteConnection(builder.ToString());
+        using var conn = TestConnections.Create(builder.ToString());
         conn.Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT v FROM clips LIMIT 1;";
@@ -198,7 +198,7 @@ public sealed class DatabaseBackupServiceTests : IDisposable
         // Keep this connection OPEN through the backup: a WAL database
         // checkpoints and removes its -wal sidecar when the LAST connection
         // closes, which would defeat the "row still in WAL" premise.
-        await using var setupConn = new SqliteConnection(builder.ToString());
+        await using var setupConn = TestConnections.Create(builder.ToString());
         await setupConn.OpenAsync();
         await using (var cmd = setupConn.CreateCommand())
         {
@@ -240,7 +240,7 @@ public sealed class DatabaseBackupServiceTests : IDisposable
             Mode = SqliteOpenMode.ReadWriteCreate,
         };
 
-        await using var writer = new SqliteConnection(builder.ToString());
+        await using var writer = TestConnections.Create(builder.ToString());
         await writer.OpenAsync();
         await using (var cmd = writer.CreateCommand())
         {
@@ -253,7 +253,7 @@ public sealed class DatabaseBackupServiceTests : IDisposable
 
         // Open read transaction: everything committed after this point is
         // pinned in the WAL and cannot be checkpointed into the main file.
-        await using var reader = new SqliteConnection(builder.ToString());
+        await using var reader = TestConnections.Create(builder.ToString());
         await reader.OpenAsync();
         await using (var readerCmd = reader.CreateCommand())
         {
@@ -289,7 +289,7 @@ public sealed class DatabaseBackupServiceTests : IDisposable
             Password = password,
         };
 
-        await using var writer = new SqliteConnection(builder.ToString());
+        await using var writer = TestConnections.Create(builder.ToString());
         await writer.OpenAsync();
         await using (var cmd = writer.CreateCommand())
         {
@@ -491,7 +491,7 @@ public sealed class DatabaseBackupServiceTests : IDisposable
         // Update the live DB so it differs from the backup.
         SqliteConnection.ClearAllPools();
         var builder = new SqliteConnectionStringBuilder { DataSource = _dbPath, Mode = SqliteOpenMode.ReadWrite };
-        await using (var conn = new SqliteConnection(builder.ToString()))
+        await using (var conn = TestConnections.Create(builder.ToString()))
         {
             await conn.OpenAsync();
             await using var cmd = conn.CreateCommand();

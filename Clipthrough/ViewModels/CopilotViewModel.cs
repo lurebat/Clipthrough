@@ -119,7 +119,7 @@ public sealed class CopilotViewModel : ViewModelBase, IDisposable
                 {
                     // Auto-copy the device code so the user can paste it into
                     // the GitHub verification page without retyping it.
-                    _clipboardMonitorService.SuppressNext();
+                    _clipboardMonitorService.SuppressNext(deviceCode.UserCode);
                     await _systemInteractionService.CopyTextAsync(deviceCode.UserCode);
                 }
                 catch (Exception ex)
@@ -170,7 +170,7 @@ public sealed class CopilotViewModel : ViewModelBase, IDisposable
 
         try
         {
-            _clipboardMonitorService.SuppressNext();
+            _clipboardMonitorService.SuppressNext(CopilotUserCode);
             await _systemInteractionService.CopyTextAsync(CopilotUserCode);
             CopilotSignInStatus = $"Code {CopilotUserCode} copied. Paste it at {CopilotVerificationUri}.";
         }

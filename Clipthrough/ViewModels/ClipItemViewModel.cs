@@ -374,9 +374,7 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
 
     public bool IsImageClip => Clip.ContentType == ContentType.Image;
 
-    public bool CanTransform =>
-        (IsTextClip || Clip.ContentType == ContentType.Files)
-        && !string.IsNullOrEmpty(Clip.ContentPrefix);
+    public bool CanTransform => TextTransformationService.CanTransform(Clip);
 
     // For image clips, ContentBytes may be null on metadata-only list reads (U12); use
     // ContentType to decide availability — full bytes load when the clip is opened. (U12)
@@ -653,6 +651,10 @@ public sealed class ClipItemViewModel : ViewModelBase, IDisposable
                 }
 
                 Clip = full;
+                // FullContent is memoised, and the selected-clip preview reads it
+                // the moment a clip is selected - before these bytes arrive. Left
+                // cached, a rich clip kept the plain-text fallback for good: the
+                // clip a restart selects showed one flattened paragraph (F-50).
                 _fullContent = null;
                 _previewThumbnailLoaded = false;
                 this.RaisePropertyChanged(nameof(PreviewThumbnailImage));
