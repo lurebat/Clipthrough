@@ -3267,8 +3267,8 @@
     "id": "background-move-failure-not-notified",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "Owner decision on the integrity check (b). A failed background check means a corrupt library; a status-bar line alone is easily missed.",
-    "find": "            _notificationService.PublishError(AppText.LibraryOptimizeFailedTitle, ex.Message);",
-    "replace": "            _ = AppText.LibraryOptimizeFailedTitle;",
+    "find": "            _notificationService.Publish(new AppNotification\n            {\n                Title = AppText.LibraryOptimizeFailedTitle,",
+    "replace": "            if (ex.Message.Length < 0) _notificationService.Publish(new AppNotification\n            {\n                Title = AppText.LibraryOptimizeFailedTitle,",
     "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests.ACorruptLibrary"
   },
   {
@@ -4286,5 +4286,13 @@
     "find": "        catch (NullReferenceException ex) when (decodeWidth is > 0)",
     "replace": "        catch (NullReferenceException ex) when (decodeWidth is < 0)",
     "filter": "FullyQualifiedName~ClipBitmapFactoryHeadlessTests"
+  },
+  {
+    "id": "integrity-failure-notification-times-out",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Owner decision after live check F3: the integrity-failure notification says to restore a backup and must stay until the user closes it, not vanish after six seconds.",
+    "find": "                Level = AppNotificationLevel.Error,\n                IsPersistent = true,\n                Actions =\n                [\n                    new AppNotificationAction\n                    {\n                        // Any action dismisses its notification; this one does nothing else.",
+    "replace": "                Level = AppNotificationLevel.Error,\n                IsPersistent = ex.Message.Length < 0,\n                Actions =\n                [\n                    new AppNotificationAction\n                    {\n                        // Any action dismisses its notification; this one does nothing else.",
+    "filter": "FullyQualifiedName~ACorruptLibrary_IsNotMovedInTheBackground"
   }
 ]
