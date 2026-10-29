@@ -7052,6 +7052,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await RefreshAsync();
     }
 
+    /// <summary>How often the retention and size-cap maintenance runs on its own. Tests shorten it.</summary>
+    internal TimeSpan MaintenanceInterval { get; set; } = TimeSpan.FromMinutes(1);
+
     private void StartMaintenanceLoop()
     {
         if (_subscriptions.OfType<SerialDisposable>().Any())
@@ -7060,10 +7063,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         var maintenanceSubscription = new SerialDisposable();
-        maintenanceSubscription.Disposable = Observable.Interval(TimeSpan.FromMinutes(1), RxSchedulers.TaskpoolScheduler)
-            .SelectMany(_ => Observable.FromAsync(() => ApplyMaintenanceAndRefreshAsync(false)))
+        // A failed tick is reported and the next one still runs. Without the Catch
+        // inside the SelectMany the error reached this subscription, and OnError is
+        // terminal in Rx: live check F2 lost the periodic retention and size cap for
+        // the rest of the session after one failure.
+        maintenanceSubscription.Disposable = Observable.Interval(MaintenanceInterval, RxSchedulers.TaskpoolScheduler)
+            .SelectMany(_ => Observable.FromAsync(() => ApplyMaintenanceAndRefreshAsync(false))
+                .Select(static _ => (Exception?)null)
+                .Catch(static (Exception ex) => Observable.Return<Exception?>(ex)))
             .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => { }, ex => ReportError("Maintenance loop", ex));
+            .Subscribe(
+                failure =>
+                {
+                    if (failure is not null)
+                    {
+                        ReportError("Maintenance loop", failure);
+                    }
+                },
+                ex => ReportError("Maintenance loop", ex));
         _subscriptions.Add(maintenanceSubscription);
     }
 

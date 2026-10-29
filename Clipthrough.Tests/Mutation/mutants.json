@@ -4246,5 +4246,13 @@
     "find": "                cmd.CommandText = \"SELECT COUNT(*) FROM sqlite_master WHERE 0;\";",
     "replace": "                cmd.CommandText = \"PRAGMA schema_version;\";",
     "filter": "FullyQualifiedName~StaleSchemaConnectionTests"
+  },
+  {
+    "id": "maintenance-loop-dies-on-a-failed-tick",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Live check F2: one failed maintenance tick ended the periodic retention and size cap for the session, because OnError is terminal in Rx.",
+    "find": "                .Catch(static (Exception ex) => Observable.Return<Exception?>(ex)))",
+    "replace": "                .Catch(static (Exception ex) => Observable.Throw<Exception?>(ex)))",
+    "filter": "FullyQualifiedName~MaintenanceLoop_SurvivesAFailingTick"
   }
 ]
