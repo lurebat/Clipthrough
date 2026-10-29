@@ -63,7 +63,7 @@ public sealed class LegacyDatabaseMigrationTests : IDisposable
 
         Assert.True(File.Exists(migratedPath), "Migration should have produced a .db file.");
 
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        using var connection = TestConnections.Create(new SqliteConnectionStringBuilder
         {
             DataSource = migratedPath,
             Mode = SqliteOpenMode.ReadOnly,
@@ -132,7 +132,7 @@ public sealed class LegacyDatabaseMigrationTests : IDisposable
             Mode = SqliteOpenMode.ReadWriteCreate,
         };
 
-        var writer = new SqliteConnection(builder.ToString());
+        var writer = TestConnections.Create(builder.ToString());
         writer.Open();
         try
         {
@@ -168,7 +168,7 @@ public sealed class LegacyDatabaseMigrationTests : IDisposable
             // Open the reader before closing the writer; the reader will hold
             // a shared lock on the WAL so SQLite skips the last-close
             // checkpoint and leaves the .db-wal file behind.
-            readerToKeepAlive = new SqliteConnection(builder.ToString());
+            readerToKeepAlive = TestConnections.Create(builder.ToString());
             readerToKeepAlive.Open();
 
             using (var sanity = readerToKeepAlive.CreateCommand())

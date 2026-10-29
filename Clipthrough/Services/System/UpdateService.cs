@@ -20,14 +20,25 @@ public sealed class UpdateService : IUpdateService
     ];
 
     /// <summary>
-    /// Hosts from which update feeds are accepted. Must be HTTPS. Prevents feed
-    /// hijacking via the env-override or a tampered settings.json.
+    /// Where an update feed may come from: this repository, over HTTPS, and
+    /// nothing else (F-38, OD-5a). Checked against the URL's normalised path,
+    /// so "../" cannot climb out of it.
     /// </summary>
-    private static readonly string[] s_allowedFeedHosts =
+    /// <remarks>
+    /// What the pin covers: a feed URL arriving through settings.json or the
+    /// environment override can no longer name another account's releases.
+    /// A host-only check accepted any github.com repository, which anyone can
+    /// publish to.
+    ///
+    /// What it does not cover: the packages themselves are not signature
+    /// checked. Whoever can publish a release to this repository - its
+    /// account, or a CI token with release rights - can still ship an update.
+    /// Signing and verifying releases is a separate decision (S37).
+    /// </remarks>
+    private static readonly string[] s_allowedFeedPrefixes =
     [
-        "github.com",
-        "raw.githubusercontent.com",
-        "objects.githubusercontent.com",
+        "https://github.com/lurebat/Clipthrough/",
+        "https://raw.githubusercontent.com/lurebat/Clipthrough/",
     ];
 
     private readonly ISettingsService _settingsService;
@@ -215,13 +226,14 @@ public sealed class UpdateService : IUpdateService
             return AppSettings.DefaultUpdateFeedUrl;
         }
 
-        var host = uri.Host;
-        if (!s_allowedFeedHosts.Any(h => string.Equals(h, host, StringComparison.OrdinalIgnoreCase)))
+        // Uri has already resolved any dot segments in the path.
+        var normalized = uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+        if (!s_allowedFeedPrefixes.Any(prefix => (normalized + "/").StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
         {
-            Trace.TraceWarning($"Update feed URL host '{host}' is not on the allowlist; using default.");
+            Trace.TraceWarning($"Update feed URL '{normalized}' is outside this repository; using default.");
             return AppSettings.DefaultUpdateFeedUrl;
         }
 
-        return trimmed;
+        return normalized;
     }
 }

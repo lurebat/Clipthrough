@@ -168,6 +168,13 @@ public sealed class SettingsViewModel : ViewModelBase
         set => this.RaiseAndSetIfChanged(ref _databasePath, value);
     }
 
+    private bool _honorClipboardHistoryOptOut = AppSettings.Default.HonorClipboardHistoryOptOut;
+    public bool HonorClipboardHistoryOptOut
+    {
+        get => _honorClipboardHistoryOptOut;
+        set => this.RaiseAndSetIfChanged(ref _honorClipboardHistoryOptOut, value);
+    }
+
     private string _excludedCaptureAppsText = string.Empty;
     /// <summary>
     /// Newline-separated exclusion patterns, edited as free text and parsed by
@@ -629,7 +636,7 @@ public sealed class SettingsViewModel : ViewModelBase
         SensitivitySection = Section(
             "sensitivity rules pattern regex severity warn block name enabled");
         ExcludedAppsSection = Section(
-            "excluded exclude exclusion ignore app apps application blocklist blacklist password manager keepass 1password bitwarden privacy capture source process never",
+            "excluded exclude exclusion ignore app apps application blocklist blacklist password manager keepass 1password bitwarden privacy capture source process never clipboard history opt-out chrome edge",
             isExpanded: false);
         AiSection = Section(
             "ai openai chatgpt gpt model api key base url prompt transform",

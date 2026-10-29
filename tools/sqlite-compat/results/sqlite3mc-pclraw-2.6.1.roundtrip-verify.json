@@ -1,0 +1,92 @@
+[
+  {
+    "Id": "2.roundtrip.01",
+    "Row": 2,
+    "Status": "EXPECTED-FAIL",
+    "Detail": "rt-sqlcipher-nonlegacy.db [NEGATIVE CONTROL: created with cipher=sqlcipher but WITHOUT legacy=4] -> SqliteException code=26 ext=26: SQLite Error 26: 'file is not a database'."
+  },
+  {
+    "Id": "2.roundtrip.02",
+    "Row": 2,
+    "Status": "PASS",
+    "Detail": "rt-write-a-plain-wal.rt.db [a-plain-wal fixture after candidate wrote 50 rows + update + cascading delete] -> current stack read identical data (rows=248 tags=123 checksum=3153D056D471DC77F971B1876A6A5060 integrity=ok fts_integrity=ok fts=[Hello:48, עולם:25, 日本語:25, façade:25, ünï:25, \uD83D\uDE00\uD83D\uDE80✨:25, Русский:25, example.com:25, edited:2]); current-stack write+reopen integrity=ok"
+  },
+  {
+    "Id": "2.roundtrip.03",
+    "Row": 2,
+    "Status": "PASS",
+    "Detail": "rt-write-b-enc-sqlcipher452.rt.db [b-enc-sqlcipher452 fixture after candidate wrote 50 rows + update + cascading delete] -> current stack read identical data (rows=248 tags=123 checksum=3153D056D471DC77F971B1876A6A5060 integrity=ok fts_integrity=ok fts=[Hello:48, עולם:25, 日本語:25, façade:25, ünï:25, \uD83D\uDE00\uD83D\uDE80✨:25, Русский:25, example.com:25, edited:2]); current-stack write+reopen integrity=ok"
+  },
+  {
+    "Id": "2.roundtrip.04",
+    "Row": 2,
+    "Status": "PASS",
+    "Detail": "rt-write-c-enc-rekeyed.rt.db [c-enc-rekeyed fixture after candidate wrote 50 rows + update + cascading delete] -> current stack read identical data (rows=248 tags=123 checksum=3153D056D471DC77F971B1876A6A5060 integrity=ok fts_integrity=ok fts=[Hello:48, עולם:25, 日本語:25, façade:25, ünï:25, \uD83D\uDE00\uD83D\uDE80✨:25, Русский:25, example.com:25, edited:2]); current-stack write+reopen integrity=ok"
+  },
+  {
+    "Id": "2.roundtrip.05",
+    "Row": 2,
+    "Status": "PASS",
+    "Detail": "rt-write-d-enc-wal.rt.db [d-enc-wal fixture after candidate wrote 50 rows + update + cascading delete] -> current stack read identical data (rows=248 tags=123 checksum=3153D056D471DC77F971B1876A6A5060 integrity=ok fts_integrity=ok fts=[Hello:48, עולם:25, 日本語:25, façade:25, ünï:25, \uD83D\uDE00\uD83D\uDE80✨:25, Русский:25, example.com:25, edited:2]); current-stack write+reopen integrity=ok"
+  },
+  {
+    "Id": "2.roundtrip.06",
+    "Row": 2,
+    "Status": "PASS",
+    "Detail": "rt-new-enc.rt.db [new encrypted DB created from scratch by the candidate] -> current stack read identical data (rows=299 tags=149 checksum=6D9AB09748CA97095359DF4718AE82C2 integrity=ok fts_integrity=ok fts=[Hello:59, עולם:30, 日本語:30, façade:30, ünï:30, \uD83D\uDE00\uD83D\uDE80✨:30, Русский:30, example.com:29, edited:1]); current-stack write+reopen integrity=ok"
+  },
+  {
+    "Id": "2.roundtrip.07",
+    "Row": 2,
+    "Status": "PASS",
+    "Detail": "rt-wal-left.db [encrypted .db + 156592-byte uncheckpointed -wal written by the candidate (copied while open)] -> current stack read identical data (rows=199 tags=99 checksum=7F5AFB5BC08F1BF5414DCBD5F8CBBE62 integrity=ok fts_integrity=ok fts=[Hello:39, עולם:20, 日本語:20, façade:20, ünï:20, \uD83D\uDE00\uD83D\uDE80✨:20, Русский:20, example.com:20, edited:1]); current-stack write+reopen integrity=ok"
+  },
+  {
+    "Id": "2.roundtrip.08",
+    "Row": 2,
+    "Status": "PASS",
+    "Detail": "bk-dst.rt.db [backup-API copy (encrypted->encrypted) made by the candidate] -> current stack read identical data (rows=199 tags=99 checksum=7F5AFB5BC08F1BF5414DCBD5F8CBBE62 integrity=ok fts_integrity=ok fts=[Hello:39, עולם:20, 日本語:20, façade:20, ünï:20, \uD83D\uDE00\uD83D\uDE80✨:20, Русский:20, example.com:20, edited:1]); current-stack write+reopen integrity=ok"
+  },
+  {
+    "Id": "2.roundtrip.09",
+    "Row": 2,
+    "Status": "PASS",
+    "Detail": "rk-enc-enc.rt.db [backup-API copy rekeyed encrypted->encrypted by the candidate (PRAGMA rekey in WAL mode)] -> current stack read identical data (rows=199 tags=99 checksum=7F5AFB5BC08F1BF5414DCBD5F8CBBE62 integrity=ok fts_integrity=ok fts=[Hello:39, עולם:20, 日本語:20, façade:20, ünï:20, \uD83D\uDE00\uD83D\uDE80✨:20, Русский:20, example.com:20, edited:1]); current-stack write+reopen integrity=ok"
+  },
+  {
+    "Id": "2.roundtrip.10",
+    "Row": 2,
+    "Status": "PASS",
+    "Detail": "enc-via-rekey-delete.rt.db [PRAGMA rekey 'plain'->'enc' (journal wal->delete->wal, ends wal) (candidate) -> encrypted] -> current stack read identical data (rows=199 tags=99 checksum=7F5AFB5BC08F1BF5414DCBD5F8CBBE62 integrity=ok fts_integrity=ok fts=[Hello:39, עולם:20, 日本語:20, façade:20, ünï:20, \uD83D\uDE00\uD83D\uDE80✨:20, Русский:20, example.com:20, edited:1]); current-stack write+reopen integrity=ok"
+  },
+  {
+    "Id": "2.roundtrip.11",
+    "Row": 2,
+    "Status": "PASS",
+    "Detail": "enc-via-vacuum-into.rt.db [plaintext fixture VACUUM INTO keyed URI (candidate) -> encrypted] -> current stack read identical data (rows=199 tags=99 checksum=7F5AFB5BC08F1BF5414DCBD5F8CBBE62 integrity=ok fts_integrity=ok fts=[Hello:39, עולם:20, 日本語:20, façade:20, ünï:20, \uD83D\uDE00\uD83D\uDE80✨:20, Русский:20, example.com:20, edited:1]); current-stack write+reopen integrity=ok"
+  },
+  {
+    "Id": "2.roundtrip.12",
+    "Row": 2,
+    "Status": "PASS",
+    "Detail": "dec-via-rekey-wal.rt.db [PRAGMA rekey 'enc'->'plain' (journal wal, ends wal) (candidate) -> plaintext] -> current stack read identical data (rows=199 tags=99 checksum=7F5AFB5BC08F1BF5414DCBD5F8CBBE62 integrity=ok fts_integrity=ok fts=[Hello:39, עולם:20, 日本語:20, façade:20, ünï:20, \uD83D\uDE00\uD83D\uDE80✨:20, Русский:20, example.com:20, edited:1]); current-stack write+reopen integrity=ok"
+  },
+  {
+    "Id": "2.roundtrip.13",
+    "Row": 2,
+    "Status": "PASS",
+    "Detail": "dec-via-rekey-delete.rt.db [PRAGMA rekey 'enc'->'plain' (journal wal->delete->wal, ends wal) (candidate) -> plaintext] -> current stack read identical data (rows=199 tags=99 checksum=7F5AFB5BC08F1BF5414DCBD5F8CBBE62 integrity=ok fts_integrity=ok fts=[Hello:39, עולם:20, 日本語:20, façade:20, ünï:20, \uD83D\uDE00\uD83D\uDE80✨:20, Русский:20, example.com:20, edited:1]); current-stack write+reopen integrity=ok"
+  },
+  {
+    "Id": "2.roundtrip.14",
+    "Row": 2,
+    "Status": "PASS",
+    "Detail": "purge.rt.db [fixture b after candidate purged sensitive rows + FTS optimize + VACUUM] -> current stack read identical data (rows=171 tags=85 checksum=696D963A1A9DD621E38D3D7A37742F53 integrity=ok fts_integrity=ok fts=[Hello:34, עולם:17, 日本語:17, façade:18, ünï:18, \uD83D\uDE00\uD83D\uDE80✨:17, Русский:17, example.com:17, edited:1]); current-stack write+reopen integrity=ok"
+  },
+  {
+    "Id": "2.roundtrip.15",
+    "Row": 2,
+    "Status": "PASS",
+    "Detail": "clip db #2.rt.db [encrypted DB created by the candidate under a path with space/#/%/non-ASCII] -> current stack read identical data (rows=20 tags=10 checksum=FEF6C887EAB83E3CE6AAFD0209006D6C integrity=ok fts_integrity=ok fts=[Hello:4, עולם:2, 日本語:2, façade:2, ünï:2, \uD83D\uDE00\uD83D\uDE80✨:2, Русский:2, example.com:2, edited:0]); current-stack write+reopen integrity=ok"
+  }
+]

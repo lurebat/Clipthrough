@@ -374,9 +374,9 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
                 var availableFormats = DescribeFormats(clipboardData);
                 Trace.TraceInformation($"Clipboard change detected. Formats: {availableFormats}");
 
-                if (ShouldIgnoreClipboard(clipboardData))
+                if (await ShouldIgnoreClipboardAsync(clipboardData, _settingsService.Current.HonorClipboardHistoryOptOut))
                 {
-                    Trace.TraceInformation($"Clipboard change ignored because the source app set a clipboard-viewer-ignore format. Formats: {availableFormats}");
+                    Trace.TraceInformation($"Clipboard change ignored because the source app asked for it not to be kept. Formats: {availableFormats}");
                     return null;
                 }
 
@@ -696,6 +696,40 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
 
     private static string DescribeFormats(IAsyncDataTransfer clipboardData)
         => string.Join(", ", clipboardData.Formats.Select(static format => $"{format.Kind}:{format.Identifier}"));
+
+    private const string ClipboardHistoryOptOutFormat = "CanIncludeInClipboardHistory";
+
+    /// <summary>
+    /// Whether the source asked for this content not to be kept. The two
+    /// clipboard-viewer formats always apply. With
+    /// <paramref name="honorHistoryOptOut"/> (the default, OD-10b / S39), so
+    /// does <c>CanIncludeInClipboardHistory</c> set to a DWORD of 0: what
+    /// Chrome, Edge and Bitwarden publish for a copied password, and nothing
+    /// else - without it those passwords were captured, indexed and kept (F-03).
+    /// A nonzero, missing or malformed value never suppresses capture.
+    /// </summary>
+    internal static async Task<bool> ShouldIgnoreClipboardAsync(IAsyncDataTransfer clipboardData, bool honorHistoryOptOut)
+    {
+        if (ShouldIgnoreClipboard(clipboardData))
+        {
+            return true;
+        }
+
+        if (!honorHistoryOptOut
+            || !clipboardData.Formats.Any(static f => string.Equals(f.Identifier, ClipboardHistoryOptOutFormat, StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        var value = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(ClipboardHistoryOptOutFormat));
+        if (value is not { Length: >= sizeof(int) })
+        {
+            Trace.TraceWarning($"{ClipboardHistoryOptOutFormat} is present but malformed ({value?.Length ?? 0} bytes); capturing the clip.");
+            return false;
+        }
+
+        return BitConverter.ToInt32(value, 0) == 0;
+    }
 
     private static bool ShouldIgnoreClipboard(IAsyncDataTransfer clipboardData)
     {
