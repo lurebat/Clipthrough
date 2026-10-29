@@ -1873,11 +1873,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         get => _isWelcomeOpen;
         private set
         {
-            if (!this.RaiseAndSetIfChanged(ref _isWelcomeOpen, value))
+            // RaiseAndSetIfChanged returns the new value, not whether it
+            // changed, so it cannot be the guard. (audit F-46)
+            if (_isWelcomeOpen == value)
             {
                 return;
             }
 
+            this.RaiseAndSetIfChanged(ref _isWelcomeOpen, value);
             this.RaisePropertyChanged(nameof(IsMainWorkspaceVisible));
         }
     }
@@ -1902,11 +1905,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         get => _isPasswordPromptOpen;
         private set
         {
-            if (!this.RaiseAndSetIfChanged(ref _isPasswordPromptOpen, value))
+            if (_isPasswordPromptOpen == value)
             {
                 return;
             }
 
+            this.RaiseAndSetIfChanged(ref _isPasswordPromptOpen, value);
             this.RaisePropertyChanged(nameof(IsMainWorkspaceVisible));
         }
     }

@@ -110,6 +110,8 @@ public static class AppText
         [nameof(SettingsExternalDiffToolPathLabel)] = "Diff tool path",
         [nameof(OpenInEditorButtonLabel)] = "Editor",
         [nameof(CompareClipsButtonLabel)] = "Compare",
+        [nameof(SearchOptionsButtonLabel)] = "Search options",
+        [nameof(SearchOptionsButtonTooltip)] = "Regex, case, wildcard, whole word, fuzzy and semantic matching",
         [nameof(WildcardFilterLabel)] = "Wildcard",
         [nameof(WholeWordFilterLabel)] = "Whole word",
         [nameof(PastedFilterLabel)] = "Pasted",
@@ -432,6 +434,8 @@ public static class AppText
     public static string SettingsExternalDiffToolPathLabel => Text(nameof(SettingsExternalDiffToolPathLabel));
     public static string OpenInEditorButtonLabel => Text(nameof(OpenInEditorButtonLabel));
     public static string CompareClipsButtonLabel => Text(nameof(CompareClipsButtonLabel));
+    public static string SearchOptionsButtonLabel => Text(nameof(SearchOptionsButtonLabel));
+    public static string SearchOptionsButtonTooltip => Text(nameof(SearchOptionsButtonTooltip));
     public static string WildcardFilterLabel => Text(nameof(WildcardFilterLabel));
     public static string WholeWordFilterLabel => Text(nameof(WholeWordFilterLabel));
     public static string PastedFilterLabel => Text(nameof(PastedFilterLabel));

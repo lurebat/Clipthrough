@@ -76,7 +76,7 @@
     "file": "Clipthrough/Services/Security/SensitivityService.cs",
     "why": "Strict compilation on load makes one bad stored pattern take down the entire rule set, leaving sensitivity scanning permanently unable to load.",
     "find": "_compiledRules = CompileStoredRules(rules);",
-    "replace": "_compiledRules = CompileRules(rules);",
+    "replace": "_compiledRules = Environment.ProcessorCount < 0 ? CompileStoredRules(rules) : CompileRules(rules);",
     "filter": "SensitivityServiceTests"
   },
   {
@@ -389,7 +389,7 @@
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "filter": "SemanticSearchSetting_TogglingIt_StartsAndStopsTheEmbeddingWorker",
     "find": "        this.RaisePropertyChanged(nameof(IsAiMenuVisible));\n        ApplySemanticSearchWorkerState(settings.EnableSemanticSearch);",
-    "replace": "        this.RaisePropertyChanged(nameof(IsAiMenuVisible));"
+    "replace": "        this.RaisePropertyChanged(nameof(IsAiMenuVisible));\n        if (Environment.ProcessorCount < 0) ApplySemanticSearchWorkerState(settings.EnableSemanticSearch);"
   },
   {
     "id": "semantic-toggle-off-does-not-stop-worker",
@@ -669,7 +669,7 @@
     "file": "Clipthrough/Services/Platform/RichClipboardFormatting.cs",
     "filter": "LooksLikeHtml_IsFalseForCodeThatMerelyContainsAngleBrackets",
     "find": "           && (ClosingOrSelfClosingTagRegex().IsMatch(content)\n               || VoidElementRegex().IsMatch(content)\n               || content.Contains(\"<!DOCTYPE html\", StringComparison.OrdinalIgnoreCase));",
-    "replace": "           && Regex.IsMatch(content, @\"<\\s*([a-zA-Z][a-zA-Z0-9]*)\\b[^>]*>\", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);"
+    "replace": "           && (Regex.IsMatch(content, @\"<\\s*([a-zA-Z][a-zA-Z0-9]*)\\b[^>]*>\", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) || (Environment.ProcessorCount < 0 && (ClosingOrSelfClosingTagRegex().IsMatch(content) || VoidElementRegex().IsMatch(content))));"
   },
   {
     "id": "cfhtml-stops-recognising-void-elements",
@@ -677,7 +677,7 @@
     "file": "Clipthrough/Services/Platform/RichClipboardFormatting.cs",
     "filter": "LooksLikeHtml_IsTrueForRealMarkup",
     "find": "               || VoidElementRegex().IsMatch(content)\n",
-    "replace": ""
+    "replace": "               || (Environment.ProcessorCount < 0 && VoidElementRegex().IsMatch(content))\n"
   },
   {
     "id": "cfhtml-converts-only-the-platform-newline",
@@ -813,7 +813,7 @@
     "file": "Clipthrough/Controls/SyntaxTextEditor.cs",
     "filter": "SyntaxTextEditorHeadlessTests",
     "find": "        if (!_isAttached)\n        {\n            return;\n        }\n\n        var isDark = ActualThemeVariant != ThemeVariant.Light;",
-    "replace": "        var isDark = ActualThemeVariant != ThemeVariant.Light;"
+    "replace": "        if (!_isAttached && Environment.ProcessorCount < 0)\n        {\n            return;\n        }\n\n        var isDark = ActualThemeVariant != ThemeVariant.Light;"
   },
   {
     "id": "k19-grammar-update-reinstalls-after-detach",
@@ -988,7 +988,7 @@
     "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
     "why": "Without spare capacity every batch of 32 reallocates and copies the whole cache, which is the quadratic backfill the review measured at 223 GiB of memcpy over a 100k library.",
     "find": "                var capacity = GrowCapacity(existing.Ids.Length, newCount, dim);",
-    "replace": "                var capacity = newCount;",
+    "replace": "                var capacity = Environment.ProcessorCount < 0 ? GrowCapacity(existing.Ids.Length, newCount, dim) : newCount;",
     "filter": "AppendEmbeddingsAsync_DoesNotReallocateTheCachePerBatch"
   },
   {
@@ -1052,7 +1052,7 @@
     "file": "Clipthrough/Presentation/ClipDisplayFormatter.cs",
     "why": "The original interpreted Regex.Replace with IgnoreCase folds case using the CURRENT culture. Under tr-TR upper-case I does not fold to i, so <LI> and <DIV> stop matching: bullets and paragraph breaks vanish while the catch-all still strips the tags, so the damage is invisible.",
     "find": "            var withListItems = ListItemTagRegex().Replace(withoutScripts, \"• \");\n            var withBreaks = BlockLevelTagRegex().Replace(withListItems, Environment.NewLine);",
-    "replace": "            var withListItems = Regex.Replace(withoutScripts, @\"<li[^>]*>\", \"• \", RegexOptions.IgnoreCase);\n            var withBreaks = Regex.Replace(withListItems, @\"</?(br|p|div|section|article|ul|ol|h[1-6]|tr)[^>]*>\", Environment.NewLine, RegexOptions.IgnoreCase);",
+    "replace": "            var withListItems = Environment.ProcessorCount < 0 ? ListItemTagRegex().Replace(withoutScripts, \"• \") : Regex.Replace(withoutScripts, @\"<li[^>]*>\", \"• \", RegexOptions.IgnoreCase);\n            var withBreaks = Environment.ProcessorCount < 0 ? BlockLevelTagRegex().Replace(withListItems, Environment.NewLine) : Regex.Replace(withListItems, @\"</?(br|p|div|section|article|ul|ol|h[1-6]|tr)[^>]*>\", Environment.NewLine, RegexOptions.IgnoreCase);",
     "filter": "RenderRichContent_HandlesUpperCaseMarkup_UnderAnyCulture"
   },
   {
@@ -1180,7 +1180,7 @@
     "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
     "why": "After replacing the root the heap invariant is broken, so the root is no longer the weakest survivor and later candidates are compared against the wrong threshold.",
     "find": "            _scores[0] = score;\n            SiftDown();",
-    "replace": "            _scores[0] = score;",
+    "replace": "            _scores[0] = score;\n            if (Environment.ProcessorCount < 0) SiftDown();",
     "filter": "FullyQualifiedName~SemanticSearchServiceTests"
   },
   {
@@ -1188,7 +1188,7 @@
     "file": "Clipthrough/Services/Search/SemanticSearchService.cs",
     "why": "While the heap is still filling, a new entry has to bubble up to its place. Without that the root is whatever landed at index zero first, not the weakest.",
     "find": "                SiftUp(_count++);",
-    "replace": "                _count++;",
+    "replace": "                if (Environment.ProcessorCount < 0) SiftUp(_count); _count++;",
     "filter": "FullyQualifiedName~SemanticSearchServiceTests"
   },
   {
@@ -1628,7 +1628,7 @@
     "file": "Clipthrough/Services/Search/SemanticIndexCoordinator.cs",
     "why": "The in-memory cache then only grows on a full reload, so every clip captured since the last refresh is invisible to semantic search.",
     "find": "                .Subscribe(records => _ = AppendAsync(records));",
-    "replace": "                .Subscribe(records => { });",
+    "replace": "                .Subscribe(records => { if (Environment.ProcessorCount < 0) _ = AppendAsync(records); });",
     "filter": "FullyQualifiedName~SemanticIndexCoordinatorTests"
   },
   {
@@ -1684,7 +1684,7 @@
     "file": "Clipthrough/Services/Search/SemanticIndexCoordinator.cs",
     "why": "The store announces the deletion but nothing acts on it, which is exactly the state this coordinator exists to prevent.",
     "find": "                .Subscribe(ids => _ = RemoveAsync(ids));",
-    "replace": "                .Subscribe(ids => { });",
+    "replace": "                .Subscribe(ids => { if (Environment.ProcessorCount < 0) _ = RemoveAsync(ids); });",
     "filter": "FullyQualifiedName~SemanticIndexCoordinatorTests"
   },
   {
@@ -1724,7 +1724,7 @@
     "file": "Clipthrough/Presentation/ClipboardMarkupDecoder.cs",
     "why": "CF_HTML header values are UTF-8 byte offsets. Treating them as UTF-16 indexes silently truncates every clip containing non-ASCII text, and only a non-ASCII fixture catches it - an ASCII fixture is byte-identical either way.",
     "find": "        var start = ByteOffsetToCharIndex(html, startOffset.Value);\n        var end = ByteOffsetToCharIndex(html, endOffset.Value);",
-    "replace": "        var start = startOffset.Value <= html.Length ? startOffset : null;\n        var end = endOffset.Value <= html.Length ? endOffset : null;",
+    "replace": "        var start = Environment.ProcessorCount < 0 ? ByteOffsetToCharIndex(html, startOffset.Value) : startOffset.Value <= html.Length ? startOffset : null;\n        var end = Environment.ProcessorCount < 0 ? ByteOffsetToCharIndex(html, endOffset.Value) : endOffset.Value <= html.Length ? endOffset : null;",
     "filter": "FullyQualifiedName~ClipboardMarkupDecoderTests"
   },
   {
@@ -1836,7 +1836,7 @@
     "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
     "why": "The setting saves and displays fine but decides nothing, so the user believes their password manager is excluded while every copy from it is still captured.",
     "find": "        isExcluded = CaptureExclusionPolicy.IsExcluded(sourceInfo, _settingsService.Current.ExcludedCaptureApps);",
-    "replace": "        isExcluded = false;",
+    "replace": "        isExcluded = Environment.ProcessorCount < 0 && CaptureExclusionPolicy.IsExcluded(sourceInfo, _settingsService.Current.ExcludedCaptureApps);",
     "filter": "FullyQualifiedName~CaptureExclusionPolicyTests"
   },
   {
@@ -1892,7 +1892,7 @@
     "file": "Clipthrough/Services/Ocr/OcrService.cs",
     "why": "A blank request must fall back to AppSettings.OcrLanguages, otherwise the background queue silently OCRs in the wrong language.",
     "find": "        var requested = string.IsNullOrWhiteSpace(languages) ? _settingsService.Current.OcrLanguages : languages;\n        var key = requested?.Trim() ?? string.Empty;",
-    "replace": "        var requested = languages;\n        var key = requested?.Trim() ?? string.Empty;",
+    "replace": "        var requested = Environment.ProcessorCount < 0 ? _settingsService.Current.OcrLanguages : languages;\n        var key = requested?.Trim() ?? string.Empty;",
     "filter": "FullyQualifiedName~OcrServiceEngineCachingTests"
   },
   {
@@ -1908,7 +1908,7 @@
     "file": "Clipthrough/Services/Ocr/OcrEngineCache.cs",
     "why": "The cache exists solely to avoid reloading the language model; a lookup that never hits makes it dead weight.",
     "find": "            if (_engine is not null && string.Equals(_key, key, StringComparison.OrdinalIgnoreCase))\n            {\n                return _engine;\n            }",
-    "replace": "            if (_engine is not null && false)\n            {\n                return _engine;\n            }",
+    "replace": "            if (_engine is not null && string.Equals(_key, key, StringComparison.OrdinalIgnoreCase) && Environment.ProcessorCount < 0)\n            {\n                return _engine;\n            }",
     "filter": "FullyQualifiedName~OcrEngineCacheTests|FullyQualifiedName~OcrServiceEngineCachingTests"
   },
   {
@@ -1916,7 +1916,7 @@
     "file": "Clipthrough/Services/Ocr/OcrEngineCache.cs",
     "why": "Serving the cached engine regardless of key would OCR Hebrew clips with the English recognizer after one English clip warmed the cache.",
     "find": "            if (_engine is not null && string.Equals(_key, key, StringComparison.OrdinalIgnoreCase))",
-    "replace": "            if (_engine is not null)",
+    "replace": "            if (_engine is not null && (_key is null || _key is not null))",
     "filter": "FullyQualifiedName~OcrEngineCacheTests|FullyQualifiedName~OcrServiceEngineCachingTests"
   },
   {
@@ -2012,7 +2012,7 @@
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "Enabling the feature runs a full embedding pass and then changes nothing, because the search bar has a second toggle that defaults off.",
     "find": "        if (settings.EnableSemanticSearch && !_wasSemanticSearchEnabled)\n        {\n            UseSemanticClipSearch = true;\n        }",
-    "replace": "",
+    "replace": "        if (settings.EnableSemanticSearch && !_wasSemanticSearchEnabled && Environment.ProcessorCount < 0)\n        {\n            UseSemanticClipSearch = true;\n        }",
     "filter": "FullyQualifiedName~SemanticSearchOptInHeadlessTests"
   },
   {
@@ -2020,7 +2020,7 @@
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "Opting in on every save, not just the off->on edge, silently undoes a user who unticked the search-bar checkbox.",
     "find": "        if (settings.EnableSemanticSearch && !_wasSemanticSearchEnabled)",
-    "replace": "        if (settings.EnableSemanticSearch)",
+    "replace": "        if (settings.EnableSemanticSearch && (_wasSemanticSearchEnabled || !_wasSemanticSearchEnabled))",
     "filter": "FullyQualifiedName~SemanticSearchOptInHeadlessTests"
   },
   {
@@ -2532,7 +2532,7 @@
     "why": "Restores the silent fallback: the parse failure becomes a trace line, the corrupt file stays where the next save will overwrite it, and the user is never told their configuration was replaced.",
     "file": "Clipthrough/Services/Storage/SettingsService.cs",
     "find": "                LoadFault = QuarantineCorruptSettings(ex);",
-    "replace": "                Trace.TraceWarning($\"Settings file load failed: {ex.Message}\");",
+    "replace": "                LoadFault = Environment.ProcessorCount < 0 ? QuarantineCorruptSettings(ex) : null;",
     "filter": "FullyQualifiedName~SettingsFileIntegrityTests"
   },
   {
@@ -2934,5 +2934,237 @@
     "find": "/// hand-built connection in tests too.",
     "replace": "/// hand-built connection in tests too. new SqliteConnection(",
     "filter": "FullyQualifiedName~TestsGetTheirConnectionsFromTheFactory_Too"
+  },
+  {
+    "id": "welcome-close-guards-on-raise-result",
+    "why": "RaiseAndSetIfChanged returns the new value, not a changed flag, so guarding on it returns early whenever the welcome screen closes. IsMainWorkspaceVisible is never raised and the window stays blank after Create library (audit F-46).",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "find": "            if (_isWelcomeOpen == value)\n            {\n                return;\n            }\n\n            this.RaiseAndSetIfChanged(ref _isWelcomeOpen, value);",
+    "replace": "            if (!this.RaiseAndSetIfChanged(ref _isWelcomeOpen, value))\n            {\n                return;\n            }",
+    "filter": "FullyQualifiedName~MainWorkspaceVisibilityHeadlessTests.CreatingTheLibraryFromTheWelcomeScreen_ShowsTheWorkspace"
+  },
+  {
+    "id": "password-prompt-close-guards-on-raise-result",
+    "why": "Same misuse on the password prompt: closing it after a correct password returns before IsMainWorkspaceVisible is raised, so every manual unlock of an encrypted library leaves the window blank (audit F-46).",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "find": "            if (_isPasswordPromptOpen == value)\n            {\n                return;\n            }\n\n            this.RaiseAndSetIfChanged(ref _isPasswordPromptOpen, value);",
+    "replace": "            if (!this.RaiseAndSetIfChanged(ref _isPasswordPromptOpen, value))\n            {\n                return;\n            }",
+    "filter": "FullyQualifiedName~MainWorkspaceVisibilityHeadlessTests.UnlockingWithTheCorrectPassword_ShowsTheWorkspace"
+  },
+  {
+    "id": "welcome-keeps-the-workspace-min-width",
+    "why": "Applies the workspace's 1100 DIP minimum to the welcome screen again. On a work area narrower than that, even a maximized window is laid out at 1100 DIP and Create library is drawn off-screen (audit F-49).",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "find": "            <Setter Property=\"MinWidth\" Value=\"480\" />",
+    "replace": "            <Setter Property=\"MinWidth\" Value=\"1100\" />",
+    "filter": "FullyQualifiedName~WelcomeNarrowWorkAreaHeadlessTests.OnANarrowWorkArea_CreateLibraryIsOnScreenAndTabReachable"
+  },
+  {
+    "id": "welcome-content-stops-tracking-the-viewport",
+    "why": "Without a finite width the sideways-scrolling welcome content is measured at infinity, wrapped text stops wrapping, and it scrolls sideways (2010 DIP in a 1282 DIP viewport) even at the default window size.",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "find": "                          Width=\"{Binding $parent[ScrollViewer].Viewport.Width}\">",
+    "replace": "                          >",
+    "filter": "FullyQualifiedName~WelcomeNarrowWorkAreaHeadlessTests.AtTheDefaultSize_TheWelcomeContentDoesNotScrollSideways"
+  },
+  {
+    "id": "settings-mirror-ignores-a-missing-database",
+    "why": "Mirrors settings into a database that does not exist yet. On every first run that logs 'Legacy settings mirror save failed: SQLite Error 14' to the user, or creates an empty database file when the folder already exists (audit F-51). The extra clause keeps DatabaseExists referenced while making the guard never return.",
+    "file": "Clipthrough/Services/Storage/SettingsService.cs",
+    "find": "        if (!_connectionFactory.DatabaseExists)",
+    "replace": "        if (!_connectionFactory.DatabaseExists && settings is null)",
+    "filter": "FullyQualifiedName~SettingsLegacyMirrorFirstRunTests"
+  },
+  {
+    "id": "window-fit-keeps-the-requested-width",
+    "why": "Keeps the requested width on a narrower working area: the window is laid out wider than the screen and right-aligned controls are off it (audit F-49).",
+    "file": "Clipthrough/Views/WindowGeometry.cs",
+    "find": "            Math.Max(minClientSize.Width, Math.Min(clientSize.Width, availableWidth)),",
+    "replace": "            Math.Max(minClientSize.Width, Math.Max(clientSize.Width, availableWidth)),",
+    "filter": "FullyQualifiedName~WindowGeometryTests|FullyQualifiedName~WindowFitHeadlessTests"
+  },
+  {
+    "id": "window-fit-ignores-the-minimum",
+    "why": "Fits a window below its minimum size; Avalonia then lays it out at the minimum anyway, so the fitted geometry and the real one disagree.",
+    "file": "Clipthrough/Views/WindowGeometry.cs",
+    "find": "            Math.Max(minClientSize.Height, Math.Min(clientSize.Height, availableHeight)));",
+    "replace": "            Math.Max(0 * minClientSize.Height, Math.Min(clientSize.Height, availableHeight)));",
+    "filter": "FullyQualifiedName~WindowGeometryTests.TheMinimumWins"
+  },
+  {
+    "id": "caret-placement-treats-dip-as-pixels",
+    "why": "Sizes the frame at scaling 1 when placing it beside the caret. On a 250% screen a 576 DIP window is treated as 576 px and lands hundreds of DIP past the right edge.",
+    "file": "Clipthrough/Views/WindowGeometry.cs",
+    "find": "        var outer = OuterPixels(clientSize, frameExtra, screen.Scaling);",
+    "replace": "        var outer = OuterPixels(clientSize, frameExtra, screen.Scaling > 0 ? 1.0 : screen.Scaling);",
+    "filter": "FullyQualifiedName~WindowGeometryTests.NearTheCaret|FullyQualifiedName~WindowFitHeadlessTests.NearTheCaret"
+  },
+  {
+    "id": "caret-placement-never-flips-above",
+    "why": "Opens the window below the caret even when there is no room, so it is pushed up over the caret by the clamp rather than placed above it.",
+    "file": "Clipthrough/Views/WindowGeometry.cs",
+    "find": "        if (y + outer.Height > screen.WorkingArea.Bottom)",
+    "replace": "        if (y + outer.Height > screen.WorkingArea.Bottom && caret.X < int.MinValue + 1)",
+    "filter": "FullyQualifiedName~WindowGeometryTests.NearTheCaret_NoRoomBelow"
+  },
+  {
+    "id": "restore-ignores-the-screen-it-was-on",
+    "why": "Always restores onto the primary screen, so a window left on a second monitor jumps to the first on every start.",
+    "file": "Clipthrough/Views/WindowGeometry.cs",
+    "find": "            .FirstOrDefault() ?? screens[0];",
+    "replace": "            .FirstOrDefault() is null ? screens[0] : screens[0];",
+    "filter": "FullyQualifiedName~WindowGeometryTests.ARememberedWindowGoesBackToTheScreenItWasOn"
+  },
+  {
+    "id": "dpi-change-is-not-refitted",
+    "why": "Ignores ScalingChanged: a window dragged onto a 250% monitor keeps its DIP size and runs off it.",
+    "file": "Clipthrough/Views/WindowFitter.cs",
+    "find": "            => Dispatcher.UIThread.Post(() => Fit(window, onlyIfTooLarge: true), DispatcherPriority.Background);",
+    "replace": "            => Dispatcher.UIThread.Post(() => _ = window, DispatcherPriority.Background);",
+    "filter": "FullyQualifiedName~WindowFitHeadlessTests.ADpiChange"
+  },
+  {
+    "id": "screen-change-is-not-refitted",
+    "why": "Ignores a change of monitors: a window on an unplugged monitor stays where no screen shows it.",
+    "file": "Clipthrough/Views/WindowFitter.cs",
+    "find": "            => Dispatcher.UIThread.Post(() => Fit(window), DispatcherPriority.Background);",
+    "replace": "            => Dispatcher.UIThread.Post(() => _ = window, DispatcherPriority.Background);",
+    "filter": "FullyQualifiedName~WindowFitHeadlessTests.UnpluggingTheMonitor"
+  },
+  {
+    "id": "main-window-is-not-refitted-on-show",
+    "why": "Skips the fit when the window opens, including when it comes back from the tray onto a screen that shrank while it was hidden.",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "find": "        WindowFitter.Fit(this);",
+    "replace": "        _ = this;",
+    "filter": "FullyQualifiedName~WindowFitHeadlessTests.ShowingFromTheTray|FullyQualifiedName~WindowFitHeadlessTests.OnOpen"
+  },
+  {
+    "id": "settings-is-not-fitted",
+    "why": "Settings opens at 960x720 on a 576 DIP screen with Save and Cancel off it.",
+    "file": "Clipthrough/Views/SettingsWindow.axaml.cs",
+    "find": "        WindowFitter.Attach(this);",
+    "replace": "        _ = this;",
+    "filter": "FullyQualifiedName~WindowFitHeadlessTests.Settings_|FullyQualifiedName~SettingsNarrowHeadlessTests"
+  },
+  {
+    "id": "rekey-is-not-fitted",
+    "why": "Re-encrypt opens taller than a 1280x720 laptop at 150%, with its buttons below the screen.",
+    "file": "Clipthrough/Views/RekeyDialog.axaml.cs",
+    "find": "        WindowFitter.Attach(this);",
+    "replace": "        _ = this;",
+    "filter": "FullyQualifiedName~WindowFitHeadlessTests.ReEncrypt"
+  },
+  {
+    "id": "narrow-breakpoint-never-applies",
+    "why": "Keeps the list and preview side by side on a portrait screen, squeezing both below usable widths.",
+    "file": "Clipthrough/Views/WorkspaceBreakpoints.cs",
+    "find": "    public const double NarrowBelowWidth = 760;",
+    "replace": "    public const double NarrowBelowWidth = 0;",
+    "filter": "FullyQualifiedName~ResponsiveWorkspaceHeadlessTests"
+  },
+  {
+    "id": "short-breakpoint-never-applies",
+    "why": "Keeps the footer, counters and six search modifiers on a 1280x720 laptop at 150%, leaving no room for the clip list.",
+    "file": "Clipthrough/Views/WorkspaceBreakpoints.cs",
+    "find": "    public const double ShortBelowHeight = 600;",
+    "replace": "    public const double ShortBelowHeight = 0;",
+    "filter": "FullyQualifiedName~ResponsiveWorkspaceHeadlessTests"
+  },
+  {
+    "id": "window-min-height-back-to-640",
+    "why": "Restores the old 640 DIP minimum height: on a 1280x720 laptop at 150% the window lays out taller than the screen and Create library and Unlock are below it (audit F-49).",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "find": "            <Setter Property=\"MinHeight\" Value=\"360\" />",
+    "replace": "            <Setter Property=\"MinHeight\" Value=\"640\" />",
+    "filter": "FullyQualifiedName~WelcomeNarrowWorkAreaHeadlessTests|FullyQualifiedName~ResponsiveWorkspaceHeadlessTests"
+  },
+  {
+    "id": "toasts-back-at-the-top",
+    "why": "Puts toasts back at the top-right, where they cover the type toggles for as long as they show.",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "find": "                VerticalAlignment=\"Bottom\"\n                Margin=\"0,0,16,16\"",
+    "replace": "                VerticalAlignment=\"Top\"\n                Margin=\"0,16,16,0\"",
+    "filter": "FullyQualifiedName~ResponsiveWorkspaceHeadlessTests.Toasts_"
+  },
+  {
+    "id": "search-box-is-not-capped",
+    "why": "Lets the search box grow without limit on a 2560+ DIP screen (B18).",
+    "file": "Clipthrough/Views/MainWindow.Layout.cs",
+    "find": "                heroRow.ColumnDefinitions[1].MaxWidth = WorkspaceBreakpoints.SearchMaxWidth;",
+    "replace": "                heroRow.ColumnDefinitions[1].MaxWidth = double.PositiveInfinity + (WorkspaceBreakpoints.SearchMaxWidth * 0);",
+    "filter": "FullyQualifiedName~ResponsiveWorkspaceHeadlessTests.Ultrawide"
+  },
+  {
+    "id": "preview-is-not-capped",
+    "why": "Lets the preview grow to 2200 DIP lines on an ultrawide screen (B18).",
+    "file": "Clipthrough/Views/MainWindow.Layout.cs",
+    "find": "                split.ColumnDefinitions[2].MaxWidth = WorkspaceBreakpoints.PreviewMaxWidth;",
+    "replace": "                split.ColumnDefinitions[2].MaxWidth = double.PositiveInfinity + (WorkspaceBreakpoints.PreviewMaxWidth * 0);",
+    "filter": "FullyQualifiedName~ResponsiveWorkspaceHeadlessTests.Ultrawide"
+  },
+  {
+    "id": "narrow-preview-not-below-the-list",
+    "why": "Puts the preview in the same cell as the list in Narrow, drawing one over the other.",
+    "file": "Clipthrough/Views/MainWindow.Layout.cs",
+    "find": "                Place(preview, 2, 0);",
+    "replace": "                Place(preview, 0, 0);",
+    "filter": "FullyQualifiedName~ResponsiveWorkspaceHeadlessTests.Narrow_"
+  },
+  {
+    "id": "wide-layout-changes-its-split",
+    "why": "Changes the Wide split from 1:2, which was meant to stay exactly as it always was.",
+    "file": "Clipthrough/Views/MainWindow.Layout.cs",
+    "find": "                    ? new ColumnDefinitions(\"*,6,2*\")",
+    "replace": "                    ? new ColumnDefinitions(\"2*,6,3*\")",
+    "filter": "FullyQualifiedName~ResponsiveWorkspaceHeadlessTests.Wide_"
+  },
+  {
+    "id": "search-options-do-not-change-the-search",
+    "why": "The Search options flyout shows the modifier but no longer sets it, so on a short screen the modifiers cannot be turned on at all.",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "find": "                                <CheckBox IsChecked=\"{Binding UseRegexSearch}\"",
+    "replace": "                                <CheckBox IsChecked=\"{Binding UseRegexSearch, Mode=OneWay}\"",
+    "filter": "FullyQualifiedName~ResponsiveWorkspaceHeadlessTests.SearchOptions_"
+  },
+  {
+    "id": "settings-hotkey-labels-do-not-wrap",
+    "why": "Hotkey labels stop wrapping, so on a portrait screen they run under their hotkey boxes (B11).",
+    "file": "Clipthrough/Views/SettingsWindow.axaml",
+    "find": "            <Setter Property=\"TextWrapping\" Value=\"Wrap\" />",
+    "replace": "            <Setter Property=\"TextWrapping\" Value=\"NoWrap\" />",
+    "filter": "FullyQualifiedName~SettingsNarrowHeadlessTests"
+  },
+  {
+    "id": "placement-is-not-saved-on-hide",
+    "why": "The window is hidden after every paste and to the tray; without a save there, its size is lost on the next start.",
+    "file": "Clipthrough/Views/MainWindow.Layout.cs",
+    "find": "        else if (change.Property == IsVisibleProperty && !IsVisible)",
+    "replace": "        else if (change.Property == IsVisibleProperty && !IsVisible && Content is null)",
+    "filter": "FullyQualifiedName~WindowPlacementHeadlessTests.Hiding"
+  },
+  {
+    "id": "placement-is-not-restored",
+    "why": "Ignores the remembered placement, so the window always opens at its 1360x860 default.",
+    "file": "Clipthrough/Views/MainWindow.Layout.cs",
+    "find": "        if (store?.Load() is not { } saved)",
+    "replace": "        if (store?.Load() is not { } saved || store is not null)",
+    "filter": "FullyQualifiedName~WindowPlacementHeadlessTests"
+  },
+  {
+    "id": "placement-records-the-maximized-size",
+    "why": "Remembers a maximized window's screen-sized bounds as its normal size, so un-maximizing after a restart does nothing.",
+    "file": "Clipthrough/Views/MainWindow.Layout.cs",
+    "find": "        if (WindowState == WindowState.Normal && IsVisible)",
+    "replace": "        if (IsVisible)",
+    "filter": "FullyQualifiedName~WindowPlacementHeadlessTests.HidingAMaximized"
+  },
+  {
+    "id": "placement-store-accepts-a-zero-size",
+    "why": "Loads a hand-edited or truncated window.json with a zero or negative size and opens the window at its minimum.",
+    "file": "Clipthrough/Services/System/WindowPlacementStore.cs",
+    "find": "            if (placement is null || !(placement.Width > 0) || !(placement.Height > 0))",
+    "replace": "            if (placement is null)",
+    "filter": "FullyQualifiedName~WindowPlacementStoreTests"
   }
 ]

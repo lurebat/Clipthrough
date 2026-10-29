@@ -95,7 +95,7 @@ public partial class App : Application
             _updateService = Services.GetRequiredService<IUpdateService>();
             _aiTransformService = Services.GetRequiredService<IAiTransformService>();
 
-            _mainWindow = desktop.MainWindow = new MainWindow(_systemInteractionService)
+            _mainWindow = desktop.MainWindow = new MainWindow(_systemInteractionService, Services.GetRequiredService<IWindowPlacementStore>())
             {
                 DataContext = mainWindowViewModel,
             };
@@ -233,6 +233,7 @@ public partial class App : Application
         services.AddSingleton<ISensitivityService, SensitivityService>();
         services.AddSingleton<ISettingsService, SettingsService>();
         services.AddSingleton<IAppNotificationService, AppNotificationService>();
+        services.AddSingleton<IWindowPlacementStore, WindowPlacementStore>();
         services.AddSingleton<ISessionLogService>(_ => SessionLogService.Instance);
         services.AddSingleton<ISystemInteractionService, SystemInteractionService>();
         services.AddSingleton<DatabaseInitializer>();
@@ -1026,45 +1027,18 @@ public partial class App : Application
         });
     }
 
+    /// <summary>
+    /// Opens the window beside the text caret, on whichever screen the caret
+    /// is on. This used to mix units - the window's DIP width against pixel
+    /// screen bounds - and on a 250% screen placed it hundreds of DIP past the
+    /// right edge.
+    /// </summary>
     private void PositionWindowNearCaret(Window window)
     {
-        var caretPosition = _systemInteractionService?.GetCaretScreenPosition();
-        if (caretPosition is not { } caret)
+        if (_systemInteractionService?.GetCaretScreenPosition() is { } caret)
         {
-            return;
+            WindowFitter.PlaceNearCaret(window, caret);
         }
-
-        var screen = window.Screens.ScreenFromPoint(caret);
-        if (screen is null)
-        {
-            return;
-        }
-
-        var bounds = screen.WorkingArea;
-        var windowWidth = (int)window.Width;
-        var windowHeight = (int)window.Height;
-        if (windowWidth <= 0)
-        {
-            windowWidth = 800;
-        }
-
-        if (windowHeight <= 0)
-        {
-            windowHeight = 600;
-        }
-
-        // Position below and to the right of the caret, clamped to screen bounds
-        var x = Math.Min(caret.X, bounds.Right - windowWidth);
-        var y = caret.Y + 20;
-        if (y + windowHeight > bounds.Bottom)
-        {
-            y = caret.Y - windowHeight - 10;
-        }
-
-        x = Math.Max(bounds.X, x);
-        y = Math.Max(bounds.Y, y);
-
-        window.Position = new PixelPoint(x, y);
     }
 
     private void HideMainWindowToTray()

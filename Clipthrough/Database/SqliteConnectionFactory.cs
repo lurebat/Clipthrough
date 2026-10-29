@@ -18,6 +18,13 @@ public sealed class SqliteConnectionFactory
     public SqliteConnection CreateConnection() => Create(SqliteOpenMode.ReadWriteCreate);
 
     /// <summary>
+    /// Whether the database these connections open is there yet. Before the
+    /// first-run "Create library" it is not, and <see cref="CreateConnection"/>
+    /// would either fail to open it or create an empty file in its place.
+    /// </summary>
+    public bool DatabaseExists => File.Exists(_storageOptionsService.Current.DatabasePath);
+
+    /// <summary>
     /// A read-only connection for maintenance probes that must not alter the
     /// database. Read-only rather than read-write is load-bearing: it cannot
     /// create an empty file when the path is wrong, so a missing database fails
