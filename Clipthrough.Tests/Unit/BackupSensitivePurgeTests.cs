@@ -19,12 +19,18 @@ namespace Clipthrough.Tests.Unit;
 public sealed class BackupSensitivePurgeTests
 {
     private const string Secret = "NOT-A-REAL-SECRET-Zq81Wm";
+
+    // Large enough to spill onto overflow pages of its own, so deleting it frees
+    // whole pages. SQLite3 Multiple Ciphers is built with SQLITE_SECURE_DELETE and
+    // zeroes them, so the byte scan below cannot tell whether the purge vacuumed;
+    // the freelist can.
+    private static readonly string SensitiveText = string.Concat(Enumerable.Repeat(Secret + " ", 1000));
     private const string Ordinary = "an ordinary clip that stays";
 
     private static async Task<(long SensitiveId, long OrdinaryId)> SeedAsync(TemporaryDatabaseScope scope)
     {
         await scope.DatabaseInitializer.InitializeAsync();
-        var sensitive = await Capture(scope, Secret);
+        var sensitive = await Capture(scope, SensitiveText);
         var ordinary = await Capture(scope, Ordinary);
         await scope.ClipStoreService.SetSensitiveAsync(sensitive, true);
         using var connection = scope.ConnectionFactory.CreateConnection();
@@ -87,6 +93,7 @@ public sealed class BackupSensitivePurgeTests
         Assert.Equal(0L, Scalar(backup, $"SELECT count(*) FROM clips_fts WHERE clips_fts MATCH '\"{Secret}\"';"));
         Assert.DoesNotContain(Secret, Encoding.ASCII.GetString(File.ReadAllBytes(backup)), StringComparison.Ordinal);
         Assert.False(File.Exists(backup + "-wal") && new FileInfo(backup + "-wal").Length > 0);
+        Assert.Equal(0L, Scalar(backup, "PRAGMA freelist_count;"));
 
         // Everything else is a faithful copy, and the live library is untouched.
         Assert.Equal(1L, Scalar(backup, $"SELECT count(*) FROM clips WHERE id = {ordinaryId};"));
