@@ -602,6 +602,56 @@ public sealed class DeferredPayloadMoveTests
         Assert.True(Scalar(scope, $"SELECT COUNT(*) FROM clips WHERE id = {ids[1]};") == 0, "A sensitive clip copied two hours ago outlived its one-hour lifetime.");
     }
 
+    /// <summary>
+    /// Rubber-duck F-13-3: the background UTC backfill reads the rows it will
+    /// convert, then writes them, and captures run in between. A re-copy sets
+    /// captured_at and last_copied_at, and the backfill wrote its stale converted
+    /// values over them, so the clip lost its recent position and could expire as
+    /// if never copied again. A column the re-copy did not touch is still
+    /// converted.
+    /// </summary>
+    [Fact]
+    public async Task ARecopyDuringTheBackgroundUtcBackfill_KeepsItsNewTimestamps()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        SeedSchema8Library(scope, 2);
+        var request = new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "copied before the upgrade",
+            ContentBytes = Encoding.UTF8.GetBytes("copied before the upgrade"),
+        };
+        var clip = await scope.ClipStoreService.CaptureFastAsync(request);
+        Assert.NotNull(clip);
+        GiveTimestampsAnOffset(scope, clip.Id);
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+
+        string? recopiedAt = null;
+        DatabaseInitializer.BeforeUtcBackfillWrites = async token =>
+        {
+            await scope.ClipStoreService.CaptureFastAsync(request, token);
+            recopiedAt = Timestamps(scope, clip.Id)[2];
+        };
+        try
+        {
+            Assert.True(await scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(progress: null));
+        }
+        finally
+        {
+            DatabaseInitializer.BeforeUtcBackfillWrites = null;
+        }
+
+        Assert.NotNull(recopiedAt);
+        Assert.NotEqual(RepairedTimestamps[2], recopiedAt);
+        Assert.Equal(2, Scalar(scope, $"SELECT copy_count FROM clips WHERE id = {clip.Id};"));
+        var after = Timestamps(scope, clip.Id);
+        Assert.True(after[2] == recopiedAt, $"The backfill overwrote the re-copy's last_copied_at {recopiedAt} with {after[2]}.");
+        Assert.Equal(recopiedAt, after[0]);
+        Assert.Equal(RepairedTimestamps[1], after[1]);
+    }
+
     private static string BackupDirectory(TemporaryDatabaseScope scope) =>
         System.IO.Path.Combine(System.IO.Path.GetDirectoryName(scope.DatabasePath)!, "backups");
 

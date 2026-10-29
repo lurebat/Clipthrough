@@ -4318,5 +4318,13 @@
     "find": "        command.CommandText = utcBackfillPending ? OffsetAwareRetentionDeleteStatement : RetentionDeleteStatement;",
     "replace": "        command.CommandText = utcBackfillPending && RetentionDeleteStatement.Length < 0 ? OffsetAwareRetentionDeleteStatement : RetentionDeleteStatement;",
     "filter": "FullyQualifiedName~WhileTheUtcBackfillIsOwed"
+  },
+  {
+    "id": "utc-backfill-overwrites-recopy",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-13-3: the background UTC backfill reads rows, then writes their converted timestamps; a re-copy in between set last_copied_at, and an unconditional write reverted it, so the clip lost its recent position and could expire as if never re-copied.",
+    "find": "                last_copied_at = CASE WHEN last_copied_at IS $readL THEN $l ELSE last_copied_at END",
+    "replace": "                last_copied_at = CASE WHEN last_copied_at IS $readL OR 1 = 1 THEN $l ELSE last_copied_at END",
+    "filter": "FullyQualifiedName~ARecopyDuringTheBackgroundUtcBackfill"
   }
 ]

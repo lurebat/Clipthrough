@@ -1123,6 +1123,12 @@ public sealed class DatabaseInitializer : Clipthrough.Services.Search.IPausableW
     internal static Action<long>? AfterPayloadRowMoved { get; set; }
 
     /// <summary>
+    /// Test seam: runs between the UTC backfill's read and its writes, with no
+    /// transaction open, where the background backfill can meet a capture.
+    /// </summary>
+    internal static Func<CancellationToken, Task>? BeforeUtcBackfillWrites { get; set; }
+
+    /// <summary>
     /// Whether a quick_check failed this session. The daily backup is not taken from
     /// such a library (live check F3), so the older, good backups are kept.
     /// </summary>
@@ -1597,10 +1603,14 @@ public sealed class DatabaseInitializer : Clipthrough.Services.Search.IPausableW
     /// and expired wrong by that offset until the store boundary converted them.
     /// Idempotent: a value already at +00:00, and text with no offset at all,
     /// parses with a zero offset and is left exactly as it is.
+    /// On a deferred upgrade it runs in the background while the app captures, so
+    /// each column is rewritten only if it still holds the value read: a re-copy
+    /// in between sets captured_at and last_copied_at, already in UTC, and those
+    /// are kept (F-13-3).
     /// </remarks>
     private static async Task BackfillUtcTimestampsAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
-        var updates = new List<(long Id, string?[] Values)>();
+        var updates = new List<(long Id, string?[] Read, string?[] Values)>();
         await using (var select = connection.CreateCommand())
         {
             select.CommandText = """
@@ -1612,11 +1622,13 @@ public sealed class DatabaseInitializer : Clipthrough.Services.Search.IPausableW
             await using var reader = await select.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
+                var read = new string?[3];
                 var values = new string?[3];
                 var changed = false;
                 for (var i = 0; i < 3; i++)
                 {
                     var raw = reader.IsDBNull(i + 1) ? null : reader.GetString(i + 1);
+                    read[i] = raw;
                     values[i] = raw;
                     if (raw is not null
                         && DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed)
@@ -1629,7 +1641,7 @@ public sealed class DatabaseInitializer : Clipthrough.Services.Search.IPausableW
 
                 if (changed)
                 {
-                    updates.Add((reader.GetInt64(0), values));
+                    updates.Add((reader.GetInt64(0), read, values));
                 }
             }
         }
@@ -1639,20 +1651,37 @@ public sealed class DatabaseInitializer : Clipthrough.Services.Search.IPausableW
             return;
         }
 
+        if (BeforeUtcBackfillWrites is { } beforeWrites)
+        {
+            await beforeWrites(cancellationToken);
+        }
+
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         await using var update = connection.CreateCommand();
         update.Transaction = transaction;
-        update.CommandText = "UPDATE clips SET captured_at = $c, first_copied_at = $f, last_copied_at = $l WHERE id = $id;";
+        update.CommandText = """
+            UPDATE clips
+            SET captured_at = CASE WHEN captured_at IS $readC THEN $c ELSE captured_at END,
+                first_copied_at = CASE WHEN first_copied_at IS $readF THEN $f ELSE first_copied_at END,
+                last_copied_at = CASE WHEN last_copied_at IS $readL THEN $l ELSE last_copied_at END
+            WHERE id = $id;
+            """;
         var id = update.Parameters.Add("$id", SqliteType.Integer);
         var c = update.Parameters.Add("$c", SqliteType.Text);
         var f = update.Parameters.Add("$f", SqliteType.Text);
         var l = update.Parameters.Add("$l", SqliteType.Text);
-        foreach (var (clipId, values) in updates)
+        var readC = update.Parameters.Add("$readC", SqliteType.Text);
+        var readF = update.Parameters.Add("$readF", SqliteType.Text);
+        var readL = update.Parameters.Add("$readL", SqliteType.Text);
+        foreach (var (clipId, read, values) in updates)
         {
             id.Value = clipId;
             c.Value = (object?)values[0] ?? DBNull.Value;
             f.Value = (object?)values[1] ?? DBNull.Value;
             l.Value = (object?)values[2] ?? DBNull.Value;
+            readC.Value = (object?)read[0] ?? DBNull.Value;
+            readF.Value = (object?)read[1] ?? DBNull.Value;
+            readL.Value = (object?)read[2] ?? DBNull.Value;
             await update.ExecuteNonQueryAsync(cancellationToken);
         }
 
