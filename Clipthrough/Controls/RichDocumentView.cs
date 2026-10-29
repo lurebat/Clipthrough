@@ -382,10 +382,16 @@ public sealed class RichDocumentView : UserControl
         _emptyState.IsVisible = false;
     }
 
+    // CancellationToken.None on purpose. The preview never cancels an import:
+    // a timeout stops the preview waiting, not the importer, and the import is
+    // kept so that a new one waits for it instead of running beside it and so
+    // that re-selecting the same clip reuses its result (F-47, single flight).
+    // A token cancelled on timeout or on a newer selection would change both,
+    // so passing one is a behaviour change, not plumbing.
     private static async Task<DocumentNode> ImportAsync(string content, ClipContentFormat format) => format switch
     {
-        ClipContentFormat.Html => (await HtmlFormat.Instance.ImportAsync(content).ConfigureAwait(false)).Doc,
-        ClipContentFormat.Rtf => (await RtfFormat.Instance.ImportAsync(content).ConfigureAwait(false)).Doc,
+        ClipContentFormat.Html => (await HtmlFormat.Instance.ImportAsync(content, CancellationToken.None).ConfigureAwait(false)).Doc,
+        ClipContentFormat.Rtf => (await RtfFormat.Instance.ImportAsync(content, CancellationToken.None).ConfigureAwait(false)).Doc,
         // Anything else reaching a rich renderer is text that was mislabelled somewhere
         // upstream; showing it as paragraphs beats showing nothing.
         _ => DocumentNode.FromParagraphs(content.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n')),
