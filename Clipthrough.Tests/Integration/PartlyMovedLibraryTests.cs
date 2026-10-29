@@ -90,6 +90,59 @@ public sealed class PartlyMovedLibraryTests
         Assert.Equal(ids.Length - moved, Scalar(scope, "SELECT COUNT(*) FROM clips WHERE content_bytes IS NOT NULL;"));
     }
 
+    /// <summary>
+    /// A row the move has not reached still holds its icon inline, and its
+    /// stored_bytes counts that icon, as schema 8 did. The size cap has to count it
+    /// - in the total, and in the walk that decides how many clips to evict - or a
+    /// library mid-move is measured at a fraction of what it occupies.
+    /// </summary>
+    [Fact]
+    public async Task TheSizeCap_CountsTheInlineIconsOfRowsNotYetMoved()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        var ids = SeedLegacyImages(scope, 4);
+        await MovePartlyAsync(scope, ids, moved: 1);
+
+        // 3 x 400 KB of inline icons put the library past 1 MB; the payloads are 4 bytes each.
+        using (var connection = scope.ConnectionFactory.CreateConnection())
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE clips SET source_app_icon = zeroblob(400000) WHERE source_app_icon IS NOT NULL;
+                UPDATE clips SET stored_bytes = byte_size + LENGTH(source_app_icon) WHERE source_app_icon IS NOT NULL;
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        Assert.Equal(3 * 400_004L, Scalar(scope, "SELECT SUM(stored_bytes) FROM clips WHERE source_app_icon IS NOT NULL;"));
+        scope.SettingsService.SetCurrent(new AppSettings
+        {
+            EnableNormalClipLifetime = false,
+            EnableSensitiveClipLifetime = false,
+            EnableMaxEntryCount = false,
+            EnableMaxLibrarySize = true,
+            MaxLibrarySizeMegabytes = 1,
+        });
+
+        var result = await scope.ClipStoreService.ApplyMaintenanceAsync();
+
+        // The two oldest go: the moved one frees only its 4 bytes, the next one its
+        // inline icon too. Measured by byte_size the library is 16 bytes plus one
+        // stored icon and nothing is evicted; walked by byte_size it never fits and
+        // everything is.
+        Assert.Equal(2, result.PurgedClipCount);
+        Assert.Null(await scope.ClipStoreService.GetByIdAsync(ids[0]));
+        Assert.Null(await scope.ClipStoreService.GetByIdAsync(ids[1]));
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(ids[2]));
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(ids[3]));
+        Assert.Equal(
+            Scalar(scope, "SELECT COALESCE((SELECT SUM(stored_bytes) FROM clips), 0) + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons), 0);"),
+            result.TotalStoredBytes);
+        Assert.Equal(2 * 400_004L, result.TotalStoredBytes);
+    }
+
     [Fact]
     public async Task EveryClip_ReadsItsPayloadAndIcon_WhereverTheyCurrentlyLive()
     {

@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Clipthrough.Models;
@@ -268,16 +269,23 @@ public sealed class ClipRetentionTests
             MaxLibrarySizeMegabytes = maxMegabytes,
         });
 
+        // Each clip has an icon of its own, so a purge also leaves icons behind for
+        // the orphan sweep (U-E1), and the reported total has to be read after it.
+        // Without icons the row walk and the database agree whatever is read when.
         for (var i = 0; i < 6; i++)
         {
-            await CaptureAsync(scope, new string((char)('a' + i), clipBytes));
+            var clip = await CaptureAsync(scope, new string((char)('a' + i), clipBytes));
+            await scope.ClipStoreService.UpdateSourceAppIconAsync(clip.Id, Enumerable.Repeat((byte)(i + 1), 1000).ToArray());
         }
 
         var result = await scope.ClipStoreService.ApplyMaintenanceAsync();
 
         Assert.Equal(expectedPurgedCount, result.PurgedClipCount);
         Assert.Equal(Scalar(scope, "SELECT COUNT(*) FROM clips;"), result.TotalClipCount);
-        Assert.Equal(Scalar(scope, "SELECT COALESCE(SUM(byte_size), 0) FROM clips;"), result.TotalStoredBytes);
+        Assert.Equal(6 - expectedPurgedCount, Scalar(scope, "SELECT COUNT(*) FROM app_icons;"));
+        Assert.Equal(
+            Scalar(scope, "SELECT COALESCE((SELECT SUM(stored_bytes) FROM clips), 0) + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons), 0);"),
+            result.TotalStoredBytes);
     }
 
     /// <summary>
