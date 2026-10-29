@@ -80,14 +80,23 @@ public sealed class ReleasePackagingTests
         Assert.True(int.Parse(match.Groups["build"].Value, System.Globalization.CultureInfo.InvariantCulture) >= MinimumRuntimePatch);
         Assert.Equal("x64", match.Groups["arch"].Value);
 
-        // The app needs Microsoft.NETCore.App, which both the "runtime" and the
-        // "desktop" bundle install. Velopack's default type is "desktop" too,
-        // but writing it out is what makes the choice visible in the workflow.
-        Assert.Contains(match.Groups["type"].Value, new[] { "runtime", "desktop" });
+        // "runtime", not "desktop" (owner decision): the app loads only
+        // Microsoft.NETCore.App - Avalonia does not use the Windows Desktop
+        // framework - so requiring the desktop bundle would make users
+        // download one they never load. That stops being true the day the
+        // project opts into WPF or Windows Forms, which is checked below.
+        Assert.Equal("runtime", match.Groups["type"].Value);
 
         // Velopack compares major and minor exactly, so the dependency has to
         // name the runtime the app actually targets.
         var project = XDocument.Load(RepoFile("Clipthrough", "Clipthrough.csproj"));
+        foreach (var desktopFramework in new[] { "UseWPF", "UseWindowsForms" })
+        {
+            Assert.False(
+                project.Descendants(desktopFramework).Any(e => string.Equals(e.Value.Trim(), "true", StringComparison.OrdinalIgnoreCase)),
+                $"Clipthrough.csproj sets {desktopFramework}, so the app now loads Microsoft.WindowsDesktop.App: the installer must require the desktop runtime.");
+        }
+
         var targetFramework = project.Descendants("TargetFramework").Single().Value;
         var target = Regex.Match(targetFramework, @"^net(?<major>\d+)\.(?<minor>\d+)");
         Assert.True(target.Success, $"Unexpected TargetFramework '{targetFramework}'.");

@@ -77,16 +77,19 @@ jobs:
         # before applying every update, and downloads the latest patch when the
         # machine is below the floor. The third part is the floor: net10.0
         # alone would accept any 10.0.x. 10.0.14 is the out-of-band Brotli fix
-        # that followed 10.0.13's ~44 CVEs. Velopack silently ignores a string
-        # it cannot parse, so ReleasePackagingTests checks this one the way the
-        # installed client reads it.
+        # that followed 10.0.13's ~44 CVEs. "runtime", not "desktop": the app
+        # loads only Microsoft.NETCore.App (see Clipthrough.runtimeconfig.json;
+        # Avalonia does not use the Windows Desktop framework), so requiring
+        # the desktop bundle would make users download one they never load.
+        # Velopack silently ignores a string it cannot parse, so
+        # ReleasePackagingTests checks this one the way the client reads it.
         run: |
           vpk pack `
             --packId Clipthrough `
             --packVersion ${{ steps.ver.outputs.version }} `
             --packDir artifacts\publish `
             --mainExe Clipthrough.exe `
-            --framework net10.0.14-x64-desktop `
+            --framework net10.0.14-x64-runtime `
             --outputDir artifacts\velopack
 
       - name: Stage release assets

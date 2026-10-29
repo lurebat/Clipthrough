@@ -2931,16 +2931,24 @@
     "id": "installer-runtime-floor-dropped",
     "file": ".github/workflows/release.yml",
     "why": "Without the patch part Velopack accepts any 10.0.x runtime, so installs and updates run on runtimes missing 10.0.13/10.0.14's security fixes.",
-    "find": "            --framework net10.0.14-x64-desktop `",
-    "replace": "            --framework net10.0-x64-desktop `",
+    "find": "            --framework net10.0.14-x64-runtime `",
+    "replace": "            --framework net10.0-x64-runtime `",
     "filter": "FullyQualifiedName~ReleasePackagingTests.TheInstallerRequiresAServicedDotnetRuntime"
   },
   {
     "id": "installer-runtime-string-unparseable",
     "file": ".github/workflows/release.yml",
     "why": "Velopack skips a dependency it cannot parse without a word, so a malformed string ships an installer that requires nothing.",
-    "find": "            --framework net10.0.14-x64-desktop `",
-    "replace": "            --framework net10.0.14-desktop-x64 `",
+    "find": "            --framework net10.0.14-x64-runtime `",
+    "replace": "            --framework net10.0.14-runtime-x64 `",
+    "filter": "FullyQualifiedName~ReleasePackagingTests.TheInstallerRequiresAServicedDotnetRuntime"
+  },
+  {
+    "id": "installer-requires-desktop-bundle",
+    "file": ".github/workflows/release.yml",
+    "why": "The app loads only Microsoft.NETCore.App; requiring the Windows Desktop bundle makes users without it download a runtime they never load (owner decision: runtime).",
+    "find": "            --framework net10.0.14-x64-runtime `",
+    "replace": "            --framework net10.0.14-x64-desktop `",
     "filter": "FullyQualifiedName~ReleasePackagingTests.TheInstallerRequiresAServicedDotnetRuntime"
   }
 ]
