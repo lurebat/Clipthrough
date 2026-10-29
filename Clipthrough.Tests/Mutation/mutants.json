@@ -2891,9 +2891,17 @@
     "id": "prefix-row-is-editable",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "F-10. An edit is saved as a new clip; editing a row that holds a prefix would save a clip missing everything after it.",
-    "find": "        SelectedClip is { Clip.IsContentTruncated: false } selected",
-    "replace": "        SelectedClip is { } selected",
+    "find": "        _presentedClipIsComplete\n        && SelectedClip is { } selected",
+    "replace": "        (_presentedClipIsComplete || !_presentedClipIsComplete)\n        && SelectedClip is { } selected",
     "filter": "FullyQualifiedName~SelectingALongListRow_ShowsThePrefixFirst"
+  },
+  {
+    "id": "editability-follows-the-row-not-the-editor",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Hydration completes the row a dispatcher turn before the selection re-presents it. If editability follows the row, the editor is editable while it still holds the 4096-character prefix, and an edit committed in that gap is captured as a new clip holding the prefix plus the edit.",
+    "find": "        _presentedClipIsComplete = SelectedClip is { Clip.IsContentTruncated: false };",
+    "replace": "        _presentedClipIsComplete = SelectedClip is not null || _presentedClipIsComplete;",
+    "filter": "FullyQualifiedName~BetweenHydrationAndThePreview_TheEditorStaysReadOnly"
   },
   {
     "id": "transform-html-decided-by-one-transform",
