@@ -2986,7 +2986,7 @@
   {
     "id": "upgrade-progress-applied-on-the-worker-thread",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
-    "why": "U-E1 (C). The initializer reports from a worker thread; raising the overlay properties there touches Avalonia from the wrong thread.",
+    "why": "U-E1 (C). The initializer reports from a worker thread; raising the overlay properties there touches Avalonia from the wrong thread. Since Avalonia 12.1.4 a binding marshals an off-thread PropertyChanged itself, so the test asserts the raising thread directly.",
     "find": "        public void Report(LibraryUpgradeProgress value) => Avalonia.Threading.Dispatcher.UIThread.Post(() => apply(value));",
     "replace": "        public void Report(LibraryUpgradeProgress value) => apply(value);",
     "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests"
