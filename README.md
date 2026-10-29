@@ -12,6 +12,7 @@ Clipthrough is an Avalonia desktop clipboard history app focused on rich clipboa
 - Per-session log window with a filterable activity trail
 - Configurable local hotkeys (recorded in the settings window) and global hotkeys for paste cycling
 - First-run welcome flow for storage path, password, and hotkey setup
+- Fits any screen from a 576 DIP portrait monitor to an ultrawide: the layout reflows below 1100 DIP (the preview moves under the list on narrow screens, and short screens hide the footer). Every window stays inside its monitor's working area, including after a DPI change, a monitor change, or a show from the tray. The window reopens at the size, position and maximized state it was left in.
 - SQLite database with optional encryption password, retention policies, and size caps
 - Clip export with original payload, rendered text, and metadata
 - Top menu bar and an in-app Help window
