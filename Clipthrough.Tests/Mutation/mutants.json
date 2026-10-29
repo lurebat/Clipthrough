@@ -1499,7 +1499,7 @@
     "id": "schema-version-not-bumped-for-index-change",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "The migration gate skips every Ensure* helper when the stored version already matches, so a schema change that does not bump the version never reaches an installed database.",
-    "find": "    private const int CurrentSchemaVersion = 9;",
+    "find": "    private const int CurrentSchemaVersion = 10;",
     "replace": "    private const int CurrentSchemaVersion = 7;",
     "filter": "FullyQualifiedName~ClipStoredBytesTests"
   },
@@ -2934,6 +2934,14 @@
     "find": "                    LIMIT $limit;\n",
     "replace": "                    LIMIT -1 + ($limit * 0);\n",
     "filter": "FullyQualifiedName~PayloadLayoutTests.AMoveInterruptedMidBatch"
+  },
+  {
+    "id": "payload-layout-shares-schema-nine",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Phase G's UTC backfill and Phase E's payload layout were both written as schema 9. A library G stamped 9 still has inline payloads; if the layout also called itself 9, that library would read as already moved and keep every payload in the clips row.",
+    "find": "    private const int CurrentSchemaVersion = 10;",
+    "replace": "    private const int CurrentSchemaVersion = 9;",
+    "filter": "FullyQualifiedName~PayloadLayoutTests.ALibraryStampedNineByTheUtcBackfill_IsStillMoved"
   },
   {
     "id": "orphaned-icons-kept-after-eviction",

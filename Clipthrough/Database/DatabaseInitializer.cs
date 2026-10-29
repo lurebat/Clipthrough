@@ -324,9 +324,14 @@ public sealed class DatabaseInitializer
     /// each, which adds up to ~800ms on a cold OS file cache).
     /// </summary>
     /// <remarks>
-    /// 9: BackfillUtcTimestampsAsync (F-35).
+    /// 9: BackfillUtcTimestampsAsync (F-35, U-G7). 10: payloads and icons out of the
+    /// clips row (U-E1). Both were written against 8 and both took 9; the layout
+    /// moved to 10 so that a library the backfill stamped 9 is still moved.
     /// </remarks>
-    private const int CurrentSchemaVersion = 9;
+    private const int CurrentSchemaVersion = 10;
+
+    /// <summary>The version that added BackfillUtcTimestampsAsync (F-35, U-G7).</summary>
+    private const int UtcTimestampsIntroducedVersion = 9;
 
     /// <summary>
     /// The last schema version whose migration changed what clips_fts holds:
@@ -430,8 +435,6 @@ public sealed class DatabaseInitializer
             TraceStep(sw, "backfill-aggregation");
             await BackfillClipPayloadColumnsAsync(connection, cancellationToken);
             TraceStep(sw, "backfill-payload");
-            await BackfillUtcTimestampsAsync(connection, cancellationToken);
-            TraceStep(sw, "backfill-utc-timestamps");
             await DeduplicateClipsByHashAsync(connection, cancellationToken);
             TraceStep(sw, "dedupe-by-hash");
             await EnsureUniqueClipHashIndexAsync(connection, cancellationToken);
@@ -450,6 +453,14 @@ public sealed class DatabaseInitializer
             await EnsureSourceAppIconHashColumnAsync(connection, cancellationToken);
             await MovePayloadsOutOfClipsAsync(connection, progress, cancellationToken);
             TraceStep(sw, "move-payloads");
+
+            // After the move: it scans every row's timestamps, which sit after the
+            // inline payload until the move has run (F-06).
+            if (storedVersion < UtcTimestampsIntroducedVersion)
+            {
+                await BackfillUtcTimestampsAsync(connection, cancellationToken);
+                TraceStep(sw, "backfill-utc-timestamps");
+            }
             progress?.Report(new LibraryUpgradeProgress(LibraryUpgradeStage.Finishing));
             await WriteSchemaVersionAsync(connection, CurrentSchemaVersion, cancellationToken);
             TraceStep(sw, $"version-write ({CurrentSchemaVersion})");
