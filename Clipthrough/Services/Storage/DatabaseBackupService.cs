@@ -188,9 +188,10 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
     ///
     /// Deleting the rows is not enough on its own: their bytes stay in free
     /// pages and the full-text index keeps the original segments until a merge.
-    /// So the index is optimized and the file vacuumed whenever anything was
-    /// removed. A copy whose schema has no <c>is_sensitive</c> column is left
-    /// alone.
+    /// So the index is optimized and the file vacuumed on every purge, including
+    /// one that removes nothing: live expiry may have deleted a sensitive clip
+    /// before the copy, leaving the same residue. A copy whose schema has no
+    /// <c>is_sensitive</c> column is left alone.
     /// </summary>
     internal static int PurgeSensitiveClips(string path, string? password)
     {
@@ -207,14 +208,17 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
 
         var removed = Execute(connection, "DELETE FROM clips WHERE is_sensitive = 1;");
 
+        // Not only when this purge removed rows: live expiry may already have
+        // deleted a sensitive clip, and the copy carries its index segments
+        // all the same (rubber-duck F-06-3).
+        if (HasTable(connection, "clips_fts"))
+        {
+            Execute(connection, "INSERT INTO clips_fts(clips_fts) VALUES('optimize');");
+        }
+
+        Execute(connection, "VACUUM;");
         if (removed > 0)
         {
-            if (HasTable(connection, "clips_fts"))
-            {
-                Execute(connection, "INSERT INTO clips_fts(clips_fts) VALUES('optimize');");
-            }
-
-            Execute(connection, "VACUUM;");
             Trace.TraceInformation($"Removed {removed} sensitive clip(s) from the backup copy.");
         }
 

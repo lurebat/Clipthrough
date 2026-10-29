@@ -2795,8 +2795,8 @@
     "id": "backup-purge-leaves-free-pages",
     "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
     "why": "F-19. Deleted rows stay in free pages and in un-merged FTS segments until the copy is optimized and vacuumed. The engine's SQLITE_SECURE_DELETE zeroes the free pages, so the test checks the freelist is empty, not only the bytes.",
-    "find": "        if (removed > 0)\n        {\n            if (HasTable(connection, \"clips_fts\"))\n",
-    "replace": "        if (removed < 0)\n        {\n            if (HasTable(connection, \"clips_fts\"))\n",
+    "find": "        if (HasTable(connection, \"clips_fts\"))\n        {\n            Execute(connection, \"INSERT INTO clips_fts(clips_fts) VALUES('optimize');\");\n        }\n\n        Execute(connection, \"VACUUM;\");\n",
+    "replace": "        if (removed < 0)\n        {\n        if (HasTable(connection, \"clips_fts\"))\n        {\n            Execute(connection, \"INSERT INTO clips_fts(clips_fts) VALUES('optimize');\");\n        }\n\n        Execute(connection, \"VACUUM;\");\n        }\n",
     "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WithTheLifetimeOn_TheDailyBackup_HoldsNoSensitiveClip"
   },
   {
@@ -3350,5 +3350,13 @@
     "find": "            DeleteStrandedTempCopies(backupDir, tempPath);",
     "replace": "            if (tempPath.Length < 0) DeleteStrandedTempCopies(backupDir, tempPath);",
     "filter": "FullyQualifiedName~BackupSensitivePurgeTests.ATempCopyLeftByAnEarlierCrash"
+  },
+  {
+    "id": "f06-3-backup-optimize-only-when-purge-removed-rows",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Rubber-duck F-06-3: with the lifetime on, the backup copy is optimized and vacuumed even when the purge removes nothing, because live expiry may already have deleted a sensitive clip whose index segments the copy still carries.",
+    "find": "        if (HasTable(connection, \"clips_fts\"))\n        {\n            Execute(connection, \"INSERT INTO clips_fts(clips_fts) VALUES('optimize');\");\n        }\n\n        Execute(connection, \"VACUUM;\");\n",
+    "replace": "        if (removed > 0)\n        {\n        if (HasTable(connection, \"clips_fts\"))\n        {\n            Execute(connection, \"INSERT INTO clips_fts(clips_fts) VALUES('optimize');\");\n        }\n\n        Execute(connection, \"VACUUM;\");\n        }\n",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WithTheLifetimeOn_ASensitiveClipLiveExpiryAlreadyDeleted"
   }
 ]
