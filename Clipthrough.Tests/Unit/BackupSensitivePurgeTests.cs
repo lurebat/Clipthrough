@@ -55,7 +55,7 @@ public sealed class BackupSensitivePurgeTests
     private static object? Scalar(string path, string sql)
     {
         var builder = new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadOnly, Pooling = false };
-        using var connection = new SqliteConnection(builder.ToString());
+        using var connection = TestConnections.Create(builder.ToString());
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = sql;
@@ -120,7 +120,7 @@ public sealed class BackupSensitivePurgeTests
         try
         {
             var builder = new SqliteConnectionStringBuilder { DataSource = path, Pooling = false };
-            using (var connection = new SqliteConnection(builder.ToString()))
+            using (var connection = TestConnections.Create(builder.ToString()))
             {
                 connection.Open();
                 using var command = connection.CreateCommand();

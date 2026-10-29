@@ -2955,9 +2955,17 @@
     "id": "clipangel-decrypted-copy-left-in-temp",
     "file": "Clipthrough/Services/Storage/ClipAngelImportService.cs",
     "why": "F-34 (found by its tests). A pooled connection keeps the decrypted copy open, TryDelete fails silently, and a plaintext copy of the ClipAngel history stays in %TEMP%.",
-    "find": "        const int batchSize = 200;\n\n        try\n        {\n            // Pooling off: a pooled connection keeps the decrypted copy open after\n            // Dispose, TryDelete then fails silently, and a plaintext copy of the\n            // user's ClipAngel history is left in %TEMP% (found by F-34's tests).\n            await using var conn = Clipthrough.Database.SqliteConnectionFactory.Create(temp, password: null, SqliteOpenMode.ReadOnly, pooling: false);\n",
-    "replace": "        const int batchSize = 200;\n\n        try\n        {\n            // Pooling off: a pooled connection keeps the decrypted copy open after\n            // Dispose, TryDelete then fails silently, and a plaintext copy of the\n            // user's ClipAngel history is left in %TEMP% (found by F-34's tests).\n            await using var conn = Clipthrough.Database.SqliteConnectionFactory.Create(temp, password: null, SqliteOpenMode.ReadOnly, pooling: true);\n",
+    "find": "var conn = Clipthrough.Database.SqliteConnectionFactory.Create(path, password: null, SqliteOpenMode.ReadOnly, pooling: false);",
+    "replace": "var conn = Clipthrough.Database.SqliteConnectionFactory.Create(path, password: null, SqliteOpenMode.ReadOnly, pooling: true);",
     "filter": "FullyQualifiedName~ClipAngelImportServiceTests"
+  },
+  {
+    "id": "clipangel-import-builds-its-own-connection",
+    "file": "Clipthrough/Services/Storage/ClipAngelImportService.cs",
+    "why": "Guard R7 across C and G/U-C9. Phase C's ClipAngel validation opened its own connection and set busy_timeout itself; once G and U-C9 made the factory the only place a connection is built, that copy bypassed it. The source scan must catch it coming back.",
+    "find": "var conn = Clipthrough.Database.SqliteConnectionFactory.Create(path, password: null, SqliteOpenMode.ReadOnly, pooling: false);",
+    "replace": "var conn = new SqliteConnection($\"Data Source={path};Mode=ReadOnly;Pooling=False\");",
+    "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
   },
   {
     "id": "batch-capture-keeps-the-caller-offset",

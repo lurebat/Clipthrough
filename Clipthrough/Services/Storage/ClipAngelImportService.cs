@@ -350,13 +350,15 @@ public sealed class ClipAngelImportService : IClipAngelImportService
     /// </remarks>
     private static async Task<SqliteConnection> OpenValidatedAsync(string path, CancellationToken cancellationToken)
     {
-        var conn = new SqliteConnection($"Data Source={path};Mode=ReadOnly;Pooling=False");
+        // Through the factory (guard R7), so busy_timeout and the connection recipe stay in one place.
+        // Pooling off: a pooled connection would keep the decrypted temp copy open and undeletable.
+        var conn = Clipthrough.Database.SqliteConnectionFactory.Create(path, password: null, SqliteOpenMode.ReadOnly, pooling: false);
         try
         {
             await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
             await using (var pragmas = conn.CreateCommand())
             {
-                pragmas.CommandText = "PRAGMA busy_timeout = 5000; PRAGMA trusted_schema = OFF; PRAGMA query_only = ON;";
+                pragmas.CommandText = "PRAGMA trusted_schema = OFF; PRAGMA query_only = ON;";
                 await pragmas.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
 

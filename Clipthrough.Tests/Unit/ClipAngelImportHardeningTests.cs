@@ -40,7 +40,7 @@ public sealed class ClipAngelImportHardeningTests : IDisposable
     private string BuildClipAngelDatabase(string schemaAndData)
     {
         var plain = Path.Combine(_root, Guid.NewGuid().ToString("N") + ".plain.db");
-        using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = plain, Pooling = false }.ToString()))
+        using (var connection = TestConnections.Create(new SqliteConnectionStringBuilder { DataSource = plain, Pooling = false }.ToString()))
         {
             connection.Open();
             using var command = connection.CreateCommand();
