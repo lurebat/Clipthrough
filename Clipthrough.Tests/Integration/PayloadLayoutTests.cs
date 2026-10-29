@@ -98,7 +98,7 @@ public sealed class PayloadLayoutTests
         await scope.DatabaseInitializer.InitializeAsync();
         var clip = await CaptureImageAsync(scope, [9, 9, 9], icon: null);
 
-        using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = scope.DatabasePath, ForeignKeys = false, Pooling = false }.ToString()))
+        using (var connection = TestConnections.Create(new SqliteConnectionStringBuilder { DataSource = scope.DatabasePath, ForeignKeys = false, Pooling = false }.ToString()))
         {
             connection.Open();
             using var command = connection.CreateCommand();
@@ -167,6 +167,32 @@ public sealed class PayloadLayoutTests
         }
     }
 
+    private static int CurrentSchemaVersion =>
+        (int)(typeof(DatabaseInitializer)
+            .GetField("CurrentSchemaVersion", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+            ?.GetRawConstantValue()
+            ?? throw new InvalidOperationException(
+                "DatabaseInitializer.CurrentSchemaVersion is gone or is no longer a const - this test can no longer track it."));
+
+    /// <summary>
+    /// Phase G stamps schema 9 after its UTC timestamp backfill, on a library whose
+    /// payloads are still inline. If this layout also called itself 9, such a library
+    /// would read as already moved and keep every payload in the clips row for good.
+    /// </summary>
+    [Fact]
+    public async Task ALibraryStampedNineByTheUtcBackfill_IsStillMoved()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        var ids = await SeedLegacyRowsAsync(scope, 3);
+        await ExecuteAsync(scope, "UPDATE app_metadata SET value = '9' WHERE key = 'schema_version';");
+
+        await scope.DatabaseInitializer.InitializeAsync();
+
+        await AssertMovedAsync(scope, ids);
+        Assert.Equal(CurrentSchemaVersion, await ScalarAsync(scope, "SELECT CAST(value AS INTEGER) FROM app_metadata WHERE key = 'schema_version';"));
+    }
+
     [Fact]
     public async Task AnExistingLibrary_IsMoved_AndMovingAgainChangesNothing()
     {
@@ -220,6 +246,6 @@ public sealed class PayloadLayoutTests
         await scope.DatabaseInitializer.InitializeAsync();
 
         await AssertMovedAsync(scope, ids);
-        Assert.Equal(9, await ScalarAsync(scope, "SELECT CAST(value AS INTEGER) FROM app_metadata WHERE key = 'schema_version';"));
+        Assert.Equal(CurrentSchemaVersion, await ScalarAsync(scope, "SELECT CAST(value AS INTEGER) FROM app_metadata WHERE key = 'schema_version';"));
     }
 }

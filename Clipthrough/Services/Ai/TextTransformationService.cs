@@ -4,6 +4,8 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Clipthrough.Services;
 
@@ -24,17 +26,74 @@ public static partial class TextTransformationService
     /// is the shape of defect this repository has been bitten by twice: two
     /// sources of truth that agree until someone adds a case to one of them.
     /// </remarks>
+    /// <summary>
+    /// Why <see cref="ApplyAsync"/> will leave <paramref name="input"/> unchanged
+    /// for <paramref name="transformation"/> without trying, or null when it
+    /// will try. Markdown-&gt;HTML refuses input nested too deeply or with too
+    /// long an unbroken run: on VellumText 0.7.0 the importer overflowed the
+    /// stack on it and killed the process (F-48). 0.8 survives it, but converts
+    /// 8 KB of '[' into a fragment of its input, so the refusal is kept for the
+    /// message it gives (owner decision on #12). HTML-&gt;Markdown no longer
+    /// refuses anything. Callers show this instead of a bare "no change".
+    /// </summary>
+    public static string? RefusalReason(Models.TextTransformation transformation, string input)
+        => transformation is Models.TextTransformation.MarkdownToHtml
+            && !string.IsNullOrEmpty(input)
+            && !Presentation.ImportGuards.IsSafeToImport(input)
+                ? Localization.AppText.TransformInputTooDeeplyNested
+                : null;
+
     public static bool ProducesHtml(Models.TextTransformation transformation)
         => transformation is Models.TextTransformation.BoxTableToHtml
             or Models.TextTransformation.MarkdownToHtml;
 
-    public static string Apply(Models.TextTransformation transformation, string input, string? delimiter = null)
+    /// <summary>
+    /// Whether text transforms apply to <paramref name="clip"/>: text, rich
+    /// text and file lists with content. Not images - an image clip's text is
+    /// the title of the window it was copied from, not anything the user wants
+    /// transformed or pasted (F-12). The row menu and the global hotkeys both
+    /// ask here, so they cannot disagree about which clips qualify.
+    /// </summary>
+    public static bool CanTransform(Models.ClipEntry clip)
+        => clip.ContentType is Models.ContentType.Text or Models.ContentType.RichText or Models.ContentType.Files
+            // ContentPrefix, not Content: this is asked of list rows, whose Content throws
+            // once a clip is longer than the bound (U-D5). Emptiness is all it needs.
+            && !string.IsNullOrEmpty(clip.ContentPrefix);
+
+    /// <summary>
+    /// Applies <paramref name="transformation"/> to <paramref name="input"/>.
+    /// </summary>
+    /// <remarks>
+    /// Asynchronous because the HTML/Markdown converters are: VellumText's
+    /// importers are async-only, and parse on a thread of their own. Every other
+    /// transformation is a pure string function that completes synchronously on
+    /// the caller, so awaiting it costs nothing and moves no work off the
+    /// caller's thread. Await it; never block on it, least of all on the UI
+    /// thread, where a converter's continuation cannot run.
+    /// </remarks>
+    public static Task<string> ApplyAsync(
+        Models.TextTransformation transformation,
+        string input,
+        string? delimiter = null,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(input))
         {
-            return input;
+            return Task.FromResult(input);
         }
 
+        return transformation switch
+        {
+            Models.TextTransformation.HtmlToMarkdown => HtmlToMarkdownAsync(input, cancellationToken),
+            Models.TextTransformation.MarkdownToHtml => MarkdownToHtmlAsync(input, cancellationToken),
+            _ => Task.FromResult(ApplyText(transformation, input, delimiter)),
+        };
+    }
+
+    // The synchronous transformations. The two converters are dispatched by
+    // ApplyAsync and never reach this switch.
+    private static string ApplyText(Models.TextTransformation transformation, string input, string? delimiter)
+    {
         return transformation switch
         {
             Models.TextTransformation.None => input,
@@ -58,8 +117,6 @@ public static partial class TextTransformationService
             Models.TextTransformation.RemoveEmptyLines => RemoveEmptyLines(input),
             Models.TextTransformation.RemoveDuplicateLines => RemoveDuplicateLines(input),
             Models.TextTransformation.BoxTableToHtml => BoxTableToHtml(input),
-            Models.TextTransformation.HtmlToMarkdown => HtmlToMarkdown(input),
-            Models.TextTransformation.MarkdownToHtml => MarkdownToHtml(input),
             Models.TextTransformation.JsonQuote => JsonQuote(input),
             Models.TextTransformation.JsonUnquote => JsonUnquote(input),
             Models.TextTransformation.JsonMinify => JsonReformat(input, indented: false),
@@ -286,8 +343,14 @@ public static partial class TextTransformationService
     /// sentence has no markup to convert, and running it through an importer
     /// would escape characters the user typed on purpose.
     /// </remarks>
-    private static string HtmlToMarkdown(string input)
+    private static async Task<string> HtmlToMarkdownAsync(string input, CancellationToken cancellationToken)
     {
+        // No nesting refusal here, unlike Markdown -> HTML. VellumText 0.8 drops
+        // tags nested past its depth limit, keeps their text, and parses on a
+        // thread with a 256 MiB stack, so deep markup converts instead of
+        // killing the process; HostileRichPayloadTests pins that in a child
+        // process. The refusal this used to share with Markdown -> HTML was
+        // removed once that held (owner decision on #12).
         if (!LooksLikeHtml(input))
         {
             return input;
@@ -295,9 +358,16 @@ public static partial class TextTransformationService
 
         try
         {
-            var document = VellumText.Interop.Html.HtmlFormat.Instance.Import(input).Doc;
-            var markdown = VellumText.Interop.Markdown.MarkdownFormat.Instance.Export(document);
+            // ConfigureAwait(false): the export below is synchronous and must not
+            // land back on the UI thread the caller awaited from.
+            var imported = await VellumText.Interop.Html.HtmlFormat.Instance
+                .ImportAsync(input, cancellationToken).ConfigureAwait(false);
+            var markdown = VellumText.Interop.Markdown.MarkdownFormat.Instance.Export(imported.Doc);
             return string.IsNullOrWhiteSpace(markdown) ? input : markdown;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -324,13 +394,29 @@ public static partial class TextTransformationService
     /// depth, not the load-bearing part, and a comment claiming otherwise would
     /// send the next reader to the wrong place when it matters.
     /// </remarks>
-    private static string MarkdownToHtml(string input)
+    private static async Task<string> MarkdownToHtmlAsync(string input, CancellationToken cancellationToken)
     {
+        // 8 KB of '[' killed the whole process on VellumText 0.7.0 (F-48), and a
+        // stack overflow cannot be caught. 0.8 walks the parsed tree with an
+        // explicit stack and parses on a 256 MiB thread, so this guard is no
+        // longer what prevents the crash. It is kept for what the user sees:
+        // without it 0.8 converts that input into a fragment of itself, where
+        // the refusal leaves the text alone and says why (owner decision on #12).
+        if (!Presentation.ImportGuards.IsSafeToImport(input))
+        {
+            return input;
+        }
+
         try
         {
-            var document = VellumText.Interop.Markdown.MarkdownFormat.Instance.Import(input).Doc;
-            var html = VellumText.Interop.Html.HtmlFormat.Instance.Export(document);
+            var imported = await VellumText.Interop.Markdown.MarkdownFormat.Instance
+                .ImportAsync(input, cancellationToken).ConfigureAwait(false);
+            var html = VellumText.Interop.Html.HtmlFormat.Instance.Export(imported.Doc);
             return string.IsNullOrWhiteSpace(html) ? input : html;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

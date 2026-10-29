@@ -55,7 +55,7 @@ public sealed class SqliteErrorsTests : IDisposable
 
     private async Task CreateEncryptedDatabaseAsync(string password)
     {
-        await using var connection = new SqliteConnection(ConnectionString(_databasePath, password, SqliteOpenMode.ReadWriteCreate));
+        await using var connection = TestConnections.Create(ConnectionString(_databasePath, password, SqliteOpenMode.ReadWriteCreate));
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = "CREATE TABLE t(x); INSERT INTO t VALUES (1);";
@@ -66,7 +66,7 @@ public sealed class SqliteErrorsTests : IDisposable
     {
         return await Assert.ThrowsAsync<SqliteException>(async () =>
         {
-            await using var connection = new SqliteConnection(connectionString);
+            await using var connection = TestConnections.Create(connectionString);
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT count(*) FROM sqlite_master;";

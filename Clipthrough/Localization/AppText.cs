@@ -46,12 +46,10 @@ public static class AppText
         [nameof(CheckForUpdateMenuHeader)] = "_Check for updates",
         [nameof(CheckForUpdateButtonLabel)] = "Check for updates",
         [nameof(CheckingForUpdateStatus)] = "Checking for updates...",
-        [nameof(UpdateAvailableTitle)] = "Update available",
         [nameof(UpdateCheckCompleteTitle)] = "Update check complete",
         [nameof(UpdateCheckCompleteStatus)] = "Update check complete.",
         [nameof(UpdateCheckFailedTitle)] = "Update check failed",
         [nameof(SettingsTitleText)] = "Settings",
-        [nameof(SettingsDescriptionText)] = "Adjust shortcuts, tray behavior, storage, sensitivity rules, retention, and archive capacity.",
         [nameof(SettingsLocalHotkeysTitle)] = "Local shortcuts",
         [nameof(SettingsGlobalHotkeyTitle)] = "Global shortcuts",
         [nameof(SettingsStorageTitle)] = "Database storage",
@@ -62,7 +60,8 @@ public static class AppText
         [nameof(SettingsExcludedAppsTitle)] = "Excluded applications",
         [nameof(SettingsExcludedAppsDescription)] = "Clipboard changes produced by these applications are never captured - nothing is read, stored, or indexed. One entry per line. An entry can be a process name (1Password), an executable file name (KeePass.exe), a full path, or a wildcard pattern such as *vault* or C:\\Program Files\\Acme\\*.",
         [nameof(SettingsExcludedAppsWatermark)] = "1Password\nKeePass.exe\n*bitwarden*",
-        [nameof(SettingsExcludedAppsCaveat)] = "Best effort: Clipthrough can only exclude an application it can identify. When Windows does not report an owner for a clipboard change - a hidden helper window, a process that has already exited, or a protected process - the clip is captured, because silently discarding every unattributable clip would lose far more history than it protects. Applications that need a hard guarantee should publish the standard 'Clipboard Viewer Ignore' format, which Clipthrough always honors regardless of this list.",
+        [nameof(SettingsExcludedAppsCaveat)] = "Best effort: Clipthrough can only exclude an application it can identify. When Windows does not report an owner for a clipboard change - a hidden helper window, a process that has already exited, or a protected process - the clip is captured, because silently discarding every unattributable clip would lose far more history than it protects. Applications that need a hard guarantee should publish the standard 'Clipboard Viewer Ignore' format, which Clipthrough always honors regardless of this list. Content marked 'CanIncludeInClipboardHistory = 0' - what Chrome, Edge and Bitwarden publish for passwords - is also skipped while the option below is on.",
+        [nameof(SettingsHonorClipboardHistoryOptOutLabel)] = "Skip content its source marks as not for clipboard history (browser and password-manager passwords)",
         [nameof(SettingsClipLimitLabel)] = "Max clip size (KB)",
         [nameof(SettingsDatabasePathLabel)] = "Database path",
         [nameof(SettingsDatabasePasswordLabel)] = "Encryption password",
@@ -112,6 +111,8 @@ public static class AppText
         [nameof(SettingsExternalDiffToolPathLabel)] = "Diff tool path",
         [nameof(OpenInEditorButtonLabel)] = "Editor",
         [nameof(CompareClipsButtonLabel)] = "Compare",
+        [nameof(SearchOptionsButtonLabel)] = "Search options",
+        [nameof(SearchOptionsButtonTooltip)] = "Regex, case, wildcard, whole word, fuzzy and semantic matching",
         [nameof(WildcardFilterLabel)] = "Wildcard",
         [nameof(WholeWordFilterLabel)] = "Whole word",
         [nameof(PastedFilterLabel)] = "Pasted",
@@ -125,19 +126,27 @@ public static class AppText
         [nameof(CompareNeedsDiffToolStatus)] = "Set an external diff tool path in Settings to compare clips.",
         [nameof(CompareOpenedStatus)] = "Opened diff tool for comparison.",
         [nameof(SettingsThemeModeLabel)] = "Theme",
-        [nameof(SettingsSearchSortByDateLabel)] = "Sort search results by date instead of relevance",
+        [nameof(ExportSensitiveConfirmTitle)] = "Export a sensitive clip?",
+        [nameof(ExportSensitiveConfirmBody)] = "Export writes this clip as an unencrypted file in Documents\\Clipthrough Exports, which is often synced to OneDrive. The file stays after the clip expires or is deleted from Clipthrough.\n\nExport it anyway?",
+        [nameof(ExportSensitiveConfirmAccept)] = "Export",
+        [nameof(ExportSensitiveConfirmCancel)] = "Cancel",
+        [nameof(ExportSensitiveCancelledStatus)] = "Sensitive clip not exported",
+        [nameof(ClipAngelImportUnexpectedSchema)] = "This ClipAngel database was not imported: its structure is not what ClipAngel writes (Clips is not a plain table, or the file contains views or triggers).",
+        [nameof(TransformInputTooDeeplyNested)] = "Left unchanged: this text is nested too deeply, or has too long a run without spaces, to convert safely.",
+        [nameof(SettingsRegexBacktrackingLabel)] = "Use the backtracking regex engine",
+        [nameof(SettingsRegexBacktrackingHint)] = "Supports backreferences and lookarounds, but some patterns are slow; a search that runs too long is stopped. The default engine cannot hang.",
+        [nameof(RegexNeedsBacktrackingStatus)] = "This pattern needs the backtracking regex engine (backreferences, lookarounds or atomic groups). Turn it on in Settings > Search.",
+        [nameof(RegexTooSlowStatus)] = "Pattern too slow: the regex search was stopped. Simplify the pattern, or switch off the backtracking engine in Settings > Search.",
         [nameof(OpenedInEditorStatus)] = "Opened in editor",
         [nameof(SettingsHintText)] = "Enter shortcuts in forms like Ctrl+Shift+R, Ctrl+Shift+F, or F8. Disable any shortcut you do not want active. Startup registration applies on Windows.",
         [nameof(SettingsStorageHintText)] = "The path is stored outside the clip database so you can move or encrypt it. Leave the password empty to keep SQLite unencrypted.",
-        [nameof(SettingsDatabasePasswordWarning)] = "⚠ Saved as plaintext in storage.json so the database can auto-unlock on startup. Anyone with access to your user profile can read it.",
+        [nameof(SettingsDatabasePasswordWarning)] = "⚠ Saved in storage.json encrypted for your Windows account (DPAPI) so the database can unlock on startup. Any program running as you can still decrypt it. Where DPAPI is unavailable the password is kept in memory only and asked for again next launch.",
         [nameof(SettingsConfirmEncryptionPasswordTitle)] = "Save encryption password?",
-        [nameof(SettingsConfirmEncryptionPasswordBody)] = "The encryption password will be stored as plaintext in storage.json so Clipthrough can auto-unlock the database on startup.\n\nAnyone with access to your user profile can read it. Continue?",
-        [nameof(SettingsConfirmEncryptionPasswordConfirm)] = "Save plaintext",
+        [nameof(SettingsConfirmEncryptionPasswordBody)] = "The encryption password will be saved in storage.json, encrypted for your Windows account (DPAPI), so Clipthrough can unlock the database on startup.\n\nAny program running as you can still decrypt it. Where DPAPI is unavailable it is kept in memory only. Continue?",
+        [nameof(SettingsConfirmEncryptionPasswordConfirm)] = "Remember password",
+        [nameof(SettingsRememberDatabasePassword)] = "Remember password (encrypted for your Windows account)",
         [nameof(SettingsConfirmEncryptionPasswordCancel)] = "Cancel",
         [nameof(StartupErrorTitle)] = "Clipthrough could not start",
-        [nameof(StartupErrorBody)] = "The clip library failed to load. Your data may be intact - check the log for details.",
-        [nameof(StartupErrorOpenLogs)] = "Open logs folder",
-        [nameof(StartupErrorOpenDatabase)] = "Open database folder",
         [nameof(WelcomeTitleText)] = "Welcome to Clipthrough",
         [nameof(WelcomeDescriptionText)] = "Set up your clipboard library before the app starts capturing. You can change these options later in Settings.",
         [nameof(WelcomeSaveButtonLabel)] = "Create library",
@@ -165,8 +174,6 @@ public static class AppText
         [nameof(LibraryUpgradeStageMovingClipData)] = "Moving stored clip data",
         [nameof(LibraryUpgradeStageFinishing)] = "Finishing up",
         [nameof(WaitingForFirstCapture)] = "Waiting for first capture",
-        [nameof(RemoveFavorite)] = "Remove Favorite",
-        [nameof(AddFavorite)] = "Add Favorite",
         [nameof(SensitiveClipCopiedTitle)] = "Sensitive clip copied",
         [nameof(SensitiveClipCopiedMessage)] = "This clip matched one or more sensitivity rules. Review it before sharing.",
         [nameof(UnmarkSensitiveButtonLabel)] = "Unsevere",
@@ -190,6 +197,10 @@ public static class AppText
         [nameof(SettingsInvalidMaxLibrarySize)] = "Enter an archive size between 1 and 1048576 MB.",
         [nameof(SettingsInvalidMaxEntryCount)] = "Enter a max entry count between 1 and 5000000.",
         [nameof(SettingsPasswordMismatch)] = "Passwords do not match.",
+        [nameof(RekeyPasswordMismatch)] = "New password and confirmation do not match.",
+        [nameof(RekeyRememberNewPassword)] = "Remember new password (encrypted for your Windows account)",
+        [nameof(RekeyRememberNewPasswordWarning)] = "⚠ The new password will be saved in storage.json, encrypted for your Windows account (DPAPI). Any program running as you can still decrypt it. Where DPAPI is unavailable it is kept in memory only.",
+        [nameof(RekeyPasswordEdgeWhitespace)] = "The new password starts or ends with a space or other whitespace. Remove it: Clipthrough ignores leading and trailing whitespace when you unlock, so the database could never be opened with it.",
         [nameof(UnlockIncorrectPassword)] = "Incorrect password. Please try again.",
         [nameof(UnlockDatabaseUnreadable)] = "The database could not be opened. It may have been moved, deleted, or is in use by another program.",
         [nameof(SettingsInvalidRuleName)] = "Each sensitivity rule needs a name.",
@@ -244,12 +255,11 @@ public static class AppText
         [nameof(UnexpectedErrorTitle)] = "Something went wrong",
         [nameof(ClipCaptureFailedTitle)] = "Clip capture failed",
         [nameof(SettingsLoadFailedTitle)] = "Settings could not be read",
+        [nameof(StorageLoadFailedTitle)] = "Library location could not be read",
         [nameof(LibraryOptimizeFailedTitle)] = "Library storage was not optimized",
-        [nameof(ClipCaptureFailedUnsupportedPayload)] = "The clipboard payload was not a supported text, rich text, image, or file format.",
         [nameof(ClipCaptureFailedEmptyPayload)] = "The clipboard payload was empty.",
         [nameof(ClipDragImportTitle)] = "Imported by drag",
         [nameof(ClipDragImportBadgeLabel)] = "Dropped",
-        [nameof(ClipDragImportDropHint)] = "Drop files, images, or text to import",
         ["ContentType.Text"] = "Text",
         ["ContentType.Image"] = "Image",
         ["ContentType.RichText"] = "Rich text",
@@ -308,6 +318,8 @@ public static class AppText
         ["Format.RelativeDaysPlural"] = "{0} days ago",
         ["Format.LogCount"] = "{0:N0} session logs",
         ["Format.StorageUsage"] = "{0}",
+        ["Format.StorageLoadFault"] = "{0} could not be read and was moved to {1}. Clipthrough does not know where your library is, so it started as if for the first time. If your library is not in the default location, choose it again.",
+        ["Format.StorageLoadFaultNotMoved"] = "{0} could not be read, and could not be moved aside. Clipthrough started with the default library location.",
         ["Format.EntryUsage"] = "{0:N0} clips",
         ["Format.StorageCapacity"] = "Cap {0:N0} MB",
         ["Format.EntryCapacity"] = "Cap {0:N0} clips",
@@ -372,12 +384,10 @@ public static class AppText
     public static string CheckForUpdateMenuHeader => Text(nameof(CheckForUpdateMenuHeader));
     public static string CheckForUpdateButtonLabel => Text(nameof(CheckForUpdateButtonLabel));
     public static string CheckingForUpdateStatus => Text(nameof(CheckingForUpdateStatus));
-    public static string UpdateAvailableTitle => Text(nameof(UpdateAvailableTitle));
     public static string UpdateCheckCompleteTitle => Text(nameof(UpdateCheckCompleteTitle));
     public static string UpdateCheckCompleteStatus => Text(nameof(UpdateCheckCompleteStatus));
     public static string UpdateCheckFailedTitle => Text(nameof(UpdateCheckFailedTitle));
     public static string SettingsTitleText => Text(nameof(SettingsTitleText));
-    public static string SettingsDescriptionText => Text(nameof(SettingsDescriptionText));
     public static string SettingsLocalHotkeysTitle => Text(nameof(SettingsLocalHotkeysTitle));
     public static string SettingsGlobalHotkeyTitle => Text(nameof(SettingsGlobalHotkeyTitle));
     public static string SettingsStorageTitle => Text(nameof(SettingsStorageTitle));
@@ -389,6 +399,7 @@ public static class AppText
     public static string SettingsExcludedAppsDescription => Text(nameof(SettingsExcludedAppsDescription));
     public static string SettingsExcludedAppsWatermark => Text(nameof(SettingsExcludedAppsWatermark));
     public static string SettingsExcludedAppsCaveat => Text(nameof(SettingsExcludedAppsCaveat));
+    public static string SettingsHonorClipboardHistoryOptOutLabel => Text(nameof(SettingsHonorClipboardHistoryOptOutLabel));
     public static string SettingsClipLimitLabel => Text(nameof(SettingsClipLimitLabel));
     public static string SettingsDatabasePathLabel => Text(nameof(SettingsDatabasePathLabel));
     public static string SettingsDatabasePasswordLabel => Text(nameof(SettingsDatabasePasswordLabel));
@@ -461,6 +472,8 @@ public static class AppText
     public static string SettingsExternalDiffToolPathLabel => Text(nameof(SettingsExternalDiffToolPathLabel));
     public static string OpenInEditorButtonLabel => Text(nameof(OpenInEditorButtonLabel));
     public static string CompareClipsButtonLabel => Text(nameof(CompareClipsButtonLabel));
+    public static string SearchOptionsButtonLabel => Text(nameof(SearchOptionsButtonLabel));
+    public static string SearchOptionsButtonTooltip => Text(nameof(SearchOptionsButtonTooltip));
     public static string WildcardFilterLabel => Text(nameof(WildcardFilterLabel));
     public static string WholeWordFilterLabel => Text(nameof(WholeWordFilterLabel));
     public static string PastedFilterLabel => Text(nameof(PastedFilterLabel));
@@ -474,7 +487,17 @@ public static class AppText
     public static string CompareNeedsDiffToolStatus => Text(nameof(CompareNeedsDiffToolStatus));
     public static string CompareOpenedStatus => Text(nameof(CompareOpenedStatus));
     public static string SettingsThemeModeLabel => Text(nameof(SettingsThemeModeLabel));
-    public static string SettingsSearchSortByDateLabel => Text(nameof(SettingsSearchSortByDateLabel));
+    public static string ExportSensitiveConfirmTitle => Text(nameof(ExportSensitiveConfirmTitle));
+    public static string ExportSensitiveConfirmBody => Text(nameof(ExportSensitiveConfirmBody));
+    public static string ExportSensitiveConfirmAccept => Text(nameof(ExportSensitiveConfirmAccept));
+    public static string ExportSensitiveConfirmCancel => Text(nameof(ExportSensitiveConfirmCancel));
+    public static string ExportSensitiveCancelledStatus => Text(nameof(ExportSensitiveCancelledStatus));
+    public static string ClipAngelImportUnexpectedSchema => Text(nameof(ClipAngelImportUnexpectedSchema));
+    public static string TransformInputTooDeeplyNested => Text(nameof(TransformInputTooDeeplyNested));
+    public static string SettingsRegexBacktrackingLabel => Text(nameof(SettingsRegexBacktrackingLabel));
+    public static string SettingsRegexBacktrackingHint => Text(nameof(SettingsRegexBacktrackingHint));
+    public static string RegexNeedsBacktrackingStatus => Text(nameof(RegexNeedsBacktrackingStatus));
+    public static string RegexTooSlowStatus => Text(nameof(RegexTooSlowStatus));
     public static string OpenedInEditorStatus => Text(nameof(OpenedInEditorStatus));
     public static string SettingsHintText => Text(nameof(SettingsHintText));
     public static string SettingsStorageHintText => Text(nameof(SettingsStorageHintText));
@@ -482,11 +505,9 @@ public static class AppText
     public static string SettingsConfirmEncryptionPasswordTitle => Text(nameof(SettingsConfirmEncryptionPasswordTitle));
     public static string SettingsConfirmEncryptionPasswordBody => Text(nameof(SettingsConfirmEncryptionPasswordBody));
     public static string SettingsConfirmEncryptionPasswordConfirm => Text(nameof(SettingsConfirmEncryptionPasswordConfirm));
+    public static string SettingsRememberDatabasePassword => Text(nameof(SettingsRememberDatabasePassword));
     public static string SettingsConfirmEncryptionPasswordCancel => Text(nameof(SettingsConfirmEncryptionPasswordCancel));
     public static string StartupErrorTitle => Text(nameof(StartupErrorTitle));
-    public static string StartupErrorBody => Text(nameof(StartupErrorBody));
-    public static string StartupErrorOpenLogs => Text(nameof(StartupErrorOpenLogs));
-    public static string StartupErrorOpenDatabase => Text(nameof(StartupErrorOpenDatabase));
     public static string WelcomeTitleText => Text(nameof(WelcomeTitleText));
     public static string WelcomeDescriptionText => Text(nameof(WelcomeDescriptionText));
     public static string WelcomeSaveButtonLabel => Text(nameof(WelcomeSaveButtonLabel));
@@ -514,8 +535,6 @@ public static class AppText
     public static string LibraryUpgradeStageMovingClipData => Text(nameof(LibraryUpgradeStageMovingClipData));
     public static string LibraryUpgradeStageFinishing => Text(nameof(LibraryUpgradeStageFinishing));
     public static string WaitingForFirstCapture => Text(nameof(WaitingForFirstCapture));
-    public static string RemoveFavorite => Text(nameof(RemoveFavorite));
-    public static string AddFavorite => Text(nameof(AddFavorite));
     public static string SensitiveClipCopiedTitle => Text(nameof(SensitiveClipCopiedTitle));
     public static string SensitiveClipCopiedMessage => Text(nameof(SensitiveClipCopiedMessage));
     public static string UnmarkSensitiveButtonLabel => Text(nameof(UnmarkSensitiveButtonLabel));
@@ -550,6 +569,10 @@ public static class AppText
     public static string SettingsInvalidMaxLibrarySize => Text(nameof(SettingsInvalidMaxLibrarySize));
     public static string SettingsInvalidMaxEntryCount => Text(nameof(SettingsInvalidMaxEntryCount));
     public static string SettingsPasswordMismatch => Text(nameof(SettingsPasswordMismatch));
+    public static string RekeyPasswordMismatch => Text(nameof(RekeyPasswordMismatch));
+    public static string RekeyPasswordEdgeWhitespace => Text(nameof(RekeyPasswordEdgeWhitespace));
+    public static string RekeyRememberNewPassword => Text(nameof(RekeyRememberNewPassword));
+    public static string RekeyRememberNewPasswordWarning => Text(nameof(RekeyRememberNewPasswordWarning));
     public static string UnlockIncorrectPassword => Text(nameof(UnlockIncorrectPassword));
     public static string UnlockDatabaseUnreadable => Text(nameof(UnlockDatabaseUnreadable));
     public static string SettingsInvalidRuleName => Text(nameof(SettingsInvalidRuleName));
@@ -608,14 +631,13 @@ public static class AppText
     public static string ClipCaptureFailedTitle => Text(nameof(ClipCaptureFailedTitle));
 
     public static string SettingsLoadFailedTitle => Text(nameof(SettingsLoadFailedTitle));
+    public static string StorageLoadFailedTitle => Text(nameof(StorageLoadFailedTitle));
     public static string LibraryOptimizeFailedTitle => Text(nameof(LibraryOptimizeFailedTitle));
 
     public static string ClipDragImportTitle => Text(nameof(ClipDragImportTitle));
 
     public static string ClipDragImportBadgeLabel => Text(nameof(ClipDragImportBadgeLabel));
 
-    public static string ClipDragImportDropHint => Text(nameof(ClipDragImportDropHint));
-    public static string ClipCaptureFailedUnsupportedPayload => Text(nameof(ClipCaptureFailedUnsupportedPayload));
     public static string ClipCaptureFailedEmptyPayload => Text(nameof(ClipCaptureFailedEmptyPayload));
 
     public static void SetCulture(CultureInfo culture)
@@ -716,6 +738,8 @@ public static class AppText
     public static string FormatLogCount(int count) => Format("Format.LogCount", count);
 
     public static string FormatStorageUsage(long bytes) => Format("Format.StorageUsage", FormatByteCount(bytes));
+    public static string FormatStorageLoadFault(string fileName, string quarantineName) => Format("Format.StorageLoadFault", fileName, quarantineName);
+    public static string FormatStorageLoadFaultNotMoved(string fileName) => Format("Format.StorageLoadFaultNotMoved", fileName);
 
     public static string FormatEntryUsage(int count) => Format("Format.EntryUsage", count);
 

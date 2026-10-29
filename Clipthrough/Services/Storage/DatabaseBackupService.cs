@@ -19,8 +19,10 @@ namespace Clipthrough.Services;
 ///
 /// Snapshots are written next to the live database in a sibling
 /// <c>backups/</c> folder as <c>clipthrough-YYYYMMDD.db</c>. The file format
-/// is just a copy of the encrypted SQLite file (after WAL checkpoint) so it
-/// can be restored by simply replacing the live database.
+/// is a consistent copy of the (encrypted) database read through SQLite by
+/// <see cref="SqliteDatabaseCopier"/>, so commits still in the WAL are included
+/// while the app keeps running, and it can be restored by replacing the live
+/// database.
 /// </summary>
 public sealed class DatabaseBackupService : IDatabaseBackupService
 {
@@ -30,6 +32,7 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
     private readonly IClipboardMonitorService? _clipboardMonitor;
     private readonly IBackgroundOcrQueue? _ocrQueue;
     private readonly IEmbeddingWorker? _embeddingWorker;
+    private readonly ISettingsService? _settingsService;
     private readonly int _retention;
 
     /// <summary>
@@ -42,12 +45,14 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         IClipboardMonitorService? clipboardMonitor,
         IBackgroundOcrQueue? ocrQueue,
         IEmbeddingWorker? embeddingWorker,
-        int retention = DefaultRetention)
+        int retention = DefaultRetention,
+        ISettingsService? settingsService = null)
     {
         _storageOptionsService = storageOptionsService;
         _clipboardMonitor = clipboardMonitor;
         _ocrQueue = ocrQueue;
         _embeddingWorker = embeddingWorker;
+        _settingsService = settingsService;
         _retention = retention < 1 ? 1 : retention;
     }
 
@@ -81,7 +86,18 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
             // even while other connections are reading or writing.
             var tempPath = todayPath + ".tmp";
             await Task.Run(
-                () => SqliteDatabaseCopier.CopyDatabase(dbPath, _storageOptionsService.Current.DatabasePassword, tempPath),
+                () =>
+                {
+                    var password = _storageOptionsService.Current.DatabasePassword;
+                    SqliteDatabaseCopier.CopyDatabase(dbPath, password, tempPath);
+                    // Owner decision on OD-4a: the purge serves the lifetime
+                    // promise. With the lifetime off sensitive clips are kept
+                    // like any other, so a restored backup brings them back.
+                    if (_settingsService?.Current.EnableSensitiveClipLifetime == true)
+                    {
+                        PurgeSensitiveClips(tempPath, password);
+                    }
+                },
                 cancellationToken).ConfigureAwait(false);
             File.Move(tempPath, todayPath, overwrite: true);
             Trace.TraceInformation($"Database backup written: {todayPath}");
@@ -94,19 +110,164 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         }
     }
 
-    private static void ApplyBusyTimeoutOnOpen(object? sender, StateChangeEventArgs e)
+    /// <summary>
+    /// Removes sensitive clips - with their full-text entries, vectors and
+    /// rule matches - from a backup copy before it is kept (F-19, OD-4a).
+    /// Called only while the sensitive-clip lifetime is on.
+    ///
+    /// A backup is retained for a week, so a sensitive clip copied into one
+    /// outlived its lifetime there no matter when the live library expired it.
+    /// With the lifetime on, restoring a backup therefore brings back no
+    /// sensitive clips; that is the owner's choice recorded as OD-4a.
+    ///
+    /// Deleting the rows is not enough on its own: their bytes stay in free
+    /// pages and the full-text index keeps the original segments until a merge.
+    /// So the index is optimized and the file vacuumed whenever anything was
+    /// removed. A copy whose schema has no <c>is_sensitive</c> column is left
+    /// alone.
+    /// </summary>
+    internal static int PurgeSensitiveClips(string path, string? password)
     {
-        if (e.CurrentState == ConnectionState.Open && sender is SqliteConnection connection)
+        // Through the factory (U-G1/U-C9): the cipher recipe and busy_timeout come with it.
+        // The schema's ON DELETE CASCADE removes the vectors and rule matches; SQLite
+        // only honours it with foreign keys on.
+        using var connection = Clipthrough.Database.SqliteConnectionFactory.Create(path, password, SqliteOpenMode.ReadWrite, pooling: false, foreignKeys: true);
+        connection.Open();
+
+        if (!HasColumn(connection, "clips", "is_sensitive"))
         {
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "PRAGMA busy_timeout = 5000;";
-            cmd.ExecuteNonQuery();
+            return 0;
         }
+
+        var removed = Execute(connection, "DELETE FROM clips WHERE is_sensitive = 1;");
+
+        if (removed > 0)
+        {
+            if (HasTable(connection, "clips_fts"))
+            {
+                Execute(connection, "INSERT INTO clips_fts(clips_fts) VALUES('optimize');");
+            }
+
+            Execute(connection, "VACUUM;");
+            Trace.TraceInformation($"Removed {removed} sensitive clip(s) from the backup copy.");
+        }
+
+        return removed;
     }
+
+    private static int Execute(SqliteConnection connection, string sql)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return command.ExecuteNonQuery();
+    }
+
+    private static bool HasTable(SqliteConnection connection, string table)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM sqlite_master WHERE name = $name AND type = 'table';";
+        command.Parameters.AddWithValue("$name", table);
+        return command.ExecuteScalar() is not null;
+    }
+
+    private static bool HasColumn(SqliteConnection connection, string table, string column)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM pragma_table_info($table) WHERE name = $column;";
+        command.Parameters.AddWithValue("$table", table);
+        command.Parameters.AddWithValue("$column", column);
+        return command.ExecuteScalar() is not null;
+    }
+
 
     private const string BackupNamePrefix = "clipthrough-";
     private const string BackupNameSuffix = ".db";
     private const string BackupNamePattern = BackupNamePrefix + "*" + BackupNameSuffix;
+
+    /// <summary>
+    /// Re-keys every backup beside <paramref name="dbPath"/> after the live
+    /// database moved from <paramref name="previousKey"/> to
+    /// <paramref name="newKey"/>, so each restore point Settings lists still
+    /// restores. Restore requires a backup to open with the live key; before
+    /// this, every backup taken before a rekey - or before encryption was
+    /// turned on - was listed and could not be restored (F-15). Turning
+    /// encryption on also no longer leaves the history in plaintext beside it.
+    /// </summary>
+    /// <remarks>
+    /// Each backup is rewritten to a temp file, verified, then renamed over the
+    /// original, so a failure leaves that backup as it was. Best effort per
+    /// file: the live rekey has already succeeded and must not be undone by a
+    /// backup that cannot be read. A backup that opens with neither key - an
+    /// older key from before an earlier rekey - is left alone and traced.
+    /// Synchronous and slow (a key derivation per open, a full copy per file):
+    /// call it off the UI thread.
+    /// </remarks>
+    internal static void RekeyBackups(string dbPath, string previousKey, string newKey)
+    {
+        var backupDir = Path.Combine(Path.GetDirectoryName(dbPath)!, "backups");
+        if (!Directory.Exists(backupDir))
+        {
+            return;
+        }
+
+        string[] files;
+        try
+        {
+            files = Directory.GetFiles(backupDir, BackupNamePattern);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceWarning($"Could not list backups to re-key: {ex.Message}");
+            return;
+        }
+
+        foreach (var backup in files)
+        {
+            var tempPath = backup + ".rekeying-" + Guid.NewGuid().ToString("N");
+            try
+            {
+                if (StorageOptionsService.CanOpenWithPassword(backup, newKey))
+                {
+                    continue;
+                }
+
+                // A backup the live database could restore before the rekey
+                // opens with the previous key, or - per ValidateBackupReadable -
+                // with none at all.
+                string? sourceKey = StorageOptionsService.CanOpenWithPassword(backup, previousKey) ? previousKey
+                    : previousKey.Length > 0 && StorageOptionsService.CanOpenWithPassword(backup, string.Empty) ? string.Empty
+                    : null;
+                if (sourceKey is null)
+                {
+                    Trace.TraceWarning($"Backup '{Path.GetFileName(backup)}' opens with neither the previous nor the new key; left as it is.");
+                    continue;
+                }
+
+                StorageOptionsService.WriteRekeyedCopy(backup, sourceKey, newKey, tempPath);
+                if (!StorageOptionsService.CanOpenWithPassword(tempPath, newKey))
+                {
+                    throw new InvalidOperationException("the re-keyed copy does not open with the new key");
+                }
+
+                // CanOpenWithPassword pools its connection; a pooled handle on
+                // the backup would make the rename below fail.
+                SqliteConnection.ClearAllPools();
+                File.Move(tempPath, backup, overwrite: true);
+                Trace.TraceInformation($"Backup '{Path.GetFileName(backup)}' re-keyed to match the database.");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException or InvalidOperationException)
+            {
+                Trace.TraceWarning($"Could not re-key backup '{Path.GetFileName(backup)}': {ex.Message}");
+            }
+            finally
+            {
+                if (File.Exists(tempPath))
+                {
+                    try { File.Delete(tempPath); } catch { /* best effort */ }
+                }
+            }
+        }
+    }
 
     /// <summary>
     /// The day a backup covers, taken from its name.

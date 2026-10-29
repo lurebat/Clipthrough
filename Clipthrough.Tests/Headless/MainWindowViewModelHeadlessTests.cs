@@ -67,7 +67,6 @@ public sealed partial class MainWindowViewModelHeadlessTests
         using var viewModel = new MainWindowViewModel(
             clipStore,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -243,6 +242,106 @@ public sealed partial class MainWindowViewModelHeadlessTests
         Assert.Equal($"C:\\TEMP\\ALPHA.TXT{Environment.NewLine}D:\\DATA\\BETA.TXT", systemInteraction.LastCopiedText);
     }
 
+    /// <summary>
+    /// The right-click Transform menu runs on the clicked row rather than the
+    /// selection, through its own command. It decided "is this HTML?" by
+    /// comparing against BoxTableToHtml alone, so Markdown → HTML from a row
+    /// stored the CF_HTML document as plain text and put it on the clipboard as
+    /// text: pasting gave the raw header and markup (F-04).
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RowTransform_MarkdownToHtml_StoresAndCopiesHtml()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var clip = await CaptureTextClipAsync(scope.ClipStoreService, "# Title\n\nSome **bold** text.");
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        var row = viewModel.Clips.Single(c => c.Clip.Id == clip.Id);
+        await row.ApplyTextTransformationCommand.Execute(TextTransformation.MarkdownToHtml).ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(ClipContentFormat.Html, systemInteraction.LastCopiedRichContentFormat);
+        Assert.Contains("<h1", systemInteraction.LastCopiedRichContent, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(systemInteraction.LastCopiedText);
+
+        var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        var stored = Assert.Single(all.Items, c => c.SourceClipId == clip.Id);
+        Assert.Equal(ClipContentFormat.Html, stored.ContentFormat);
+        Assert.Equal(ContentType.RichText, stored.ContentType);
+        Assert.Equal("builtin:MarkdownToHtml", stored.TransformKind);
+    }
+
+    /// <summary>
+    /// Input too deeply nested to convert safely (F-48) is left alone, and the
+    /// status says why rather than a bare "no change".
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RowTransform_MarkdownToHtmlOnTooDeepInput_SaysWhyAndCreatesNothing()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, new TestSessionLogService());
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var clip = await CaptureTextClipAsync(scope.ClipStoreService, new string('[', 8192));
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        var row = viewModel.Clips.Single(c => c.Clip.Id == clip.Id);
+        await row.ApplyTextTransformationCommand.Execute(TextTransformation.MarkdownToHtml).ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(AppText.TransformInputTooDeeplyNested, viewModel.StatusText);
+        Assert.Null(systemInteraction.LastCopiedRichContent);
+        var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        Assert.DoesNotContain(all.Items, c => c.SourceClipId == clip.Id);
+    }
+
+    /// <summary>
+    /// The row path must keep transforming the clicked row - not the selection
+    /// and not the checked clips - now that it shares the menu path's pipeline.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RowTransform_AppliesToTheClickedRowOnly()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var clicked = await CaptureTextClipAsync(scope.ClipStoreService, "clicked row");
+        clipboardMonitor.Emit(clicked);
+        var selected = await CaptureTextClipAsync(scope.ClipStoreService, "selected row");
+        clipboardMonitor.Emit(selected);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(selected.Id, viewModel.SelectedClip?.Id);
+        viewModel.Clips.Single(c => c.Clip.Id == selected.Id).IsChecked = true;
+
+        var row = viewModel.Clips.Single(c => c.Clip.Id == clicked.Id);
+        await row.ApplyTextTransformationCommand.Execute(TextTransformation.UpperCase).ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("CLICKED ROW", systemInteraction.LastCopiedText);
+        var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        Assert.Single(all.Items, c => c.SourceClipId is not null);
+    }
+
     [AvaloniaFact]
     public async Task SelectAllAndFavoriteSelected_UpdateAllCheckedClips()
     {
@@ -284,7 +383,6 @@ public sealed partial class MainWindowViewModelHeadlessTests
         using var viewModel = new MainWindowViewModel(
             gatedStore,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -633,6 +731,31 @@ public sealed partial class MainWindowViewModelHeadlessTests
 
         Assert.True(viewModel.IsWelcomeOpen);
         Assert.Equal(AppText.WelcomeStatusText, viewModel.StatusText);
+    }
+
+    /// <summary>
+    /// A torn storage.json leaves the app on the default library. That is the
+    /// only recovery there is, but it must not be a silent one (F-22).
+    /// </summary>
+    [AvaloniaFact]
+    public async Task InitializeAsync_WhenStorageConfigWasUnreadable_TellsTheUser()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        scope.StorageOptionsService.LoadFault = "storage.json could not be read and was moved to storage.json.corrupt-x.";
+
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+
+        await viewModel.InitializeAsync();
+
+        var notification = scope.NotificationService.LastNotification;
+        Assert.NotNull(notification);
+        Assert.Equal(AppText.StorageLoadFailedTitle, notification.Title);
+        Assert.Equal(scope.StorageOptionsService.LoadFault, notification.Message);
+        Assert.Equal(AppNotificationLevel.Error, notification.Level);
+        Assert.True(viewModel.IsWelcomeOpen);
     }
 
     [AvaloniaFact]
@@ -1721,12 +1844,12 @@ public sealed partial class MainWindowViewModelHeadlessTests
         Clipthrough.Services.IOcrService? ocrService = null,
         IClipStoreService? clipStore = null,
         Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null,
-        Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null)
+        Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null,
+        Clipthrough.Services.IDatabaseBackupService? databaseBackupService = null)
     {
         return new MainWindowViewModel(
             clipStore ?? scope.ClipStoreService,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -1743,6 +1866,7 @@ public sealed partial class MainWindowViewModelHeadlessTests
             scope.DatabaseInitializer,
             semanticSearchService: semanticSearchService,
             embeddingWorker: embeddingWorker,
+            databaseBackupService: databaseBackupService,
             dragDropService: dragDropService);
     }
 

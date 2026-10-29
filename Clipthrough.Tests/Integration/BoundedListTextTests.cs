@@ -56,6 +56,25 @@ public sealed class BoundedListTextTests
         Assert.Equal(LongText, full.Content);
     }
 
+    /// <summary>
+    /// The Transform menus, toolbar and row context menu ask
+    /// <see cref="Clipthrough.Services.TextTransformationService.CanTransform"/> about the list
+    /// row, not the hydrated clip. Reading <see cref="ClipEntry.Content"/> there
+    /// threw for every clip longer than the bound (Phase B's gate meeting Phase
+    /// D's bounded rows), so a long clip could not be transformed at all.
+    /// </summary>
+    [Fact]
+    public async Task ALongClipsListRow_CanStillBeTransformed()
+    {
+        var (scope, _) = await SeedAsync(LongText);
+        using var __ = scope;
+
+        var row = Assert.Single((await scope.ClipStoreService.SearchAsync(new ClipSearchFilters())).Items);
+        Assert.True(row.IsContentTruncated, "Setup: the row must be a truncated one.");
+
+        Assert.True(Clipthrough.Services.TextTransformationService.CanTransform(row));
+    }
+
     [Fact]
     public async Task AClipThatFits_IsNotTruncated()
     {
