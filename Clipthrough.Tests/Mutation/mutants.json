@@ -3270,5 +3270,13 @@
     "find": "        Closed += (_, _) => m_placementStore?.Flush();",
     "replace": "        Closed += (_, _) => (m_placementStore is null ? m_placementStore : null)?.Flush();",
     "filter": "FullyQualifiedName~WindowPlacementHeadlessTests.ClosingTheWindow_SavesAndThenWaitsForTheWrite"
+  },
+  {
+    "id": "guard-busy-timeout-flags-prose",
+    "file": "Clipthrough.Tests/Unit/ConnectionConstructionGuardTests.cs",
+    "why": "The busy_timeout rule matched prose such as \"busy_timeout (5 s)\" in a comment, so a code comment failed the guard (found when the upgrade start merged with the strengthened guard, rubber-duck F-10-2 follow-up).",
+    "find": "new(@\"\\bbusy_timeout\\s*(?:=|\\(\\s*[\\w{}$@.]+\\s*\\))\", RegexOptions",
+    "replace": "new(@\"\\bbusy_timeout\\s*[=(]\", RegexOptions",
+    "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
   }
 ]
