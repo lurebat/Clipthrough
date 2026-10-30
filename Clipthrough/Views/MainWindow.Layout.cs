@@ -13,6 +13,8 @@ namespace Clipthrough.Views;
 public partial class MainWindow
 {
     private (WorkspaceWidth Width, bool Short)? m_appliedBreakpoint;
+    private (WorkspaceWidth Width, bool Short)? m_pendingBreakpoint;
+    private bool m_applyingBreakpoint;
     private IWindowPlacementStore? m_placementStore;
     private WindowPlacement? m_normalPlacement;
 
@@ -27,7 +29,7 @@ public partial class MainWindow
         // size, before InitializeComponent has built anything to rearrange.
         if (change.Property == ClientSizeProperty && Content is not null)
         {
-            ApplyWorkspaceBreakpoint(WorkspaceBreakpoints.Classify(ClientSize));
+            RequestWorkspaceBreakpoint(WorkspaceBreakpoints.Classify(ClientSize));
             RememberNormalPlacement();
         }
         else if (change.Property == IsVisibleProperty && !IsVisible)
@@ -103,6 +105,41 @@ public partial class MainWindow
     /// shows, hides or resizes is a style in MainWindow.axaml keyed on the
     /// bp-* classes set below.
     /// </summary>
+    /// <remarks>
+    /// Every definition change goes through <see cref="GridDefinitions.Set"/>:
+    /// assigning a collection directly leaves Avalonia's Grid indexing it with
+    /// cells cached against the old one, which threw from inside the window
+    /// procedure and killed the app on a display-mode change.
+    /// </remarks>
+    private void RequestWorkspaceBreakpoint((WorkspaceWidth Width, bool Short) breakpoint)
+    {
+        // A display-mode change can deliver one WM_SIZE inside another. Should a
+        // size change ever reach here while a layout is being applied, finish
+        // that one and then apply the latest, rather than rearranging the grids
+        // halfway through.
+        if (m_applyingBreakpoint)
+        {
+            m_pendingBreakpoint = breakpoint;
+            return;
+        }
+
+        m_applyingBreakpoint = true;
+        try
+        {
+            ApplyWorkspaceBreakpoint(breakpoint);
+            while (m_pendingBreakpoint is { } next)
+            {
+                m_pendingBreakpoint = null;
+                ApplyWorkspaceBreakpoint(next);
+            }
+        }
+        finally
+        {
+            m_applyingBreakpoint = false;
+            m_pendingBreakpoint = null;
+        }
+    }
+
     private void ApplyWorkspaceBreakpoint((WorkspaceWidth Width, bool Short) breakpoint)
     {
         if (m_appliedBreakpoint == breakpoint)
@@ -122,18 +159,17 @@ public partial class MainWindow
         {
             if (width == WorkspaceWidth.Narrow)
             {
-                heroRow.ColumnDefinitions = new ColumnDefinitions("*");
-                heroRow.RowDefinitions = new RowDefinitions("Auto,Auto");
+                GridDefinitions.Set(heroRow, "*", "Auto,Auto");
                 Place(search, 0, 0);
                 Place(segments, 1, 0);
             }
             else
             {
-                heroRow.ColumnDefinitions = new ColumnDefinitions("Auto,1000*,*,1000*");
-                heroRow.RowDefinitions = new RowDefinitions("Auto");
+                GridDefinitions.Set(heroRow, "Auto,1000*,*,1000*", "Auto");
                 Place(search, 0, 1);
                 Place(segments, 0, 3);
             }
+
             // Past these the search box and the type toggles only get emptier.
             // The thin spacer between them takes whatever the caps leave, so on a
             // 2560+ DIP screen the toggles stay at the right edge. (B18)
@@ -152,8 +188,7 @@ public partial class MainWindow
         {
             if (width == WorkspaceWidth.Wide)
             {
-                filterRow.ColumnDefinitions = new ColumnDefinitions("Auto,Auto,Auto,*,Auto");
-                filterRow.RowDefinitions = new RowDefinitions("Auto");
+                GridDefinitions.Set(filterRow, "Auto,Auto,Auto,*,Auto", "Auto");
                 Place(categories, 0, 0);
                 Place(sort, 0, 2);
                 Place(modifiers, 0, 4);
@@ -163,8 +198,7 @@ public partial class MainWindow
             {
                 // Short collapses the modifiers into the Search options button,
                 // which then shares the first row with the sort order.
-                filterRow.ColumnDefinitions = new ColumnDefinitions(isShort ? "*,Auto,Auto" : "*,Auto");
-                filterRow.RowDefinitions = new RowDefinitions(isShort ? "Auto" : "Auto,Auto");
+                GridDefinitions.Set(filterRow, isShort ? "*,Auto,Auto" : "*,Auto", isShort ? "Auto" : "Auto,Auto");
                 Place(categories, 0, 0);
                 Place(sort, 0, 1);
                 Place(modifiers, 1, 0, columnSpan: 2);
@@ -179,8 +213,7 @@ public partial class MainWindow
         {
             if (width == WorkspaceWidth.Narrow)
             {
-                split.ColumnDefinitions = new ColumnDefinitions("*");
-                split.RowDefinitions = new RowDefinitions("*,6,*");
+                GridDefinitions.Set(split, "*", "*,6,*");
                 split.ColumnSpacing = 0;
                 split.RowSpacing = 4;
                 splitter.ResizeDirection = GridResizeDirection.Rows;
@@ -190,14 +223,11 @@ public partial class MainWindow
             }
             else
             {
-                split.ColumnDefinitions = width == WorkspaceWidth.Wide
-                    ? new ColumnDefinitions("*,6,2*")
-                    : new ColumnDefinitions("2*,6,3*");
+                GridDefinitions.Set(split, width == WorkspaceWidth.Wide ? "*,6,2*" : "2*,6,3*", "*");
 
                 // On a 2560 DIP or wider screen the preview's lines grow past
                 // anything comfortable to read; the list takes the rest. (B18)
                 split.ColumnDefinitions[2].MaxWidth = WorkspaceBreakpoints.PreviewMaxWidth;
-                split.RowDefinitions = new RowDefinitions("*");
                 split.ColumnSpacing = 4;
                 split.RowSpacing = 0;
                 splitter.ResizeDirection = GridResizeDirection.Columns;
@@ -214,16 +244,14 @@ public partial class MainWindow
         {
             if (width == WorkspaceWidth.Narrow)
             {
-                footer.ColumnDefinitions = new ColumnDefinitions("*,Auto");
-                footer.RowDefinitions = new RowDefinitions("Auto,Auto");
+                GridDefinitions.Set(footer, "*,Auto", "Auto,Auto");
                 Place(status, 0, 0);
                 Place(actions, 0, 1);
                 Place(stats, 1, 0, columnSpan: 2);
             }
             else
             {
-                footer.ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto");
-                footer.RowDefinitions = new RowDefinitions("Auto");
+                GridDefinitions.Set(footer, "Auto,*,Auto", "Auto");
                 Place(status, 0, 0);
                 Place(stats, 0, 1);
                 Place(actions, 0, 2);
@@ -236,8 +264,7 @@ public partial class MainWindow
         {
             if (width == WorkspaceWidth.Wide)
             {
-                welcome.ColumnDefinitions = new ColumnDefinitions("340,*");
-                welcome.RowDefinitions = new RowDefinitions("Auto");
+                GridDefinitions.Set(welcome, "340,*", "Auto");
                 welcome.MinWidth = WorkspaceBreakpoints.WelcomeTwoColumnMinWidth;
                 Place(info, 0, 0);
                 Place(form, 0, 1);
@@ -246,8 +273,7 @@ public partial class MainWindow
             {
                 // The form first: it is what the user has to fill in, and the
                 // explanation is still there below it.
-                welcome.ColumnDefinitions = new ColumnDefinitions("*");
-                welcome.RowDefinitions = new RowDefinitions("Auto,Auto");
+                GridDefinitions.Set(welcome, "*", "Auto,Auto");
                 welcome.MinWidth = 0;
                 Place(form, 0, 0);
                 Place(info, 1, 0);
