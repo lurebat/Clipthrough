@@ -13,6 +13,7 @@ namespace Clipthrough.Services;
 public sealed class WindowPlacementStore : IWindowPlacementStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly TimeSpan FlushTimeout = TimeSpan.FromSeconds(2);
 
     private readonly string _path;
     private readonly object _gate = new();
@@ -64,6 +65,20 @@ public sealed class WindowPlacementStore : IWindowPlacementStore
 
     /// <summary>Completes when the last <see cref="Save"/> has reached the disk.</summary>
     internal Task FlushAsync() => _pendingWrite;
+
+    // Bounded: this runs on the UI thread as the app exits, and a stalled disk
+    // must not hang the exit. The write itself is a few hundred bytes.
+    public void Flush()
+    {
+        try
+        {
+            _pendingWrite.Wait(FlushTimeout);
+        }
+        catch (AggregateException ex)
+        {
+            Trace.TraceWarning($"Could not save the window placement to {_path}: {ex.InnerException?.Message}");
+        }
+    }
 
     public void Save(SavedWindowPlacement placement)
     {

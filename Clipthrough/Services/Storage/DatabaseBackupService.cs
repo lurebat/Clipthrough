@@ -56,6 +56,12 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         _retention = retention < 1 ? 1 : retention;
     }
 
+    /// <summary>
+    /// Runs between taking the daily snapshot and publishing it, so a test can
+    /// put a rekey into the gap deterministically.
+    /// </summary>
+    internal Func<Task>? SnapshotTakenForTests { get; set; }
+
     public async Task EnsureDailyBackupAsync(CancellationToken cancellationToken = default)
     {
         var dbPath = _storageOptionsService.Current.DatabasePath;
@@ -86,31 +92,60 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
             // even while other connections are reading or writing.
             var tempPath = todayPath + TempSuffix;
             DeleteStrandedTempCopies(backupDir, tempPath);
+            var key = _storageOptionsService.Current.DatabasePassword;
+            var published = false;
             try
             {
                 await Task.Run(
                     () =>
                     {
-                        var password = _storageOptionsService.Current.DatabasePassword;
-                        SqliteDatabaseCopier.CopyDatabase(dbPath, password, tempPath);
+                        SqliteDatabaseCopier.CopyDatabase(dbPath, key, tempPath);
                         // Owner decision on OD-4a: the purge serves the lifetime
                         // promise. With the lifetime off sensitive clips are kept
                         // like any other, so a restored backup brings them back.
                         if (_settingsService?.Current.EnableSensitiveClipLifetime == true)
                         {
-                            PurgeSensitiveClips(tempPath, password);
+                            PurgeSensitiveClips(tempPath, key);
                         }
                     },
                     cancellationToken).ConfigureAwait(false);
-                File.Move(tempPath, todayPath, overwrite: true);
+                if (SnapshotTakenForTests is { } snapshotTaken)
+                {
+                    await snapshotTaken().ConfigureAwait(false);
+                }
+
+                // The copy is taken outside the storage lock, so a rekey can finish
+                // between it and here. That rekey has already re-keyed every
+                // published backup, and this copy - under the old key, or plaintext
+                // when encryption was just turned on - would be the one restore
+                // point that does not restore. Publishing under the lock means a
+                // rekey either sees this backup or has finished before the check.
+                await _storageOptionsService.RunExclusiveAsync(
+                    current =>
+                    {
+                        if (!string.Equals(current.DatabasePassword, key, StringComparison.Ordinal))
+                        {
+                            Trace.TraceWarning("Database backup discarded: the database was re-keyed while it was being copied.");
+                            return;
+                        }
+
+                        File.Move(tempPath, todayPath, overwrite: true);
+                        published = true;
+                    },
+                    cancellationToken).ConfigureAwait(false);
             }
             finally
             {
                 // On any failure the temp copy may hold clips the purge never
-                // removed, and retention only prunes finished backups.
+                // removed, and retention only prunes finished backups. A copy
+                // discarded for a rekey goes the same way.
                 DeleteTempCopy(tempPath);
             }
 
+            if (!published)
+            {
+                return;
+            }
             Trace.TraceInformation($"Database backup written: {todayPath}");
 
             PruneOldBackups(backupDir);
