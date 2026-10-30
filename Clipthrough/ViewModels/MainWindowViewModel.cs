@@ -3191,13 +3191,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task OpenInEditorAsync()
     {
-        if (SelectedClip is null)
+        // Captured once: the selection can move while the clip is hydrated
+        // below, and the editor must get the clip the command was run on.
+        var target = SelectedClip;
+        if (target is null)
         {
             return;
         }
 
         _ = CommitSearchQueryAsync();
-        var editorPath = ResolveExternalEditorPath(SelectedClip);
+        var editorPath = ResolveExternalEditorPath(target);
         if (!string.IsNullOrWhiteSpace(editorPath) && !System.IO.File.Exists(ExtractExecutablePath(editorPath)))
         {
             _notificationService.PublishError(
@@ -3206,8 +3209,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        await SelectedClip.EnsureContentHydratedAsync();
-        var exportResult = await _clipExportService.ExportForToolAsync(SelectedClip.Clip);
+        await target.EnsureContentHydratedAsync();
+        var exportResult = await _clipExportService.ExportForToolAsync(target.Clip);
         await _systemInteractionService.OpenInEditorAsync(exportResult.PrimaryPath, editorPath);
         StatusText = $"{AppText.OpenedInEditorStatus}: {Path.GetFileName(exportResult.PrimaryPath)}";
     }

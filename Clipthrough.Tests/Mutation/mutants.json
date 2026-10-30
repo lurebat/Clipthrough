@@ -3259,8 +3259,8 @@
     "id": "open-in-editor-writes-an-export",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "F-18. Open in editor is a working copy, not an export the user asked to keep.",
-    "find": "        var exportResult = await _clipExportService.ExportForToolAsync(SelectedClip.Clip);\n",
-    "replace": "        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);\n",
+    "find": "        var exportResult = await _clipExportService.ExportForToolAsync(target.Clip);\n",
+    "replace": "        var exportResult = await _clipExportService.ExportAsync(target.Clip);\n",
     "filter": "FullyQualifiedName~OpenInEditor_UsesASessionToolCopy"
   },
   {
@@ -3862,5 +3862,21 @@
     "find": "        if (HasTable(connection, \"clips_fts\"))\n        {\n            Execute(connection, \"INSERT INTO clips_fts(clips_fts) VALUES('optimize');\");\n        }\n\n        Execute(connection, \"VACUUM;\");\n",
     "replace": "        if (removed > 0)\n        {\n        if (HasTable(connection, \"clips_fts\"))\n        {\n            Execute(connection, \"INSERT INTO clips_fts(clips_fts) VALUES('optimize');\");\n        }\n\n        Execute(connection, \"VACUUM;\");\n        }\n",
     "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WithTheLifetimeOn_ASensitiveClipLiveExpiryAlreadyDeleted"
+  },
+  {
+    "id": "f07-1-export-rereads-selection-after-hydration",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-07-1: export must hydrate and write the clip Export was run on, not whatever SelectedClip became while hydration was awaited.",
+    "find": "        await target.EnsureContentHydratedAsync();\n        var exportResult = await _clipExportService.ExportAsync(target.Clip);",
+    "replace": "        await (SelectedClip ?? target).EnsureContentHydratedAsync();\n        var exportResult = await _clipExportService.ExportAsync((SelectedClip ?? target).Clip);",
+    "filter": "FullyQualifiedName~ExportingALongListRow_ExportsThatRow_EvenIfTheSelectionMovesDuringHydration"
+  },
+  {
+    "id": "f07-1-open-in-editor-rereads-selection",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-07-1: Open in editor must copy the clip the command was run on, not whatever SelectedClip became while hydration was awaited.",
+    "find": "var exportResult = await _clipExportService.ExportForToolAsync(target.Clip);",
+    "replace": "var exportResult = await _clipExportService.ExportForToolAsync((SelectedClip ?? target).Clip);",
+    "filter": "FullyQualifiedName~OpeningALongListRowInTheEditor_OpensThatRow_EvenIfTheSelectionMovesDuringHydration"
   }
 ]
