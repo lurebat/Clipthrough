@@ -7492,6 +7492,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// and emitted on the captured-clips stream so the UI sees it instantly.
     /// Returns the number of clips imported.
     /// </summary>
+    /// <remarks>
+    /// A drop is a deliberate import, so the clipboard-capture rules do not
+    /// apply: it is kept even when its source app is excluded, publishes
+    /// "Clipboard Viewer Ignore", or marks it CanIncludeInClipboardHistory = 0.
+    /// See the S39 refinement under "Settled decisions" in AGENTS.md.
+    /// </remarks>
     public async Task<int> ImportDroppedDataAsync(Avalonia.Input.IDataTransfer drop, ClipboardSourceApplicationInfo? sourceInfo)
     {
         if (drop is null)

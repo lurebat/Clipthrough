@@ -3534,5 +3534,13 @@
     "find": "        if (changed)",
     "replace": "        if (changed && grid.Name == \"never\")",
     "filter": "FullyQualifiedName~WorkspaceBreakpointTransitionHeadlessTests"
+  },
+  {
+    "id": "f06-6-drop-honours-history-opt-out",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "S39 refinement (rubber-duck F-06-6): a drop is a deliberate import and bypasses the clipboard-history opt-out; making drops honour it must be a decision, not an accident.",
+    "find": "        IReadOnlyList<ClipCaptureRequest> requests;\n        try\n        {\n            requests = await _dragDropService.TryBuildCaptureRequestsAsync(drop, sourceInfo);",
+    "replace": "        if (drop is Avalonia.Input.IAsyncDataTransfer asyncDrop && await ClipboardMonitorService.ShouldIgnoreClipboardAsync(asyncDrop, _settingsService.Current.HonorClipboardHistoryOptOut))\n        {\n            return 0;\n        }\n\n        IReadOnlyList<ClipCaptureRequest> requests;\n        try\n        {\n            requests = await _dragDropService.TryBuildCaptureRequestsAsync(drop, sourceInfo);",
+    "filter": "FullyQualifiedName~ADropMarkedNotForClipboardHistory_IsStillImported"
   }
 ]
