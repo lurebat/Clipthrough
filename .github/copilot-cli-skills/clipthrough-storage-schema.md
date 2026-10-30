@@ -204,6 +204,13 @@ count, wrong tokenizer). The schema DDL then recreates it **empty**. So a repair
 has to repopulate the index itself — it returns `bool` for exactly that reason,
 and the caller rebuilds on `true` regardless of `schema_version`.
 
+A launch killed between the drop and the end of the rebuild leaves a table whose
+definition is already current, so the next launch's repair check no longer
+fires. The repair therefore records `app_metadata.fts_rebuild_pending` before it
+drops anything, the next launch rebuilds (and runs the integrity check) while
+that key exists, and `RebuildClipSearchIndexAsync` deletes it once the rebuild
+has committed.
+
 This matters because "FTS needs repair" and "schema version is behind" are
 independent. `HasPendingStructuralWorkAsync` already relies on that: its last
 check is a bare FTS-migration test reached only once the version is current, and

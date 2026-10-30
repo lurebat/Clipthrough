@@ -3950,5 +3950,37 @@
     "find": "        catch (NullReferenceException ex) when (decodeWidth is > 0)",
     "replace": "        catch (NullReferenceException ex) when (decodeWidth is < 0)",
     "filter": "FullyQualifiedName~ClipBitmapFactoryHeadlessTests"
+  },
+  {
+    "id": "fts-interrupted-repair-pending-not-read",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-11-2. A launch killed between the FTS repair's drop and the end of its rebuild leaves the recreated table empty with a current definition; if the pending marker is not consulted, the next launch skips the rebuild and every stored clip drops out of keyword search for good.",
+    "find": "        ftsSchemaRecreated |= await IsFtsRebuildPendingAsync(connection, cancellationToken);",
+    "replace": "        ftsSchemaRecreated |= FtsRebuildPendingKey.Length < 0 && await IsFtsRebuildPendingAsync(connection, cancellationToken);",
+    "filter": "FullyQualifiedName~FtsSchemaRepairTests.ARepairInterruptedBeforeTheRebuild"
+  },
+  {
+    "id": "fts-interrupted-repair-pending-not-recorded",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-11-2. The marker has to be written before the drop; without it nothing tells the next launch that the recreated table is still empty.",
+    "find": "            INSERT INTO app_metadata (key, value) VALUES ('{FtsRebuildPendingKey}', '1')",
+    "replace": "            INSERT INTO app_metadata (key, value) VALUES ('{FtsRebuildPendingKey}-mutant', '1')",
+    "filter": "FullyQualifiedName~FtsSchemaRepairTests.ARepairInterruptedBeforeTheRebuild"
+  },
+  {
+    "id": "fts-interrupted-repair-pending-never-cleared",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-11-2. A marker that survives the rebuild makes every later launch rebuild the whole index and pay a full-file quick_check.",
+    "find": "        await ExecuteNonQueryAsync(connection, $\"DELETE FROM app_metadata WHERE key = '{FtsRebuildPendingKey}';\", cancellationToken);",
+    "replace": "        await ExecuteNonQueryAsync(connection, $\"DELETE FROM app_metadata WHERE key = '{FtsRebuildPendingKey}' AND 0;\", cancellationToken);",
+    "filter": "FullyQualifiedName~FtsSchemaRepairTests.ARepairInterruptedBeforeTheRebuild"
+  },
+  {
+    "id": "fts-interrupted-repair-skips-integrity-check",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-11-2. The resumed rebuild rewrites pages, so the integrity gate has to see the same pending work the initializer is about to do.",
+    "find": "            || await IsFtsRebuildPendingAsync(connection, cancellationToken))",
+    "replace": "            || (FtsRebuildPendingKey.Length < 0 && await IsFtsRebuildPendingAsync(connection, cancellationToken)))",
+    "filter": "FullyQualifiedName~FtsSchemaRepairTests.ARepairInterruptedBeforeTheRebuild"
   }
 ]

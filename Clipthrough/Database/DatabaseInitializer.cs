@@ -404,6 +404,10 @@ public sealed class DatabaseInitializer
         }
         TraceStep(sw, "schema-ddl");
 
+        // A repair an earlier launch did not live to finish: its table now looks
+        // current, so only the marker says it is still empty (rubber-duck F-11-2).
+        ftsSchemaRecreated |= await IsFtsRebuildPendingAsync(connection, cancellationToken);
+
         // Schema-version gate. On an established DB this short-circuits all
         // the Ensure*/Backfill* helpers (each of which costs at least one
         // round trip and a PRAGMA table_info read) and goes straight to the
@@ -1400,7 +1404,26 @@ public sealed class DatabaseInitializer
     }
 
     private static async Task RebuildClipSearchIndexAsync(SqliteConnection connection, CancellationToken cancellationToken)
-        => await ExecuteNonQueryAsync(connection, "INSERT INTO clips_fts(clips_fts) VALUES ('rebuild');", cancellationToken);
+    {
+        await ExecuteNonQueryAsync(connection, "INSERT INTO clips_fts(clips_fts) VALUES ('rebuild');", cancellationToken);
+        await ExecuteNonQueryAsync(connection, $"DELETE FROM app_metadata WHERE key = '{FtsRebuildPendingKey}';", cancellationToken);
+    }
+
+    /// <summary>
+    /// Set before <see cref="MigrateFtsSchemaIfNeededAsync"/> drops the index and
+    /// cleared once the rebuild has committed, so a launch killed anywhere in
+    /// between leaves a record that the recreated table is still empty. Nothing
+    /// else can tell: by then its definition is current and the schema version
+    /// may be too.
+    /// </summary>
+    private const string FtsRebuildPendingKey = "fts_rebuild_pending";
+
+    private static async Task<bool> IsFtsRebuildPendingAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM app_metadata WHERE key = '{FtsRebuildPendingKey}';";
+        return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) > 0;
+    }
 
     /// <summary>
     /// Detects if the existing FTS table has an older (2- or 4-column) schema
@@ -1418,6 +1441,18 @@ public sealed class DatabaseInitializer
         {
             return false;
         }
+
+        // Before the drop, which is the start of the window. app_metadata is
+        // created here when an old library predates it; the schema DDL would
+        // create the same table moments later.
+        await ExecuteNonQueryAsync(connection, $"""
+            CREATE TABLE IF NOT EXISTS app_metadata (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            INSERT INTO app_metadata (key, value) VALUES ('{FtsRebuildPendingKey}', '1')
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+            """, cancellationToken);
 
         // Drop old triggers and FTS table so they're recreated with the new schema/tokenizer.
         await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_ai;", cancellationToken);
@@ -1496,7 +1531,8 @@ public sealed class DatabaseInitializer
             }
         }
 
-        if (await ReadSchemaVersionAsync(connection, cancellationToken) < CurrentSchemaVersion)
+        if (await ReadSchemaVersionAsync(connection, cancellationToken) < CurrentSchemaVersion
+            || await IsFtsRebuildPendingAsync(connection, cancellationToken))
         {
             return true;
         }
