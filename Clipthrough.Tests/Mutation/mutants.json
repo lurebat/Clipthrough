@@ -4731,8 +4731,8 @@
     "id": "size-cap-walk-frees-icons-while-move-owed",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "Rubber-duck F-13-5: while icons are out of the size total, an eviction that frees an icon frees nothing the total counted; a walk that subtracts the icon stops with the library still over its cap. Guards the merge with the F-11-1 walk (ReadIconReferencesAsync).",
-    "find": "                SELECT {StoredRowBytes}\n                FROM clips\n                WHERE NOT {UserKeptClipPredicate}",
-    "replace": "                SELECT {StoredRowBytes} + COALESCE((SELECT LENGTH(png) FROM app_icons WHERE hash = clips.source_app_icon_hash), 0)\n                FROM clips\n                WHERE NOT {UserKeptClipPredicate}",
+    "find": "                if (iconsCounted && !reader.IsDBNull(1))",
+    "replace": "                if ((iconsCounted || connection.ConnectionString.Length > 0) && !reader.IsDBNull(1))",
     "filter": "FullyQualifiedName~WhileTheMoveIsOwed_EvictingAnIconsLastClipFreesOnlyItsPayload"
   },
   {
