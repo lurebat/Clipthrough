@@ -278,6 +278,11 @@ the unit that implements it, so whether the code matches is checkable.
 - **S39 - clipboard-history opt-out (OD-10, U-C1).** Content published with
   `CanIncludeInClipboardHistory` = 0 is not captured while the setting is on,
   and the setting defaults to on.
+  Refinement: the rule governs clipboard capture. A drag-and-drop onto
+  Clipthrough is a deliberate import and bypasses the opt-out, the excluded-apps
+  list and `Clipboard Viewer Ignore` alike (`ImportDroppedDataAsync`; pinned by
+  `ADropMarkedNotForClipboardHistory_IsStillImported`). Owner decision pending
+  confirmation, 2026-10-30.
 - **S40 - search history (OD-9, U-G8).** A query is recorded only when the user
   commits to it - Enter, or acting on a result - never on a throttled refresh.
 - **S41 - quitting inside the undo window (OD-8, U-B4).** Pending deletes are

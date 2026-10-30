@@ -60,7 +60,8 @@ public static class AppText
         [nameof(SettingsExcludedAppsTitle)] = "Excluded applications",
         [nameof(SettingsExcludedAppsDescription)] = "Clipboard changes produced by these applications are never captured - nothing is read, stored, or indexed. One entry per line. An entry can be a process name (1Password), an executable file name (KeePass.exe), a full path, or a wildcard pattern such as *vault* or C:\\Program Files\\Acme\\*.",
         [nameof(SettingsExcludedAppsWatermark)] = "1Password\nKeePass.exe\n*bitwarden*",
-        [nameof(SettingsExcludedAppsCaveat)] = "Best effort: Clipthrough can only exclude an application it can identify. When Windows does not report an owner for a clipboard change - a hidden helper window, a process that has already exited, or a protected process - the clip is captured, because silently discarding every unattributable clip would lose far more history than it protects. Applications that need a hard guarantee should publish the standard 'Clipboard Viewer Ignore' format, which Clipthrough always honors regardless of this list.",
+        [nameof(SettingsExcludedAppsCaveat)] = "Best effort: Clipthrough can only exclude an application it can identify. When Windows does not report an owner for a clipboard change - a hidden helper window, a process that has already exited, or a protected process - the clip is captured, because silently discarding every unattributable clip would lose far more history than it protects. Applications that need a hard guarantee should publish the standard 'Clipboard Viewer Ignore' format, which Clipthrough always honors regardless of this list. Content marked 'CanIncludeInClipboardHistory = 0' - what Chrome, Edge and Bitwarden publish for passwords - is also skipped while the option below is on. These rules apply to clipboard capture only: content you drag and drop onto Clipthrough is a deliberate import and is kept regardless.",
+        [nameof(SettingsHonorClipboardHistoryOptOutLabel)] = "Skip content its source marks as not for clipboard history (browser and password-manager passwords)",
         [nameof(SettingsClipLimitLabel)] = "Max clip size (KB)",
         [nameof(SettingsDatabasePathLabel)] = "Database path",
         [nameof(SettingsDatabasePasswordLabel)] = "Encryption password",
@@ -125,6 +126,12 @@ public static class AppText
         [nameof(CompareNeedsDiffToolStatus)] = "Set an external diff tool path in Settings to compare clips.",
         [nameof(CompareOpenedStatus)] = "Opened diff tool for comparison.",
         [nameof(SettingsThemeModeLabel)] = "Theme",
+        [nameof(ExportSensitiveConfirmTitle)] = "Export a sensitive clip?",
+        [nameof(ExportSensitiveConfirmBody)] = "Export writes this clip as an unencrypted file in Documents\\Clipthrough Exports, which is often synced to OneDrive. The file stays after the clip expires or is deleted from Clipthrough.\n\nExport it anyway?",
+        [nameof(ExportSensitiveConfirmAccept)] = "Export",
+        [nameof(ExportSensitiveConfirmCancel)] = "Cancel",
+        [nameof(ExportSensitiveCancelledStatus)] = "Sensitive clip not exported",
+        [nameof(ClipAngelImportUnexpectedSchema)] = "This ClipAngel database was not imported: its structure is not what ClipAngel writes (Clips is not a plain table, or the file contains views or triggers).",
         [nameof(OpenedInEditorStatus)] = "Opened in editor",
         [nameof(SettingsHintText)] = "Enter shortcuts in forms like Ctrl+Shift+R, Ctrl+Shift+F, or F8. Disable any shortcut you do not want active. Startup registration applies on Windows.",
         [nameof(SettingsStorageHintText)] = "The path is stored outside the clip database so you can move or encrypt it. Leave the password empty to keep SQLite unencrypted.",
@@ -379,6 +386,7 @@ public static class AppText
     public static string SettingsExcludedAppsDescription => Text(nameof(SettingsExcludedAppsDescription));
     public static string SettingsExcludedAppsWatermark => Text(nameof(SettingsExcludedAppsWatermark));
     public static string SettingsExcludedAppsCaveat => Text(nameof(SettingsExcludedAppsCaveat));
+    public static string SettingsHonorClipboardHistoryOptOutLabel => Text(nameof(SettingsHonorClipboardHistoryOptOutLabel));
     public static string SettingsClipLimitLabel => Text(nameof(SettingsClipLimitLabel));
     public static string SettingsDatabasePathLabel => Text(nameof(SettingsDatabasePathLabel));
     public static string SettingsDatabasePasswordLabel => Text(nameof(SettingsDatabasePasswordLabel));
@@ -449,6 +457,12 @@ public static class AppText
     public static string CompareNeedsDiffToolStatus => Text(nameof(CompareNeedsDiffToolStatus));
     public static string CompareOpenedStatus => Text(nameof(CompareOpenedStatus));
     public static string SettingsThemeModeLabel => Text(nameof(SettingsThemeModeLabel));
+    public static string ExportSensitiveConfirmTitle => Text(nameof(ExportSensitiveConfirmTitle));
+    public static string ExportSensitiveConfirmBody => Text(nameof(ExportSensitiveConfirmBody));
+    public static string ExportSensitiveConfirmAccept => Text(nameof(ExportSensitiveConfirmAccept));
+    public static string ExportSensitiveConfirmCancel => Text(nameof(ExportSensitiveConfirmCancel));
+    public static string ExportSensitiveCancelledStatus => Text(nameof(ExportSensitiveCancelledStatus));
+    public static string ClipAngelImportUnexpectedSchema => Text(nameof(ClipAngelImportUnexpectedSchema));
     public static string OpenedInEditorStatus => Text(nameof(OpenedInEditorStatus));
     public static string SettingsHintText => Text(nameof(SettingsHintText));
     public static string SettingsStorageHintText => Text(nameof(SettingsStorageHintText));

@@ -299,7 +299,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         JumpToTopCommand = ReactiveCommand.Create(() => { if (Clips.Count > 0) SelectedClip = Clips[0]; });
         OpenHelpCommand = ReactiveCommand.Create(OpenHelp);
         OpenAboutCommand = ReactiveCommand.Create(OpenAbout);
-        Maintenance = new DatabaseMaintenanceViewModel(databaseBackupService ?? new DatabaseBackupService(storageOptionsService, null, null, null), _storageOptionsService, _systemInteractionService, _notificationService, ReportError);
+        Maintenance = new DatabaseMaintenanceViewModel(databaseBackupService ?? new DatabaseBackupService(storageOptionsService, null, null, null, settingsService: settingsService), _storageOptionsService, _systemInteractionService, _notificationService, ReportError);
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
         SaveSettingsCommand = ReactiveCommand.CreateFromTask(SaveSettingsAsync);
         BrowseDatabasePathCommand = ReactiveCommand.CreateFromTask<Window?>(BrowseDatabasePathAsync);
@@ -1229,6 +1229,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string SettingsExcludedAppsDescription => AppText.SettingsExcludedAppsDescription;
     public string SettingsExcludedAppsWatermark => AppText.SettingsExcludedAppsWatermark;
     public string SettingsExcludedAppsCaveat => AppText.SettingsExcludedAppsCaveat;
+
+    public string SettingsHonorClipboardHistoryOptOutLabel => AppText.SettingsHonorClipboardHistoryOptOutLabel;
 
     public string SettingsClipLimitLabel => AppText.SettingsClipLimitLabel;
 
@@ -3088,14 +3090,41 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// Asks the user to confirm something (title, body, confirm label, cancel
+    /// label). Set by the window; null when no view is attached, in which case
+    /// a choice that needs confirming is declined.
+    /// </summary>
+    public Func<string, string, string, string, Task<bool>>? ConfirmAsync { get; set; }
+
     private async Task ExportSelectedAsync()
     {
-        if (SelectedClip is null)
+        // Captured once: a capture can move the selection while the dialog
+        // below is open, and the confirmation covers this clip only.
+        var target = SelectedClip;
+        if (target is null)
         {
             return;
         }
 
-        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);
+        // Explicit Export writes a plaintext copy that outlives the clip -
+        // past its sensitive lifetime and outside database encryption, often
+        // into a OneDrive-synced folder. For a sensitive clip that is the
+        // user's call to make knowingly (OD-3a); without a way to ask, it is
+        // not made for them.
+        if (target.Clip.IsSensitive
+            && (ConfirmAsync is null
+                || !await ConfirmAsync(
+                    AppText.ExportSensitiveConfirmTitle,
+                    AppText.ExportSensitiveConfirmBody,
+                    AppText.ExportSensitiveConfirmAccept,
+                    AppText.ExportSensitiveConfirmCancel)))
+        {
+            StatusText = AppText.ExportSensitiveCancelledStatus;
+            return;
+        }
+
+        var exportResult = await _clipExportService.ExportAsync(target.Clip);
         _clipboardMonitorService.SuppressNext();
         await _systemInteractionService.CopyTextAsync(exportResult.PrimaryPath);
         await _systemInteractionService.OpenPathAsync(exportResult.PrimaryPath);
@@ -3135,7 +3164,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);
+        var exportResult = await _clipExportService.ExportForToolAsync(SelectedClip.Clip);
         await _systemInteractionService.OpenInEditorAsync(exportResult.PrimaryPath, editorPath);
         StatusText = $"{AppText.OpenedInEditorStatus}: {Path.GetFileName(exportResult.PrimaryPath)}";
     }
@@ -3150,7 +3179,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         try
         {
-            await _systemInteractionService.OpenPathAsync(url);
+            // OpenUrlAsync, not OpenPathAsync: a source URL comes from captured
+            // or imported content, and OpenPathAsync ShellExecutes anything - a
+            // \\host\share path leaked NetNTLM over SMB, a .cmd ran - while
+            // never opening an actual web link (F-20). OpenUrlAsync admits
+            // http, https and mailto only.
+            await _systemInteractionService.OpenUrlAsync(url);
             StatusText = $"Opened {url}";
         }
         catch (Exception ex)
@@ -3241,8 +3275,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var left = await _clipExportService.ExportAsync(checkedClips[0].Clip);
-        var right = await _clipExportService.ExportAsync(checkedClips[1].Clip);
+        var left = await _clipExportService.ExportForToolAsync(checkedClips[0].Clip);
+        var right = await _clipExportService.ExportForToolAsync(checkedClips[1].Clip);
 
         await _systemInteractionService.OpenInDiffToolAsync(left.PrimaryPath, right.PrimaryPath, diffToolPath);
         StatusText = AppText.CompareOpenedStatus;
@@ -5893,6 +5927,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             EnablePasteAsPlainTextHotkey = Settings.EnablePasteAsPlainTextHotkey,
             PasteAsPlainTextHotkey = normalizedExtended["paste-as-plain-text"],
             ExcludedCaptureApps = Services.CaptureExclusionPolicy.ParsePatterns(Settings.ExcludedCaptureAppsText),
+            HonorClipboardHistoryOptOut = Settings.HonorClipboardHistoryOptOut,
             ExternalEditorPath = Settings.ExternalEditorPath.Trim(),
             ExternalImageEditorPath = Settings.ExternalImageEditorPath.Trim(),
             ExternalDiffToolPath = Settings.ExternalDiffToolPath.Trim(),
@@ -6090,6 +6125,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.EnablePasteAsPlainTextHotkey = settings.EnablePasteAsPlainTextHotkey;
         Settings.PasteAsPlainTextHotkey = settings.PasteAsPlainTextHotkey;
         Settings.ExcludedCaptureAppsText = Services.CaptureExclusionPolicy.FormatPatterns(settings.ExcludedCaptureApps);
+        Settings.HonorClipboardHistoryOptOut = settings.HonorClipboardHistoryOptOut;
         Settings.ExternalEditorPath = settings.ExternalEditorPath;
         Settings.ExternalImageEditorPath = settings.ExternalImageEditorPath;
         Settings.ExternalDiffToolPath = settings.ExternalDiffToolPath;
@@ -6318,6 +6354,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             try
             {
+                // Classify first (rubber-duck F-06-5): a clip captured just
+                // before a crash still has is_sensitive = 0 with its scan
+                // pending, and the backup purge only removes flagged rows.
+                // StartBackgroundServices runs the same recovery later; by then
+                // it usually finds nothing.
+                await RecoverPendingSensitivityAsync().ConfigureAwait(false);
+
+                // Expire first (OD-4a). Otherwise a sensitive clip that outlived
+                // its lifetime while the app was closed is copied into a backup
+                // that is kept for a week, before the maintenance loop's first
+                // tick a minute later removes it from the live library.
+                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);
                 await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -7491,6 +7539,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// and emitted on the captured-clips stream so the UI sees it instantly.
     /// Returns the number of clips imported.
     /// </summary>
+    /// <remarks>
+    /// A drop is a deliberate import, so the clipboard-capture rules do not
+    /// apply: it is kept even when its source app is excluded, publishes
+    /// "Clipboard Viewer Ignore", or marks it CanIncludeInClipboardHistory = 0.
+    /// See the S39 refinement under "Settled decisions" in AGENTS.md.
+    /// </remarks>
     public async Task<int> ImportDroppedDataAsync(Avalonia.Input.IDataTransfer drop, ClipboardSourceApplicationInfo? sourceInfo)
     {
         if (drop is null)

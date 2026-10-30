@@ -262,8 +262,18 @@ internal sealed class TestClipboardMonitorService : IClipboardMonitorService
 
     public bool IsRunning { get; private set; }
 
+    /// <summary>
+    /// When set, <see cref="Start"/> blocks until it completes (at most 30 s).
+    /// StartBackgroundServices starts the monitor first, so this holds every
+    /// background service behind it - letting a test see what startup did
+    /// before them without any of them racing it. Start runs on a thread-pool
+    /// thread, so blocking it does not stall the dispatcher.
+    /// </summary>
+    public Task? StartGate { get; init; }
+
     public void Start()
     {
+        StartGate?.Wait(TimeSpan.FromSeconds(30));
         IsRunning = true;
     }
 
@@ -345,9 +355,22 @@ internal sealed class TestClipExportService : IClipExportService
 
     public string? LastPrimaryPath { get; private set; }
 
+    public int ExportCount { get; private set; }
+
+    public int ToolExportCount { get; private set; }
+
     public Task<ClipExportResult> ExportAsync(ClipEntry clip, CancellationToken cancellationToken = default)
     {
+        ExportCount++;
         LastExportDirectory = Path.Combine(Path.GetTempPath(), $"clip-export-{clip.Id}");
+        LastPrimaryPath = Path.Combine(LastExportDirectory, "rendered.txt");
+        return Task.FromResult(new ClipExportResult(LastExportDirectory, LastPrimaryPath));
+    }
+
+    public Task<ClipExportResult> ExportForToolAsync(ClipEntry clip, CancellationToken cancellationToken = default)
+    {
+        ToolExportCount++;
+        LastExportDirectory = Path.Combine(Path.GetTempPath(), $"clip-tool-copy-{clip.Id}");
         LastPrimaryPath = Path.Combine(LastExportDirectory, "rendered.txt");
         return Task.FromResult(new ClipExportResult(LastExportDirectory, LastPrimaryPath));
     }
@@ -442,14 +465,22 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
         return Task.CompletedTask;
     }
 
+    /// <summary>How many times OpenPathAsync ran - it ShellExecutes anything.</summary>
+    public int OpenPathCount { get; private set; }
+
+    /// <summary>The last URL given to OpenUrlAsync, the scheme-checked opener.</summary>
+    public string? LastOpenedUrl { get; private set; }
+
     public Task OpenPathAsync(string path)
     {
+        OpenPathCount++;
         LastOpenedPath = path;
         return Task.CompletedTask;
     }
 
     public Task OpenUrlAsync(string url)
     {
+        LastOpenedUrl = url;
         LastOpenedPath = url;
         return Task.CompletedTask;
     }

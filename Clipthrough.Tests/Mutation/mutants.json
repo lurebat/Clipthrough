@@ -252,8 +252,8 @@
     "why": "Reverts the daily backup to a raw file copy. A checkpoint that cannot finish leaves committed frames in the WAL, and the copied .db then opens as 'database disk image is malformed' - an unopenable backup nobody notices until they need it.",
     "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
     "filter": "DatabaseBackupServiceTests",
-    "find": "                () => SqliteDatabaseCopier.CopyDatabase(dbPath, key, tempPath),",
-    "replace": "                () => File.Copy(dbPath, tempPath, overwrite: true),"
+    "find": "                        SqliteDatabaseCopier.CopyDatabase(dbPath, key, tempPath);",
+    "replace": "                        File.Copy(dbPath, tempPath, overwrite: true);"
   },
   {
     "id": "move-copies-the-file-instead-of-the-database",
@@ -2680,6 +2680,166 @@
     "filter": "FullyQualifiedName~WhitespaceToJsonArray"
   },
   {
+    "id": "source-url-opened-as-a-path",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-20. Opening a clip's source URL with OpenPathAsync ShellExecutes whatever the content says - a UNC path leaks NetNTLM, a local script runs - and never opens a real https link.",
+    "find": "            await _systemInteractionService.OpenUrlAsync(url);\n            StatusText = $\"Opened {url}\";",
+    "replace": "            await _systemInteractionService.OpenPathAsync(url);\n            StatusText = $\"Opened {url}\";",
+    "filter": "FullyQualifiedName~OpenSourceUrl_UsesTheSchemeCheckedOpener"
+  },
+  {
+    "id": "update-feed-pinned-to-host-only",
+    "file": "Clipthrough/Services/System/UpdateService.cs",
+    "why": "F-38. A host-only allow-list accepts any GitHub account's releases as the update feed; the pin has to be to this repository's path.",
+    "find": "        if (!s_allowedFeedPrefixes.Any(prefix => (normalized + \"/\").StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))",
+    "replace": "        if (!s_allowedFeedPrefixes.Any(prefix => string.Equals(new Uri(prefix).Host, uri.Host, StringComparison.OrdinalIgnoreCase)))",
+    "filter": "FullyQualifiedName~UpdateServiceTests.ResolveFeedUrl_AFeedOutsideThisRepositoryIsRejected"
+  },
+  {
+    "id": "clipangel-accepts-any-clips-object",
+    "file": "Clipthrough/Services/Storage/ClipAngelImportService.cs",
+    "why": "F-21. Without requiring Clips to be a real table, a crafted file decides what the import reads - a view runs the author's SQL on the bundled SQLite.",
+    "find": "            if (!string.Equals(clipsType, \"table\", StringComparison.Ordinal) || viewsAndTriggers != 0)",
+    "replace": "            if (clipsType == \"view\" && viewsAndTriggers != 0)",
+    "filter": "FullyQualifiedName~ClipAngelImportHardeningTests"
+  },
+  {
+    "id": "clipangel-allows-views-and-triggers",
+    "file": "Clipthrough/Services/Storage/ClipAngelImportService.cs",
+    "why": "F-21. A real ClipAngel database has no views or triggers; allowing them lets attacker-written SQL run during the import.",
+    "find": "            if (!string.Equals(clipsType, \"table\", StringComparison.Ordinal) || viewsAndTriggers != 0)",
+    "replace": "            if (!string.Equals(clipsType, \"table\", StringComparison.Ordinal) || viewsAndTriggers < 0)",
+    "filter": "FullyQualifiedName~ClipAngelImportHardeningTests.ATriggerAnywhereInTheSchema"
+  },
+  {
+    "id": "history-opt-out-format-ignored",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "why": "F-03. Without honouring CanIncludeInClipboardHistory = 0, passwords copied from Chrome, Edge and Bitwarden are captured, indexed and kept.",
+    "find": "        return BitConverter.ToInt32(value, 0) == 0;",
+    "replace": "        return value.Length < 0;",
+    "filter": "FullyQualifiedName~ClipboardHistoryOptOutTests"
+  },
+  {
+    "id": "history-opt-out-setting-ignored",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "why": "OD-10b / S39. The opt-out is behind a setting; ignoring it removes the user's way to turn the behaviour off.",
+    "find": "        if (!honorHistoryOptOut\n",
+    "replace": "        if (honorHistoryOptOut && !honorHistoryOptOut\n",
+    "filter": "FullyQualifiedName~ClipboardHistoryOptOutTests.OptedOutContent_IsCaptured_WhenTheSettingIsOff"
+  },
+  {
+    "id": "history-opt-out-setting-not-saved",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "OD-10b. A setting the dialog shows but never saves leaves the user believing they turned the opt-out off.",
+    "find": "            HonorClipboardHistoryOptOut = Settings.HonorClipboardHistoryOptOut,\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~TheHistoryOptOutSetting_IsSaved"
+  },
+  {
+    "id": "tool-copies-are-ordinary-exports",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "F-18. A tool copy written as a full export lands in Documents (often OneDrive-synced) with a metadata.json of the raw content, and outlives the session.",
+    "find": "        return ExportCoreAsync(clip, _sessionRoot, includeMetadata: false, cancellationToken);\n",
+    "replace": "        return ExportAsync(clip, cancellationToken);\n",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AToolCopy_LandsInTheSessionFolder"
+  },
+  {
+    "id": "tool-copies-survive-exit",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "F-18. Session working copies of possibly sensitive clips must not outlive the session.",
+    "find": "        TryDeleteDirectory(_sessionRoot);\n        RetryUnsweptFolders();\n    }\n",
+    "replace": "        _ = _sessionRoot;\n        RetryUnsweptFolders();\n    }\n",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AToolCopy_LandsInTheSessionFolder"
+  },
+  {
+    "id": "crashed-session-tool-copies-are-kept",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "F-18. A session that crashed never ran Dispose; the next start is the only chance to remove its copies.",
+    "find": "        RemoveAbandonedSessionFolders();\n",
+    "replace": "        if (_sessionRoot.Length < 0) RemoveAbandonedSessionFolders();\n",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AFolderLeftByAProcessThatIsGone"
+  },
+  {
+    "id": "open-in-editor-writes-an-export",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-18. Open in editor is a working copy, not an export the user asked to keep.",
+    "find": "        var exportResult = await _clipExportService.ExportForToolAsync(SelectedClip.Clip);\n",
+    "replace": "        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);\n",
+    "filter": "FullyQualifiedName~OpenInEditor_UsesASessionToolCopy"
+  },
+  {
+    "id": "compare-writes-an-export",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-18. Compare writes working copies of both clips, not exports.",
+    "find": "        var left = await _clipExportService.ExportForToolAsync(checkedClips[0].Clip);\n",
+    "replace": "        var left = await _clipExportService.ExportAsync(checkedClips[0].Clip);\n",
+    "filter": "FullyQualifiedName~Compare_UsesSessionToolCopies"
+  },
+  {
+    "id": "sensitive-export-is-not-confirmed",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-18 / OD-3a. Exporting a sensitive clip writes plaintext that outlives its lifetime; the user must choose it knowingly.",
+    "find": "        if (target.Clip.IsSensitive\n            && (ConfirmAsync is null\n",
+    "replace": "        if (target.Clip.IsSensitive && !target.Clip.IsSensitive\n            && (ConfirmAsync is null\n",
+    "filter": "FullyQualifiedName~ExportingASensitiveClip_AsksFirst|FullyQualifiedName~ExportingASensitiveClip_WithNoWayToAsk"
+  },
+  {
+    "id": "backups-keep-sensitive-clips",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "F-19 / OD-4a. A backup is kept for a week; a sensitive clip copied into it outlives its lifetime there.",
+    "find": "                            PurgeSensitiveClips(tempPath, key);\n",
+    "replace": "                            if (Environment.ProcessorCount < 0) PurgeSensitiveClips(tempPath, key);\n",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests"
+  },
+  {
+    "id": "backup-purge-leaves-free-pages",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "F-19. Deleted rows stay in free pages and in un-merged FTS segments until the copy is optimized and vacuumed. The engine's SQLITE_SECURE_DELETE zeroes the free pages, so the test checks the freelist is empty, not only the bytes.",
+    "find": "        if (HasTable(connection, \"clips_fts\"))\n        {\n            Execute(connection, \"INSERT INTO clips_fts(clips_fts) VALUES('optimize');\");\n        }\n\n        Execute(connection, \"VACUUM;\");\n",
+    "replace": "        if (removed < 0)\n        {\n        if (HasTable(connection, \"clips_fts\"))\n        {\n            Execute(connection, \"INSERT INTO clips_fts(clips_fts) VALUES('optimize');\");\n        }\n\n        Execute(connection, \"VACUUM;\");\n        }\n",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WithTheLifetimeOn_TheDailyBackup_HoldsNoSensitiveClip"
+  },
+  {
+    "id": "backup-purge-keeps-vectors",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "F-19. The vector and rule matches go by the schema's ON DELETE CASCADE, which SQLite ignores unless the connection turns foreign keys on.",
+    "find": "SqliteOpenMode.ReadWrite, pooling: false, foreignKeys: true);",
+    "replace": "SqliteOpenMode.ReadWrite, pooling: false, foreignKeys: false);",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WithTheLifetimeOn_TheDailyBackup_HoldsNoSensitiveClip"
+  },
+  {
+    "id": "startup-backup-precedes-expiry",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-19 / OD-4a. The startup backup ran before the first expiry, copying clips that outlived their lifetime while the app was closed.",
+    "find": "                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n",
+    "replace": "                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n",
+    "filter": "FullyQualifiedName~StartupExpiresSensitiveClips_BeforeTakingTheDailyBackup"
+  },
+  {
+    "id": "backup-purge-ignores-the-lifetime-setting",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "OD-4a owner decision. With the sensitive lifetime off the user keeps sensitive clips; purging them from backups would lose them on restore.",
+    "find": "                    if (_settingsService?.Current.EnableSensitiveClipLifetime == true)\n",
+    "replace": "                    if (_settingsService?.Current.EnableSensitiveClipLifetime == true || _settingsService?.Current.EnableSensitiveClipLifetime != true)\n",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WithTheLifetimeOff_TheDailyBackup_KeepsSensitiveClips"
+  },
+  {
+    "id": "connection-factory-loses-the-cipher-key",
+    "file": "Clipthrough/Database/SqliteConnectionFactory.cs",
+    "why": "U-C8/U-C9. Every installed encrypted library must open through the factory; a connection that misses the key fails with error 26 and reads as a wrong password.",
+    "find": "            builder.Password = password;\n",
+    "replace": "            _ = password;\n",
+    "filter": "FullyQualifiedName~SqlCipherFixtureCompatibilityTests"
+  },
+  {
+    "id": "secure-delete-not-enabled",
+    "file": "Clipthrough/Database/SqliteConnectionFactory.cs",
+    "why": "U-C4b / F-19. Without secure_delete a deleted or expired clip stays readable in a free page of a plaintext library, and in every copy of the file. SQLite3 Multiple Ciphers compiles SQLITE_SECURE_DELETE in, so only a connection that had it turned off shows the pragma missing; the test reopens such a pooled connection.",
+    "find": "            cmd.CommandText = \"PRAGMA busy_timeout = 5000; PRAGMA secure_delete = ON;\";",
+    "replace": "            cmd.CommandText = \"PRAGMA busy_timeout = 5000;\";",
+    "filter": "FullyQualifiedName~SecureDeleteTests"
+  },
+  {
     "id": "move-leaves-target-sidecars",
     "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
     "why": "F-01. Setting aside only the target's main file leaves its -wal beside the moved library; SQLite replays the foreign WAL on the next open and the user's history reads back as the old target's rows, with the source already deleted.",
@@ -2795,9 +2955,17 @@
     "id": "clipangel-decrypted-copy-left-in-temp",
     "file": "Clipthrough/Services/Storage/ClipAngelImportService.cs",
     "why": "F-34 (found by its tests). A pooled connection keeps the decrypted copy open, TryDelete fails silently, and a plaintext copy of the ClipAngel history stays in %TEMP%.",
-    "find": "        const int batchSize = 200;\n\n        try\n        {\n            // Pooling off: a pooled connection keeps the decrypted copy open after\n            // Dispose, TryDelete then fails silently, and a plaintext copy of the\n            // user's ClipAngel history is left in %TEMP% (found by F-34's tests).\n            await using var conn = Clipthrough.Database.SqliteConnectionFactory.Create(temp, password: null, SqliteOpenMode.ReadOnly, pooling: false);\n",
-    "replace": "        const int batchSize = 200;\n\n        try\n        {\n            // Pooling off: a pooled connection keeps the decrypted copy open after\n            // Dispose, TryDelete then fails silently, and a plaintext copy of the\n            // user's ClipAngel history is left in %TEMP% (found by F-34's tests).\n            await using var conn = Clipthrough.Database.SqliteConnectionFactory.Create(temp, password: null, SqliteOpenMode.ReadOnly, pooling: true);\n",
+    "find": "var conn = Clipthrough.Database.SqliteConnectionFactory.Create(path, password: null, SqliteOpenMode.ReadOnly, pooling: false);",
+    "replace": "var conn = Clipthrough.Database.SqliteConnectionFactory.Create(path, password: null, SqliteOpenMode.ReadOnly, pooling: true);",
     "filter": "FullyQualifiedName~ClipAngelImportServiceTests"
+  },
+  {
+    "id": "clipangel-import-builds-its-own-connection",
+    "file": "Clipthrough/Services/Storage/ClipAngelImportService.cs",
+    "why": "Guard R7 across C and G/U-C9. Phase C's ClipAngel validation opened its own connection and set busy_timeout itself; once G and U-C9 made the factory the only place a connection is built, that copy bypassed it. The source scan must catch it coming back.",
+    "find": "var conn = Clipthrough.Database.SqliteConnectionFactory.Create(path, password: null, SqliteOpenMode.ReadOnly, pooling: false);",
+    "replace": "var conn = new SqliteConnection($\"Data Source={path};Mode=ReadOnly;Pooling=False\");",
+    "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
   },
   {
     "id": "batch-capture-keeps-the-caller-offset",
@@ -2894,14 +3062,6 @@
     "find": "            DataSource = DataSourceFor(path),",
     "replace": "            DataSource = string.IsNullOrEmpty(password) ? path : DataSourceFor(path),",
     "filter": "FullyQualifiedName~EncryptingAPlaintextWalLibrary_WritesSqlCipher4_AndKeepsItInWal"
-  },
-  {
-    "id": "connection-factory-loses-the-cipher-key",
-    "file": "Clipthrough/Database/SqliteConnectionFactory.cs",
-    "why": "U-C8/U-C9. Every installed encrypted library must open through the factory; a connection that misses the key fails with error 26 and reads as a wrong password.",
-    "find": "            builder.Password = password;\n",
-    "replace": "            _ = password;\n",
-    "filter": "FullyQualifiedName~SqlCipherFixtureCompatibilityTests"
   },
   {
     "id": "rekey-encrypts-plaintext-in-wal",
@@ -3168,6 +3328,38 @@
     "filter": "FullyQualifiedName~WindowPlacementStoreTests"
   },
   {
+    "id": "f06-1-export-rereads-selection",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-06-1: export must write the clip the user confirmed, not whatever SelectedClip became while the dialog was open.",
+    "find": "var exportResult = await _clipExportService.ExportAsync(target.Clip);",
+    "replace": "var exportResult = await _clipExportService.ExportAsync((SelectedClip ?? target).Clip);",
+    "filter": "FullyQualifiedName~ExportingASensitiveClip_ExportsTheConfirmedClip"
+  },
+  {
+    "id": "f06-2-failed-backup-keeps-temp",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Rubber-duck F-06-2: a backup that fails after the copy (e.g. in the purge) must not leave the unpurged .db.tmp, which retention never prunes.",
+    "find": "                DeleteTempCopy(tempPath);",
+    "replace": "                if (tempPath.Length < 0) DeleteTempCopy(tempPath);",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WhenThePurgeFails"
+  },
+  {
+    "id": "f06-2-stranded-temp-not-swept",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Rubber-duck F-06-2: a temp copy stranded by a crash on an earlier day is never overwritten or pruned, so the next backup sweeps it.",
+    "find": "            DeleteStrandedTempCopies(backupDir, tempPath);",
+    "replace": "            if (tempPath.Length < 0) DeleteStrandedTempCopies(backupDir, tempPath);",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.ATempCopyLeftByAnEarlierCrash"
+  },
+  {
+    "id": "f06-3-backup-optimize-only-when-purge-removed-rows",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Rubber-duck F-06-3: with the lifetime on, the backup copy is optimized and vacuumed even when the purge removes nothing, because live expiry may already have deleted a sensitive clip whose index segments the copy still carries.",
+    "find": "        if (HasTable(connection, \"clips_fts\"))\n        {\n            Execute(connection, \"INSERT INTO clips_fts(clips_fts) VALUES('optimize');\");\n        }\n\n        Execute(connection, \"VACUUM;\");\n",
+    "replace": "        if (removed > 0)\n        {\n        if (HasTable(connection, \"clips_fts\"))\n        {\n            Execute(connection, \"INSERT INTO clips_fts(clips_fts) VALUES('optimize');\");\n        }\n\n        Execute(connection, \"VACUUM;\");\n        }\n",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WithTheLifetimeOn_ASensitiveClipLiveExpiryAlreadyDeleted"
+  },
+  {
     "id": "embedding-pause-skips-concurrent-drain",
     "file": "Clipthrough/Services/Search/EmbeddingWorker.cs",
     "why": "Rubber-duck F-09-1. A pause (or second stop) that arrives while an earlier stop is still draining must await that drain. Returning because the loop is already marked stopped lets a rekey, move or restore run while the loop still holds the database open.",
@@ -3222,6 +3414,62 @@
     "find": "            .Select(s => (Screen: s, Overlap: OverlapArea(frame, s.WorkingArea)))",
     "replace": "            .Select(s => (Screen: s, Overlap: OverlapArea(new PixelRect(remembered.Position, OuterPixels(remembered.ClientSize, frameExtra, s.Scaling)), s.WorkingArea)))",
     "filter": "FullyQualifiedName~WindowGeometryTests.ARememberedWindowMostlyOnA100PercentScreen"
+  },
+  {
+    "id": "f06-4-sweep-trusts-pid-alone",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "Rubber-duck F-06-4: a crashed session's PID can be reused, so the sweep must judge a folder by whether its session lock is still held, not by the PID.",
+    "find": "                var abandoned = File.Exists(lockPath)",
+    "replace": "                var abandoned = File.Exists(lockPath) && lockPath.Length < 0",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AFolderWhosePidWasReused"
+  },
+  {
+    "id": "f06-4-session-lock-not-held",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "Rubber-duck F-06-4: a live session keeps its lock open for its lifetime, so a second instance starting up does not sweep its tool copies.",
+    "find": "                FileAccess.ReadWrite,\n                FileShare.None);",
+    "replace": "                FileAccess.ReadWrite,\n                FileShare.None);\n            _sessionLock.Dispose();",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.ALiveSessionsFolder_IsKept"
+  },
+  {
+    "id": "f06-5-backup-before-pending-scan",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-06-5: a clip whose sensitivity scan a crash left pending is unflagged, so the startup backup purge would keep it; startup classifies pending clips before the backup.",
+    "find": "                await RecoverPendingSensitivityAsync().ConfigureAwait(false);",
+    "replace": "                await (_isDisposed ? RecoverPendingSensitivityAsync() : Task.CompletedTask).ConfigureAwait(false);",
+    "filter": "FullyQualifiedName~StartupClassifiesClipsWhoseScanNeverRan_BeforeTakingTheDailyBackup"
+  },
+  {
+    "id": "f06-8-slow-backup-precedes-expiry",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-06-8: the backup-order test must catch a backup that precedes expiry even when the backup is slow enough for the second startup maintenance pass to expire the clip first; the delay stands in for a starved thread pool.",
+    "find": "                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);",
+    "replace": "                await Task.Delay(3000).ConfigureAwait(false);\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);",
+    "filter": "FullyQualifiedName~StartupExpiresSensitiveClips_BeforeTakingTheDailyBackup"
+  },
+  {
+    "id": "f06-7-no-retry-on-tool-copy",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "Rubber-duck F-06-7: an abandoned folder a tool still held at startup is retried on the next tool copy, not left until another start.",
+    "find": "        RetryUnsweptFolders();\n        EnsureSessionLock();",
+    "replace": "        if (_sessionRoot.Length < 0) RetryUnsweptFolders();\n        EnsureSessionLock();",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AnAbandonedFolderLockedAtStartup_IsRemovedOnceReleased"
+  },
+  {
+    "id": "f06-7-no-retry-at-exit",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "Rubber-duck F-06-7: an abandoned folder a tool still held at startup is retried at exit.",
+    "find": "        TryDeleteDirectory(_sessionRoot);\n        RetryUnsweptFolders();",
+    "replace": "        TryDeleteDirectory(_sessionRoot);\n        if (_sessionRoot.Length < 0) RetryUnsweptFolders();",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AnAbandonedFolderLockedAtStartup_IsRemovedAtExit"
+  },
+  {
+    "id": "f06-7-failed-sweep-forgotten",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "Rubber-duck F-06-7: a folder the startup sweep could not remove is remembered for retry.",
+    "find": "                    _unsweptFolders.Add(folder);",
+    "replace": "                    _ = folder;",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AnAbandonedFolderLockedAtStartup"
   },
   {
     "id": "guard-target-typed-construction",
@@ -3286,6 +3534,14 @@
     "find": "        if (changed)",
     "replace": "        if (changed && grid.Name == \"never\")",
     "filter": "FullyQualifiedName~WorkspaceBreakpointTransitionHeadlessTests"
+  },
+  {
+    "id": "f06-6-drop-honours-history-opt-out",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "S39 refinement (rubber-duck F-06-6): a drop is a deliberate import and bypasses the clipboard-history opt-out; making drops honour it must be a decision, not an accident.",
+    "find": "        IReadOnlyList<ClipCaptureRequest> requests;\n        try\n        {\n            requests = await _dragDropService.TryBuildCaptureRequestsAsync(drop, sourceInfo);",
+    "replace": "        if (drop is Avalonia.Input.IAsyncDataTransfer asyncDrop && await ClipboardMonitorService.ShouldIgnoreClipboardAsync(asyncDrop, _settingsService.Current.HonorClipboardHistoryOptOut))\n        {\n            return 0;\n        }\n\n        IReadOnlyList<ClipCaptureRequest> requests;\n        try\n        {\n            requests = await _dragDropService.TryBuildCaptureRequestsAsync(drop, sourceInfo);",
+    "filter": "FullyQualifiedName~ADropMarkedNotForClipboardHistory_IsStillImported"
   },
   {
     "id": "result-click-skips-search-commit",

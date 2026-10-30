@@ -1628,6 +1628,7 @@ public partial class MainWindow : Window
             m_subscribedViewModel.HelpRequested -= OnHelpRequested;
             m_subscribedViewModel.AboutRequested -= OnAboutRequested;
             m_subscribedViewModel.Clips.CollectionChanged -= OnClipsCollectionChanged;
+            m_subscribedViewModel.ConfirmAsync = null;
             m_subscribedViewModel = null;
         }
 
@@ -1642,6 +1643,7 @@ public partial class MainWindow : Window
             m_subscribedViewModel.HelpRequested += OnHelpRequested;
             m_subscribedViewModel.AboutRequested += OnAboutRequested;
             m_subscribedViewModel.Clips.CollectionChanged += OnClipsCollectionChanged;
+            m_subscribedViewModel.ConfirmAsync = (title, body, accept, cancel) => ConfirmDialog.ShowAsync(this, title, body, accept, cancel);
             UpdateSettingsWindowVisibility(viewModel.IsSettingsOpen);
             UpdateAiPromptWindowVisibility(viewModel.IsAiPromptOpen);
             // The encrypted-database prompt is already open by the time the view

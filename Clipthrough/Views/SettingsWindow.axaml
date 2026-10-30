@@ -556,6 +556,8 @@
                                  Text="{Binding Settings.ExcludedCaptureAppsText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                         <TextBlock Classes="body-muted" TextWrapping="Wrap"
                                    Text="{Binding SettingsExcludedAppsCaveat}" />
+                        <CheckBox Content="{Binding SettingsHonorClipboardHistoryOptOutLabel}"
+                                  IsChecked="{Binding Settings.HonorClipboardHistoryOptOut, Mode=TwoWay}" />
                     </StackPanel>
                 </Expander>
 

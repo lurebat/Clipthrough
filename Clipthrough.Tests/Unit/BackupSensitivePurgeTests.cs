@@ -1,0 +1,244 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using Clipthrough.Models;
+using Clipthrough.Services;
+using Microsoft.Data.Sqlite;
+using Xunit;
+
+namespace Clipthrough.Tests.Unit;
+
+/// <summary>
+/// F-19 / OD-4a, backup half. A daily backup is kept for a week, so a
+/// sensitive clip copied into one outlived its lifetime there: the audit probe
+/// found the expired secret in the backup after the live library had expired
+/// it. While the lifetime setting is on, backups carry no sensitive clips.
+/// </summary>
+public sealed class BackupSensitivePurgeTests
+{
+    private const string Secret = "NOT-A-REAL-SECRET-Zq81Wm";
+
+    // Large enough to spill onto overflow pages of its own, so deleting it frees
+    // whole pages. SQLite3 Multiple Ciphers is built with SQLITE_SECURE_DELETE and
+    // zeroes them, so the byte scan below cannot tell whether the purge vacuumed;
+    // the freelist can.
+    private static readonly string SensitiveText = string.Concat(Enumerable.Repeat(Secret + " ", 1000));
+    private const string Ordinary = "an ordinary clip that stays";
+
+    private static async Task<(long SensitiveId, long OrdinaryId)> SeedAsync(TemporaryDatabaseScope scope)
+    {
+        await scope.DatabaseInitializer.InitializeAsync();
+        var sensitive = await Capture(scope, SensitiveText);
+        var ordinary = await Capture(scope, Ordinary);
+        await scope.ClipStoreService.SetSensitiveAsync(sensitive, true);
+        using var connection = scope.ConnectionFactory.CreateConnection();
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO clip_embeddings (clip_id, model_version, dimensions, vector, created_at)
+            VALUES ($id, 'test', 1, zeroblob(4), '2025-01-01');
+            """;
+        command.Parameters.AddWithValue("$id", sensitive);
+        command.ExecuteNonQuery();
+        return (sensitive, ordinary);
+    }
+
+    private static async Task<long> Capture(TemporaryDatabaseScope scope, string text)
+    {
+        var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = text,
+            ContentBytes = Encoding.UTF8.GetBytes(text),
+            SkipPostInsertMaintenance = true,
+        });
+        return clip!.Id;
+    }
+
+    private static object? Scalar(string path, string sql)
+    {
+        var builder = new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadOnly, Pooling = false };
+        using var connection = TestConnections.Create(builder.ToString());
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return command.ExecuteScalar();
+    }
+
+    private static string BackupPath(TemporaryDatabaseScope scope)
+        => Directory.GetFiles(Path.Combine(Path.GetDirectoryName(scope.DatabasePath)!, "backups"), "*.db").Single();
+
+    private static async Task BackUpAsync(TemporaryDatabaseScope scope, bool lifetimeOn)
+    {
+        scope.SettingsService.SetCurrent(AppSettings.Default with { EnableSensitiveClipLifetime = lifetimeOn });
+        await new DatabaseBackupService(scope.StorageOptionsService, null, null, null, settingsService: scope.SettingsService)
+            .EnsureDailyBackupAsync();
+        SqliteConnection.ClearAllPools();
+    }
+
+    [Fact]
+    public async Task WithTheLifetimeOn_TheDailyBackup_HoldsNoSensitiveClip_InRowsIndexVectorsOrFreePages()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        var (sensitiveId, ordinaryId) = await SeedAsync(scope);
+
+        await BackUpAsync(scope, lifetimeOn: true);
+
+        var backup = BackupPath(scope);
+        Assert.Equal(0L, Scalar(backup, $"SELECT count(*) FROM clips WHERE id = {sensitiveId};"));
+        Assert.Equal(0L, Scalar(backup, $"SELECT count(*) FROM clip_embeddings WHERE clip_id = {sensitiveId};"));
+        Assert.Equal(0L, Scalar(backup, $"SELECT count(*) FROM clips_fts WHERE clips_fts MATCH '\"{Secret}\"';"));
+        Assert.DoesNotContain(Secret, Encoding.ASCII.GetString(File.ReadAllBytes(backup)), StringComparison.Ordinal);
+        Assert.False(File.Exists(backup + "-wal") && new FileInfo(backup + "-wal").Length > 0);
+        Assert.Equal(0L, Scalar(backup, "PRAGMA freelist_count;"));
+
+        // Everything else is a faithful copy, and the live library is untouched.
+        Assert.Equal(1L, Scalar(backup, $"SELECT count(*) FROM clips WHERE id = {ordinaryId};"));
+        Assert.Equal(1L, Scalar(backup, "SELECT count(*) FROM clips_fts WHERE clips_fts MATCH '\"ordinary clip\"';"));
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(sensitiveId));
+    }
+
+    /// <summary>
+    /// Owner decision on OD-4a: the purge serves the lifetime promise, so with
+    /// the lifetime off sensitive clips are kept like any other and a restored
+    /// backup brings them back.
+    /// </summary>
+    [Fact]
+    public async Task WithTheLifetimeOff_TheDailyBackup_KeepsSensitiveClips()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        var (sensitiveId, _) = await SeedAsync(scope);
+
+        await BackUpAsync(scope, lifetimeOn: false);
+
+        var backup = BackupPath(scope);
+        Assert.Equal(1L, Scalar(backup, $"SELECT count(*) FROM clips WHERE id = {sensitiveId};"));
+        Assert.Equal(1L, Scalar(backup, $"SELECT count(*) FROM clip_embeddings WHERE clip_id = {sensitiveId};"));
+        Assert.Equal(1L, Scalar(backup, $"SELECT count(*) FROM clips_fts WHERE clips_fts MATCH '\"{Secret}\"';"));
+    }
+
+    /// <summary>
+    /// Rubber-duck F-06-2. When the purge fails after the copy was written, the
+    /// unpurged temp copy must not stay behind: retention only prunes
+    /// <c>clipthrough-*.db</c>, so a <c>.db.tmp</c> would keep every sensitive
+    /// clip on disk indefinitely.
+    /// </summary>
+    [Fact]
+    public async Task WhenThePurgeFails_NoUnpurgedCopyIsLeftInTheBackupsFolder()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await SeedAsync(scope);
+        using (var connection = scope.ConnectionFactory.CreateConnection())
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TRIGGER block_sensitive_delete BEFORE DELETE ON clips WHEN OLD.is_sensitive = 1
+                BEGIN SELECT RAISE(ABORT, 'test: purge blocked'); END;
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        await BackUpAsync(scope, lifetimeOn: true);
+
+        var backupDir = Path.Combine(Path.GetDirectoryName(scope.DatabasePath)!, "backups");
+        Assert.Empty(Directory.GetFiles(backupDir).Select(Path.GetFileName));
+    }
+
+    /// <summary>
+    /// Rubber-duck F-06-2. A temp copy stranded by a crash on an earlier day has
+    /// a name nothing else ever writes or prunes again, so the next backup
+    /// removes it.
+    /// </summary>
+    [Fact]
+    public async Task ATempCopyLeftByAnEarlierCrash_IsRemovedByTheNextBackup()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await SeedAsync(scope);
+        var backupDir = Path.Combine(Path.GetDirectoryName(scope.DatabasePath)!, "backups");
+        Directory.CreateDirectory(backupDir);
+        var stranded = Path.Combine(backupDir, "clipthrough-20200101.db.tmp");
+        File.WriteAllText(stranded, Secret);
+        File.WriteAllText(stranded + "-wal", Secret);
+
+        await BackUpAsync(scope, lifetimeOn: true);
+
+        Assert.False(File.Exists(stranded));
+        Assert.False(File.Exists(stranded + "-wal"));
+        Assert.Single(Directory.GetFiles(backupDir, "*.db"));
+    }
+
+    /// <summary>
+    /// Rubber-duck F-06-3. Live expiry can delete a sensitive clip before the
+    /// day's backup runs; the purge then removes nothing. The full-text index
+    /// still holds the clip's terms - a delete only adds a tombstone segment
+    /// until a merge - so a page copy carries them into the backup unless the
+    /// index is optimized and the file vacuumed anyway.
+    ///
+    /// The index stores trigrams, so the needle is one: three non-ASCII
+    /// characters, which no other term in this library shares a prefix with,
+    /// so the index stores it whole and a byte search can find it.
+    /// </summary>
+    [Fact]
+    public async Task WithTheLifetimeOn_ASensitiveClipLiveExpiryAlreadyDeleted_LeavesNoTraceInTheBackupFile()
+    {
+        const string Needle = "\u79D8\u5BC6\u9375";
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(AppSettings.Default with { EnableSensitiveClipLifetime = true, SensitiveClipLifetimeMinutes = 5 });
+        var sensitive = await Capture(scope, $"api key {Needle} {Secret}");
+        var ordinary = await Capture(scope, Ordinary);
+        await scope.ClipStoreService.SetSensitiveAsync(sensitive, true);
+        using (var connection = scope.ConnectionFactory.CreateConnection())
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            var hourAgo = DateTimeOffset.UtcNow.AddHours(-1).ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+            command.CommandText = $"UPDATE clips SET captured_at = '{hourAgo}', last_copied_at = '{hourAgo}' WHERE id = {sensitive};";
+            command.ExecuteNonQuery();
+        }
+
+        await scope.ClipStoreService.ApplyMaintenanceAsync();
+        Assert.Null(await scope.ClipStoreService.GetByIdAsync(sensitive));
+        var needle = Encoding.UTF8.GetBytes(Needle);
+
+        // Control: a plain copy (lifetime off, no purge) does still carry the
+        // needle, so its absence below is the purge's doing.
+        await BackUpAsync(scope, lifetimeOn: false);
+        Assert.NotEqual(-1, File.ReadAllBytes(BackupPath(scope)).AsSpan().IndexOf(needle));
+        File.Delete(BackupPath(scope));
+
+        await BackUpAsync(scope, lifetimeOn: true);
+
+        var backup = BackupPath(scope);
+        Assert.Equal(1L, Scalar(backup, $"SELECT count(*) FROM clips WHERE id = {ordinary};"));
+        Assert.Equal(-1, File.ReadAllBytes(backup).AsSpan().IndexOf(needle));
+    }
+
+    [Fact]
+    public void ACopyWithoutTheSensitiveColumn_IsLeftAlone()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "ct-purge-" + Guid.NewGuid().ToString("N") + ".db");
+        try
+        {
+            var builder = new SqliteConnectionStringBuilder { DataSource = path, Pooling = false };
+            using (var connection = TestConnections.Create(builder.ToString()))
+            {
+                connection.Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = "CREATE TABLE clips (v TEXT); INSERT INTO clips VALUES ('x');";
+                command.ExecuteNonQuery();
+            }
+
+            Assert.Equal(0, DatabaseBackupService.PurgeSensitiveClips(path, null));
+            Assert.Equal(1L, Scalar(path, "SELECT count(*) FROM clips;"));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+}

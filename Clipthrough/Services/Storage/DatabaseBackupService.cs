@@ -32,6 +32,7 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
     private readonly IClipboardMonitorService? _clipboardMonitor;
     private readonly IBackgroundOcrQueue? _ocrQueue;
     private readonly IEmbeddingWorker? _embeddingWorker;
+    private readonly ISettingsService? _settingsService;
     private readonly int _retention;
 
     /// <summary>
@@ -44,12 +45,14 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         IClipboardMonitorService? clipboardMonitor,
         IBackgroundOcrQueue? ocrQueue,
         IEmbeddingWorker? embeddingWorker,
-        int retention = DefaultRetention)
+        int retention = DefaultRetention,
+        ISettingsService? settingsService = null)
     {
         _storageOptionsService = storageOptionsService;
         _clipboardMonitor = clipboardMonitor;
         _ocrQueue = ocrQueue;
         _embeddingWorker = embeddingWorker;
+        _settingsService = settingsService;
         _retention = retention < 1 ? 1 : retention;
     }
 
@@ -87,42 +90,62 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
             // Read the snapshot through SQLite rather than checkpointing and
             // copying the file, so commits still living in the WAL are included
             // even while other connections are reading or writing.
-            var tempPath = todayPath + ".tmp";
+            var tempPath = todayPath + TempSuffix;
+            DeleteStrandedTempCopies(backupDir, tempPath);
             var key = _storageOptionsService.Current.DatabasePassword;
-            await Task.Run(
-                () => SqliteDatabaseCopier.CopyDatabase(dbPath, key, tempPath),
-                cancellationToken).ConfigureAwait(false);
-            if (SnapshotTakenForTests is { } snapshotTaken)
+            var published = false;
+            try
             {
-                await snapshotTaken().ConfigureAwait(false);
+                await Task.Run(
+                    () =>
+                    {
+                        SqliteDatabaseCopier.CopyDatabase(dbPath, key, tempPath);
+                        // Owner decision on OD-4a: the purge serves the lifetime
+                        // promise. With the lifetime off sensitive clips are kept
+                        // like any other, so a restored backup brings them back.
+                        if (_settingsService?.Current.EnableSensitiveClipLifetime == true)
+                        {
+                            PurgeSensitiveClips(tempPath, key);
+                        }
+                    },
+                    cancellationToken).ConfigureAwait(false);
+                if (SnapshotTakenForTests is { } snapshotTaken)
+                {
+                    await snapshotTaken().ConfigureAwait(false);
+                }
+
+                // The copy is taken outside the storage lock, so a rekey can finish
+                // between it and here. That rekey has already re-keyed every
+                // published backup, and this copy - under the old key, or plaintext
+                // when encryption was just turned on - would be the one restore
+                // point that does not restore. Publishing under the lock means a
+                // rekey either sees this backup or has finished before the check.
+                await _storageOptionsService.RunExclusiveAsync(
+                    current =>
+                    {
+                        if (!string.Equals(current.DatabasePassword, key, StringComparison.Ordinal))
+                        {
+                            Trace.TraceWarning("Database backup discarded: the database was re-keyed while it was being copied.");
+                            return;
+                        }
+
+                        File.Move(tempPath, todayPath, overwrite: true);
+                        published = true;
+                    },
+                    cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                // On any failure the temp copy may hold clips the purge never
+                // removed, and retention only prunes finished backups. A copy
+                // discarded for a rekey goes the same way.
+                DeleteTempCopy(tempPath);
             }
 
-            // The copy is taken outside the storage lock, so a rekey can finish
-            // between it and here. That rekey has already re-keyed every
-            // published backup, and this copy - under the old key, or plaintext
-            // when encryption was just turned on - would be the one restore
-            // point that does not restore. Publishing under the lock means a
-            // rekey either sees this backup or has finished before the check.
-            var published = false;
-            await _storageOptionsService.RunExclusiveAsync(
-                current =>
-                {
-                    if (!string.Equals(current.DatabasePassword, key, StringComparison.Ordinal))
-                    {
-                        File.Delete(tempPath);
-                        Trace.TraceWarning("Database backup discarded: the database was re-keyed while it was being copied.");
-                        return;
-                    }
-
-                    File.Move(tempPath, todayPath, overwrite: true);
-                    published = true;
-                },
-                cancellationToken).ConfigureAwait(false);
             if (!published)
             {
                 return;
             }
-
             Trace.TraceInformation($"Database backup written: {todayPath}");
 
             PruneOldBackups(backupDir);
@@ -131,6 +154,134 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         {
             Trace.TraceWarning($"Database backup failed: {ex.Message}");
         }
+    }
+
+    private const string TempSuffix = ".tmp";
+
+    /// <summary>
+    /// Removes a temp copy and any journal beside it. Best effort: a copy that
+    /// cannot be removed now is swept by a later backup.
+    /// </summary>
+    private static void DeleteTempCopy(string tempPath)
+    {
+        foreach (var suffix in new[] { string.Empty, "-wal", "-shm", "-journal" })
+        {
+            try
+            {
+                File.Delete(tempPath + suffix);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Trace.TraceWarning($"Could not remove the backup temp copy '{Path.GetFileName(tempPath + suffix)}': {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Sweeps temp copies a crash left behind on earlier days. Each day writes
+    /// its own temp name, so nothing else would ever overwrite or prune them,
+    /// and one that died mid-purge still holds sensitive clips. Today's name is
+    /// skipped: this run overwrites it.
+    /// </summary>
+    private static void DeleteStrandedTempCopies(string backupDir, string currentTempPath)
+    {
+        try
+        {
+            foreach (var path in Directory.EnumerateFiles(backupDir, BackupNamePattern + TempSuffix + "*"))
+            {
+                if (path.StartsWith(currentTempPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    File.Delete(path);
+                    Trace.TraceInformation($"Removed a stranded backup temp copy: {Path.GetFileName(path)}");
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Trace.TraceWarning($"Could not remove the stranded backup temp copy '{Path.GetFileName(path)}': {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceWarning($"Could not list stranded backup temp copies: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Removes sensitive clips - with their full-text entries, vectors and
+    /// rule matches - from a backup copy before it is kept (F-19, OD-4a).
+    /// Called only while the sensitive-clip lifetime is on.
+    ///
+    /// A backup is retained for a week, so a sensitive clip copied into one
+    /// outlived its lifetime there no matter when the live library expired it.
+    /// With the lifetime on, restoring a backup therefore brings back no
+    /// sensitive clips; that is the owner's choice recorded as OD-4a.
+    ///
+    /// Deleting the rows is not enough on its own: their bytes stay in free
+    /// pages and the full-text index keeps the original segments until a merge.
+    /// So the index is optimized and the file vacuumed on every purge, including
+    /// one that removes nothing: live expiry may have deleted a sensitive clip
+    /// before the copy, leaving the same residue. A copy whose schema has no
+    /// <c>is_sensitive</c> column is left alone.
+    /// </summary>
+    internal static int PurgeSensitiveClips(string path, string? password)
+    {
+        // Through the factory (U-G1/U-C9): the cipher recipe and busy_timeout come with it.
+        // The schema's ON DELETE CASCADE removes the vectors and rule matches; SQLite
+        // only honours it with foreign keys on.
+        using var connection = Clipthrough.Database.SqliteConnectionFactory.Create(path, password, SqliteOpenMode.ReadWrite, pooling: false, foreignKeys: true);
+        connection.Open();
+
+        if (!HasColumn(connection, "clips", "is_sensitive"))
+        {
+            return 0;
+        }
+
+        var removed = Execute(connection, "DELETE FROM clips WHERE is_sensitive = 1;");
+
+        // Not only when this purge removed rows: live expiry may already have
+        // deleted a sensitive clip, and the copy carries its index segments
+        // all the same (rubber-duck F-06-3).
+        if (HasTable(connection, "clips_fts"))
+        {
+            Execute(connection, "INSERT INTO clips_fts(clips_fts) VALUES('optimize');");
+        }
+
+        Execute(connection, "VACUUM;");
+        if (removed > 0)
+        {
+            Trace.TraceInformation($"Removed {removed} sensitive clip(s) from the backup copy.");
+        }
+
+        return removed;
+    }
+
+    private static int Execute(SqliteConnection connection, string sql)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return command.ExecuteNonQuery();
+    }
+
+    private static bool HasTable(SqliteConnection connection, string table)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM sqlite_master WHERE name = $name AND type = 'table';";
+        command.Parameters.AddWithValue("$name", table);
+        return command.ExecuteScalar() is not null;
+    }
+
+    private static bool HasColumn(SqliteConnection connection, string table, string column)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM pragma_table_info($table) WHERE name = $column;";
+        command.Parameters.AddWithValue("$table", table);
+        command.Parameters.AddWithValue("$column", column);
+        return command.ExecuteScalar() is not null;
     }
 
 
