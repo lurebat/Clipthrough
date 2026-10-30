@@ -3550,5 +3550,13 @@
     "find": "        catch (NullReferenceException ex) when (decodeWidth is > 0)",
     "replace": "        catch (NullReferenceException ex) when (decodeWidth is < 0)",
     "filter": "FullyQualifiedName~ClipBitmapFactoryHeadlessTests"
+  },
+  {
+    "id": "step-paste-rich-publishes-plain-text",
+    "file": "Clipthrough/Services/System/ClipClipboardWriter.cs",
+    "why": "Rubber-duck F-05-1: step-paste and paste-newest published clip.Content (the plain text) as the HTML/RTF payload instead of the markup stored in ContentBytes.",
+    "find": "            var richContent = string.IsNullOrWhiteSpace(markup) ? clip.Content : markup;",
+    "replace": "            var richContent = string.IsNullOrWhiteSpace(markup) || markup.Length >= 0 ? clip.Content : markup;",
+    "filter": "FullyQualifiedName~ClipClipboardWriterTests|FullyQualifiedName~HotkeyClipActionsTests"
   }
 ]
