@@ -526,6 +526,16 @@ public sealed class MainWindowViewModelHeadlessTests
 
         await viewModel.InitializeAsync();
 
+        // InitializeAsync opens the database on a worker thread and returns.
+        // Until that lands every refresh is a no-op, so the RefreshAsync that
+        // selects the new clip would be dropped and the original stay selected.
+        for (var attempt = 0; attempt < 200 && viewModel.IsLoadingDatabase; attempt++)
+        {
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
+        Assert.False(viewModel.IsLoadingDatabase);
+
         var clip = CreateImageClipEntry(CreatePngBytes(unchecked((int)0xFFFF0000)), "original image");
         viewModel.SelectedClip = new ClipItemViewModel(clip);
         Dispatcher.UIThread.RunJobs();
