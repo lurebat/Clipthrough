@@ -2561,8 +2561,21 @@ public sealed class ClipStoreService : IClipStoreService
     /// distinct source-app icon once (U-E1, F-39). Icons used to be stored, and
     /// counted, once per clip.
     /// </summary>
-    private const string TotalStoredBytesSql =
-        "SELECT COALESCE((SELECT SUM(" + StoredRowBytes + ") FROM clips), 0) + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons), 0);";
+    /// <remarks>
+    /// Icons count only once the payload move is done (rubber-duck F-13-5, owner
+    /// decision). While a deferred move is owed, orphaned icons cannot be swept -
+    /// finding them means scanning rows that still hold payloads inline - so
+    /// counting app_icons then made the cap evict clips to pay for icons nothing
+    /// uses. The total undercounts by the icons' bytes for that window instead,
+    /// and the eviction walk, which subtracts only stored_bytes, agrees with it.
+    /// Any walk that also subtracts an icon an eviction frees must do so only
+    /// under the same condition.
+    /// </remarks>
+    private const string TotalStoredBytesSql = $"""
+        SELECT COALESCE((SELECT SUM({StoredRowBytes}) FROM clips), 0)
+             + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons
+                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1')), 0);
+        """;
 
     /// <summary>
     /// Writes what the clips row no longer holds inline (U-E1, F-06): the payload

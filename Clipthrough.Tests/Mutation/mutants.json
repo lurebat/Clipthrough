@@ -2923,8 +2923,8 @@
     "id": "size-cap-ignores-stored-icons",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "The cap must bound what is on disk (the 12.5x under-count fixed earlier); since U-E1 icons are counted once, from app_icons.",
-    "find": " + \") FROM clips), 0) + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons), 0);\";",
-    "replace": " + \") FROM clips), 0) + 0;\";",
+    "find": "             + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons\n                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1')), 0);",
+    "replace": "             + 0;",
     "filter": "FullyQualifiedName~Maintenance_LibrarySizeCap_CountsTheSourceAppIconsItStores"
   },
   {
@@ -4710,5 +4710,45 @@
     "find": "        if (changed)",
     "replace": "        if (changed && grid.Name == \"never\")",
     "filter": "FullyQualifiedName~WorkspaceBreakpointTransitionHeadlessTests"
+  },
+  {
+    "id": "size-total-counts-icons-while-move-owed",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-13-5 (owner decision, option 2): while the deferred payload move is owed, orphaned icons cannot be swept, so counting app_icons makes the size cap evict clips to pay for icons nothing uses.",
+    "find": "                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1')), 0);",
+    "replace": "                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1') OR 1 = 1), 0);",
+    "filter": "FullyQualifiedName~WhileTheMoveIsOwed"
+  },
+  {
+    "id": "size-total-leaves-icons-out-after-the-move",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-13-5: icons leave the size total only while the move is owed; once it is done each distinct icon counts once again.",
+    "find": "                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1')), 0);",
+    "replace": "                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1') AND 1 = 0), 0);",
+    "filter": "FullyQualifiedName~WhileTheMoveIsOwed_TheSizeTotalLeavesIconsOut"
+  },
+  {
+    "id": "size-cap-walk-frees-icons-while-move-owed",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-13-5: while icons are out of the size total, an eviction that frees an icon frees nothing the total counted; a walk that subtracts the icon stops with the library still over its cap. Guards the merge with the F-11-1 walk (ReadIconReferencesAsync).",
+    "find": "                SELECT {StoredRowBytes}\n                FROM clips\n                WHERE NOT {UserKeptClipPredicate}",
+    "replace": "                SELECT {StoredRowBytes} + COALESCE((SELECT LENGTH(png) FROM app_icons WHERE hash = clips.source_app_icon_hash), 0)\n                FROM clips\n                WHERE NOT {UserKeptClipPredicate}",
+    "filter": "FullyQualifiedName~WhileTheMoveIsOwed_EvictingAnIconsLastClipFreesOnlyItsPayload"
+  },
+  {
+    "id": "integrity-failure-notification-omits-unbacked-note",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-13-10 (owner decision, option 1): the integrity-failure notification says to restore a backup, but the daily backup waited for the check, so nothing copied this session is in one; it must say so, and where a restore keeps the replaced library.",
+    "find": "                Message = _databaseInitializer.HasFailedIntegrityCheck\n                    ? ",
+    "replace": "                Message = _databaseInitializer.HasFailedIntegrityCheck && ex.Message.Length < 0\n                    ? ",
+    "filter": "FullyQualifiedName~ACorruptLibrary_IsNotMovedInTheBackground"
+  },
+  {
+    "id": "unbacked-note-on-every-run-failure",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-13-10: the backup note belongs to the failed integrity check, the only failure that says to restore a backup; other background-run failures do not get it.",
+    "find": "                Message = _databaseInitializer.HasFailedIntegrityCheck\n                    ? ",
+    "replace": "                Message = _databaseInitializer.HasFailedIntegrityCheck || ex.Message.Length >= 0\n                    ? ",
+    "filter": "FullyQualifiedName~ABackgroundRunFailureOtherThanTheCheck_HasNoBackupNote"
   }
 ]

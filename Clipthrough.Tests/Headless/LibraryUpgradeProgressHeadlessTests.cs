@@ -481,6 +481,14 @@ public sealed class LibraryUpgradeProgressHeadlessTests
             Assert.Equal(AppNotificationLevel.Error, notification.Level);
             Assert.Contains("integrity check failed", notification.Message, StringComparison.OrdinalIgnoreCase);
 
+            // F-13-10: the backups it says to restore hold nothing copied this session,
+            // and a restore keeps the replaced library under a .before-restore- name.
+            Assert.Contains("not in any backup", AppText.LibraryIntegrityFailedUnbackedClips, StringComparison.Ordinal);
+            Assert.Contains(".before-restore-", AppText.LibraryIntegrityFailedUnbackedClips, StringComparison.Ordinal);
+            Assert.True(
+                notification.Message.Contains(AppText.LibraryIntegrityFailedUnbackedClips, StringComparison.Ordinal),
+                "The integrity-failure notification does not say that this session's clips are in no backup.");
+
             // Owner decision (live check F3): this one stays until the user closes
             // it. A non-persistent notification is removed after six seconds - long
             // before someone looking away from the screen reads "restore a backup".
@@ -519,6 +527,66 @@ public sealed class LibraryUpgradeProgressHeadlessTests
             }
         }
     }
+    /// <summary>
+    /// F-13-10, the other side: a background-run failure that is not a failed
+    /// integrity check does not say to restore a backup, so it gets no note about
+    /// what the backups hold.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task ABackgroundRunFailureOtherThanTheCheck_HasNoBackupNote()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        scope.SettingsService.SetHasSavedSettings(true);
+        scope.StorageOptionsService.SetHasSavedConfig(true);
+        Task.Run(() => scope.DatabaseInitializer.InitializeAsync()).GetAwaiter().GetResult();
+        SeedLegacyRows(scope, version: 8);
+        DatabaseInitializer.AfterPayloadRowMoved = _ => throw new InvalidOperationException("injected failure in the background move");
+
+        MainWindowViewModel? viewModel = null;
+        try
+        {
+            viewModel = new MainWindowViewModel(
+                scope.ClipStoreService,
+                new TestClipboardMonitorService(),
+                scope.SettingsService,
+                new TestSystemInteractionService(),
+                scope.StorageOptionsService,
+                scope.SensitivityService,
+                scope.NotificationService,
+                new TestSessionLogService(),
+                scope.ClipExportService,
+                new TestImageEditorService(),
+                scope.SearchHistoryService,
+                new TestAiTransformService(false),
+                new TestOcrService(),
+                new BackgroundOcrQueueStub(),
+                new BackgroundJobIndicator(),
+                scope.DatabaseInitializer);
+
+            await viewModel.InitializeAsync();
+            var clock = Stopwatch.StartNew();
+            while (!viewModel.Notifications.Any(n => n.Title == AppText.LibraryOptimizeFailedTitle) && clock.Elapsed < TimeSpan.FromSeconds(20))
+            {
+                await Task.Delay(20);
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            var shown = Assert.Single(viewModel.Notifications, n => n.Title == AppText.LibraryOptimizeFailedTitle);
+            Assert.Contains("injected failure in the background move", shown.Message, StringComparison.Ordinal);
+            Assert.False(scope.DatabaseInitializer.HasFailedIntegrityCheck);
+            Assert.DoesNotContain(AppText.LibraryIntegrityFailedUnbackedClips, shown.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            DatabaseInitializer.AfterPayloadRowMoved = null;
+            viewModel?.Dispose();
+            for (var i = 0; i < 5; i++)
+            {
+                try { Dispatcher.UIThread.RunJobs(); } catch { /* test teardown */ }
+            }
+        }
+    }
+
     private sealed class BackgroundOcrQueueStub : IBackgroundOcrQueue
     {
         public IObservable<long> OcrCompleted { get; } = System.Reactive.Linq.Observable.Empty<long>();
