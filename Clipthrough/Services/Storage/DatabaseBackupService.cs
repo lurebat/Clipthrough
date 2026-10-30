@@ -53,6 +53,12 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         _retention = retention < 1 ? 1 : retention;
     }
 
+    /// <summary>
+    /// Runs between taking the daily snapshot and publishing it, so a test can
+    /// put a rekey into the gap deterministically.
+    /// </summary>
+    internal Func<Task>? SnapshotTakenForTests { get; set; }
+
     public async Task EnsureDailyBackupAsync(CancellationToken cancellationToken = default)
     {
         var dbPath = _storageOptionsService.Current.DatabasePath;
@@ -82,10 +88,41 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
             // copying the file, so commits still living in the WAL are included
             // even while other connections are reading or writing.
             var tempPath = todayPath + ".tmp";
+            var key = _storageOptionsService.Current.DatabasePassword;
             await Task.Run(
-                () => SqliteDatabaseCopier.CopyDatabase(dbPath, _storageOptionsService.Current.DatabasePassword, tempPath),
+                () => SqliteDatabaseCopier.CopyDatabase(dbPath, key, tempPath),
                 cancellationToken).ConfigureAwait(false);
-            File.Move(tempPath, todayPath, overwrite: true);
+            if (SnapshotTakenForTests is { } snapshotTaken)
+            {
+                await snapshotTaken().ConfigureAwait(false);
+            }
+
+            // The copy is taken outside the storage lock, so a rekey can finish
+            // between it and here. That rekey has already re-keyed every
+            // published backup, and this copy - under the old key, or plaintext
+            // when encryption was just turned on - would be the one restore
+            // point that does not restore. Publishing under the lock means a
+            // rekey either sees this backup or has finished before the check.
+            var published = false;
+            await _storageOptionsService.RunExclusiveAsync(
+                current =>
+                {
+                    if (!string.Equals(current.DatabasePassword, key, StringComparison.Ordinal))
+                    {
+                        File.Delete(tempPath);
+                        Trace.TraceWarning("Database backup discarded: the database was re-keyed while it was being copied.");
+                        return;
+                    }
+
+                    File.Move(tempPath, todayPath, overwrite: true);
+                    published = true;
+                },
+                cancellationToken).ConfigureAwait(false);
+            if (!published)
+            {
+                return;
+            }
+
             Trace.TraceInformation($"Database backup written: {todayPath}");
 
             PruneOldBackups(backupDir);

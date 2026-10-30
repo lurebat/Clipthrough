@@ -465,6 +465,20 @@ public sealed class StorageOptionsService : IStorageOptionsService
         }
     }
 
+    /// <inheritdoc />
+    public async Task RunExclusiveAsync(Action<StorageOptions> action, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            action(Current);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     /// <summary>
     /// Writes a copy of <paramref name="sourcePath"/>, which opens with
     /// <paramref name="currentKey"/>, to <paramref name="destinationPath"/>
@@ -479,8 +493,8 @@ public sealed class StorageOptionsService : IStorageOptionsService
     /// for every unencrypted library (F-16). When either side is empty the
     /// copy is written with <c>sqlcipher_export</c> into a database attached
     /// with the target key instead. Like VACUUM it carries the schema, every
-    /// row, the FTS5 shadow tables, triggers and <c>user_version</c>; the
-    /// journal mode is a property of the file and is set to match the source.
+    /// row, the FTS5 shadow tables and triggers; <c>user_version</c> and the
+    /// journal mode are not carried, so both are set to match the source.
     /// </remarks>
     internal static void WriteRekeyedCopy(string sourcePath, string currentKey, string newKey, string destinationPath)
     {
@@ -499,10 +513,20 @@ public sealed class StorageOptionsService : IStorageOptionsService
                     journalMode = Convert.ToString(mode.ExecuteScalar(), CultureInfo.InvariantCulture) ?? string.Empty;
                 }
 
+                // sqlcipher_export does not carry user_version on this build, so
+                // the copy would read 0 unless it is set explicitly.
+                long userVersion;
+                using (var version = source.CreateCommand())
+                {
+                    version.CommandText = "PRAGMA main.user_version;";
+                    userVersion = Convert.ToInt64(version.ExecuteScalar(), CultureInfo.InvariantCulture);
+                }
+
                 using var export = source.CreateCommand();
                 export.CommandText =
                     "ATTACH DATABASE $path AS rekeyed KEY $key; " +
                     "SELECT sqlcipher_export('rekeyed'); " +
+                    "PRAGMA rekeyed.user_version = " + userVersion.ToString(CultureInfo.InvariantCulture) + "; " +
                     (string.Equals(journalMode, "wal", StringComparison.OrdinalIgnoreCase) ? "PRAGMA rekeyed.journal_mode = WAL; " : string.Empty) +
                     "DETACH DATABASE rekeyed;";
                 export.Parameters.AddWithValue("$path", destinationPath);
