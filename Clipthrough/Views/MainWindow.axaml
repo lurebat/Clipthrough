@@ -39,6 +39,19 @@
         <Style Selector="Border.preview-pane">
             <Setter Property="MinWidth" Value="620" />
         </Style>
+        <!--
+          The footer meters' Wide layout lives here, not on the elements: a value
+          set on the element beats every style, so the bp-* overrides below would
+          never apply and the meters would stay a 576 DIP row in a 480 DIP window.
+        -->
+        <Style Selector="StackPanel#FooterStats">
+            <Setter Property="Orientation" Value="Horizontal" />
+            <Setter Property="Spacing" Value="16" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="StackPanel#FooterStats > Border.detail-stat-card">
+            <Setter Property="MinWidth" Value="280" />
+        </Style>
         <Style Selector="Window.bp-medium Border.list-pane">
             <Setter Property="MinWidth" Value="260" />
         </Style>
@@ -1335,13 +1348,9 @@
 
                 <StackPanel x:Name="FooterStats"
                             Grid.Column="1"
-                            Orientation="Horizontal"
-                            Spacing="16"
-                            HorizontalAlignment="Center"
                             VerticalAlignment="Center">
                     <Border Classes="detail-stat-card"
-                            Padding="8,4"
-                            MinWidth="280">
+                            Padding="8,4">
                         <StackPanel Spacing="4">
                             <Grid ColumnDefinitions="*,Auto"
                                   ColumnSpacing="8">
@@ -1361,8 +1370,7 @@
                     </Border>
 
                     <Border Classes="detail-stat-card"
-                            Padding="8,4"
-                            MinWidth="280">
+                            Padding="8,4">
                         <StackPanel Spacing="4">
                             <Grid ColumnDefinitions="*,Auto"
                                   ColumnSpacing="8">

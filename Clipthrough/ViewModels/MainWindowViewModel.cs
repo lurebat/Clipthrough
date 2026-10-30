@@ -3184,7 +3184,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task ExportSelectedAsync()
     {
-        if (SelectedClip is null)
+        // Captured once: a capture can move the selection while the dialog
+        // below is open, and the confirmation covers this clip only.
+        var target = SelectedClip;
+        if (target is null)
         {
             return;
         }
@@ -3194,7 +3197,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // into a OneDrive-synced folder. For a sensitive clip that is the
         // user's call to make knowingly (OD-3a); without a way to ask, it is
         // not made for them.
-        if (SelectedClip.Clip.IsSensitive
+        if (target.Clip.IsSensitive
             && (ConfirmAsync is null
                 || !await ConfirmAsync(
                     AppText.ExportSensitiveConfirmTitle,
@@ -3206,8 +3209,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        await SelectedClip.EnsureContentHydratedAsync();
-        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);
+        await target.EnsureContentHydratedAsync();
+        var exportResult = await _clipExportService.ExportAsync(target.Clip);
         _clipboardMonitorService.SuppressNext(exportResult.PrimaryPath);
         await _systemInteractionService.CopyTextAsync(exportResult.PrimaryPath);
         await _systemInteractionService.OpenPathAsync(exportResult.PrimaryPath);
@@ -3232,13 +3235,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task OpenInEditorAsync()
     {
-        if (SelectedClip is null)
+        // Captured once: the selection can move while the clip is hydrated
+        // below, and the editor must get the clip the command was run on.
+        var target = SelectedClip;
+        if (target is null)
         {
             return;
         }
 
         _ = CommitSearchQueryAsync();
-        var editorPath = ResolveExternalEditorPath(SelectedClip);
+        var editorPath = ResolveExternalEditorPath(target);
         if (!string.IsNullOrWhiteSpace(editorPath) && !System.IO.File.Exists(ExtractExecutablePath(editorPath)))
         {
             _notificationService.PublishError(
@@ -3247,8 +3253,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        await SelectedClip.EnsureContentHydratedAsync();
-        var exportResult = await _clipExportService.ExportForToolAsync(SelectedClip.Clip);
+        await target.EnsureContentHydratedAsync();
+        var exportResult = await _clipExportService.ExportForToolAsync(target.Clip);
         await _systemInteractionService.OpenInEditorAsync(exportResult.PrimaryPath, editorPath);
         StatusText = $"{AppText.OpenedInEditorStatus}: {Path.GetFileName(exportResult.PrimaryPath)}";
     }
@@ -3735,13 +3741,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // An explicit target (the row a context menu was opened on) replaces the
         // checked-clips / selection rule, and never uses a selection slice.
         var checkedClips = explicitTarget is null ? Clips.Where(static c => c.IsChecked).ToList() : new List<ClipItemViewModel>();
+
+        // The converters are async, so the user can move the editor selection or
+        // pick another clip while one runs. Splice with the range and text that
+        // were converted, never with the live properties read after the await.
+        var sliceStart = EditedClipSelectionStart;
+        var sliceLength = EditedClipSelectionLength;
+        var sliceFullText = EditedClipText ?? string.Empty;
+        var sliceClip = SelectedClip;
         var useSelectionSlice = explicitTarget is null
             && checkedClips.Count == 0
-            && SelectedClip is not null
-            && EditedClipSelectionLength > 0
-            && EditedClipSelectionStart >= 0
-            && EditedClipSelectionStart + EditedClipSelectionLength <= (EditedClipText?.Length ?? 0)
-            && !SelectedClip.Clip.IsContentTruncated;
+            && sliceClip is not null
+            && sliceLength > 0
+            && sliceStart >= 0
+            && sliceStart + sliceLength <= sliceFullText.Length
+            && !sliceClip.Clip.IsContentTruncated;
 
         var targets = explicitTarget is not null ? new List<ClipItemViewModel> { explicitTarget }
             : checkedClips.Count > 0 ? checkedClips
@@ -3759,10 +3773,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             string source;
             string result;
-            if (useSelectionSlice && ReferenceEquals(target, SelectedClip))
+            if (useSelectionSlice && ReferenceEquals(target, sliceClip))
             {
-                var full = EditedClipText ?? string.Empty;
-                var slice = full.Substring(EditedClipSelectionStart, EditedClipSelectionLength);
+                var full = sliceFullText;
+                var slice = full.Substring(sliceStart, sliceLength);
                 var transformedSlice = await transform(slice, CancellationToken.None);
                 if (string.Equals(slice, transformedSlice, StringComparison.Ordinal))
                 {
@@ -3770,9 +3784,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 }
                 source = full;
                 result = string.Concat(
-                    full.AsSpan(0, EditedClipSelectionStart),
+                    full.AsSpan(0, sliceStart),
                     transformedSlice,
-                    full.AsSpan(EditedClipSelectionStart + EditedClipSelectionLength));
+                    full.AsSpan(sliceStart + sliceLength));
             }
             else
             {
@@ -4178,7 +4192,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         try
         {
             await Task.Delay(TimeSpan.FromSeconds(5), cts.Token);
-            await CommitPendingDeletesAsync(ids);
+            await CommitPendingDeletesAsync(ids, cts);
         }
         catch (OperationCanceledException)
         {
@@ -4194,7 +4208,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var anyRestored = false;
         foreach (var id in clipIds)
         {
-            if (_pendingDeletes.Remove(id))
+            if (TryRemoveOwnedPendingDelete(id, cts))
             {
                 _hiddenPendingDeletes.Remove(id);
                 anyRestored = true;
@@ -4211,11 +4225,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         StatusText = clipIds.Length == 1 ? "Clip restored" : $"{clipIds.Length} clips restored";
     }
 
-    private async Task CommitPendingDeletesAsync(long[] clipIds)
+    private async Task CommitPendingDeletesAsync(long[] clipIds, CancellationTokenSource cts)
     {
         foreach (var id in clipIds)
         {
-            if (_pendingDeletes.Remove(id, out _))
+            if (TryRemoveOwnedPendingDelete(id, cts))
             {
                 await RunClipMutationAsync(() => _clipStoreService.DeleteAsync(id));
                 // The row is gone from the result set now, so it no longer
@@ -4224,6 +4238,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
         }
     }
+
+    /// <summary>
+    /// Removes the pending delete of <paramref name="clipId"/> only if it still
+    /// belongs to the delete that owns <paramref name="cts"/>.
+    /// </summary>
+    /// <remarks>
+    /// A re-copy withdraws a pending delete, and the user can then delete the
+    /// same clip again, which starts a new undo window under the same id. The
+    /// earlier delete's timer and Undo button must not act on that later delete:
+    /// matching by id alone let the first timer commit the second delete seconds
+    /// into its undo window, and the second Undo then found nothing to restore.
+    /// </remarks>
+    private bool TryRemoveOwnedPendingDelete(long clipId, CancellationTokenSource cts)
+        => _pendingDeletes.TryGetValue(clipId, out var pending)
+            && ReferenceEquals(pending.Cts, cts)
+            && _pendingDeletes.Remove(clipId);
 
     private void WithdrawPendingDelete(long clipId)
     {

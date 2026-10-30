@@ -67,6 +67,10 @@ public sealed class ClipStoreService : IClipStoreService
     /// there was more. A row shows a title and a snippet; carrying a 2 MB log into every
     /// list page cost the UI that string and its UTF-16 copy per row. An entry read this
     /// way throws on <see cref="ClipEntry.Content"/> until it is hydrated.
+    ///
+    /// substr() and length() both stop at the first NUL in a TEXT value, so a clip
+    /// containing one is always flagged: its row holds only the text before the NUL,
+    /// however short the clip.
     /// </summary>
     private const string ClipListSelectColumns = """
             c.id,
@@ -99,7 +103,7 @@ public sealed class ClipStoreService : IClipStoreService
             c.source_clip_id,
             c.transform_kind,
             c.import_kind,
-            (COALESCE(length(c.content), 0) > 4096)
+            (COALESCE(length(c.content), 0) > 4096 OR COALESCE(instr(c.content, char(0)), 0) > 0)
         """;
 
     /// <summary>

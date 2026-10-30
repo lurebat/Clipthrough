@@ -177,4 +177,91 @@ public sealed partial class MainWindowViewModelHeadlessTests
 
         Assert.Equal(LongClipText, scope.ClipExportService.LastExportedContent);
     }
+
+    /// <summary>
+    /// Selects the long row and arranges for the selection to move to another
+    /// clip - marked sensitive in the store - from inside the row's hydration,
+    /// i.e. after a command has started awaiting it and before it resumes.
+    /// </summary>
+    private static async Task<(MainWindowViewModel ViewModel, ClipItemViewModel Row, ClipItemViewModel Other)> SelectionMovesDuringHydrationAsync(
+        TemporaryDatabaseScope scope)
+    {
+        await PrepareInitializedScopeAsync(scope);
+        var captured = await CaptureTextClipAsync(scope.ClipStoreService, LongClipText);
+        // Marked before the window loads: a later change would make the next
+        // refresh replace this row's view model with a new one.
+        var secret = await CaptureTextClipAsync(scope.ClipStoreService, "password = NOT-A-REAL-CREDENTIAL");
+        await scope.ClipStoreService.SetSensitiveAsync(secret.Id, true);
+        var viewModel = CreateViewModel(scope, new TestClipboardMonitorService(), new TestSystemInteractionService(), new TestSessionLogService());
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+        for (var attempt = 0; attempt < 80 && viewModel.Clips.Count < 2; attempt++)
+        {
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        var row = viewModel.Clips.Single(c => c.Id == captured.Id);
+        var other = viewModel.Clips.Single(c => c.Id == secret.Id);
+        Assert.True(other.Clip.IsSensitive, "Setup: the clip the selection moves to must be sensitive.");
+
+        var moved = false;
+        row.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ClipItemViewModel.FullImage) && !moved && !row.Clip.IsContentTruncated)
+            {
+                moved = true;
+                viewModel.SelectedClip = other;
+            }
+        };
+
+        viewModel.SelectedClip = row;
+        Assert.True(row.Clip.IsContentTruncated, "Setup: the row must still need hydration when the command starts.");
+        return (viewModel, row, other);
+    }
+
+    /// <summary>
+    /// Rubber-duck F-07-1. Export hydrates the clip before writing it, and the
+    /// selection can move while that runs. The export must still write the clip
+    /// Export was clicked on - a non-sensitive one, so nobody was asked - and
+    /// must not write the newly selected sensitive clip, which nobody confirmed.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task ExportingALongListRow_ExportsThatRow_EvenIfTheSelectionMovesDuringHydration()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        var (viewModel, row, other) = await SelectionMovesDuringHydrationAsync(scope);
+        using var _ = viewModel;
+        var asked = 0;
+        viewModel.ConfirmAsync = (_, _, _, _) => { asked++; return Task.FromResult(true); };
+
+        await viewModel.ExportSelectedCommand.Execute().ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Same(other, viewModel.SelectedClip);
+        Assert.Equal(0, asked);
+        Assert.Equal(1, scope.ClipExportService.ExportCount);
+        Assert.EndsWith($"clip-export-{row.Id}", scope.ClipExportService.LastExportDirectory, StringComparison.Ordinal);
+        Assert.Equal(LongClipText, scope.ClipExportService.LastExportedContent);
+    }
+
+    /// <summary>
+    /// Rubber-duck F-07-1, Open in editor. The same hydration await: the editor
+    /// must get a copy of the clip the command was run on, not whatever became
+    /// selected while it was being loaded.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task OpeningALongListRowInTheEditor_OpensThatRow_EvenIfTheSelectionMovesDuringHydration()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        var (viewModel, row, other) = await SelectionMovesDuringHydrationAsync(scope);
+        using var _ = viewModel;
+
+        await viewModel.OpenInEditorCommand.Execute().ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Same(other, viewModel.SelectedClip);
+        Assert.Equal(1, scope.ClipExportService.ToolExportCount);
+        Assert.EndsWith($"clip-tool-copy-{row.Id}", scope.ClipExportService.LastExportDirectory, StringComparison.Ordinal);
+    }
 }

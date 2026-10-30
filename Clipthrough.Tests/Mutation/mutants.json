@@ -2851,8 +2851,8 @@
     "id": "export-skips-hydration",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "F-10. Export writes the clip to a file the user keeps; from a list row it must not be a prefix.",
-    "find": "        await SelectedClip.EnsureContentHydratedAsync();\n        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);\n        _clipboardMonitorService.SuppressNext(exportResult.PrimaryPath);",
-    "replace": "        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);\n        _clipboardMonitorService.SuppressNext(exportResult.PrimaryPath);",
+    "find": "        await target.EnsureContentHydratedAsync();\n        var exportResult = await _clipExportService.ExportAsync(target.Clip);\n        _clipboardMonitorService.SuppressNext(exportResult.PrimaryPath);",
+    "replace": "        var exportResult = await _clipExportService.ExportAsync(target.Clip);\n        _clipboardMonitorService.SuppressNext(exportResult.PrimaryPath);",
     "filter": "FullyQualifiedName~ExportingALongListRow_ExportsAllOfIt"
   },
   {
@@ -3371,8 +3371,8 @@
     "id": "open-in-editor-writes-an-export",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "F-18. Open in editor is a working copy, not an export the user asked to keep.",
-    "find": "        var exportResult = await _clipExportService.ExportForToolAsync(SelectedClip.Clip);\n",
-    "replace": "        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);\n",
+    "find": "        var exportResult = await _clipExportService.ExportForToolAsync(target.Clip);\n",
+    "replace": "        var exportResult = await _clipExportService.ExportAsync(target.Clip);\n",
     "filter": "FullyQualifiedName~OpenInEditor_UsesASessionToolCopy"
   },
   {
@@ -3387,8 +3387,8 @@
     "id": "sensitive-export-is-not-confirmed",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "F-18 / OD-3a. Exporting a sensitive clip writes plaintext that outlives its lifetime; the user must choose it knowingly.",
-    "find": "        if (SelectedClip.Clip.IsSensitive\n            && (ConfirmAsync is null\n",
-    "replace": "        if (SelectedClip.Clip.IsSensitive && !SelectedClip.Clip.IsSensitive\n            && (ConfirmAsync is null\n",
+    "find": "        if (target.Clip.IsSensitive\n            && (ConfirmAsync is null\n",
+    "replace": "        if (target.Clip.IsSensitive && !target.Clip.IsSensitive\n            && (ConfirmAsync is null\n",
     "filter": "FullyQualifiedName~ExportingASensitiveClip_AsksFirst|FullyQualifiedName~ExportingASensitiveClip_WithNoWayToAsk"
   },
   {
@@ -3403,8 +3403,8 @@
     "id": "backup-purge-leaves-free-pages",
     "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
     "why": "F-19. Deleted rows stay in free pages and in un-merged FTS segments until the copy is optimized and vacuumed. The engine's SQLITE_SECURE_DELETE zeroes the free pages, so the test checks the freelist is empty, not only the bytes.",
-    "find": "        if (removed > 0)\n        {\n            if (HasTable(connection, \"clips_fts\"))\n",
-    "replace": "        if (removed < 0)\n        {\n            if (HasTable(connection, \"clips_fts\"))\n",
+    "find": "        if (HasTable(connection, \"clips_fts\"))\n        {\n            Execute(connection, \"INSERT INTO clips_fts(clips_fts) VALUES('optimize');\");\n        }\n\n        Execute(connection, \"VACUUM;\");\n",
+    "replace": "        if (removed < 0)\n        {\n        if (HasTable(connection, \"clips_fts\"))\n        {\n            Execute(connection, \"INSERT INTO clips_fts(clips_fts) VALUES('optimize');\");\n        }\n\n        Execute(connection, \"VACUUM;\");\n        }\n",
     "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WithTheLifetimeOn_TheDailyBackup_HoldsNoSensitiveClip"
   },
   {
@@ -3998,5 +3998,141 @@
     "find": "                    if (icon.Remaining == 0)",
     "replace": "                    if (icon.Remaining == 0 && hash.Length < 0)",
     "filter": "FullyQualifiedName~ClipRetentionTests.Maintenance_LibrarySizeCap_CountsTheIconAnEvictionFrees"
+  },
+  {
+    "id": "f06-1-export-rereads-selection",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-06-1: export must write the clip the user confirmed, not whatever SelectedClip became while the dialog was open.",
+    "find": "var exportResult = await _clipExportService.ExportAsync(target.Clip);",
+    "replace": "var exportResult = await _clipExportService.ExportAsync((SelectedClip ?? target).Clip);",
+    "filter": "FullyQualifiedName~ExportingASensitiveClip_ExportsTheConfirmedClip"
+  },
+  {
+    "id": "f06-2-failed-backup-keeps-temp",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Rubber-duck F-06-2: a backup that fails after the copy (e.g. in the purge) must not leave the unpurged .db.tmp, which retention never prunes.",
+    "find": "                DeleteTempCopy(tempPath);",
+    "replace": "                if (tempPath.Length < 0) DeleteTempCopy(tempPath);",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WhenThePurgeFails"
+  },
+  {
+    "id": "f06-2-stranded-temp-not-swept",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Rubber-duck F-06-2: a temp copy stranded by a crash on an earlier day is never overwritten or pruned, so the next backup sweeps it.",
+    "find": "            DeleteStrandedTempCopies(backupDir, tempPath);",
+    "replace": "            if (tempPath.Length < 0) DeleteStrandedTempCopies(backupDir, tempPath);",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.ATempCopyLeftByAnEarlierCrash"
+  },
+  {
+    "id": "f06-3-backup-optimize-only-when-purge-removed-rows",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Rubber-duck F-06-3: with the lifetime on, the backup copy is optimized and vacuumed even when the purge removes nothing, because live expiry may already have deleted a sensitive clip whose index segments the copy still carries.",
+    "find": "        if (HasTable(connection, \"clips_fts\"))\n        {\n            Execute(connection, \"INSERT INTO clips_fts(clips_fts) VALUES('optimize');\");\n        }\n\n        Execute(connection, \"VACUUM;\");\n",
+    "replace": "        if (removed > 0)\n        {\n        if (HasTable(connection, \"clips_fts\"))\n        {\n            Execute(connection, \"INSERT INTO clips_fts(clips_fts) VALUES('optimize');\");\n        }\n\n        Execute(connection, \"VACUUM;\");\n        }\n",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WithTheLifetimeOn_ASensitiveClipLiveExpiryAlreadyDeleted"
+  },
+  {
+    "id": "f07-1-export-rereads-selection-after-hydration",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-07-1: export must hydrate and write the clip Export was run on, not whatever SelectedClip became while hydration was awaited.",
+    "find": "        await target.EnsureContentHydratedAsync();\n        var exportResult = await _clipExportService.ExportAsync(target.Clip);",
+    "replace": "        await (SelectedClip ?? target).EnsureContentHydratedAsync();\n        var exportResult = await _clipExportService.ExportAsync((SelectedClip ?? target).Clip);",
+    "filter": "FullyQualifiedName~ExportingALongListRow_ExportsThatRow_EvenIfTheSelectionMovesDuringHydration"
+  },
+  {
+    "id": "f07-1-open-in-editor-rereads-selection",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-07-1: Open in editor must copy the clip the command was run on, not whatever SelectedClip became while hydration was awaited.",
+    "find": "var exportResult = await _clipExportService.ExportForToolAsync(target.Clip);",
+    "replace": "var exportResult = await _clipExportService.ExportForToolAsync((SelectedClip ?? target).Clip);",
+    "filter": "FullyQualifiedName~OpeningALongListRowInTheEditor_OpensThatRow_EvenIfTheSelectionMovesDuringHydration"
+  },
+  {
+    "id": "f07-2-list-row-nul-reported-complete",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-07-2: substr()/length() stop at a NUL, so a list row of a clip containing U+0000 must be flagged truncated or hydration is skipped and the text after the NUL is lost.",
+    "find": "OR COALESCE(instr(c.content, char(0)), 0) > 0)",
+    "replace": "OR COALESCE(instr(c.content, char(0)), 0) < 0)",
+    "filter": "FullyQualifiedName~AClipWithAnEmbeddedNul_IsNeverPassedOffAsComplete"
+  },
+  {
+    "id": "selection-slice-splice-rereads-live-selection",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-12-1: the selection-slice transform spliced the converted slice at EditedClipSelectionStart/Length read after the async conversion, so moving the selection meanwhile replaced the wrong range.",
+    "find": "                    full.AsSpan(0, sliceStart),\n                    transformedSlice,\n                    full.AsSpan(sliceStart + sliceLength));",
+    "replace": "                    full.AsSpan(0, EditedClipSelectionStart),\n                    transformedSlice,\n                    full.AsSpan(EditedClipSelectionStart + EditedClipSelectionLength));",
+    "filter": "FullyQualifiedName~SelectionSliceTransform"
+  },
+  {
+    "id": "step-paste-rich-publishes-plain-text",
+    "file": "Clipthrough/Services/System/ClipClipboardWriter.cs",
+    "why": "Rubber-duck F-05-1: step-paste and paste-newest published clip.Content (the plain text) as the HTML/RTF payload instead of the markup stored in ContentBytes.",
+    "find": "            var richContent = string.IsNullOrWhiteSpace(markup) ? clip.Content : markup;",
+    "replace": "            var richContent = string.IsNullOrWhiteSpace(markup) || markup.Length >= 0 ? clip.Content : markup;",
+    "filter": "FullyQualifiedName~ClipClipboardWriterTests|FullyQualifiedName~HotkeyClipActionsTests"
+  },
+  {
+    "id": "pending-delete-owner-ignored",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-05-2: an earlier delete's undo timer matched pending deletes by id alone, so after delete, re-copy, delete again it committed the second delete inside its undo window and the second Undo restored nothing.",
+    "find": "            && ReferenceEquals(pending.Cts, cts)",
+    "replace": "            && (ReferenceEquals(pending.Cts, cts) || clipId >= 0)",
+    "filter": "FullyQualifiedName~DeleteRecopyDeleteAgain"
+  },
+  {
+    "id": "embedding-pause-skips-concurrent-drain",
+    "file": "Clipthrough/Services/Search/EmbeddingWorker.cs",
+    "why": "Rubber-duck F-09-1. A pause (or second stop) that arrives while an earlier stop is still draining must await that drain. Returning because the loop is already marked stopped lets a rekey, move or restore run while the loop still holds the database open.",
+    "find": "drain = _draining;",
+    "replace": "drain = cancelled ? _draining : Task.CompletedTask;",
+    "filter": "Pause_WhileAStopIsStillDraining_WaitsForTheLoopToFinish"
+  },
+  {
+    "id": "drop-image-encode-on-ui-thread",
+    "file": "Clipthrough/Services/Capture/DragDropService.cs",
+    "why": "Rubber-duck F-09-2. The drop handler awaits TryBuildCaptureRequestsAsync on the UI thread; reading, decoding and PNG-encoding a dropped photo inline freezes the window for seconds.",
+    "find": "await Task.Run(() => TryBuildImageRequestFromFile(path, sourceInfo));",
+    "replace": "await Task.FromResult(TryBuildImageRequestFromFile(path, sourceInfo));",
+    "filter": "ADroppedNonPngImageFile_IsDecodedAndReEncodedOffTheCallingThread"
+  },
+  {
+    "id": "startup-keeps-stale-key-on-plaintext-db",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "Removing encryption swaps the plaintext file in before storage.json is rewritten; a crash or failed write in between leaves the old remembered password, and keying a plaintext file fails every connection with 'file is not a database' at the next start (rubber-duck F-04-1).",
+    "find": "                && !RequiresPassword(options.DatabasePath))",
+    "replace": "                && !RequiresPassword(options.DatabasePath)\n                && options.DatabasePath.Length < 0)",
+    "filter": "Rekey_ToNoPassword_ConfigWriteFailsAfterTheSwap_NextStartOpensTheLibrary"
+  },
+  {
+    "id": "startup-drops-key-on-empty-db-file",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "An empty database file opens without a key, so dropping a remembered password whenever a keyless read succeeds would build the library unencrypted after a crash between file creation and the first write (rubber-duck F-04-1 review follow-up).",
+    "find": "                && new FileInfo(options.DatabasePath).Length > 0",
+    "replace": "                && new FileInfo(options.DatabasePath).Length >= 0",
+    "filter": "RememberedPassword_OnAnEmptyDatabaseFile_IsKept"
+  },
+  {
+    "id": "footer-meters-orientation-set-on-the-element",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "why": "Rubber-duck F-14-1. A value set on the element beats every style setter, so an inline Orientation on FooterStats silently disables the bp-narrow override and the two meters stay a 576 DIP row in a 480 DIP window.",
+    "find": "                <StackPanel x:Name=\"FooterStats\"\n                            Grid.Column=\"1\"\n",
+    "replace": "                <StackPanel x:Name=\"FooterStats\"\n                            Grid.Column=\"1\"\n                            Orientation=\"Horizontal\"\n",
+    "filter": "FullyQualifiedName~FooterMeters_FitInsideTheFooter"
+  },
+  {
+    "id": "footer-meter-min-width-set-on-the-element",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "why": "Rubber-duck F-14-1. An inline MinWidth on the footer meters beats the bp-medium MinWidth 150 style, so at the narrowest Medium width the two 280 DIP meters run past the footer.",
+    "find": "                            VerticalAlignment=\"Center\">\n                    <Border Classes=\"detail-stat-card\"\n                            Padding=\"8,4\">\n                        <StackPanel Spacing=\"4\">\n                            <Grid ColumnDefinitions=\"*,Auto\"\n                                  ColumnSpacing=\"8\">\n                                <TextBlock Classes=\"detail-label\"\n                                           FontSize=\"10\"\n                                           Text=\"{Binding StorageUsageText}\" />\n                                <TextBlock Grid.Column=\"1\"\n                                           Classes=\"body-muted\"\n                                           FontSize=\"10\"\n                                           Text=\"{Binding StorageCapacityText}\" />\n                            </Grid>\n                            <ProgressBar Minimum=\"0\"\n                                         Maximum=\"100\"\n                                         Value=\"{Binding StorageUsagePercent}\"\n                                         Height=\"4\" />\n                        </StackPanel>\n                    </Border>\n\n                    <Border Classes=\"detail-stat-card\"\n                            Padding=\"8,4\">",
+    "replace": "                            VerticalAlignment=\"Center\">\n                    <Border Classes=\"detail-stat-card\"\n                            Padding=\"8,4\"\n                            MinWidth=\"280\">\n                        <StackPanel Spacing=\"4\">\n                            <Grid ColumnDefinitions=\"*,Auto\"\n                                  ColumnSpacing=\"8\">\n                                <TextBlock Classes=\"detail-label\"\n                                           FontSize=\"10\"\n                                           Text=\"{Binding StorageUsageText}\" />\n                                <TextBlock Grid.Column=\"1\"\n                                           Classes=\"body-muted\"\n                                           FontSize=\"10\"\n                                           Text=\"{Binding StorageCapacityText}\" />\n                            </Grid>\n                            <ProgressBar Minimum=\"0\"\n                                         Maximum=\"100\"\n                                         Value=\"{Binding StorageUsagePercent}\"\n                                         Height=\"4\" />\n                        </StackPanel>\n                    </Border>\n\n                    <Border Classes=\"detail-stat-card\"\n                            Padding=\"8,4\"\n                            MinWidth=\"280\">",
+    "filter": "FullyQualifiedName~FooterMeters_FitInsideTheFooter"
+  },
+  {
+    "id": "restore-sizes-the-frame-at-each-candidates-scaling",
+    "file": "Clipthrough/Views/WindowGeometry.cs",
+    "why": "Rubber-duck F-14-2. Measuring the remembered frame at each candidate screen's own scaling makes a 250% neighbour see it 2.5 times as large, so a window saved mostly on the 100% screen beside it restores on the wrong monitor.",
+    "find": "            .Select(s => (Screen: s, Overlap: OverlapArea(frame, s.WorkingArea)))",
+    "replace": "            .Select(s => (Screen: s, Overlap: OverlapArea(new PixelRect(remembered.Position, OuterPixels(remembered.ClientSize, frameExtra, s.Scaling)), s.WorkingArea)))",
+    "filter": "FullyQualifiedName~WindowGeometryTests.ARememberedWindowMostlyOnA100PercentScreen"
   }
 ]
