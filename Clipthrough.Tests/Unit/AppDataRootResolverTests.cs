@@ -140,4 +140,81 @@ public sealed class AppDataRootResolverTests : IDisposable
 
         Assert.Equal(Path.Combine(Environment.CurrentDirectory, "relative-data"), root.Directory);
     }
+
+    /// <summary>
+    /// Builds the layout a Velopack package unpacks to - the Setup install and
+    /// the -Portable.zip alike: Update.exe and the launcher stub at the root,
+    /// the real executable in current\ beside the sq.version manifest. An
+    /// update replaces current\ wholesale, so nothing that must survive one -
+    /// the marker, or the data - may live inside it.
+    /// </summary>
+    private (string Root, string Current) VelopackLayout()
+    {
+        var root = Directory.CreateDirectory(Path.Combine(_work, "velopack")).FullName;
+        var current = Directory.CreateDirectory(Path.Combine(root, "current")).FullName;
+        File.WriteAllText(Path.Combine(root, "Update.exe"), string.Empty);
+        File.WriteAllText(Path.Combine(current, "sq.version"), "<package/>");
+        return (root, current);
+    }
+
+    [Fact]
+    public void UnderVelopack_TheMarkerAndTheDataSitBesideUpdateExe_OutsideCurrent()
+    {
+        var (root, current) = VelopackLayout();
+        PlacePortableMarker(root);
+
+        var dataRoot = AppDataRootResolver.Resolve([], null, current, _localAppData);
+
+        Assert.Equal(AppDataRootSource.Portable, dataRoot.Source);
+        Assert.Equal(Path.Combine(root, "ClipthroughData"), dataRoot.Directory);
+    }
+
+    // Honouring a marker inside current\ would move the data folder back to
+    // the default at the next update, which deletes the marker with the rest
+    // of current\.
+    [Fact]
+    public void UnderVelopack_AMarkerInsideCurrent_IsNotPortable()
+    {
+        var (_, current) = VelopackLayout();
+        PlacePortableMarker(current);
+
+        var dataRoot = AppDataRootResolver.Resolve([], null, current, _localAppData);
+
+        Assert.Equal(AppDataRootSource.Default, dataRoot.Source);
+    }
+
+    // Only a manifest beside the executable makes the parent a Velopack root,
+    // as in Velopack's own locator: a plain ZIP unpacked under some other
+    // Squirrel-style folder is still its own root.
+    [Fact]
+    public void APlainCopyBelowAnUnrelatedUpdateExe_IsItsOwnRoot()
+    {
+        File.WriteAllText(Path.Combine(_work, "Update.exe"), string.Empty);
+        PlacePortableMarker(_exeDirectory);
+
+        var dataRoot = Resolve([]);
+
+        Assert.Equal(Path.Combine(_exeDirectory, "ClipthroughData"), dataRoot.Directory);
+    }
+
+    // Velopack restarts the app after applying an update. The marker and the
+    // variable survive that on their own; the command line has to be handed
+    // back, or the updated app comes up on the default folder.
+    [Fact]
+    public void ARelaunch_KeepsACommandLineFolder()
+    {
+        var root = Resolve(["--data-dir", Dir("cli")]);
+
+        Assert.Equal(["--data-dir", Dir("cli")], root.RelaunchArguments);
+    }
+
+    [Fact]
+    public void ARelaunch_NeedsNothingForTheOtherSources()
+    {
+        PlacePortableMarker(_exeDirectory);
+
+        Assert.Empty(Resolve([]).RelaunchArguments);
+        Assert.Empty(Resolve([], environment: Dir("env")).RelaunchArguments);
+        Assert.Empty(AppDataRoot.Default(_localAppData).RelaunchArguments);
+    }
 }

@@ -840,7 +840,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
         return new StorageOptionsDocument
         {
-            DatabasePath = options.DatabasePath,
+            DatabasePath = _dataRoot.ToStoredPath(options.DatabasePath),
             RememberPassword = options.RememberPassword,
             // DatabasePassword (plaintext) is intentionally omitted — never written.
             DatabasePasswordProtected = protectedPassword,

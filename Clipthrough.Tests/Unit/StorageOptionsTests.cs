@@ -49,4 +49,17 @@ public sealed class StorageOptionsTests
 
         Assert.Equal(Path.Combine(s_fakeLocalAppData, "chosen", "clipthrough.db"), normalized.DatabasePath);
     }
+
+    // Against the data folder, never the working directory: that is current\
+    // under Velopack, which the next update deletes, and whatever folder a
+    // shortcut or script happened to start in otherwise.
+    [Fact]
+    public void Normalize_ResolvesARelativeLibraryAgainstTheDataRoot()
+    {
+        var root = AppDataRoot.Chosen(Path.Combine(s_fakeLocalAppData, "chosen"), AppDataRootSource.Portable);
+
+        var normalized = new StorageOptions { DatabasePath = Path.Combine("library", "clips.db") }.Normalize(root);
+
+        Assert.Equal(Path.Combine(s_fakeLocalAppData, "chosen", "library", "clips.db"), normalized.DatabasePath);
+    }
 }

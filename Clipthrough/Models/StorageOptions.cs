@@ -26,7 +26,7 @@ public sealed record StorageOptions
     {
         var normalizedPath = string.IsNullOrWhiteSpace(DatabasePath)
             ? dataRoot.DefaultDatabasePath
-            : Path.GetFullPath(Environment.ExpandEnvironmentVariables(DatabasePath.Trim()));
+            : Path.GetFullPath(Environment.ExpandEnvironmentVariables(DatabasePath.Trim()), dataRoot.Directory);
 
         return this with
         {

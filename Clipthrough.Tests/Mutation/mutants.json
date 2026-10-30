@@ -4915,8 +4915,8 @@
     "id": "dataroot-portable-marker",
     "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
     "why": "A portable.flag marker beside the executable must keep the data in a folder beside it (portable mode, user decision).",
-    "find": "if (File.Exists(Path.Combine(executableDirectory, PortableMarkerFileName)))",
-    "replace": "if (File.Exists(Path.Combine(executableDirectory, PortableMarkerFileName)) && executableDirectory.Length < 0)",
+    "find": "if (File.Exists(Path.Combine(applicationRoot, PortableMarkerFileName)))",
+    "replace": "if (File.Exists(Path.Combine(applicationRoot, PortableMarkerFileName)) && applicationRoot.Length < 0)",
     "filter": "FullyQualifiedName~AppDataRootResolverTests"
   },
   {
@@ -5014,5 +5014,69 @@
     "find": "            AppDataRootResolver.EnsureUsable(dataRoot);",
     "replace": "            if (dataRoot.Directory.Length < 0) AppDataRootResolver.EnsureUsable(dataRoot);",
     "filter": "FullyQualifiedName~AppDataRootValidationTests"
+  },
+  {
+    "id": "dataroot-velopack-root-above-current",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "Under Velopack the portable marker and data belong beside Update.exe, above current\\, which every update replaces (portable mode must survive updates).",
+    "find": "            ? parent",
+    "replace": "            ? directory",
+    "filter": "FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "dataroot-velopack-needs-manifest",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "Only a sq.version manifest beside the executable makes the parent a Velopack root, as in Velopack's own locator; a plain copy below an unrelated Update.exe is its own root.",
+    "find": "&& File.Exists(Path.Combine(directory, VelopackManifestName))",
+    "replace": "&& VelopackManifestName.Length > 0",
+    "filter": "FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "dataroot-marker-inside-current-ignored",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "A marker inside current\\ would be deleted by the next update and move the data folder back to the default, so it must not turn portable mode on.",
+    "find": "if (File.Exists(Path.Combine(applicationRoot, PortableMarkerFileName)))",
+    "replace": "if (File.Exists(Path.Combine(applicationRoot, PortableMarkerFileName)) || File.Exists(Path.Combine(executableDirectory, PortableMarkerFileName)))",
+    "filter": "FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "dataroot-relative-library-against-root",
+    "file": "Clipthrough/Models/StorageOptions.cs",
+    "why": "A relative library path resolves against the data folder, not the working directory (current\\ under Velopack, wiped by updates).",
+    "find": "Path.GetFullPath(Environment.ExpandEnvironmentVariables(DatabasePath.Trim()), dataRoot.Directory)",
+    "replace": "Path.GetFullPath(Environment.ExpandEnvironmentVariables(DatabasePath.Trim()))",
+    "filter": "FullyQualifiedName~StorageOptionsTests"
+  },
+  {
+    "id": "dataroot-portable-library-stored-relative",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "In portable mode storage.json records a library inside the folder relative to it, so the library is found after the folder changes drive letter or parent.",
+    "find": "DatabasePath = _dataRoot.ToStoredPath(options.DatabasePath),",
+    "replace": "DatabasePath = options.DatabasePath,",
+    "filter": "FullyQualifiedName~PortableDataRootTests"
+  },
+  {
+    "id": "dataroot-relative-only-when-portable",
+    "file": "Clipthrough/Models/AppDataRoot.cs",
+    "why": "Only portable mode stores relative paths; a folder chosen by path keeps the full path in storage.json, as before.",
+    "find": "if (Source != AppDataRootSource.Portable)",
+    "replace": "if (Source != AppDataRootSource.Portable && Source == AppDataRootSource.Portable)",
+    "filter": "FullyQualifiedName~PortableDataRootTests"
+  },
+  {
+    "id": "dataroot-outside-portable-stays-absolute",
+    "file": "Clipthrough/Models/AppDataRoot.cs",
+    "why": "A library outside the portable folder is not inside the thing that moves, so it stays absolute rather than becoming ..\\ relative.",
+    "find": "relative.StartsWith(\"..\" + Path.DirectorySeparatorChar, StringComparison.Ordinal)",
+    "replace": "relative.Length < 0",
+    "filter": "FullyQualifiedName~PortableDataRootTests"
+  },
+  {
+    "id": "dataroot-relaunch-keeps-cli-folder",
+    "file": "Clipthrough/Models/AppDataRoot.cs",
+    "why": "Velopack's restart after an update must be handed --data-dir, or the updated app comes back on the default folder.",
+    "find": "Source == AppDataRootSource.CommandLine",
+    "replace": "Source == AppDataRootSource.Portable",
+    "filter": "FullyQualifiedName~AppDataRootResolverTests|FullyQualifiedName~UpdateServiceTests"
   }
 ]

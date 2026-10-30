@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 
 namespace Clipthrough.Models;
@@ -61,6 +62,35 @@ public sealed record AppDataRoot
     public string CopilotTokenPath => Path.Combine(Directory, "copilot-token.bin");
 
     public string LogFilePath => Path.Combine(Directory, "logs", "clipthrough.log");
+
+    /// <summary>
+    /// What to pass a relaunch of this process - Velopack's restart after an
+    /// update - so it comes back to this folder. The variable and the portable
+    /// marker survive a restart by themselves; only the command line does not.
+    /// </summary>
+    public IReadOnlyList<string> RelaunchArguments => Source == AppDataRootSource.CommandLine
+        ? [CommandLineOptions.DataDirectoryOption, Directory]
+        : [];
+
+    /// <summary>
+    /// The form of <paramref name="fullPath"/> to write to storage.json. In
+    /// portable mode a path inside the folder is written relative to it, so the
+    /// library is still found after the folder moves to another drive letter
+    /// or parent; <see cref="StorageOptions.Normalize"/> resolves it back
+    /// against <see cref="Directory"/>. Every other path stays as it was given.
+    /// </summary>
+    public string ToStoredPath(string fullPath)
+    {
+        if (Source != AppDataRootSource.Portable)
+        {
+            return fullPath;
+        }
+
+        var relative = Path.GetRelativePath(Directory, fullPath);
+        return Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            ? fullPath
+            : relative;
+    }
 
     /// <summary>The root used when nothing chose another one.</summary>
     public static AppDataRoot Default(string localApplicationData)

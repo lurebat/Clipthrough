@@ -335,7 +335,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RerunAllEmbeddingsCommand = ReactiveCommand.CreateFromTask(RerunAllEmbeddingsAsync);
         RefreshSemanticCoverageCommand = ReactiveCommand.CreateFromTask(RefreshSemanticCoverageAsync);
 
-        Update = new UpdateViewModel(updateService ?? new UpdateService(settingsService), _jobIndicator, _notificationService, status => StatusText = status);
+        Update = new UpdateViewModel(updateService ?? new UpdateService(settingsService, _storageOptionsService.DataRoot), _jobIndicator, _notificationService, status => StatusText = status);
 
         _settingsService.SettingsChanged += OnSettingsChanged;
 

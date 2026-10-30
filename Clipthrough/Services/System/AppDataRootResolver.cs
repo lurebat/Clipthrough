@@ -26,6 +26,8 @@ public static class AppDataRootResolver
     /// <summary>The folder, beside the marker, that a portable copy keeps its data in.</summary>
     public const string PortableDataDirectoryName = "ClipthroughData";
 
+    private const string VelopackUpdateExeName = "Update.exe";
+    private const string VelopackManifestName = "sq.version";
     public static AppDataRoot ResolveForCurrentProcess(IReadOnlyList<string> args)
         => Resolve(
             args,
@@ -63,14 +65,34 @@ public static class AppDataRootResolver
             return Choose(environmentValue, AppDataRootSource.EnvironmentVariable);
         }
 
-        if (File.Exists(Path.Combine(executableDirectory, PortableMarkerFileName)))
+        var applicationRoot = FindApplicationRoot(executableDirectory);
+        if (File.Exists(Path.Combine(applicationRoot, PortableMarkerFileName)))
         {
-            return AppDataRoot.Chosen(Path.Combine(executableDirectory, PortableDataDirectoryName), AppDataRootSource.Portable);
+            return AppDataRoot.Chosen(Path.Combine(applicationRoot, PortableDataDirectoryName), AppDataRootSource.Portable);
         }
 
         return AppDataRoot.Default(localApplicationData);
     }
 
+    /// <summary>
+    /// The folder a user sees as "where Clipthrough is": the executable's own
+    /// folder for a plain ZIP, but for a Velopack package - the installed app
+    /// and the -Portable.zip alike - the folder above current\, beside
+    /// Update.exe and the launcher stub. Velopack replaces current\ on every
+    /// update, so a marker or data kept inside it would be deleted by one.
+    /// The rule is Velopack's own (WindowsVelopackLocator, 1.2.0): Update.exe
+    /// in the parent and the sq.version manifest beside the executable.
+    /// </summary>
+    internal static string FindApplicationRoot(string executableDirectory)
+    {
+        var directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(executableDirectory));
+        var parent = Path.GetDirectoryName(directory);
+        return parent is not null
+            && File.Exists(Path.Combine(parent, VelopackUpdateExeName))
+            && File.Exists(Path.Combine(directory, VelopackManifestName))
+            ? parent
+            : directory;
+    }
     private static AppDataRoot Choose(string value, AppDataRootSource source)
     {
         // Checked before expanding too: the expansion is a Win32 call, and stops at a NUL.
