@@ -505,6 +505,153 @@ public sealed class DeferredPayloadMoveTests
         Assert.Equal(OffsetTimestamps, Timestamps(scope, ids[0]));
     }
 
+    /// <summary>
+    /// Rubber-duck F-13-1: the background upgrade holds a connection of its own, so
+    /// a whole-database operation has to pause it as it pauses the other workers.
+    /// A restore renames the live file aside, which fails while any handle is open
+    /// on it (Windows) or leaves the upgrader writing to the renamed file
+    /// (elsewhere). Paused, the run resumes after the restore, from the start and
+    /// against the library that is live by then.
+    /// </summary>
+    [Fact]
+    public async Task ARestoreDuringTheBackgroundMove_PausesTheMove_WhichFinishesOnTheRestoredLibrary()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        var ids = SeedSchema8Library(scope, 4);
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+
+        // The library as it is before anything moved is what gets restored.
+        var backupPath = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(scope.DatabasePath)!, "before-move.db");
+        Scalar(scope, $"VACUUM INTO '{backupPath.Replace("'", "''", StringComparison.Ordinal)}';");
+
+        using var held = new SemaphoreSlim(0);
+        var heldTokens = new ConcurrentQueue<CancellationToken>();
+        using var closing = new CancellationTokenSource();
+        DatabaseInitializer.BackgroundPayloadMoveBatchBudget = TimeSpan.Zero;
+        DatabaseInitializer.BetweenBackgroundPayloadBatches = async token =>
+        {
+            heldTokens.Enqueue(token);
+            held.Release();
+            await Task.Delay(Timeout.Infinite, token);
+        };
+        try
+        {
+            var move = Task.Run(() => scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(progress: null, closing.Token));
+            Assert.True(await held.WaitAsync(TimeSpan.FromSeconds(20)), "The move never reached its first pause.");
+
+            // Only the invocation already holding stays held; a resumed run goes through.
+            DatabaseInitializer.BetweenBackgroundPayloadBatches = null;
+
+            var backup = new Clipthrough.Services.DatabaseBackupService(scope.StorageOptionsService, null, null, null, settingsService: scope.SettingsService, databaseInitializer: scope.DatabaseInitializer);
+            await backup.RestoreAsync(backupPath);
+
+            Assert.True(heldTokens.TryPeek(out var heldToken) && heldToken.IsCancellationRequested, "The restore ran without stopping the background move.");
+            Assert.True(await move.WaitAsync(TimeSpan.FromSeconds(30)), "The move did not run after the restore.");
+            Assert.Equal(0, InlineRows(scope));
+            Assert.Equal(ids.Length, Scalar(scope, "SELECT COUNT(*) FROM clip_payloads;"));
+            await AssertEveryClipReadsAsync(scope, ids);
+        }
+        finally
+        {
+            DatabaseInitializer.BetweenBackgroundPayloadBatches = null;
+            DatabaseInitializer.BackgroundPayloadMoveBatchBudget = TimeSpan.FromMilliseconds(100);
+            closing.Cancel();
+        }
+    }
+
+    /// <summary>
+    /// Rubber-duck F-13-2: on a deferred start the UTC backfill waits for the
+    /// background, but startup maintenance runs at once, and the lifetime purge
+    /// compares timestamps as text - right only for UTC (F-35). Until the backfill
+    /// has run it has to compare instants: a clip copied ten minutes ago in a
+    /// -05:00 zone reads as five hours older, and one copied two hours ago at
+    /// +05:00 reads as three hours in the future.
+    /// </summary>
+    [Fact]
+    public async Task WhileTheUtcBackfillIsOwed_TheLifetimePurgeComparesInstants_NotOffsetText()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        var ids = SeedSchema8Library(scope, 2);
+        var now = DateTimeOffset.UtcNow;
+        var fresh = now.AddMinutes(-10).ToOffset(TimeSpan.FromHours(-5)).ToString("O", CultureInfo.InvariantCulture);
+        var expired = now.AddHours(-2).ToOffset(TimeSpan.FromHours(5)).ToString("O", CultureInfo.InvariantCulture);
+        Scalar(scope, $"UPDATE clips SET is_sensitive = 1, last_copied_at = '{fresh}' WHERE id = {ids[0]};");
+        Scalar(scope, $"UPDATE clips SET is_sensitive = 1, last_copied_at = '{expired}' WHERE id = {ids[1]};");
+
+        // The fixture only discriminates while text and instant order disagree.
+        var cutoff = now.AddMinutes(-60).ToString("O", CultureInfo.InvariantCulture);
+        Assert.True(string.CompareOrdinal(fresh, cutoff) < 0, "As text, the fresh clip must look expired.");
+        Assert.True(string.CompareOrdinal(expired, cutoff) > 0, "As text, the expired clip must look fresh.");
+
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+        Assert.Equal(1, Scalar(scope, "SELECT COUNT(*) FROM app_metadata WHERE key = 'utc_backfill_pending';"));
+        scope.SettingsService.SetCurrent(new AppSettings
+        {
+            EnableSensitiveClipLifetime = true,
+            SensitiveClipLifetimeMinutes = 60,
+            EnableNormalClipLifetime = false,
+            EnableMaxEntryCount = false,
+            EnableMaxLibrarySize = false,
+        });
+
+        await scope.ClipStoreService.ApplyMaintenanceAsync();
+
+        Assert.True(Scalar(scope, $"SELECT COUNT(*) FROM clips WHERE id = {ids[0]};") == 1, "A sensitive clip copied ten minutes ago was purged as expired.");
+        Assert.True(Scalar(scope, $"SELECT COUNT(*) FROM clips WHERE id = {ids[1]};") == 0, "A sensitive clip copied two hours ago outlived its one-hour lifetime.");
+    }
+
+    /// <summary>
+    /// Rubber-duck F-13-3: the background UTC backfill reads the rows it will
+    /// convert, then writes them, and captures run in between. A re-copy sets
+    /// captured_at and last_copied_at, and the backfill wrote its stale converted
+    /// values over them, so the clip lost its recent position and could expire as
+    /// if never copied again. A column the re-copy did not touch is still
+    /// converted.
+    /// </summary>
+    [Fact]
+    public async Task ARecopyDuringTheBackgroundUtcBackfill_KeepsItsNewTimestamps()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        SeedSchema8Library(scope, 2);
+        var request = new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "copied before the upgrade",
+            ContentBytes = Encoding.UTF8.GetBytes("copied before the upgrade"),
+        };
+        var clip = await scope.ClipStoreService.CaptureFastAsync(request);
+        Assert.NotNull(clip);
+        GiveTimestampsAnOffset(scope, clip.Id);
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+
+        string? recopiedAt = null;
+        DatabaseInitializer.BeforeUtcBackfillWrites = async token =>
+        {
+            await scope.ClipStoreService.CaptureFastAsync(request, token);
+            recopiedAt = Timestamps(scope, clip.Id)[2];
+        };
+        try
+        {
+            Assert.True(await scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(progress: null));
+        }
+        finally
+        {
+            DatabaseInitializer.BeforeUtcBackfillWrites = null;
+        }
+
+        Assert.NotNull(recopiedAt);
+        Assert.NotEqual(RepairedTimestamps[2], recopiedAt);
+        Assert.Equal(2, Scalar(scope, $"SELECT copy_count FROM clips WHERE id = {clip.Id};"));
+        var after = Timestamps(scope, clip.Id);
+        Assert.True(after[2] == recopiedAt, $"The backfill overwrote the re-copy's last_copied_at {recopiedAt} with {after[2]}.");
+        Assert.Equal(recopiedAt, after[0]);
+        Assert.Equal(RepairedTimestamps[1], after[1]);
+    }
+
     private static string BackupDirectory(TemporaryDatabaseScope scope) =>
         System.IO.Path.Combine(System.IO.Path.GetDirectoryName(scope.DatabasePath)!, "backups");
 

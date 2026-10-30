@@ -89,9 +89,13 @@ re-run before believing a single red result.
 
 CI does run them, in a separate step: `.github/scripts/Invoke-HeadlessTests.ps1`.
 An assertion failure fails the build at once; only a run whose every failure is
-a `[Test Case Cleanup Failure]` is retried, once, and only for those tests. Run
+a `[Test Case Cleanup Failure]` is retried, once, and only for those tests. A
+run that did not demonstrably complete - no TRX, no test executed, a run-level
+error such as xUnit's "Catastrophic failure", or a non-zero exit with no failed
+test - fails the build and is never retried. Run
 the same script locally to reproduce what CI decides, or pass `-ClassifyOnly`
 an existing TRX to see how its failures would be treated.
+`CiHeadlessGateScriptTests` runs the script against hand-written TRX files.
 
 If Clipthrough is running it holds a lock on its own output, and any build that
 needs to copy a changed assembly into it fails with `MSB3027` / `MSB3021` on

@@ -88,6 +88,45 @@ public sealed class BoundedListTextTests
         Assert.Equal(text, row.Content);
     }
 
+    /// <summary>
+    /// Rubber-duck F-07-2. SQLite's substr() and length() stop at the first NUL in
+    /// a TEXT value, so a clip holding U+0000 (Base64 Decode can produce one) came
+    /// back from the list as the text before the NUL, flagged complete. Hydration
+    /// then had nothing to do, and copy, export, transform and edit all silently
+    /// dropped the rest. The long case is written with SQL rather than captured:
+    /// binding a string parameter longer than about 500 UTF-8 bytes stops at its
+    /// first NUL, so capture cannot store one today, but a NUL past the bound must
+    /// not depend on that.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AClipWithAnEmbeddedNul_IsNeverPassedOffAsComplete(bool longerThanTheBound)
+    {
+        const string ShortText = "left\0right";
+        var (scope, id) = await SeedAsync(ShortText);
+        using var __ = scope;
+        var text = ShortText;
+        if (longerThanTheBound)
+        {
+            text = ShortText + LongText;
+            await using var connection = scope.ConnectionFactory.CreateConnection();
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE clips SET content = content || $tail WHERE id = $id;";
+            command.Parameters.AddWithValue("$tail", LongText);
+            command.Parameters.AddWithValue("$id", id);
+            Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        }
+
+        var full = await scope.ClipStoreService.GetByIdAsync(id);
+        Assert.Equal(text, full!.Content);
+
+        var row = Assert.Single((await scope.ClipStoreService.SearchAsync(new ClipSearchFilters())).Items);
+
+        Assert.True(row.IsContentTruncated, $"The row carries {row.ContentPrefix.Length} of {text.Length} characters but says it is complete.");
+    }
+
     public static TheoryData<string, ClipSearchFilters> EveryEngine() => new()
     {
         { "fts", new ClipSearchFilters { SearchText = Needle } },

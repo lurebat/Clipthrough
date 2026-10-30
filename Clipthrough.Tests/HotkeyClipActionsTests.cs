@@ -150,6 +150,40 @@ public sealed class HotkeyClipActionsTests
     }
 
     /// <summary>
+    /// Step-paste of a captured rich clip publishes the markup the capture
+    /// stored, not the plain text beside it. Capture keeps the source app's
+    /// plain text in <c>content</c> and the HTML in <c>content_bytes</c>; the
+    /// hotkey used to send <c>content</c> as the HTML payload, so a paste into
+    /// Word arrived without its formatting.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task StepPaste_OnARichClip_PublishesTheCapturedMarkup()
+    {
+        const string plain = "hello world";
+        const string html = "<p>hello <b>world</b></p>";
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentBytes = Encoding.UTF8.GetBytes(html),
+            ContentText = plain,
+            ContentType = ContentType.RichText,
+            ContentFormat = ClipContentFormat.Html,
+            SourceApp = "Tests",
+        });
+        var interaction = new TestSystemInteractionService();
+        var monitor = new TestClipboardMonitorService();
+
+        var outcome = await HotkeyClipActions.CopyClipAtOffsetAsync(
+            0, scope.ClipStoreService, interaction, monitor, maxImageBytes: null);
+
+        Assert.Equal(HotkeyClipActions.StepPasteOutcome.Copied, outcome);
+        Assert.Equal(html, interaction.LastCopiedRichContent);
+        Assert.Equal(ClipContentFormat.Html, interaction.LastCopiedRichContentFormat);
+        Assert.Equal(plain, interaction.LastCopiedRichPlainText);
+    }
+
+    /// <summary>
     /// A clip that cannot reach the clipboard must not be marked pasted, and
     /// the caller must not send the keystroke: it would paste whatever the user
     /// had on the clipboard before.

@@ -85,6 +85,14 @@ internal static class WindowGeometry
     /// of it, or the first screen when that screen is gone, shrunk and moved
     /// to fit that screen's working area.
     /// </summary>
+    /// <remarks>
+    /// "Most of it" is measured with one frame for every screen, sized at the
+    /// scaling of the screen nearest the saved top-left: window.json does not
+    /// record the scaling the size was saved at, and that screen is the best
+    /// evidence of it. Sizing the frame at each candidate's own scaling made a
+    /// 250% neighbour see a frame 2.5 times as large, so it won a window that
+    /// was mostly on the 100% screen beside it.
+    /// </remarks>
     /// <param name="remembered">The saved client size (DIP) and frame position (pixels).</param>
     /// <param name="screens">The screens connected now; the first is the primary.</param>
     public static WindowPlacement Restore(WindowPlacement remembered, Size minClientSize, Size frameExtra, IReadOnlyList<ScreenArea> screens)
@@ -94,25 +102,33 @@ internal static class WindowGeometry
             return remembered;
         }
 
+        var savedOn = screens.MinBy(s => DistanceSquared(remembered.Position, s.WorkingArea));
+        var frame = new PixelRect(remembered.Position, OuterPixels(remembered.ClientSize, frameExtra, savedOn.Scaling));
         var screen = screens
-            .Select(s => (Screen: s, Overlap: OverlapArea(s, remembered, frameExtra)))
+            .Select(s => (Screen: s, Overlap: OverlapArea(frame, s.WorkingArea)))
             .Where(s => s.Overlap > 0)
             .OrderByDescending(s => s.Overlap)
             .Select(s => (ScreenArea?)s.Screen)
             .FirstOrDefault() ?? screens[0];
 
         var size = FitSize(remembered.ClientSize, minClientSize, frameExtra, screen);
-        var position = OverlapArea(screen, remembered, frameExtra) > 0
+        var position = OverlapArea(frame, screen.WorkingArea) > 0
             ? remembered.Position
             : screen.WorkingArea.Position;
         return new WindowPlacement(size, Clamp(position, OuterPixels(size, frameExtra, screen.Scaling), screen.WorkingArea));
     }
 
-    private static long OverlapArea(ScreenArea screen, WindowPlacement placement, Size frameExtra)
+    private static long OverlapArea(PixelRect frame, PixelRect workingArea)
     {
-        var rect = new PixelRect(placement.Position, OuterPixels(placement.ClientSize, frameExtra, screen.Scaling));
-        var overlap = rect.Intersect(screen.WorkingArea);
+        var overlap = frame.Intersect(workingArea);
         return (long)overlap.Width * overlap.Height;
+    }
+
+    private static long DistanceSquared(PixelPoint point, PixelRect area)
+    {
+        long dx = Math.Max(0, Math.Max(area.X - point.X, point.X - (area.Right - 1)));
+        long dy = Math.Max(0, Math.Max(area.Y - point.Y, point.Y - (area.Bottom - 1)));
+        return (dx * dx) + (dy * dy);
     }
 
     private static PixelSize OuterPixels(Size clientSize, Size frameExtra, double scaling)

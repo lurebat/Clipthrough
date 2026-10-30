@@ -67,6 +67,10 @@ public sealed class ClipStoreService : IClipStoreService
     /// there was more. A row shows a title and a snippet; carrying a 2 MB log into every
     /// list page cost the UI that string and its UTF-16 copy per row. An entry read this
     /// way throws on <see cref="ClipEntry.Content"/> until it is hydrated.
+    ///
+    /// substr() and length() both stop at the first NUL in a TEXT value, so a clip
+    /// containing one is always flagged: its row holds only the text before the NUL,
+    /// however short the clip.
     /// </summary>
     private const string ClipListSelectColumns = """
             c.id,
@@ -99,7 +103,7 @@ public sealed class ClipStoreService : IClipStoreService
             c.source_clip_id,
             c.transform_kind,
             c.import_kind,
-            (COALESCE(length(c.content), 0) > 4096)
+            (COALESCE(length(c.content), 0) > 4096 OR COALESCE(instr(c.content, char(0)), 0) > 0)
         """;
 
     /// <summary>
@@ -958,16 +962,21 @@ public sealed class ClipStoreService : IClipStoreService
         int? finalClipCount = null;
         long? finalStoredBytes = null;
 
+        // A deferred upgrade start leaves the UTC backfill to the background run,
+        // while maintenance runs at once (F-13-2).
+        var utcBackfillPending = (settings.EnableSensitiveClipLifetime || settings.EnableNormalClipLifetime)
+            && await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM app_metadata WHERE key = 'utc_backfill_pending' AND value = '1';", cancellationToken, transaction) > 0;
+
         if (settings.EnableSensitiveClipLifetime)
         {
             // Deliberately not preserving pinned/favorite clips: an expiring secret
             // outranks the user's intent to keep it around.
-            removedClipIds.AddRange(await DeleteOlderThanAsync(connection, transaction, isSensitive: true, now.AddMinutes(-settings.SensitiveClipLifetimeMinutes), preserveUserKeptClips: false, cancellationToken));
+            removedClipIds.AddRange(await DeleteOlderThanAsync(connection, transaction, isSensitive: true, now.AddMinutes(-settings.SensitiveClipLifetimeMinutes), preserveUserKeptClips: false, utcBackfillPending, cancellationToken));
         }
 
         if (settings.EnableNormalClipLifetime)
         {
-            removedClipIds.AddRange(await DeleteOlderThanAsync(connection, transaction, isSensitive: false, now.AddDays(-settings.NormalClipLifetimeDays), preserveUserKeptClips: true, cancellationToken));
+            removedClipIds.AddRange(await DeleteOlderThanAsync(connection, transaction, isSensitive: false, now.AddDays(-settings.NormalClipLifetimeDays), preserveUserKeptClips: true, utcBackfillPending, cancellationToken));
         }
 
         if (settings.EnableMaxEntryCount)
@@ -985,6 +994,14 @@ public sealed class ClipStoreService : IClipStoreService
 
         if (settings.EnableMaxLibrarySize)
         {
+            // The purges above may have orphaned icons that the sweep below would
+            // delete anyway; counting them here evicts clips to pay for them
+            // (rubber-duck F-11-1).
+            if (removedClipIds.Count > 0)
+            {
+                await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);
+            }
+
             var totalStoredBytes = await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken, transaction);
             finalStoredBytes = totalStoredBytes;
             var maxBytes = settings.MaxLibrarySizeMegabytes * 1024L * 1024L;
@@ -2403,13 +2420,27 @@ public sealed class ClipStoreService : IClipStoreService
         RETURNING id;
         """;
 
-    private static async Task<List<long>> DeleteOlderThanAsync(SqliteConnection connection, SqliteTransaction transaction, bool isSensitive, DateTimeOffset cutoff, bool preserveUserKeptClips, CancellationToken cancellationToken)
+    /// <summary>
+    /// The lifetime purge while an upgrade still owes the UTC backfill
+    /// (<c>utc_backfill_pending</c>, F-13-2). Until it has run, rows can carry a
+    /// non-zero offset, which the text comparison above orders wrong by up to that
+    /// offset (F-35): in a negative-offset zone it purged unexpired sensitive clips.
+    /// julianday reads the offset. It cannot use the index's date range, a cost
+    /// paid only for the minutes the background backfill takes.
+    /// </summary>
+    internal const string OffsetAwareRetentionDeleteStatement = $"""
+        DELETE FROM clips
+        WHERE is_sensitive = $isSensitive
+          AND julianday(last_copied_at) < julianday($cutoff)
+          AND ($keepUserKept = 0 OR NOT {UserKeptClipPredicate})
+        RETURNING id;
+        """;
+
+    private static async Task<List<long>> DeleteOlderThanAsync(SqliteConnection connection, SqliteTransaction transaction, bool isSensitive, DateTimeOffset cutoff, bool preserveUserKeptClips, bool utcBackfillPending, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = $"""
-            {RetentionDeleteStatement}
-            """;
+        command.CommandText = utcBackfillPending ? OffsetAwareRetentionDeleteStatement : RetentionDeleteStatement;
         command.Parameters.AddWithValue("$isSensitive", isSensitive ? 1 : 0);
         command.Parameters.AddWithValue("$cutoff", cutoff.ToString("O", CultureInfo.InvariantCulture));
         command.Parameters.AddWithValue("$keepUserKept", preserveUserKeptClips ? 1 : 0);
@@ -2549,11 +2580,19 @@ public sealed class ClipStoreService : IClipStoreService
     private static async Task<(List<long> DeletedIds, long RemainingBytes)> DeleteUntilWithinSizeAsync(SqliteConnection connection, SqliteTransaction transaction, long totalStoredBytes, long maxBytes, CancellationToken cancellationToken)
     {
         var evictionCount = 0;
+
+        // The total counts each distinct icon once (U-E1), so evicting the last
+        // clip that uses one frees the icon too - the orphan sweep deletes it.
+        // Without this the walk keeps evicting after the library already fits
+        // (rubber-duck F-11-1). Keyed by hash: the clips still using that icon,
+        // and the icon's size. One lookup per distinct icon, not per row.
+        var iconReferences = new Dictionary<string, (long Remaining, long Bytes)>(StringComparer.Ordinal);
+
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
             command.CommandText = $"""
-                SELECT {StoredRowBytes}
+                SELECT {StoredRowBytes}, source_app_icon_hash
                 FROM clips
                 WHERE NOT {UserKeptClipPredicate}
                 {OldestFirstEvictionOrder};
@@ -2563,6 +2602,22 @@ public sealed class ClipStoreService : IClipStoreService
             {
                 evictionCount++;
                 totalStoredBytes -= Math.Max(0L, reader.IsDBNull(0) ? 0L : reader.GetInt64(0));
+
+                if (!reader.IsDBNull(1))
+                {
+                    var hash = reader.GetString(1);
+                    if (!iconReferences.TryGetValue(hash, out var icon))
+                    {
+                        icon = await ReadIconReferencesAsync(connection, transaction, hash, cancellationToken);
+                    }
+
+                    icon.Remaining--;
+                    iconReferences[hash] = icon;
+                    if (icon.Remaining == 0)
+                    {
+                        totalStoredBytes -= icon.Bytes;
+                    }
+                }
             }
         }
 
@@ -2573,6 +2628,20 @@ public sealed class ClipStoreService : IClipStoreService
 
         var deletedIds = await DeleteOldestAsync(connection, transaction, evictionCount, cancellationToken);
         return (deletedIds, totalStoredBytes);
+    }
+
+    private static async Task<(long Remaining, long Bytes)> ReadIconReferencesAsync(SqliteConnection connection, SqliteTransaction transaction, string hash, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT (SELECT COUNT(*) FROM clips WHERE source_app_icon_hash = $hash),
+                   COALESCE((SELECT LENGTH(png) FROM app_icons WHERE hash = $hash), 0);
+            """;
+        command.Parameters.AddWithValue("$hash", hash);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await reader.ReadAsync(cancellationToken);
+        return (reader.GetInt64(0), reader.GetInt64(1));
     }
 
     private static void AddUpsertParameters(

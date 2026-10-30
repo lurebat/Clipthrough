@@ -193,6 +193,122 @@ public sealed class ClipRetentionTests
     }
 
     /// <summary>
+    /// Since U-E1 the size total counts each distinct icon once, so evicting the
+    /// last clip that uses an icon frees the icon as well, and the orphan sweep
+    /// deletes it. The walk that decides how many clips to evict subtracted only
+    /// each row's stored_bytes, so it kept going after the library already fit:
+    /// here, evicting the oldest clip and its 4 KB icon is enough, but the walk
+    /// saw only 100 bytes come off and took a 524 KB clip as well. (Rubber-duck
+    /// F-11-1)
+    /// </summary>
+    [Fact]
+    public async Task Maintenance_LibrarySizeCap_CountsTheIconAnEvictionFrees()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings
+        {
+            MaxClipSizeBytes = 4096,
+            EnableMaxLibrarySize = true,
+            MaxLibrarySizeMegabytes = 1,
+        });
+
+        var oldest = await CaptureAsync(scope, "oldest, with an icon of its own");
+        var middle = await CaptureAsync(scope, "middle");
+        var newest = await CaptureAsync(scope, "newest");
+
+        // 100 + 4096 + 2 x 524,000 = 1,052,196: over the 1,048,576 cap by 3,620,
+        // which the oldest clip's payload alone (100) does not cover and its
+        // payload plus its icon (4,196) does.
+        Execute(scope, $"UPDATE clips SET byte_size = 100 WHERE id = {oldest.Id};");
+        Execute(scope, $"UPDATE clips SET byte_size = 524000 WHERE id IN ({middle.Id}, {newest.Id});");
+        await scope.ClipStoreService.UpdateSourceAppIconAsync(oldest.Id, Enumerable.Repeat((byte)7, 4096).ToArray());
+
+        var result = await scope.ClipStoreService.ApplyMaintenanceAsync();
+
+        Assert.Null(await scope.ClipStoreService.GetByIdAsync(oldest.Id));
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(middle.Id));
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(newest.Id));
+        Assert.Equal(1, result.PurgedClipCount);
+        Assert.Equal(2 * 524_000, result.TotalStoredBytes);
+    }
+
+    /// <summary>
+    /// The same over-eviction from the other side: an earlier purge in the same
+    /// maintenance pass - here the entry-count cap - orphans an icon, and the
+    /// orphan sweep used to run only after the size cap had read its total. The
+    /// orphan's bytes counted against the cap, and two clips the library had room
+    /// for were evicted to pay for an icon about to be deleted anyway.
+    /// (Rubber-duck F-11-1)
+    /// </summary>
+    [Fact]
+    public async Task Maintenance_LibrarySizeCap_DoesNotCountAnIconAnEarlierPurgeOrphaned()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings
+        {
+            MaxClipSizeBytes = 4096,
+            EnableMaxEntryCount = true,
+            MaxEntryCount = 3,
+            EnableMaxLibrarySize = true,
+            MaxLibrarySizeMegabytes = 1,
+        });
+
+        var overCount = await CaptureAsync(scope, "evicted by the entry count, with an icon of its own");
+        var small = await CaptureAsync(scope, "small");
+        var middle = await CaptureAsync(scope, "middle");
+        var newest = await CaptureAsync(scope, "newest");
+
+        // Once the count cap has taken the first clip, what is left is
+        // 100 + 2 x 524,000 = 1,048,100, under the 1,048,576 cap - unless the
+        // first clip's 4 KB icon is still counted.
+        Execute(scope, $"UPDATE clips SET byte_size = 100 WHERE id IN ({overCount.Id}, {small.Id});");
+        Execute(scope, $"UPDATE clips SET byte_size = 524000 WHERE id IN ({middle.Id}, {newest.Id});");
+        await scope.ClipStoreService.UpdateSourceAppIconAsync(overCount.Id, Enumerable.Repeat((byte)7, 4096).ToArray());
+
+        var result = await scope.ClipStoreService.ApplyMaintenanceAsync();
+
+        Assert.Null(await scope.ClipStoreService.GetByIdAsync(overCount.Id));
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(small.Id));
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(middle.Id));
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(newest.Id));
+        Assert.Equal(1, result.PurgedClipCount);
+        Assert.Equal(100 + (2 * 524_000), result.TotalStoredBytes);
+    }
+
+    /// <summary>
+    /// The size a purge reports is read again after the closing orphan sweep, not
+    /// taken from the walk. The walk accounts for icons its own evictions free, but
+    /// not for one nothing referred to before the pass began - re-copying a clip
+    /// from another app leaves one - which the sweep deletes as well.
+    /// </summary>
+    [Fact]
+    public async Task Maintenance_LibrarySizeCap_ReportsTheSizeLeftAfterTheOrphanSweep()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings
+        {
+            MaxClipSizeBytes = 4096,
+            EnableMaxLibrarySize = true,
+            MaxLibrarySizeMegabytes = 1,
+        });
+
+        var oldest = await CaptureAsync(scope, "oldest");
+        var newest = await CaptureAsync(scope, "newest");
+        Execute(scope, "UPDATE clips SET byte_size = 600000;");
+        Execute(scope, "INSERT INTO app_icons (hash, png) VALUES ('orphan', zeroblob(4096));");
+
+        var result = await scope.ClipStoreService.ApplyMaintenanceAsync();
+
+        Assert.Null(await scope.ClipStoreService.GetByIdAsync(oldest.Id));
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(newest.Id));
+        Assert.Equal(0, Scalar(scope, "SELECT COUNT(*) FROM app_icons;"));
+        Assert.Equal(600_000, result.TotalStoredBytes);
+    }
+
+    /// <summary>
     /// The deliberate exception. A pinned secret still expires — pinning must not
     /// become a way to opt out of the sensitive-clip timer.
     /// </summary>
