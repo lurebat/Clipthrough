@@ -347,6 +347,42 @@ public sealed class StorageLifecycleTests : IDisposable
         Assert.Equal(1, found.TotalMatchingCount);
     }
 
+    /// <summary>
+    /// Removing encryption swaps the plaintext copy in before storage.json is
+    /// rewritten. When that write fails - or the app dies anywhere between the
+    /// two - storage.json still remembers the old password, and the next start
+    /// keyed every connection to a file that has no key: "file is not a
+    /// database", with no prompt to fall back on, until storage.json was edited
+    /// by hand. A held handle on storage.json is the write failure here; it
+    /// leaves exactly the files a crash after the swap leaves.
+    /// </summary>
+    [Fact]
+    public async Task Rekey_ToNoPassword_ConfigWriteFailsAfterTheSwap_NextStartOpensTheLibrary()
+    {
+        var (storage, _, dbPath, _) = await CreateLibraryAsync("old-pw");
+        await storage.SaveAsync(storage.Current with { DatabasePassword = "old-pw", RememberPassword = true });
+        Assert.Contains("databasePasswordProtected", File.ReadAllText(_configPath), StringComparison.Ordinal);
+
+        using (new FileStream(_configPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            await Assert.ThrowsAnyAsync<Exception>(() =>
+                storage.RekeyAsync("old-pw", string.Empty, rememberNewPassword: true));
+        }
+
+        SqliteConnection.ClearAllPools();
+        Assert.False(StorageOptionsService.RequiresPassword(dbPath), "Setup: the swap to the plaintext copy should have happened.");
+        Assert.Contains("databasePasswordProtected", File.ReadAllText(_configPath), StringComparison.Ordinal);
+
+        var next = new StorageOptionsService(new FakeDataProtectionService(), _configPath);
+        var factory = new Clipthrough.Database.SqliteConnectionFactory(next);
+        var store = new ClipStoreService(factory, new SensitivityService(factory), new TestSettingsService(), new TestNotificationService());
+
+        var found = await store.SearchAsync(new ClipSearchFilters { SearchText = Marker });
+        Assert.Equal(1, found.TotalMatchingCount);
+        Assert.Equal(string.Empty, next.Current.DatabasePassword);
+        Assert.DoesNotContain("databasePasswordProtected", File.ReadAllText(_configPath), StringComparison.Ordinal);
+    }
+
     // ─── Backups across a rekey (F-15) ────────────────────────────────────────
 
     /// <summary>
@@ -427,6 +463,32 @@ public sealed class StorageLifecycleTests : IDisposable
         // Out of the way, so the next save cannot overwrite it and the first-run
         // flow lets the user point the app back at their library.
         Assert.False(storage.HasSavedConfig);
+    }
+
+    /// <summary>
+    /// The startup repair drops a remembered key only for a file that holds
+    /// data readable without it. A file opening creates is empty until the
+    /// first write, and an empty file opens keyless too; dropping the key there
+    /// would build the user's library unencrypted from then on, silently.
+    /// </summary>
+    [Fact]
+    public async Task RememberedPassword_OnAnEmptyDatabaseFile_IsKept()
+    {
+        var (storage, _, dbPath, _) = await CreateLibraryAsync("keep-pw");
+        await storage.SaveAsync(storage.Current with { DatabasePassword = "keep-pw", RememberPassword = true });
+        SqliteConnection.ClearAllPools();
+        foreach (var sidecar in new[] { "-wal", "-shm", "-journal" })
+        {
+            File.Delete(dbPath + sidecar);
+        }
+
+        File.WriteAllBytes(dbPath, []);
+        Assert.False(StorageOptionsService.RequiresPassword(dbPath), "Setup: an empty file should open without a key.");
+
+        var next = new StorageOptionsService(new FakeDataProtectionService(), _configPath);
+
+        Assert.Equal("keep-pw", next.Current.DatabasePassword);
+        Assert.Contains("databasePasswordProtected", File.ReadAllText(_configPath), StringComparison.Ordinal);
     }
 
     [Fact]

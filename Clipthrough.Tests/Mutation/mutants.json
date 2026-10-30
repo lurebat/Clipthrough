@@ -3126,5 +3126,45 @@
     "find": "await Task.Run(() => TryBuildImageRequestFromFile(path, sourceInfo));",
     "replace": "await Task.FromResult(TryBuildImageRequestFromFile(path, sourceInfo));",
     "filter": "ADroppedNonPngImageFile_IsDecodedAndReEncodedOffTheCallingThread"
+  },
+  {
+    "id": "startup-keeps-stale-key-on-plaintext-db",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "Removing encryption swaps the plaintext file in before storage.json is rewritten; a crash or failed write in between leaves the old remembered password, and keying a plaintext file fails every connection with 'file is not a database' at the next start (rubber-duck F-04-1).",
+    "find": "                && !RequiresPassword(options.DatabasePath))",
+    "replace": "                && !RequiresPassword(options.DatabasePath)\n                && options.DatabasePath.Length < 0)",
+    "filter": "Rekey_ToNoPassword_ConfigWriteFailsAfterTheSwap_NextStartOpensTheLibrary"
+  },
+  {
+    "id": "startup-drops-key-on-empty-db-file",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "An empty database file opens without a key, so dropping a remembered password whenever a keyless read succeeds would build the library unencrypted after a crash between file creation and the first write (rubber-duck F-04-1 review follow-up).",
+    "find": "                && new FileInfo(options.DatabasePath).Length > 0",
+    "replace": "                && new FileInfo(options.DatabasePath).Length >= 0",
+    "filter": "RememberedPassword_OnAnEmptyDatabaseFile_IsKept"
+  },
+  {
+    "id": "footer-meters-orientation-set-on-the-element",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "why": "Rubber-duck F-14-1. A value set on the element beats every style setter, so an inline Orientation on FooterStats silently disables the bp-narrow override and the two meters stay a 576 DIP row in a 480 DIP window.",
+    "find": "                <StackPanel x:Name=\"FooterStats\"\n                            Grid.Column=\"1\"\n",
+    "replace": "                <StackPanel x:Name=\"FooterStats\"\n                            Grid.Column=\"1\"\n                            Orientation=\"Horizontal\"\n",
+    "filter": "FullyQualifiedName~FooterMeters_FitInsideTheFooter"
+  },
+  {
+    "id": "footer-meter-min-width-set-on-the-element",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "why": "Rubber-duck F-14-1. An inline MinWidth on the footer meters beats the bp-medium MinWidth 150 style, so at the narrowest Medium width the two 280 DIP meters run past the footer.",
+    "find": "                            VerticalAlignment=\"Center\">\n                    <Border Classes=\"detail-stat-card\"\n                            Padding=\"8,4\">\n                        <StackPanel Spacing=\"4\">\n                            <Grid ColumnDefinitions=\"*,Auto\"\n                                  ColumnSpacing=\"8\">\n                                <TextBlock Classes=\"detail-label\"\n                                           FontSize=\"10\"\n                                           Text=\"{Binding StorageUsageText}\" />\n                                <TextBlock Grid.Column=\"1\"\n                                           Classes=\"body-muted\"\n                                           FontSize=\"10\"\n                                           Text=\"{Binding StorageCapacityText}\" />\n                            </Grid>\n                            <ProgressBar Minimum=\"0\"\n                                         Maximum=\"100\"\n                                         Value=\"{Binding StorageUsagePercent}\"\n                                         Height=\"4\" />\n                        </StackPanel>\n                    </Border>\n\n                    <Border Classes=\"detail-stat-card\"\n                            Padding=\"8,4\">",
+    "replace": "                            VerticalAlignment=\"Center\">\n                    <Border Classes=\"detail-stat-card\"\n                            Padding=\"8,4\"\n                            MinWidth=\"280\">\n                        <StackPanel Spacing=\"4\">\n                            <Grid ColumnDefinitions=\"*,Auto\"\n                                  ColumnSpacing=\"8\">\n                                <TextBlock Classes=\"detail-label\"\n                                           FontSize=\"10\"\n                                           Text=\"{Binding StorageUsageText}\" />\n                                <TextBlock Grid.Column=\"1\"\n                                           Classes=\"body-muted\"\n                                           FontSize=\"10\"\n                                           Text=\"{Binding StorageCapacityText}\" />\n                            </Grid>\n                            <ProgressBar Minimum=\"0\"\n                                         Maximum=\"100\"\n                                         Value=\"{Binding StorageUsagePercent}\"\n                                         Height=\"4\" />\n                        </StackPanel>\n                    </Border>\n\n                    <Border Classes=\"detail-stat-card\"\n                            Padding=\"8,4\"\n                            MinWidth=\"280\">",
+    "filter": "FullyQualifiedName~FooterMeters_FitInsideTheFooter"
+  },
+  {
+    "id": "restore-sizes-the-frame-at-each-candidates-scaling",
+    "file": "Clipthrough/Views/WindowGeometry.cs",
+    "why": "Rubber-duck F-14-2. Measuring the remembered frame at each candidate screen's own scaling makes a 250% neighbour see it 2.5 times as large, so a window saved mostly on the 100% screen beside it restores on the wrong monitor.",
+    "find": "            .Select(s => (Screen: s, Overlap: OverlapArea(frame, s.WorkingArea)))",
+    "replace": "            .Select(s => (Screen: s, Overlap: OverlapArea(new PixelRect(remembered.Position, OuterPixels(remembered.ClientSize, frameExtra, s.Scaling)), s.WorkingArea)))",
+    "filter": "FullyQualifiedName~WindowGeometryTests.ARememberedWindowMostlyOnA100PercentScreen"
   }
 ]
