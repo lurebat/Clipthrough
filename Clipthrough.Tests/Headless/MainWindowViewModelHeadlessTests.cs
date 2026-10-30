@@ -2464,11 +2464,10 @@ public sealed partial class MainWindowViewModelHeadlessTests
             clipStore: blockingStore);
         await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
-        for (var attempt = 0; attempt < 80 && viewModel.Clips.Count < 200; attempt++)
-        {
-            await Task.Delay(25);
-            Dispatcher.UIThread.RunJobs();
-        }
+        // Startup re-applies the saved filters, which queues a refresh of its own;
+        // let it land before paging, and before every count asserted below.
+        await viewModel.WhenRefreshesIdleAsync();
+        Dispatcher.UIThread.RunJobs();
 
         Assert.Equal(200, viewModel.Clips.Count);
         await viewModel.LoadMoreCommand.Execute().ToTask();
@@ -2501,12 +2500,8 @@ public sealed partial class MainWindowViewModelHeadlessTests
 
         blockingStore.ReleaseWrites();
         await pendingWrite;
-
-        for (var attempt = 0; attempt < 200 && viewModel.Clips.Count != 200; attempt++)
-        {
-            await Task.Delay(25);
-            Dispatcher.UIThread.RunJobs();
-        }
+        await viewModel.WhenRefreshesIdleAsync();
+        Dispatcher.UIThread.RunJobs();
 
         // All 201 clips still match "keep", so a depth that failed to reset
         // shows up as 201.
@@ -2969,14 +2964,25 @@ public sealed partial class MainWindowViewModelHeadlessTests
             m_release.TrySetResult();
         }
 
-        public Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default)
+        /// <summary>
+        /// Awaited before each search reaches the store, so a test can hold a
+        /// refresh (offset 0) or a load-more page (offset past it) in flight.
+        /// </summary>
+        public Func<ClipSearchFilters, Task>? BeforeSearch { get; set; }
+
+        public async Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default)
         {
             lock (m_gate)
             {
                 m_searches.Add(filters.SearchText ?? string.Empty);
             }
 
-            return inner.SearchAsync(filters, cancellationToken);
+            if (BeforeSearch is { } beforeSearch)
+            {
+                await beforeSearch(filters);
+            }
+
+            return await inner.SearchAsync(filters, cancellationToken);
         }
 
         public async Task SetFavoriteAsync(long clipId, bool isFavorite, CancellationToken cancellationToken = default)
