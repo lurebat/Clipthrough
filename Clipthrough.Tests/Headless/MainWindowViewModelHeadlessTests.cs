@@ -348,8 +348,7 @@ public sealed partial class MainWindowViewModelHeadlessTests
         clipboardMonitor.Emit(clip);
         Dispatcher.UIThread.RunJobs();
 
-        // Settle the refresh the capture started; its list summary would
-        // otherwise overwrite the status under test.
+        // Settle the startup refresh, so the list holds the captured row.
         for (var attempt = 0; attempt < 200 && !viewModel.StatusText.Contains("matching", StringComparison.Ordinal); attempt++)
         {
             await Task.Delay(10);
@@ -358,14 +357,40 @@ public sealed partial class MainWindowViewModelHeadlessTests
 
         Assert.Contains("matching", viewModel.StatusText, StringComparison.Ordinal);
 
-        var row = viewModel.Clips.Single(c => c.Clip.Id == clip.Id);
-        await row.ApplyTextTransformationCommand.Execute(TextTransformation.HtmlToMarkdown).ToTask();
-        Dispatcher.UIThread.RunJobs();
 
-        Assert.Equal("No text or file clips changed by transformation", viewModel.StatusText);
+        // Startup also owes a 300 ms debounced filter refresh, which no state
+        // here reveals, and every refresh ends by writing the list summary to
+        // StatusText. With the converter already warm from earlier tests the
+        // transform finishes inside that window, and the summary landing after
+        // it replaced the status under test. So assert on what the transform
+        // wrote, recorded as it happens, and count clips in the store.
+        var statusWrites = new List<string>();
+        void RecordStatus(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(MainWindowViewModel.StatusText))
+            {
+                statusWrites.Add(viewModel.StatusText);
+            }
+        }
+
+        viewModel.PropertyChanged += RecordStatus;
+        try
+        {
+            var row = viewModel.Clips.Single(c => c.Clip.Id == clip.Id);
+            await row.ApplyTextTransformationCommand.Execute(TextTransformation.HtmlToMarkdown).ToTask();
+            Dispatcher.UIThread.RunJobs();
+        }
+        finally
+        {
+            viewModel.PropertyChanged -= RecordStatus;
+        }
+
+        var transformStatuses = statusWrites.Where(s => !s.Contains("matching", StringComparison.Ordinal)).ToList();
+        Assert.True(transformStatuses.Count > 0, "The transform wrote no status at all.");
+        Assert.Equal("No text or file clips changed by transformation", transformStatuses[^1]);
         Assert.Null(systemInteraction.LastCopiedText);
         var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
-        Assert.DoesNotContain(all.Items, c => c.SourceClipId == clip.Id);
+        Assert.Equal(clip.Id, Assert.Single(all.Items).Id);
     }
 
     /// <summary>
