@@ -59,7 +59,7 @@ public sealed class DragDropService : IDragDropService
         return transfer;
     }
 
-    public Task<IReadOnlyList<ClipCaptureRequest>> TryBuildCaptureRequestsAsync(IDataTransfer drop, ClipboardSourceApplicationInfo? sourceInfo)
+    public async Task<IReadOnlyList<ClipCaptureRequest>> TryBuildCaptureRequestsAsync(IDataTransfer drop, ClipboardSourceApplicationInfo? sourceInfo)
     {
         ArgumentNullException.ThrowIfNull(drop);
 
@@ -80,16 +80,21 @@ public sealed class DragDropService : IDragDropService
             {
                 if (paths.Length == 1 && IsImageExtension(Path.GetExtension(paths[0])))
                 {
-                    var imageRequest = TryBuildImageRequestFromFile(paths[0], sourceInfo);
+                    // The caller is the drop handler on the UI thread, and a large
+                    // photo takes seconds to read, decode and re-encode as PNG.
+                    // Nothing below reads the drop again, which matters: Avalonia
+                    // releases the OLE data object once the handler first yields.
+                    var path = paths[0];
+                    var imageRequest = await Task.Run(() => TryBuildImageRequestFromFile(path, sourceInfo));
                     if (imageRequest is not null)
                     {
                         requests.Add(imageRequest);
-                        return Task.FromResult<IReadOnlyList<ClipCaptureRequest>>(requests);
+                        return requests;
                     }
                 }
 
                 requests.Add(BuildFilesRequest(paths, sourceInfo));
-                return Task.FromResult<IReadOnlyList<ClipCaptureRequest>>(requests);
+                return requests;
             }
         }
 
@@ -101,7 +106,7 @@ public sealed class DragDropService : IDragDropService
             if (imageRequest is not null)
             {
                 requests.Add(imageRequest);
-                return Task.FromResult<IReadOnlyList<ClipCaptureRequest>>(requests);
+                return requests;
             }
         }
 
@@ -113,7 +118,7 @@ public sealed class DragDropService : IDragDropService
             if (imageRequest is not null)
             {
                 requests.Add(imageRequest);
-                return Task.FromResult<IReadOnlyList<ClipCaptureRequest>>(requests);
+                return requests;
             }
         }
 
@@ -123,14 +128,14 @@ public sealed class DragDropService : IDragDropService
         if (!string.IsNullOrWhiteSpace(html))
         {
             requests.Add(BuildRichTextRequest(html, plainText, ClipContentFormat.Html, sourceInfo));
-            return Task.FromResult<IReadOnlyList<ClipCaptureRequest>>(requests);
+            return requests;
         }
 
         var rtf = drop.TryGetValue(RtfFormat);
         if (!string.IsNullOrWhiteSpace(rtf))
         {
             requests.Add(BuildRichTextRequest(rtf, plainText, ClipContentFormat.Rtf, sourceInfo));
-            return Task.FromResult<IReadOnlyList<ClipCaptureRequest>>(requests);
+            return requests;
         }
 
         // 5) Plain text fallback.
@@ -139,7 +144,7 @@ public sealed class DragDropService : IDragDropService
             requests.Add(BuildTextRequest(plainText, sourceInfo));
         }
 
-        return Task.FromResult<IReadOnlyList<ClipCaptureRequest>>(requests);
+        return requests;
     }
 
     private async Task PopulateSingleClipPayloadAsync(DataTransfer transfer, ClipEntry clip, IStorageProvider storageProvider)

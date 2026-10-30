@@ -3118,5 +3118,13 @@
     "find": "drain = _draining;",
     "replace": "drain = cancelled ? _draining : Task.CompletedTask;",
     "filter": "Pause_WhileAStopIsStillDraining_WaitsForTheLoopToFinish"
+  },
+  {
+    "id": "drop-image-encode-on-ui-thread",
+    "file": "Clipthrough/Services/Capture/DragDropService.cs",
+    "why": "Rubber-duck F-09-2. The drop handler awaits TryBuildCaptureRequestsAsync on the UI thread; reading, decoding and PNG-encoding a dropped photo inline freezes the window for seconds.",
+    "find": "await Task.Run(() => TryBuildImageRequestFromFile(path, sourceInfo));",
+    "replace": "await Task.FromResult(TryBuildImageRequestFromFile(path, sourceInfo));",
+    "filter": "ADroppedNonPngImageFile_IsDecodedAndReEncodedOffTheCallingThread"
   }
 ]
