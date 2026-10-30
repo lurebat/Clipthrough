@@ -6566,7 +6566,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         _areBackgroundServicesStarted = true;
-        _ = RunDeferredPayloadMoveAsync();
+        DeferredUpgradeRun = RunDeferredPayloadMoveAsync();
         _clipboardMonitorService.Start();
         _backgroundOcrQueue.Start();
         _ = Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync());
@@ -6611,6 +6611,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// The background upgrade run <see cref="StartBackgroundServices"/> started;
+    /// null until then. Exposed so tests can wait for it.
+    /// </summary>
+    internal Task? DeferredUpgradeRun { get; private set; }
+
+    /// <summary>
     /// Finishes an upgrade's payload move in the background while the app is in
     /// use (upgrade-start research, U4). Shown as a running job with its
     /// progress; a library with nothing left to move returns at once.
@@ -6641,7 +6647,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         try
         {
-            await Task.Run(
+            var upgraded = await Task.Run(
                 () => _databaseInitializer.RunDeferredPayloadMoveAsync(
                     new DirectProgress(OnProgress),
                     _deferredPayloadMoveCancellation.Token),
@@ -6656,15 +6662,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             // The startup backup waited for the integrity check this run has now
             // passed (live check F3); without this the day would go unbacked-up.
-            // Expired clips first, as at startup (OD-4a).
-            try
+            // Expired clips first, as at startup (OD-4a). Only when the run had
+            // work: on an ordinary start nothing was held back, and the startup
+            // pass is already doing both (rubber-duck F-13-8).
+            if (upgraded)
             {
-                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);
-                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);
-            }
-            catch (Exception backupFailure) when (backupFailure is not OperationCanceledException)
-            {
-                Trace.TraceWarning($"Daily backup failed: {backupFailure.Message}");
+                try
+                {
+                    await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);
+                    await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);
+                }
+                catch (Exception backupFailure) when (backupFailure is not OperationCanceledException)
+                {
+                    Trace.TraceWarning($"Daily backup failed: {backupFailure.Message}");
+                }
             }
         }
         catch (OperationCanceledException)

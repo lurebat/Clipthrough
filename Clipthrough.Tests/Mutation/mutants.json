@@ -1499,8 +1499,8 @@
     "id": "stored-bytes-not-maintained-on-insert",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "Without the insert trigger every new clip is totalled as zero bytes, so the library size cap never fires.",
-    "find": "                SET stored_bytes = new.byte_size\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        await ExecuteNonQueryAsync(connection, \"DROP TRIGGER IF EXISTS clips_stored_bytes_au;\", cancellationToken);",
-    "replace": "                SET stored_bytes = 0\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        await ExecuteNonQueryAsync(connection, \"DROP TRIGGER IF EXISTS clips_stored_bytes_au;\", cancellationToken);",
+    "find": "                SET stored_bytes = new.byte_size\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        // A row the move has not reached still holds its icon inline, and while no",
+    "replace": "                SET stored_bytes = 0\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        // A row the move has not reached still holds its icon inline, and while no",
     "filter": "FullyQualifiedName~ClipStoredBytesTests"
   },
   {
@@ -2771,8 +2771,8 @@
     "id": "no-ocr-coverage-index",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "F-25. Without it OCR coverage reads ocr_status from each image row, after the payload: 1.9 s at 60k, 9.9 s encrypted.",
-    "find": "            WHERE content_type = 'image';\n\n        -- idx_clips_source_app_icon_hash is not here",
-    "replace": "            WHERE content_type = 'files';\n\n        -- idx_clips_source_app_icon_hash is not here",
+    "find": "ON clips(content_type, ocr_status)\n            WHERE content_type = 'image';",
+    "replace": "ON clips(content_type, ocr_status)\n            WHERE content_type = 'files';",
     "filter": "FullyQualifiedName~StartupScanIndexTests.OcrCoverage_IsAnsweredFromTheImageIndex"
   },
   {
@@ -3147,8 +3147,8 @@
     "id": "background-move-never-started",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "U4. The app opens without moving an upgraded library's payloads; nothing else ever moves them.",
-    "find": "        _ = RunDeferredPayloadMoveAsync();",
-    "replace": "        _ = Environment.ProcessorCount < 0 ? RunDeferredPayloadMoveAsync() : Task.CompletedTask;",
+    "find": "        DeferredUpgradeRun = RunDeferredPayloadMoveAsync();",
+    "replace": "        DeferredUpgradeRun = Environment.ProcessorCount < 0 ? RunDeferredPayloadMoveAsync() : Task.CompletedTask;",
     "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests.AnUpgradeFromSchema8"
   },
   {
@@ -4227,8 +4227,8 @@
     "id": "icon-hash-index-never-built-after-the-move",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "The deferred start leaves the icon-hash index to the background run; without it orphaned icons are never removed and the size cap counts them.",
-    "find": "        await ExecuteNonQueryAsync(connection, AppIconHashIndex, cancellationToken);\n        await DeleteOrphanedAppIconsAsync(connection, cancellationToken);\n        return true;",
-    "replace": "        await DeleteOrphanedAppIconsAsync(connection, cancellationToken);\n        return true;",
+    "find": "        await ExecuteNonQueryAsync(connection, AppIconHashIndex, cancellationToken);\n\n        // The move dropped it (F-13-4).",
+    "replace": "\n        // The move dropped it (F-13-4).",
     "filter": "FullyQualifiedName~ADeferredUpgradeStart_LeavesTheIconHashIndexToTheBackgroundRun"
   },
   {
@@ -4275,8 +4275,8 @@
     "id": "no-backup-after-the-background-run",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "The startup backup waits for the background check; without asking again after the run, the day goes without a backup.",
-    "find": "                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n            }\n            catch (Exception backupFailure)",
-    "replace": "                await Task.CompletedTask.ConfigureAwait(false);\n            }\n            catch (Exception backupFailure)",
+    "find": "                    await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n                }\n                catch (Exception backupFailure)",
+    "replace": "                    await Task.CompletedTask.ConfigureAwait(false);\n                }\n                catch (Exception backupFailure)",
     "filter": "FullyQualifiedName~AnUpgradeFromSchema8_OpensAtOnce"
   },
   {
@@ -4510,5 +4510,37 @@
     "find": "            .Select(s => (Screen: s, Overlap: OverlapArea(frame, s.WorkingArea)))",
     "replace": "            .Select(s => (Screen: s, Overlap: OverlapArea(new PixelRect(remembered.Position, OuterPixels(remembered.ClientSize, frameExtra, s.Scaling)), s.WorkingArea)))",
     "filter": "FullyQualifiedName~WindowGeometryTests.ARememberedWindowMostlyOnA100PercentScreen"
+  },
+  {
+    "id": "background-move-leaves-ocr-index-dropped",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-13-4: the payload move drops idx_clips_ocr_images; the deferred background run never recreated it, so OCR backlog/coverage scans ran without it for the rest of the session.",
+    "find": "        await ExecuteNonQueryAsync(connection, OcrImagesIndex, cancellationToken);",
+    "replace": "        await ExecuteNonQueryAsync(connection, OcrImagesIndex.Length < 0 ? OcrImagesIndex : \"SELECT 1;\", cancellationToken);",
+    "filter": "FullyQualifiedName~LeavesTheCurrentOcrIndexInPlace"
+  },
+  {
+    "id": "edit-before-move-drops-inline-icon-from-total",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-13-7: writing byte_size on a row the deferred move has not reached set stored_bytes = byte_size, dropping its still-live inline icon from the size total until the move reached it.",
+    "find": "                    + CASE WHEN new.source_app_icon_hash IS NULL THEN COALESCE(LENGTH(new.source_app_icon), 0) ELSE 0 END",
+    "replace": "                    + CASE WHEN new.source_app_icon_hash IS NULL AND 1 = 0 THEN COALESCE(LENGTH(new.source_app_icon), 0) ELSE 0 END",
+    "filter": "FullyQualifiedName~KeepsCountingItsInlineIcon"
+  },
+  {
+    "id": "edit-before-move-counts-stale-inline-icon",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-13-7: once a write gives an unmoved row a newer icon (source_app_icon_hash), its inline icon is stale and app_icons counts the new one; counting the inline one as well over-counts.",
+    "find": "                    + CASE WHEN new.source_app_icon_hash IS NULL THEN COALESCE(LENGTH(new.source_app_icon), 0) ELSE 0 END",
+    "replace": "                    + CASE WHEN new.source_app_icon_hash IS NULL OR 1 = 1 THEN COALESCE(LENGTH(new.source_app_icon), 0) ELSE 0 END",
+    "filter": "FullyQualifiedName~KeepsCountingItsInlineIcon"
+  },
+  {
+    "id": "ordinary-start-backs-up-twice",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-13-8: the background run's closing maintenance + daily backup are for a deferred start's held-back backup; on every ordinary start they duplicated the startup pass and raced it onto the same temp file.",
+    "find": "            if (upgraded)",
+    "replace": "            if (upgraded || Environment.ProcessorCount > 0)",
+    "filter": "FullyQualifiedName~AnOrdinaryStart_TakesTheDailyBackupOnce"
   }
 ]
