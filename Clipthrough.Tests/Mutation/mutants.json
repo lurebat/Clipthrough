@@ -2910,5 +2910,21 @@
     "find": "            if (placement is null || !(placement.Width > 0) || !(placement.Height > 0))",
     "replace": "            if (placement is null)",
     "filter": "FullyQualifiedName~WindowPlacementStoreTests"
+  },
+  {
+    "id": "footer-meters-orientation-set-on-the-element",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "why": "Rubber-duck F-14-1. A value set on the element beats every style setter, so an inline Orientation on FooterStats silently disables the bp-narrow override and the two meters stay a 576 DIP row in a 480 DIP window.",
+    "find": "                <StackPanel x:Name=\"FooterStats\"\n                            Grid.Column=\"1\"\n",
+    "replace": "                <StackPanel x:Name=\"FooterStats\"\n                            Grid.Column=\"1\"\n                            Orientation=\"Horizontal\"\n",
+    "filter": "FullyQualifiedName~FooterMeters_FitInsideTheFooter"
+  },
+  {
+    "id": "footer-meter-min-width-set-on-the-element",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "why": "Rubber-duck F-14-1. An inline MinWidth on the footer meters beats the bp-medium MinWidth 150 style, so at the narrowest Medium width the two 280 DIP meters run past the footer.",
+    "find": "                            VerticalAlignment=\"Center\">\n                    <Border Classes=\"detail-stat-card\"\n                            Padding=\"8,4\">\n                        <StackPanel Spacing=\"4\">\n                            <Grid ColumnDefinitions=\"*,Auto\"\n                                  ColumnSpacing=\"8\">\n                                <TextBlock Classes=\"detail-label\"\n                                           FontSize=\"10\"\n                                           Text=\"{Binding StorageUsageText}\" />\n                                <TextBlock Grid.Column=\"1\"\n                                           Classes=\"body-muted\"\n                                           FontSize=\"10\"\n                                           Text=\"{Binding StorageCapacityText}\" />\n                            </Grid>\n                            <ProgressBar Minimum=\"0\"\n                                         Maximum=\"100\"\n                                         Value=\"{Binding StorageUsagePercent}\"\n                                         Height=\"4\" />\n                        </StackPanel>\n                    </Border>\n\n                    <Border Classes=\"detail-stat-card\"\n                            Padding=\"8,4\">",
+    "replace": "                            VerticalAlignment=\"Center\">\n                    <Border Classes=\"detail-stat-card\"\n                            Padding=\"8,4\"\n                            MinWidth=\"280\">\n                        <StackPanel Spacing=\"4\">\n                            <Grid ColumnDefinitions=\"*,Auto\"\n                                  ColumnSpacing=\"8\">\n                                <TextBlock Classes=\"detail-label\"\n                                           FontSize=\"10\"\n                                           Text=\"{Binding StorageUsageText}\" />\n                                <TextBlock Grid.Column=\"1\"\n                                           Classes=\"body-muted\"\n                                           FontSize=\"10\"\n                                           Text=\"{Binding StorageCapacityText}\" />\n                            </Grid>\n                            <ProgressBar Minimum=\"0\"\n                                         Maximum=\"100\"\n                                         Value=\"{Binding StorageUsagePercent}\"\n                                         Height=\"4\" />\n                        </StackPanel>\n                    </Border>\n\n                    <Border Classes=\"detail-stat-card\"\n                            Padding=\"8,4\"\n                            MinWidth=\"280\">",
+    "filter": "FullyQualifiedName~FooterMeters_FitInsideTheFooter"
   }
 ]
