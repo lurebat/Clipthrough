@@ -187,7 +187,17 @@ public sealed class DatabaseInitializer : Clipthrough.Services.Search.IPausableW
             WHERE source_app_icon_hash IS NOT NULL;
         """;
 
-    private const string SortOrderIndexes = """
+    /// <summary>
+    /// The OCR scans' partial index (F-25; see <see cref="SortOrderIndexes"/>).
+    /// Separate because <see cref="MovePayloadsOutOfClipsAsync"/> drops it, and
+    /// whoever runs the move recreates it afterwards (F-13-4).
+    /// </summary>
+    private const string OcrImagesIndex = """
+        CREATE INDEX IF NOT EXISTS idx_clips_ocr_images ON clips(content_type, ocr_status)
+            WHERE content_type = 'image';
+        """;
+
+    private const string SortOrderIndexes = $"""
         -- One index per BuildOrderClause arm. Every arm leads with the pinned
         -- prefix, so an index lacking it can never satisfy the ORDER BY - which
         -- is why the two below are dropped rather than kept.
@@ -284,8 +294,7 @@ public sealed class DatabaseInitializer : Clipthrough.Services.Search.IPausableW
         -- only uses a partial index whose condition the query implies.
         CREATE INDEX IF NOT EXISTS idx_clips_sensitivity_pending ON clips(id)
             WHERE sensitivity_scanned_at IS NULL;
-        CREATE INDEX IF NOT EXISTS idx_clips_ocr_images ON clips(content_type, ocr_status)
-            WHERE content_type = 'image';
+        {OcrImagesIndex}
 
         -- idx_clips_source_app_icon_hash is not here: see AppIconHashIndex.
 
@@ -1075,6 +1084,10 @@ public sealed class DatabaseInitializer : Clipthrough.Services.Search.IPausableW
         // cleared already has its stored_bytes; this is the safety net.
         await RepairClipStoredBytesAsync(connection, cancellationToken);
         await ExecuteNonQueryAsync(connection, AppIconHashIndex, cancellationToken);
+
+        // The move dropped it (F-13-4). Here, not right after the move, so a run
+        // stopped in between still recreates it on the next.
+        await ExecuteNonQueryAsync(connection, OcrImagesIndex, cancellationToken);
         await DeleteOrphanedAppIconsAsync(connection, cancellationToken);
         return true;
     }

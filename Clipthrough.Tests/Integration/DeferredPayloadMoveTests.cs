@@ -239,6 +239,33 @@ public sealed class DeferredPayloadMoveTests
         Scalar(scope, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_clips_source_app_icon_hash';");
 
     /// <summary>
+    /// Rubber-duck F-13-4: the move drops idx_clips_ocr_images, because the
+    /// definition a schema-8 library has also required content_bytes, which the
+    /// move clears on every row. The blocking start recreates it with its index
+    /// DDL right after; the background run did not, so OCR backlog and coverage
+    /// scans went without it for the rest of the session.
+    /// </summary>
+    [Fact]
+    public async Task TheBackgroundMove_LeavesTheCurrentOcrIndexInPlace()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        SeedSchema8Library(scope, 3);
+        Scalar(scope, """
+            DROP INDEX idx_clips_ocr_images;
+            CREATE INDEX idx_clips_ocr_images ON clips(content_type, ocr_status)
+                WHERE content_type = 'image' AND content_bytes IS NOT NULL;
+            """);
+
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+        Assert.True(await scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(progress: null));
+
+        Assert.True(
+            Scalar(scope, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_clips_ocr_images' AND sql NOT LIKE '%content_bytes%';") == 1,
+            "The background move left the library without the current idx_clips_ocr_images.");
+    }
+
+    /// <summary>
     /// Live check F2 (60k, schema 8): the deferred upgrade start spent 19.5-20.7 s
     /// building U-E1's icon-hash index, because building it reads every row of
     /// clips and before the move each row spans a page. After the move the same
