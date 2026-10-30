@@ -985,6 +985,14 @@ public sealed class ClipStoreService : IClipStoreService
 
         if (settings.EnableMaxLibrarySize)
         {
+            // The purges above may have orphaned icons that the sweep below would
+            // delete anyway; counting them here evicts clips to pay for them
+            // (rubber-duck F-11-1).
+            if (removedClipIds.Count > 0)
+            {
+                await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);
+            }
+
             var totalStoredBytes = await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken, transaction);
             finalStoredBytes = totalStoredBytes;
             var maxBytes = settings.MaxLibrarySizeMegabytes * 1024L * 1024L;
@@ -2546,11 +2554,19 @@ public sealed class ClipStoreService : IClipStoreService
     private static async Task<(List<long> DeletedIds, long RemainingBytes)> DeleteUntilWithinSizeAsync(SqliteConnection connection, SqliteTransaction transaction, long totalStoredBytes, long maxBytes, CancellationToken cancellationToken)
     {
         var evictionCount = 0;
+
+        // The total counts each distinct icon once (U-E1), so evicting the last
+        // clip that uses one frees the icon too - the orphan sweep deletes it.
+        // Without this the walk keeps evicting after the library already fits
+        // (rubber-duck F-11-1). Keyed by hash: the clips still using that icon,
+        // and the icon's size. One lookup per distinct icon, not per row.
+        var iconReferences = new Dictionary<string, (long Remaining, long Bytes)>(StringComparer.Ordinal);
+
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
             command.CommandText = $"""
-                SELECT {StoredRowBytes}
+                SELECT {StoredRowBytes}, source_app_icon_hash
                 FROM clips
                 WHERE NOT {UserKeptClipPredicate}
                 {OldestFirstEvictionOrder};
@@ -2560,6 +2576,22 @@ public sealed class ClipStoreService : IClipStoreService
             {
                 evictionCount++;
                 totalStoredBytes -= Math.Max(0L, reader.IsDBNull(0) ? 0L : reader.GetInt64(0));
+
+                if (!reader.IsDBNull(1))
+                {
+                    var hash = reader.GetString(1);
+                    if (!iconReferences.TryGetValue(hash, out var icon))
+                    {
+                        icon = await ReadIconReferencesAsync(connection, transaction, hash, cancellationToken);
+                    }
+
+                    icon.Remaining--;
+                    iconReferences[hash] = icon;
+                    if (icon.Remaining == 0)
+                    {
+                        totalStoredBytes -= icon.Bytes;
+                    }
+                }
             }
         }
 
@@ -2570,6 +2602,20 @@ public sealed class ClipStoreService : IClipStoreService
 
         var deletedIds = await DeleteOldestAsync(connection, transaction, evictionCount, cancellationToken);
         return (deletedIds, totalStoredBytes);
+    }
+
+    private static async Task<(long Remaining, long Bytes)> ReadIconReferencesAsync(SqliteConnection connection, SqliteTransaction transaction, string hash, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT (SELECT COUNT(*) FROM clips WHERE source_app_icon_hash = $hash),
+                   COALESCE((SELECT LENGTH(png) FROM app_icons WHERE hash = $hash), 0);
+            """;
+        command.Parameters.AddWithValue("$hash", hash);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await reader.ReadAsync(cancellationToken);
+        return (reader.GetInt64(0), reader.GetInt64(1));
     }
 
     private static void AddUpsertParameters(

@@ -1282,10 +1282,10 @@
   {
     "id": "maintenance-size-total-is-taken-before-the-purge",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
-    "why": "The size total a purge reports must be read after the orphaned-icon sweep (U-E1). The row walk's remaining bytes still count the icons of the clips it just evicted, so reporting them overstates the library by every icon the purge freed.",
+    "why": "The size total a purge reports must be read after the orphaned-icon sweep (U-E1). The row walk subtracts the icons its own evictions free (rubber-duck F-11-1), but not an icon that was already orphaned when the pass began, which the sweep also deletes; reporting the walk's number overstates the library by it.",
     "find": "            if (finalStoredBytes is not null)\n            {\n                finalStoredBytes = await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken, transaction);",
     "replace": "            if (finalStoredBytes is null)\n            {\n                finalStoredBytes = await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken, transaction);",
-    "filter": "Maintenance_ReportsTheSameTotalsTheDatabaseWould"
+    "filter": "FullyQualifiedName~Maintenance_ReportsTheSameTotalsTheDatabaseWould|FullyQualifiedName~Maintenance_LibrarySizeCap_ReportsTheSizeLeftAfterTheOrphanSweep"
   },
   {
     "id": "size-purge-names-every-evicted-clip",
@@ -2931,8 +2931,8 @@
     "id": "orphaned-icons-kept-after-eviction",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "F-39. An icon whose last clip was evicted would keep counting against the size cap until the next start.",
-    "find": "            await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);\n",
-    "replace": "            await Task.CompletedTask;\n",
+    "find": "            // A removed clip may have been the last user of its icon (U-E1).\n            await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);\n",
+    "replace": "            // A removed clip may have been the last user of its icon (U-E1).\n            await Task.CompletedTask;\n",
     "filter": "FullyQualifiedName~PayloadLayoutTests.AnIconWhoseLastClipIsEvicted"
   },
   {
@@ -3982,5 +3982,21 @@
     "find": "            || await IsFtsRebuildPendingAsync(connection, cancellationToken))",
     "replace": "            || (FtsRebuildPendingKey.Length < 0 && await IsFtsRebuildPendingAsync(connection, cancellationToken)))",
     "filter": "FullyQualifiedName~FtsSchemaRepairTests.ARepairInterruptedBeforeTheRebuild"
+  },
+  {
+    "id": "size-cap-counts-icons-orphaned-earlier-in-the-pass",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-11-1. An icon orphaned by the lifetime or count purge earlier in the same maintenance pass is still in app_icons when the size cap reads its total, so the cap evicts clips the library has room for to pay for an icon the closing sweep deletes anyway.",
+    "find": "            if (removedClipIds.Count > 0)",
+    "replace": "            if (removedClipIds.Count < 0)",
+    "filter": "FullyQualifiedName~ClipRetentionTests.Maintenance_LibrarySizeCap_DoesNotCountAnIconAnEarlierPurgeOrphaned"
+  },
+  {
+    "id": "size-cap-walk-ignores-freed-icons",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-11-1. Evicting the last clip that uses an icon frees the icon too, which the size total counts once; a walk that subtracts only stored_bytes keeps evicting after the library already fits, permanently removing a clip.",
+    "find": "                    if (icon.Remaining == 0)",
+    "replace": "                    if (icon.Remaining == 0 && hash.Length < 0)",
+    "filter": "FullyQualifiedName~ClipRetentionTests.Maintenance_LibrarySizeCap_CountsTheIconAnEvictionFrees"
   }
 ]
