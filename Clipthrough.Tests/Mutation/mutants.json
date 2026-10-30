@@ -3774,5 +3774,29 @@
     "find": "        if (changed)",
     "replace": "        if (changed && grid.Name == \"never\")",
     "filter": "FullyQualifiedName~WorkspaceBreakpointTransitionHeadlessTests"
+  },
+  {
+    "id": "own-write-suppression-ignores-owner",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "why": "Rubber-duck F-05-4: a suppression armed for our own write swallowed another application's copy that landed inside the coalesce window, unread and never captured.",
+    "find": "            if (coversAnyWriter || !IsClipboardOwnedByAnotherProcess())",
+    "replace": "            if (coversAnyWriter || !IsClipboardOwnedByAnotherProcess() || Environment.ProcessId > 0)",
+    "filter": "FullyQualifiedName~ClipboardSuppressionOwnerHeadlessTests"
+  },
+  {
+    "id": "copy-without-saving-arm-is-ordinary",
+    "file": "Clipthrough/Services/Capture/ClipboardSuppressionGate.cs",
+    "why": "F-05-4: copy-without-saving must swallow the copy the user makes in another application; as an ordinary arm the owner check lets that copy through and it is kept.",
+    "find": "        Interlocked.Increment(ref _pendingForAnyWriter);",
+    "replace": "        Interlocked.Increment(ref _pending);",
+    "filter": "FullyQualifiedName~ClipboardSuppressionOwnerHeadlessTests"
+  },
+  {
+    "id": "unknown-clipboard-owner-counts-as-foreign",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "why": "F-05-4: with no clipboard owner to go on, the suppression must hold as before; treating unknown as another process re-captures our own writes.",
+    "find": "        => _sourceApplicationResolver.TryGetClipboardOwnerProcessId() is { } ownerProcessId\n            && ownerProcessId != Environment.ProcessId;",
+    "replace": "        => _sourceApplicationResolver.TryGetClipboardOwnerProcessId() is not { } ownerProcessId\n            || ownerProcessId != Environment.ProcessId;",
+    "filter": "FullyQualifiedName~ClipboardSuppressionOwnerHeadlessTests"
   }
 ]

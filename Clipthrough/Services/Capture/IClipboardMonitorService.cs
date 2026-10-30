@@ -59,6 +59,20 @@ public interface IClipboardMonitorService
     void SuppressNext(string? content = null);
 
     /// <summary>
+    /// Skips the next clipboard change whichever application makes it. For the
+    /// copy-without-saving hotkey, where the copy that must not be kept is the
+    /// one the user is about to make in another application.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SuppressNext"/> is for Clipthrough's own writes, and only
+    /// suppresses while Clipthrough owns the clipboard, so another application's
+    /// copy landing in the same moment is still captured. This one is not
+    /// limited that way, because swallowing another application's copy is its
+    /// purpose.
+    /// </remarks>
+    void SuppressNextForeignCopy();
+
+    /// <summary>
     /// Withdraws a suppression armed by <see cref="SuppressNext"/> when the write it was
     /// armed for threw before reaching the clipboard.
     /// </summary>

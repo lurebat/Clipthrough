@@ -29,6 +29,7 @@ internal sealed class ClipboardSuppressionGate
     private readonly Func<long> _clock;
 
     private int _pending;
+    private int _pendingForAnyWriter;
     private long _expiresAt;
 
     // The last text the application wrote, hashed, and until when a
@@ -62,6 +63,21 @@ internal sealed class ClipboardSuppressionGate
         }
 
         Interlocked.Increment(ref _pending);
+    }
+
+    /// <summary>
+    /// Records that the next clipboard change is to be skipped whichever application
+    /// makes it - the copy-without-saving hotkey, whose target is a copy the user makes
+    /// elsewhere.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from <see cref="Arm"/> because the monitor only honours an ordinary
+    /// arm while Clipthrough owns the clipboard. Counted in the same batch and window.
+    /// </remarks>
+    public void ArmForAnyWriter()
+    {
+        Interlocked.Exchange(ref _expiresAt, _clock() + _windowMilliseconds);
+        Interlocked.Increment(ref _pendingForAnyWriter);
     }
 
     /// <summary>
@@ -101,10 +117,19 @@ internal sealed class ClipboardSuppressionGate
     /// Consumes any pending suppressions and reports whether this clipboard notification
     /// should be ignored. Always clears the pending state, expired or not.
     /// </summary>
-    public bool ShouldSuppress()
+    public bool ShouldSuppress() => ShouldSuppress(out _);
+
+    /// <inheritdoc cref="ShouldSuppress()"/>
+    /// <param name="coversAnyWriter">
+    /// True when the suppression came from <see cref="ArmForAnyWriter"/>, so it applies
+    /// whoever wrote. False when it only stands for Clipthrough's own writes.
+    /// </param>
+    public bool ShouldSuppress(out bool coversAnyWriter)
     {
+        var forAnyWriter = Interlocked.Exchange(ref _pendingForAnyWriter, 0);
         var pending = Interlocked.Exchange(ref _pending, 0);
-        if (pending <= 0)
+        coversAnyWriter = forAnyWriter > 0;
+        if (pending + forAnyWriter <= 0)
         {
             return false;
         }
