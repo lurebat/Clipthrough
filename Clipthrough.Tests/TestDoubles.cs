@@ -61,6 +61,12 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
         return Task.CompletedTask;
     }
 
+    public Task RunExclusiveAsync(Action<StorageOptions> action, CancellationToken cancellationToken = default)
+    {
+        action(Current);
+        return Task.CompletedTask;
+    }
+
     public void SetInMemoryPassword(string password)
     {
         Current = new StorageOptions

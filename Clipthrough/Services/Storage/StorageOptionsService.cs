@@ -480,6 +480,20 @@ public sealed class StorageOptionsService : IStorageOptionsService
         }
     }
 
+    /// <inheritdoc />
+    public async Task RunExclusiveAsync(Action<StorageOptions> action, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            action(Current);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     /// <summary>
     /// Writes a copy of <paramref name="sourcePath"/>, which opens with
     /// <paramref name="currentKey"/>, to <paramref name="destinationPath"/>

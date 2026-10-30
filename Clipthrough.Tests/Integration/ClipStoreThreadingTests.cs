@@ -278,5 +278,8 @@ public sealed class ClipStoreThreadingTests
 
         public Task RekeyAsync(string currentPassword, string newPassword, bool rememberNewPassword, CancellationToken cancellationToken = default)
             => inner.RekeyAsync(currentPassword, newPassword, rememberNewPassword, cancellationToken);
+
+        public Task RunExclusiveAsync(Action<StorageOptions> action, CancellationToken cancellationToken = default)
+            => inner.RunExclusiveAsync(action, cancellationToken);
     }
 }
