@@ -51,7 +51,7 @@ public partial class MainWindow : Window
     {
         m_systemInteractionService = systemInteractionService;
         InitializeComponent();
-        ApplyWorkspaceBreakpoint(WorkspaceBreakpoints.Classify(ClientSize));
+        RequestWorkspaceBreakpoint(WorkspaceBreakpoints.Classify(ClientSize));
         InitializePlacement(placementStore);
         Opened += OnOpened;
         Activated += OnActivated;
