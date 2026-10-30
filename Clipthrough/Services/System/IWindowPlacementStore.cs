@@ -14,4 +14,11 @@ public interface IWindowPlacementStore
 
     /// <summary>Remembers <paramref name="placement"/>. Never throws.</summary>
     void Save(SavedWindowPlacement placement);
+
+    /// <summary>
+    /// Waits, briefly, for the last <see cref="Save"/> to reach the disk. Saves
+    /// are written in the background, and the process exits as soon as the
+    /// main window has closed, which would cut off the final one. Never throws.
+    /// </summary>
+    void Flush();
 }

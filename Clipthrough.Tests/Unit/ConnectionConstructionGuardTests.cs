@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace Clipthrough.Tests.Unit;
@@ -23,9 +24,21 @@ public sealed class ConnectionConstructionGuardTests
 {
     private const string Owner = "SqliteConnectionFactory.cs";
 
-    // Built by concatenation so this file does not match its own needles.
-    private const string NewConnection = "new Sqlite" + "Connection(";
-    private const string ProviderFactory = "Sqlite" + "Factory.";
+    // Patterns, not substrings: a substring catches only the one spelling it
+    // names, and C# has several - a target-typed new(), a qualified type name,
+    // an object initializer, no space before the parenthesis or the '='. Each
+    // pattern breaks its own literal with \s or a group, so this file does not
+    // match its own rules. The spellings each rule must catch are pinned by the
+    // *_CatchesEverySpelling theories below.
+    private static readonly Regex NewConnection = new(
+        // Explicit type, optionally qualified, with an argument list or an initializer.
+        @"\bnew\s+(?:global::)?(?:\w+\s*\.\s*)*SqliteConnection\s*[({]"
+        // Target-typed new() into a local, a field, a using declaration or an expression-bodied member.
+        + @"|\bSqliteConnection\s*\??\s+\w+\s*(?:\([^()]*\)\s*)?=>?\s*new\s*\(",
+        RegexOptions.CultureInvariant);
+    private static readonly Regex ProviderFactory = new(@"\bSqliteFactory\s*\.", RegexOptions.CultureInvariant);
+    private static readonly Regex BusyTimeout = new(@"\bbusy_timeout\s*[=(]", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    private static readonly Regex ConnectionStringAssignment = new(@"\.\s*ConnectionString\s*=(?!=)", RegexOptions.CultureInvariant);
 
     private static string ProductionSourceRoot()
     {
@@ -44,7 +57,7 @@ public sealed class ConnectionConstructionGuardTests
         throw new InvalidOperationException("Clipthrough/Clipthrough.csproj was not found above " + AppContext.BaseDirectory + "; this guard cannot silently pass without it.");
     }
 
-    private static string[] FilesContaining(string needle, string? root = null)
+    private static string[] FilesMatching(Regex rule, string? root = null)
     {
         root ??= ProductionSourceRoot();
         var files = Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
@@ -52,28 +65,88 @@ public sealed class ConnectionConstructionGuardTests
                      && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
             .ToArray();
         Assert.True(files.Length > 40, $"Only {files.Length} source files under {root}; the scan is looking in the wrong place.");
-        return [.. files.Where(f => File.ReadAllText(f).Contains(needle, StringComparison.Ordinal)).Select(Path.GetFileName).Order()!];
+        return [.. files.Where(f => rule.IsMatch(File.ReadAllText(f))).Select(Path.GetFileName).Order()!];
     }
 
     [Fact]
     public void OnlyTheFactory_SetsBusyTimeout()
-        => Assert.Equal([Owner], FilesContaining("busy_timeout ="));
+        => Assert.Equal([Owner], FilesMatching(BusyTimeout));
 
     [Fact]
     public void OnlyTheFactory_ConstructsAConnection()
-        => Assert.Equal([Owner], FilesContaining(NewConnection));
+        => Assert.Equal([Owner], FilesMatching(NewConnection));
 
-    [Theory]
-    [InlineData(ProviderFactory)]
-    [InlineData(".ConnectionString =")]
-    public void NoOtherRouteToAConnection_IsUsed(string needle)
-        => Assert.Empty(FilesContaining(needle));
+    [Fact]
+    public void NoOtherRouteToAConnection_IsUsed()
+    {
+        Assert.Empty(FilesMatching(ProviderFactory));
+        Assert.Empty(FilesMatching(ConnectionStringAssignment));
+    }
 
     [Fact]
     public void TestsGetTheirConnectionsFromTheFactory_Too()
     {
         var testRoot = Path.Combine(Path.GetDirectoryName(ProductionSourceRoot())!, "Clipthrough.Tests");
-        Assert.Empty(FilesContaining(NewConnection, testRoot));
-        Assert.Empty(FilesContaining(ProviderFactory, testRoot));
+        Assert.Empty(FilesMatching(NewConnection, testRoot));
+        Assert.Empty(FilesMatching(ProviderFactory, testRoot));
     }
+
+    // The scans above are only as strong as these rules, so each spelling of a
+    // bypass is pinned here. The snippets are concatenated for the same reason
+    // as the rules: a literal would make this file a violation of its own scan.
+    private const string Conn = "Sqlite" + "Connection";
+
+    [Theory]
+    [InlineData("var c = new " + Conn + "(cs);")]
+    [InlineData("var c = new " + Conn + " (cs);")]
+    [InlineData("var c = new\n    " + Conn + "(cs);")]
+    [InlineData("var c = new Microsoft.Data.Sqlite." + Conn + "(cs);")]
+    [InlineData("var c = new global::Microsoft.Data.Sqlite." + Conn + "(cs);")]
+    [InlineData("var c = new " + Conn + " { DefaultTimeout = 5 };")]
+    [InlineData(Conn + " c = new(cs);")]
+    [InlineData(Conn + "? c = new(cs);")]
+    [InlineData("using " + Conn + " c = new (cs);")]
+    [InlineData("Microsoft.Data.Sqlite." + Conn + " c = new(cs);")]
+    [InlineData("private readonly " + Conn + " _c = new();")]
+    [InlineData("private static " + Conn + " Open(string cs) => new(cs);")]
+    public void ConstructionRule_CatchesEverySpelling(string snippet)
+        => Assert.Matches(NewConnection, snippet);
+
+    [Theory]
+    [InlineData("using var c = " + Conn + "Factory.Create(path, password);")]
+    [InlineData(Conn + " c = " + Conn + "Factory.Create(path, password);")]
+    [InlineData("var b = new " + Conn + "StringBuilder(cs);")]
+    [InlineData(Conn + "StringBuilder b = new(cs);")]
+    [InlineData("private " + Conn + "? _connection;")]
+    public void ConstructionRule_LeavesTheFactoryRouteAlone(string snippet)
+        => Assert.DoesNotMatch(NewConnection, snippet);
+
+    [Theory]
+    [InlineData("c.Connection" + "String = cs;")]
+    [InlineData("c.Connection" + "String=cs;")]
+    [InlineData("c.Connection" + "String\n    = cs;")]
+    [InlineData("c . Connection" + "String = cs;")]
+    public void ConnectionStringRule_CatchesEverySpelling(string snippet)
+        => Assert.Matches(ConnectionStringAssignment, snippet);
+
+    [Theory]
+    [InlineData("var s = c.Connection" + "String;")]
+    [InlineData("if (c.Connection" + "String == cs) { }")]
+    public void ConnectionStringRule_IgnoresReads(string snippet)
+        => Assert.DoesNotMatch(ConnectionStringAssignment, snippet);
+
+    [Theory]
+    [InlineData("var f = Sqlite" + "Factory.Instance;")]
+    [InlineData("var f = Microsoft.Data.Sqlite.Sqlite" + "Factory.Instance;")]
+    [InlineData("var f = Sqlite" + "Factory\n    .Instance;")]
+    public void ProviderFactoryRule_CatchesEverySpelling(string snippet)
+        => Assert.Matches(ProviderFactory, snippet);
+
+    [Theory]
+    [InlineData("cmd.CommandText = \"PRAGMA busy_timeout" + " = 5000;\";")]
+    [InlineData("cmd.CommandText = \"PRAGMA busy_timeout" + "=5000;\";")]
+    [InlineData("cmd.CommandText = \"PRAGMA BUSY_TIMEOUT" + " = 5000;\";")]
+    [InlineData("cmd.CommandText = \"PRAGMA busy_timeout" + "(5000);\";")]
+    public void BusyTimeoutRule_CatchesEverySpelling(string snippet)
+        => Assert.Matches(BusyTimeout, snippet);
 }

@@ -2984,6 +2984,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        // Copying a result commits the search that found it (OD-9b), whichever copy it is.
+        _ = CommitSearchQueryAsync();
+
         try
         {
             // Clip.Content, not FullContent. FullContent is the *raw* display

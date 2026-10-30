@@ -61,6 +61,12 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
         return Task.CompletedTask;
     }
 
+    public Task RunExclusiveAsync(Action<StorageOptions> action, CancellationToken cancellationToken = default)
+    {
+        action(Current);
+        return Task.CompletedTask;
+    }
+
     public void SetInMemoryPassword(string password)
     {
         Current = new StorageOptions
@@ -90,6 +96,8 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
 internal sealed class TestSettingsService : ISettingsService
 {
     private AppSettings? _initializeCurrent;
+    private TaskCompletionSource? _holdNextSave;
+    private TaskCompletionSource _saveHeld = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public AppSettings Current { get; private set; } = AppSettings.Default;
 
@@ -150,10 +158,11 @@ internal sealed class TestSettingsService : ISettingsService
 
         LastMutation = mutate;
 
-        var hold = HoldNextSave;
-        HoldNextSave = null;
+        var hold = _holdNextSave;
+        _holdNextSave = null;
         if (hold is not null)
         {
+            _saveHeld.TrySetResult();
             await hold.Task;
         }
 
@@ -205,9 +214,23 @@ internal sealed class TestSettingsService : ISettingsService
     /// test can land an unrelated change while a save is in flight. That is the
     /// interleaving the real write gate allows and the one that used to lose
     /// updates. One-shot deliberately: the test's own update must not block on
-    /// the gate it is holding.
+    /// the gate it is holding - which only holds if the test waits for
+    /// <see cref="SaveHeld"/> before making it. A save made on another thread
+    /// (the settings dialog saves inside <c>Task.Run</c>) can otherwise arrive
+    /// second, leave the hold to the test's own update, and hang the test.
     /// </summary>
-    public TaskCompletionSource? HoldNextSave { get; set; }
+    public TaskCompletionSource? HoldNextSave
+    {
+        get => _holdNextSave;
+        set
+        {
+            _holdNextSave = value;
+            _saveHeld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+    }
+
+    /// <summary>Completes once a save has taken the <see cref="HoldNextSave"/> hold and is waiting on it.</summary>
+    public Task SaveHeld => _saveHeld.Task;
 
     public void SetCurrent(AppSettings settings)
     {
