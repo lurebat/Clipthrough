@@ -889,6 +889,8 @@ public sealed class StorageOptionsServicePhase2Tests : IDisposable
         public void SuppressNext(string? content = null) { }
 
         public void CancelSuppressNext() { }
+
+        public void SuppressNextForeignCopy() { }
     }
 
     private sealed class SingleServiceProvider : IServiceProvider

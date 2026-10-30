@@ -60,9 +60,13 @@ clipboard monitor and by drag-and-drop imports.
 **SuppressNext** — Called on `IClipboardMonitorService` before
 programmatically placing content on the clipboard (e.g. after a transform),
 with the text being written. The next `ClipboardChanged` event is ignored
-without reading the clipboard, and for the rest of the suppression window any
-event whose text matches is recognised as a re-publish of our own write (Remote
-Desktop raises one per write) and not captured. Different content is captured.
+without reading the clipboard while Clipthrough still owns the clipboard (or
+the owner cannot be determined); if another process owns it, that application
+copied inside the coalesce window and its change is read and captured. For the
+rest of the suppression window any event whose text matches is recognised as a
+re-publish of our own write (Remote Desktop raises one per write) and not
+captured. Different content is captured. `SuppressNextForeignCopy` is the
+copy-without-saving variant: it skips the next change whoever makes it.
 
 **DragDropService** — Turns a drop onto the popup window into one
 `ClipCaptureRequest` per item (`TryBuildCaptureRequestsAsync`). The view model
