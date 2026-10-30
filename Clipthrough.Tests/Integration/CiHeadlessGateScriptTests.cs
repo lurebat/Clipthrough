@@ -274,6 +274,26 @@ public sealed class CiHeadlessGateScriptTests
         Assert.Single(gate.Filters);
     }
 
+    /// <summary>
+    /// Rubber-duck F-08-2. xUnit's adapter writes a cleanup failure as
+    /// "[Test Case Cleanup Failure (test)]: exception", so the marker opens the
+    /// message. An assertion whose expected or actual text merely contains it is
+    /// still an assertion failure and must not be retried into green.
+    /// </summary>
+    [Fact]
+    public void AssertionMentioningTheCleanupMarker_IsRedAndNotRetried()
+    {
+        var gate = RunGate([
+            new Run(1, Trx("Failed", [
+                new Result(Class + ".B", "Failed",
+                    "Assert.Equal() Failure: Strings differ\nExpected: \"[Test Case Cleanup Failure (x)]: boom\"\nActual:   \"\"")])),
+            new Run(0, Passing(Class + ".B")),
+        ]);
+
+        Assert.True(gate.ExitCode == 1, gate.Output);
+        Assert.Single(gate.Filters);
+    }
+
     [Fact]
     public void CleanupFlakeThatPassesOnRetry_IsGreen()
     {

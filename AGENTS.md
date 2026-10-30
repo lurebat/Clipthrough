@@ -88,8 +88,8 @@ time on it. Run them locally if you are specifically touching view code, and
 re-run before believing a single red result.
 
 CI does run them, in a separate step: `.github/scripts/Invoke-HeadlessTests.ps1`.
-An assertion failure fails the build at once; only a run whose every failure is
-a `[Test Case Cleanup Failure]` is retried, once, and only for those tests. A
+An assertion failure fails the build at once; only a run whose every failure
+message opens with `[Test Case Cleanup Failure` is retried, once, and only for those tests. A
 run that did not demonstrably complete - no TRX, no test executed, a run-level
 error such as xUnit's "Catastrophic failure", or a non-zero exit with no failed
 test - fails the build and is never retried. Run
