@@ -3046,5 +3046,37 @@
     "find": "        if (changed)",
     "replace": "        if (changed && grid.Name == \"never\")",
     "filter": "FullyQualifiedName~WorkspaceBreakpointTransitionHeadlessTests"
+  },
+  {
+    "id": "drag-end-never-refits-on-another-screen",
+    "file": "Clipthrough/Views/WindowFitter.cs",
+    "why": "Rubber-duck F-14-3. A drag between two screens at the same scaling raises no DPI change; if the end of the move is never acted on, a 2200 DIP window dragged from an ultrawide onto a 1920 DIP monitor stays wider than it.",
+    "find": "|| end == start)",
+    "replace": "|| end == start || end.Scaling > 0)",
+    "filter": "FullyQualifiedName~WindowFitHeadlessTests.Dragging|FullyQualifiedName~WindowFitHeadlessTests.Resizing"
+  },
+  {
+    "id": "drag-refits-on-every-step",
+    "file": "Clipthrough/Views/WindowFitter.cs",
+    "why": "Rubber-duck F-14-3, owner condition: never move or resize the window while the user is still dragging it. Fitting on each WM_MOVING step would shrink it under the cursor mid-drag.",
+    "find": "        public void Moving() => _moved = true;",
+    "replace": "        public void Moving() { _moved = true; Dispatcher.UIThread.Post(() => Fit(window, onlyIfTooLarge: true), DispatcherPriority.Background); }",
+    "filter": "FullyQualifiedName~WindowFitHeadlessTests.Dragging|FullyQualifiedName~WindowFitHeadlessTests.Resizing"
+  },
+  {
+    "id": "resize-across-screens-is-refitted-like-a-move",
+    "file": "Clipthrough/Views/WindowFitter.cs",
+    "why": "Rubber-duck F-14-3. A border drag is the user choosing a size; treating a resize that ends on another screen as a move would undo the size they just chose.",
+    "find": "if (!_moved || _sized ||",
+    "replace": "if (!_moved && !_sized ||",
+    "filter": "FullyQualifiedName~WindowFitHeadlessTests.Dragging|FullyQualifiedName~WindowFitHeadlessTests.Resizing"
+  },
+  {
+    "id": "drag-end-moves-a-window-that-still-fits",
+    "file": "Clipthrough/Views/WindowFitter.cs",
+    "why": "Rubber-duck F-14-3, owner condition: never touch a window that still fits. A full fit at the end of a drag would pull a window the user deliberately left hanging off an edge back inside.",
+    "find": "            Dispatcher.UIThread.Post(() => Fit(window, onlyIfTooLarge: true), DispatcherPriority.Background);",
+    "replace": "            Dispatcher.UIThread.Post(() => Fit(window, onlyIfTooLarge: start.Value.Scaling < 0), DispatcherPriority.Background);",
+    "filter": "FullyQualifiedName~WindowFitHeadlessTests.Dragging|FullyQualifiedName~WindowFitHeadlessTests.Resizing"
   }
 ]

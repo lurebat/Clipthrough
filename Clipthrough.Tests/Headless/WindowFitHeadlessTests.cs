@@ -157,6 +157,88 @@ public sealed class WindowFitHeadlessTests
         logs.Close();
     }
 
+    [AvaloniaFact]
+    public void DraggingOntoASmallerScreen_ShrinksTheWindowOnlyWhenTheDragEnds()
+    {
+        // Same scaling on both, so no DPI change reports the move.
+        var ultrawide = TestScreens.Dip(3440, 1400, 1.0);
+        var fullHdRight = TestScreens.Dip(1920, 1032, 1.0, x: 3440);
+        using var screenScope = WindowFitter.UseScreens(new TestScreens(ultrawide, fullHdRight));
+        using var harness = MainWindowTestHarness.Create();
+        var window = harness.Window;
+        window.Position = new PixelPoint(100, 100);
+        window.Width = 2200;
+        window.Height = 900;
+        Dispatcher.UIThread.RunJobs();
+
+        var drag = WindowFitter.MoveSizeLoopOf(window)!;
+        drag.Enter();
+        foreach (var x in new[] { 1800, 3000, 3500 })
+        {
+            drag.Moving();
+            window.Position = new PixelPoint(x, 100);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(new Size(2200, 900), window.Bounds.Size);
+            Assert.Equal(new PixelPoint(x, 100), window.Position);
+        }
+
+        drag.Exit();
+        Dispatcher.UIThread.RunJobs();
+
+        AssertInside(window, fullHdRight);
+    }
+
+    [AvaloniaFact]
+    public void DraggingAWindowThatFitsOntoAnotherScreen_LeavesItWhereTheUserPutIt()
+    {
+        var left = TestScreens.Dip(2560, 1392, 1.0);
+        var fullHdRight = TestScreens.Dip(1920, 1032, 1.0, x: 2560);
+        using var screenScope = WindowFitter.UseScreens(new TestScreens(left, fullHdRight));
+        using var harness = MainWindowTestHarness.Create();
+        var window = harness.Window;
+        window.Position = new PixelPoint(100, 100);
+        window.Width = 1200;
+        window.Height = 800;
+        Dispatcher.UIThread.RunJobs();
+
+        // Fits the right screen, though dropped hanging off its right edge.
+        var drag = WindowFitter.MoveSizeLoopOf(window)!;
+        drag.Enter();
+        drag.Moving();
+        window.Position = new PixelPoint(3500, 100);
+        drag.Exit();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(new Size(1200, 800), window.Bounds.Size);
+        Assert.Equal(new PixelPoint(3500, 100), window.Position);
+    }
+
+    [AvaloniaFact]
+    public void ResizingAcrossOntoAnotherScreen_IsNotAMove()
+    {
+        var left = TestScreens.Dip(2560, 1392, 1.0);
+        var fullHdRight = TestScreens.Dip(1920, 1032, 1.0, x: 2560);
+        using var screenScope = WindowFitter.UseScreens(new TestScreens(left, fullHdRight));
+        using var harness = MainWindowTestHarness.Create();
+        var window = harness.Window;
+        window.Position = new PixelPoint(100, 100);
+        window.Width = 1200;
+        window.Height = 800;
+        Dispatcher.UIThread.RunJobs();
+
+        // Dragging the left border moves the frame's top-left as well.
+        var drag = WindowFitter.MoveSizeLoopOf(window)!;
+        drag.Enter();
+        drag.Sizing();
+        window.Position = new PixelPoint(2600, 100);
+        window.Width = 2200;
+        drag.Exit();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(new Size(2200, 800), window.Bounds.Size);
+        Assert.Equal(new PixelPoint(2600, 100), window.Position);
+    }
+
     internal static Size WorkArea(ScreenArea screen)
         => new(screen.WorkingArea.Width / screen.Scaling, screen.WorkingArea.Height / screen.Scaling);
 
