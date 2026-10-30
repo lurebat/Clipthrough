@@ -4398,5 +4398,13 @@
     "find": "Where-Object { $_ -notin $rerunPassed }",
     "replace": "Where-Object { $_ -notin $rerunPassed -and $_.Length -lt 0 }",
     "filter": "FullyQualifiedName~CiHeadlessGateScriptTests"
+  },
+  {
+    "id": "headless-gate-cleanup-marker-anywhere",
+    "file": ".github/scripts/Invoke-HeadlessTests.ps1",
+    "why": "Rubber-duck F-08-2: only a message that opens with the cleanup marker is a cleanup failure; an assertion that quotes the marker is a real failure and must not be retried.",
+    "find": "$message.StartsWith($cleanupMarker, [StringComparison]::Ordinal)",
+    "replace": "$message.Contains($cleanupMarker, [StringComparison]::Ordinal)",
+    "filter": "FullyQualifiedName~CiHeadlessGateScriptTests"
   }
 ]
