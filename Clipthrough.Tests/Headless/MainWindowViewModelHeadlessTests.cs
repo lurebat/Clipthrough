@@ -100,11 +100,21 @@ public sealed partial class MainWindowViewModelHeadlessTests
             clipboardMonitor.Emit(clip);
         }
 
-        await Task.Delay(500);
-        Dispatcher.UIThread.RunJobs();
+        // Until the database start has finished and the burst has landed, not a
+        // fixed 500 ms: the burst is emitted while the library is still loading,
+        // and under load the start alone outlasted the sleep.
+        var clock = Stopwatch.StartNew();
+        while ((viewModel.IsLoadingDatabase || viewModel.SelectedClip?.Id != 6) && clock.Elapsed < TimeSpan.FromSeconds(10))
+        {
+            await Task.Delay(20);
+            Dispatcher.UIThread.RunJobs();
+        }
 
         Assert.Equal(6, viewModel.SelectedClip?.Id);
-        Assert.InRange(clipStore.SearchCallCount, 2, 4);
+
+        // At least 1, not 2: the count includes the startup refresh, and when the
+        // start is slow the whole burst lands before it and one search serves all.
+        Assert.InRange(clipStore.SearchCallCount, 1, 4);
         Assert.Equal(1, clipStore.MaxConcurrentSearches);
     }
 
