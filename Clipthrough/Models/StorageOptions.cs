@@ -5,11 +5,11 @@ namespace Clipthrough.Models;
 
 public sealed record StorageOptions
 {
-    private const string UserDataDirectoryName = "ClipthroughData";
-    private const string LegacyUserDataDirectoryName = "Clipthrough";
-    private const string DatabaseFileName = "clipthrough.db";
-
-    public string DatabasePath { get; init; } = GetDefaultDatabasePath();
+    /// <summary>
+    /// Empty means "the default library for the data root";
+    /// <see cref="Normalize"/> fills it in.
+    /// </summary>
+    public string DatabasePath { get; init; } = string.Empty;
 
     public string DatabasePassword { get; init; } = string.Empty;
 
@@ -22,10 +22,10 @@ public sealed record StorageOptions
 
     public static StorageOptions Default { get; } = new();
 
-    public StorageOptions Normalize()
+    public StorageOptions Normalize(AppDataRoot dataRoot)
     {
         var normalizedPath = string.IsNullOrWhiteSpace(DatabasePath)
-            ? GetDefaultDatabasePath()
+            ? dataRoot.DefaultDatabasePath
             : Path.GetFullPath(Environment.ExpandEnvironmentVariables(DatabasePath.Trim()));
 
         return this with
@@ -42,33 +42,4 @@ public sealed record StorageOptions
     /// be entered through another.
     /// </summary>
     public static string NormalizePassword(string? password) => password?.Trim() ?? string.Empty;
-
-    public static string GetDefaultDatabasePath()
-    {
-        var appDataDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            UserDataDirectoryName);
-
-        return Path.Combine(appDataDirectory, DatabaseFileName);
-    }
-
-    public static string GetLegacyDefaultDatabasePath()
-    {
-        var appDataDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            LegacyUserDataDirectoryName);
-
-        return Path.Combine(appDataDirectory, DatabaseFileName);
-    }
-
-    public static bool IsLegacyDefaultDatabasePath(string? databasePath)
-    {
-        if (string.IsNullOrWhiteSpace(databasePath))
-        {
-            return false;
-        }
-
-        var normalizedPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(databasePath.Trim()));
-        return string.Equals(normalizedPath, GetLegacyDefaultDatabasePath(), StringComparison.OrdinalIgnoreCase);
-    }
 }

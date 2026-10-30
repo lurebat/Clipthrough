@@ -21,14 +21,17 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
 
     public TestStorageOptionsService(string databasePath)
     {
+        DataRoot = AppDataRoot.Chosen(Path.GetDirectoryName(Path.GetFullPath(databasePath))!, AppDataRootSource.CommandLine);
         Current = new StorageOptions
         {
             DatabasePath = databasePath,
             DatabasePassword = string.Empty,
-        }.Normalize();
+        }.Normalize(DataRoot);
     }
 
     public StorageOptions Current { get; private set; }
+
+    public AppDataRoot DataRoot { get; }
 
     public bool HasSavedConfig => _hasSavedConfig;
 
@@ -45,7 +48,7 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
 
     public Task SaveAsync(StorageOptions options, CancellationToken cancellationToken = default)
     {
-        Current = options.Normalize();
+        Current = options.Normalize(DataRoot);
         _hasSavedConfig = true;
         SaveCount++;
         return Task.CompletedTask;
@@ -57,7 +60,7 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
         {
             DatabasePassword = newPassword ?? string.Empty,
             RememberPassword = rememberNewPassword,
-        }).Normalize();
+        }).Normalize(DataRoot);
         return Task.CompletedTask;
     }
 
@@ -74,7 +77,7 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
             DatabasePath = Current.DatabasePath,
             DatabasePassword = password,
             RememberPassword = Current.RememberPassword,
-        }.Normalize();
+        }.Normalize(DataRoot);
     }
 
     public void SetHasSavedConfig(bool value) => _hasSavedConfig = value;

@@ -20,6 +20,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _configPath;
+    private readonly AppDataRoot _dataRoot;
     private readonly IDataProtectionService _dataProtection;
     private readonly IServiceProvider? _services;
 
@@ -30,14 +31,8 @@ public sealed class StorageOptionsService : IStorageOptionsService
     /// constructor cycle: StorageOptionsService -> workers -> ClipStoreService
     /// -> SqliteConnectionFactory -> StorageOptionsService.
     /// </summary>
-    public StorageOptionsService(IDataProtectionService dataProtection, IServiceProvider services)
-        : this(
-            dataProtection,
-            Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Clipthrough",
-                "storage.json"),
-            services)
+    public StorageOptionsService(IDataProtectionService dataProtection, AppDataRoot dataRoot, IServiceProvider services)
+        : this(dataProtection, dataRoot, dataRoot.StorageConfigPath, services)
     {
     }
 
@@ -49,12 +44,29 @@ public sealed class StorageOptionsService : IStorageOptionsService
     {
     }
 
+    // The data root of a test seam is the folder holding its storage.json, as
+    // a chosen root would be, so its default library is beside it too rather
+    // than in the user's real profile.
     internal StorageOptionsService(
         IDataProtectionService dataProtection,
         string configPath,
         IServiceProvider? services)
+        : this(
+            dataProtection,
+            AppDataRoot.Chosen(Path.GetDirectoryName(Path.GetFullPath(configPath))!, AppDataRootSource.CommandLine),
+            configPath,
+            services)
+    {
+    }
+
+    private StorageOptionsService(
+        IDataProtectionService dataProtection,
+        AppDataRoot dataRoot,
+        string configPath,
+        IServiceProvider? services)
     {
         _dataProtection = dataProtection;
+        _dataRoot = dataRoot;
         _configPath = configPath;
         _services = services;
 
@@ -71,6 +83,8 @@ public sealed class StorageOptionsService : IStorageOptionsService
             _services?.GetService<Clipthrough.Database.DatabaseInitializer>());
 
     public StorageOptions Current { get; private set; }
+
+    public AppDataRoot DataRoot => _dataRoot;
 
     public bool HasSavedConfig => File.Exists(_configPath);
 
@@ -161,7 +175,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
     public async Task SaveAsync(StorageOptions options, CancellationToken cancellationToken = default)
     {
-        var normalized = options.Normalize();
+        var normalized = options.Normalize(_dataRoot);
 
         await _gate.WaitAsync(cancellationToken);
         try
@@ -434,7 +448,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
                 {
                     DatabasePassword = newKey,
                     RememberPassword = rememberNewPassword,
-                }).Normalize();
+                }).Normalize(_dataRoot);
 
                 // Step 7: Update in-memory state so the running session (and the
                 // workers restarted on scope dispose) use the new key.
@@ -571,7 +585,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
             DatabasePath = Current.DatabasePath,
             DatabasePassword = password,
             RememberPassword = Current.RememberPassword,
-        }.Normalize();
+        }.Normalize(_dataRoot);
     }
 
     private StorageOptions LoadFromDisk()
@@ -580,14 +594,14 @@ public sealed class StorageOptionsService : IStorageOptionsService
         {
             if (!File.Exists(_configPath))
             {
-                return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize());
+                return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize(_dataRoot));
             }
 
             var json = File.ReadAllText(_configPath);
             var stored = JsonSerializer.Deserialize<StorageOptionsDocument>(json, JsonOptions);
             if (stored is null)
             {
-                return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize());
+                return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize(_dataRoot));
             }
 
             bool rememberPassword;
@@ -630,10 +644,10 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
             var options = new StorageOptions
             {
-                DatabasePath = stored.DatabasePath ?? StorageOptions.GetDefaultDatabasePath(),
+                DatabasePath = stored.DatabasePath ?? string.Empty,
                 DatabasePassword = loadedPassword,
                 RememberPassword = rememberPassword,
-            }.Normalize();
+            }.Normalize(_dataRoot);
 
             options = EnsureLegacyDefaultDatabaseCopied(options);
 
@@ -672,7 +686,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
             // library, so the user must hear about it, and the file must be set
             // aside before the next save overwrites the evidence (F-22).
             LoadFault = QuarantineUnreadableConfig(ex);
-            return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize());
+            return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize(_dataRoot));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -680,7 +694,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
             // is usually transient, and moving it aside would lose a config
             // that was never corrupt.
             Trace.TraceWarning($"Storage settings load failed: {ex.Message}");
-            return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize());
+            return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize(_dataRoot));
         }
     }
 
@@ -721,22 +735,27 @@ public sealed class StorageOptionsService : IStorageOptionsService
         }
     }
 
-    private static StorageOptions EnsureLegacyDefaultDatabaseCopied(StorageOptions options)
+    private StorageOptions EnsureLegacyDefaultDatabaseCopied(StorageOptions options)
     {
-        if (string.Equals(options.DatabasePath, StorageOptions.GetDefaultDatabasePath(), StringComparison.OrdinalIgnoreCase))
-        {
-            TryCopyLegacyDatabase(StorageOptions.GetLegacyDefaultDatabasePath(), options.DatabasePath, options.DatabasePassword);
-            return options;
-        }
-
-        if (!StorageOptions.IsLegacyDefaultDatabasePath(options.DatabasePath))
+        if (_dataRoot.LegacyDatabasePath is not { } legacyPath)
         {
             return options;
         }
 
-        var migrated = options with { DatabasePath = StorageOptions.GetDefaultDatabasePath() };
+        if (string.Equals(options.DatabasePath, _dataRoot.DefaultDatabasePath, StringComparison.OrdinalIgnoreCase))
+        {
+            TryCopyLegacyDatabase(legacyPath, options.DatabasePath, options.DatabasePassword);
+            return options;
+        }
+
+        if (!string.Equals(options.DatabasePath, legacyPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return options;
+        }
+
+        var migrated = options with { DatabasePath = _dataRoot.DefaultDatabasePath };
         TryCopyLegacyDatabase(options.DatabasePath, migrated.DatabasePath, migrated.DatabasePassword);
-        return migrated.Normalize();
+        return migrated.Normalize(_dataRoot);
     }
 
     /// <summary>

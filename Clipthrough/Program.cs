@@ -5,6 +5,8 @@ using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using Clipthrough.Diagnostics;
+using Clipthrough.Models;
+using Clipthrough.Services;
 using Velopack;
 
 namespace Clipthrough;
@@ -20,7 +22,10 @@ sealed class Program
     public static void Main(string[] args)
     {
         SQLitePCL.Batteries_V2.Init();
-        Clipthrough.Diagnostics.TraceConfiguration.Initialize();
+        // First, because the log file lives in the data folder it names.
+        var dataRoot = AppDataRootResolver.ResolveForCurrentProcess(args);
+        Clipthrough.Diagnostics.TraceConfiguration.Initialize(dataRoot.LogFilePath);
+        Trace.TraceInformation($"Data folder: {dataRoot.Directory} ({dataRoot.Source}).");
         TaskScheduler.UnobservedTaskException += static (_, e) =>
         {
             Trace.TraceError($"Unobserved task exception: {e.Exception}");
@@ -54,7 +59,7 @@ sealed class Program
 
         try
         {
-            BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+            BuildAvaloniaApp(dataRoot).StartWithClassicDesktopLifetime(args);
         }
         catch (Exception ex)
         {
@@ -68,8 +73,14 @@ sealed class Program
 
     // Avalonia configuration, don't remove; also used by visual designer.
     public static AppBuilder BuildAvaloniaApp()
+        => Configure(AppBuilder.Configure<App>());
+
+    private static AppBuilder BuildAvaloniaApp(AppDataRoot dataRoot)
+        => Configure(AppBuilder.Configure(() => new App(dataRoot)));
+
+    private static AppBuilder Configure(AppBuilder builder)
     {
-        var builder = AppBuilder.Configure<App>()
+        builder = builder
             .UsePlatformDetect()
             .WithInterFont()
             .UseReactiveUI(_ => { })

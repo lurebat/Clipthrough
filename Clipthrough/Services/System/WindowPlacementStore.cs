@@ -20,11 +20,8 @@ public sealed class WindowPlacementStore : IWindowPlacementStore
     private SavedWindowPlacement? _lastWritten;
     private Task _pendingWrite = Task.CompletedTask;
 
-    public WindowPlacementStore()
-        : this(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Clipthrough",
-            "window.json"))
+    public WindowPlacementStore(AppDataRoot dataRoot)
+        : this(dataRoot.WindowPlacementPath)
     {
     }
 

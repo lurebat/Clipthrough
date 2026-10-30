@@ -4918,5 +4918,61 @@
     "find": "if (File.Exists(Path.Combine(executableDirectory, PortableMarkerFileName)))",
     "replace": "if (File.Exists(Path.Combine(executableDirectory, PortableMarkerFileName)) && executableDirectory.Length < 0)",
     "filter": "FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "dataroot-wiring-storage",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "The DI constructor must read storage.json from the injected data root, not from %LOCALAPPDATA% (configurable data folder).",
+    "find": ": this(dataProtection, dataRoot, dataRoot.StorageConfigPath, services)",
+    "replace": ": this(dataProtection, dataRoot, dataRoot.StorageConfigPath + \".elsewhere\", services)",
+    "filter": "FullyQualifiedName~AppDataRootWiringTests"
+  },
+  {
+    "id": "dataroot-wiring-settings",
+    "file": "Clipthrough/Services/Storage/SettingsService.cs",
+    "why": "The DI constructor must keep settings.json in the injected data root (configurable data folder).",
+    "find": ": this(connectionFactory, dataProtection, dataRoot.SettingsPath)",
+    "replace": ": this(connectionFactory, dataProtection, dataRoot.SettingsPath + \".elsewhere\")",
+    "filter": "FullyQualifiedName~AppDataRootWiringTests"
+  },
+  {
+    "id": "dataroot-wiring-window",
+    "file": "Clipthrough/Services/System/WindowPlacementStore.cs",
+    "why": "The DI constructor must keep window.json in the injected data root (configurable data folder).",
+    "find": ": this(dataRoot.WindowPlacementPath)",
+    "replace": ": this(dataRoot.WindowPlacementPath + \".elsewhere\")",
+    "filter": "FullyQualifiedName~AppDataRootWiringTests"
+  },
+  {
+    "id": "dataroot-wiring-token",
+    "file": "Clipthrough/Services/Ai/CopilotAuthService.cs",
+    "why": "The DI constructor must keep the Copilot token in the injected data root (configurable data folder).",
+    "find": "dataProtection, dataRoot.CopilotTokenPath)",
+    "replace": "dataProtection, dataRoot.CopilotTokenPath + \".elsewhere\")",
+    "filter": "FullyQualifiedName~AppDataRootWiringTests"
+  },
+  {
+    "id": "dataroot-default-library",
+    "file": "Clipthrough/Models/StorageOptions.cs",
+    "why": "A missing library path defaults to the data root's library, not a fixed %LOCALAPPDATA% path (configurable data folder).",
+    "find": "? dataRoot.DefaultDatabasePath",
+    "replace": "? dataRoot.SettingsPath",
+    "filter": "FullyQualifiedName~AppDataRootWiringTests|FullyQualifiedName~StorageOptionsTests"
+  },
+  {
+    "id": "dataroot-legacy-migration-default-root",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "The default root still migrates the pre-0.6.3 library into ClipthroughData after the move to AppDataRoot.",
+    "find": "if (_dataRoot.LegacyDatabasePath is not { } legacyPath)",
+    "replace": "if (_dataRoot.LegacyDatabasePath is not { } legacyPath || legacyPath.Length > 0)",
+    "filter": "FullyQualifiedName~LegacyDatabaseMigrationTests"
+  },
+  {
+    "id": "guard-dataroot-folder-spellings",
+    "file": "Clipthrough.Tests/Unit/AppDataRootGuardTests.cs",
+    "why": "The LocalApplicationData rule must catch spaced and line-broken spellings, or a bypass passes the guard.",
+    "find": "@\"\\bSpecialFolder\\s*\\.\\s*Local\" + \"ApplicationData\\\\b\"",
+    "replace": "@\"\\bSpecialFolder\\.Local\" + \"ApplicationData\\\\b\"",
+    "filter": "FullyQualifiedName~AppDataRootGuardTests"
   }
 ]

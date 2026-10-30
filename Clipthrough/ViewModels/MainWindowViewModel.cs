@@ -6076,7 +6076,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 DatabasePath = Settings.DatabasePath,
                 DatabasePassword = SettingsDatabasePassword,
                 RememberPassword = SettingsRememberDatabasePassword,
-            }.Normalize();
+            }.Normalize(_storageOptionsService.DataRoot);
         }
         catch (Exception ex)
         {
@@ -7003,7 +7003,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
 
-    private static async Task<string?> PickDatabasePathAsync(IStorageProvider storageProvider, string currentPath)
+    private async Task<string?> PickDatabasePathAsync(IStorageProvider storageProvider, string currentPath)
     {
         var suggestedPath = GetSuggestedDatabasePath(currentPath);
         var suggestedDirectoryPath = Path.GetDirectoryName(suggestedPath);
@@ -7026,11 +7026,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return result?.TryGetLocalPath();
     }
 
-    private static string GetSuggestedDatabasePath(string currentPath)
+    private string GetSuggestedDatabasePath(string currentPath)
     {
         if (string.IsNullOrWhiteSpace(currentPath))
         {
-            return StorageOptions.GetDefaultDatabasePath();
+            return _storageOptionsService.DataRoot.DefaultDatabasePath;
         }
 
         try
@@ -7039,7 +7039,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
-            return StorageOptions.GetDefaultDatabasePath();
+            return _storageOptionsService.DataRoot.DefaultDatabasePath;
         }
     }
 

@@ -6,6 +6,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Clipthrough.Models;
 
 namespace Clipthrough.Services;
 
@@ -27,8 +28,8 @@ public sealed class CopilotAuthService : ICopilotAuthService, IDisposable
     private string? _copilotToken;
     private DateTimeOffset _copilotTokenExpiry;
 
-    public CopilotAuthService(IDataProtectionService dataProtection)
-        : this(new HttpClient(), ownsHttpClient: true, dataProtection)
+    public CopilotAuthService(IDataProtectionService dataProtection, AppDataRoot dataRoot)
+        : this(new HttpClient(), ownsHttpClient: true, dataProtection, dataRoot.CopilotTokenPath)
     {
     }
 
@@ -63,12 +64,9 @@ public sealed class CopilotAuthService : ICopilotAuthService, IDisposable
         // Only set up token persistence when the protector can actually secure
         // on-disk data. On non-Windows platforms with the no-op fallback we keep
         // the token in-memory only — never write cleartext to disk.
-        if (dataProtection is not null && dataProtection.CanPersistSecrets)
+        if (dataProtection is not null && dataProtection.CanPersistSecrets && tokenPath is not null)
         {
-            _tokenPath = tokenPath ?? Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Clipthrough",
-                "copilot-token.bin");
+            _tokenPath = tokenPath;
             TryLoadGitHubToken();
         }
     }
