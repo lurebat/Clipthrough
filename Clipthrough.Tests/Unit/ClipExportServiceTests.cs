@@ -86,4 +86,81 @@ public sealed class ClipExportServiceTests : IDisposable
         Assert.False(Directory.Exists(abandoned));
         Assert.True(Directory.Exists(unrelated));
     }
+
+    /// <summary>
+    /// Rubber-duck F-06-4. A crashed session's PID can be reused by any other
+    /// long-running process before the next start; the PID alone then makes
+    /// the abandoned folder look live. Here the PID is this test process -
+    /// certainly running - but no session holds the folder's lock any more.
+    /// </summary>
+    [Fact]
+    public void AFolderWhosePidWasReused_ButWhoseSessionIsGone_IsRemovedAtStartup()
+    {
+        var temp = Path.Combine(_root, "Temp");
+        var abandoned = Path.Combine(temp, $"Clipthrough-tool-copies-{Environment.ProcessId}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(abandoned);
+        File.WriteAllText(Path.Combine(abandoned, "session.lock"), string.Empty);
+        File.WriteAllText(Path.Combine(abandoned, "secret.txt"), "x");
+
+        using var service = new ClipExportService(Path.Combine(_root, "Documents"), temp);
+
+        Assert.False(Directory.Exists(abandoned));
+    }
+
+    /// <summary>A second instance that starts must not sweep a live session's copies.</summary>
+    [Fact]
+    public async Task ALiveSessionsFolder_IsKept_WhenAnotherInstanceStarts()
+    {
+        var temp = Path.Combine(_root, "Temp");
+        using var live = new ClipExportService(Path.Combine(_root, "Documents"), temp);
+        var copy = await live.ExportForToolAsync(Secret());
+
+        using var second = new ClipExportService(Path.Combine(_root, "Documents"), temp);
+
+        Assert.True(File.Exists(copy.PrimaryPath));
+    }
+
+    /// <summary>
+    /// Rubber-duck F-06-7. An external tool can still hold a file of an
+    /// abandoned folder open when the next session starts, so the startup sweep
+    /// cannot remove it. The session retries once the file is released rather
+    /// than leaving the plaintext copy until yet another start.
+    /// </summary>
+    [Fact]
+    public async Task AnAbandonedFolderLockedAtStartup_IsRemovedOnceReleased()
+    {
+        var temp = Path.Combine(_root, "Temp");
+        var abandoned = Path.Combine(temp, "Clipthrough-tool-copies-999999-abc");
+        Directory.CreateDirectory(abandoned);
+        var held = Path.Combine(abandoned, "secret.txt");
+        File.WriteAllText(held, "x");
+
+        using var service = OpenWhileHeld(held, () => new ClipExportService(Path.Combine(_root, "Documents"), temp));
+        Assert.True(Directory.Exists(abandoned), "The fixture did not hold the folder at startup.");
+
+        await service.ExportForToolAsync(Secret());
+        Assert.False(Directory.Exists(abandoned), "A released abandoned folder was not retried during the session.");
+    }
+
+    [Fact]
+    public void AnAbandonedFolderLockedAtStartup_IsRemovedAtExit()
+    {
+        var temp = Path.Combine(_root, "Temp");
+        var abandoned = Path.Combine(temp, "Clipthrough-tool-copies-999999-abc");
+        Directory.CreateDirectory(abandoned);
+        var held = Path.Combine(abandoned, "secret.txt");
+        File.WriteAllText(held, "x");
+
+        var service = OpenWhileHeld(held, () => new ClipExportService(Path.Combine(_root, "Documents"), temp));
+        Assert.True(Directory.Exists(abandoned), "The fixture did not hold the folder at startup.");
+
+        service.Dispose();
+        Assert.False(Directory.Exists(abandoned), "A released abandoned folder was not retried at exit.");
+    }
+
+    private static ClipExportService OpenWhileHeld(string path, Func<ClipExportService> create)
+    {
+        using var hold = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        return create();
+    }
 }
