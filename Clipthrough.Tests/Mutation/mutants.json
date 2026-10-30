@@ -3147,8 +3147,8 @@
     "id": "background-move-never-started",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "U4. The app opens without moving an upgraded library's payloads; nothing else ever moves them.",
-    "find": "        _ = RunDeferredPayloadMoveAsync();",
-    "replace": "        _ = Environment.ProcessorCount < 0 ? RunDeferredPayloadMoveAsync() : Task.CompletedTask;",
+    "find": "        DeferredUpgradeRun = RunDeferredPayloadMoveAsync();",
+    "replace": "        DeferredUpgradeRun = Environment.ProcessorCount < 0 ? RunDeferredPayloadMoveAsync() : Task.CompletedTask;",
     "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests.AnUpgradeFromSchema8"
   },
   {
@@ -4275,8 +4275,8 @@
     "id": "no-backup-after-the-background-run",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "The startup backup waits for the background check; without asking again after the run, the day goes without a backup.",
-    "find": "                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n            }\n            catch (Exception backupFailure)",
-    "replace": "                await Task.CompletedTask.ConfigureAwait(false);\n            }\n            catch (Exception backupFailure)",
+    "find": "                    await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n                }\n                catch (Exception backupFailure)",
+    "replace": "                    await Task.CompletedTask.ConfigureAwait(false);\n                }\n                catch (Exception backupFailure)",
     "filter": "FullyQualifiedName~AnUpgradeFromSchema8_OpensAtOnce"
   },
   {
@@ -4350,5 +4350,13 @@
     "find": "                    + CASE WHEN new.source_app_icon_hash IS NULL THEN COALESCE(LENGTH(new.source_app_icon), 0) ELSE 0 END",
     "replace": "                    + CASE WHEN new.source_app_icon_hash IS NULL OR 1 = 1 THEN COALESCE(LENGTH(new.source_app_icon), 0) ELSE 0 END",
     "filter": "FullyQualifiedName~KeepsCountingItsInlineIcon"
+  },
+  {
+    "id": "ordinary-start-backs-up-twice",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-13-8: the background run's closing maintenance + daily backup are for a deferred start's held-back backup; on every ordinary start they duplicated the startup pass and raced it onto the same temp file.",
+    "find": "            if (upgraded)",
+    "replace": "            if (upgraded || Environment.ProcessorCount > 0)",
+    "filter": "FullyQualifiedName~AnOrdinaryStart_TakesTheDailyBackupOnce"
   }
 ]

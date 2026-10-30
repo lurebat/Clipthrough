@@ -70,4 +70,64 @@ public sealed partial class MainWindowViewModelHeadlessTests
 
         Assert.False(observed, "The startup backup ran while an expired sensitive clip was still in the library.");
     }
+
+    /// <summary>
+    /// Holds the first daily backup it is asked for, and counts every request,
+    /// so a second request made while the first is still copying shows.
+    /// </summary>
+    private sealed class HoldingBackupService : IDatabaseBackupService
+    {
+        private int _calls;
+
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int Calls => Volatile.Read(ref _calls);
+
+        public Task EnsureDailyBackupAsync(CancellationToken cancellationToken = default)
+            => Interlocked.Increment(ref _calls) == 1 ? Release.Task : Task.CompletedTask;
+
+        public IReadOnlyList<DatabaseBackupInfo> ListBackups() => Array.Empty<DatabaseBackupInfo>();
+
+        public Task RestoreAsync(string backupPath, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Rubber-duck F-13-8: the background upgrade run ends with a maintenance pass
+    /// and the daily backup, for the backup a deferred start held back until its
+    /// integrity check. It did that on every start, including the ordinary ones
+    /// with nothing to move, so each start ran maintenance twice and two backups
+    /// at once onto the same temporary file.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task AnOrdinaryStart_TakesTheDailyBackupOnce()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var backup = new HoldingBackupService();
+        using var viewModel = CreateViewModel(scope, new TestClipboardMonitorService(), new TestSystemInteractionService(), new TestSessionLogService(), databaseBackupService: backup);
+        try
+        {
+            await viewModel.InitializeAsync();
+            viewModel.SetMainWindowVisible(true);
+            for (var i = 0; i < 800 && (backup.Calls == 0 || viewModel.DeferredUpgradeRun is null); i++)
+            {
+                await Task.Delay(25);
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            }
+
+            Assert.True(backup.Calls > 0, "The startup backup never ran.");
+            Assert.NotNull(viewModel.DeferredUpgradeRun);
+
+            // The first request is held. If the background run asks again it
+            // either gets through as a second request or, if it asked first,
+            // never finishes.
+            var finished = await Task.WhenAny(viewModel.DeferredUpgradeRun, Task.Delay(TimeSpan.FromSeconds(20))) == viewModel.DeferredUpgradeRun;
+            Assert.True(finished, "The background upgrade run is waiting on a daily backup on an ordinary start.");
+            Assert.True(backup.Calls == 1, $"An ordinary start asked for the daily backup {backup.Calls} times.");
+        }
+        finally
+        {
+            backup.Release.TrySetResult();
+        }
+    }
 }
