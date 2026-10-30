@@ -3558,5 +3558,13 @@
     "find": "            var richContent = string.IsNullOrWhiteSpace(markup) ? clip.Content : markup;",
     "replace": "            var richContent = string.IsNullOrWhiteSpace(markup) || markup.Length >= 0 ? clip.Content : markup;",
     "filter": "FullyQualifiedName~ClipClipboardWriterTests|FullyQualifiedName~HotkeyClipActionsTests"
+  },
+  {
+    "id": "pending-delete-owner-ignored",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-05-2: an earlier delete's undo timer matched pending deletes by id alone, so after delete, re-copy, delete again it committed the second delete inside its undo window and the second Undo restored nothing.",
+    "find": "            && ReferenceEquals(pending.Cts, cts)",
+    "replace": "            && (ReferenceEquals(pending.Cts, cts) || clipId >= 0)",
+    "filter": "FullyQualifiedName~DeleteRecopyDeleteAgain"
   }
 ]
