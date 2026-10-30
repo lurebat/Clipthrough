@@ -55,7 +55,10 @@ Four separate assumptions, each wrong on a scaled or changed monitor:
 - **Fit triggers:** `Views/WindowFitter.cs` fits a window each time it opens,
   including every show from the tray. It also refits after `ScalingChanged`
   (only when the window no longer fits, so a drag between monitors is not
-  fought) and after the screens change. Every Clipthrough window calls
+  fought), after the screens change, and when a drag by the caption ends on
+  another screen (`WindowFitter.MoveSizeLoop`, from WM_EXITSIZEMOVE; again only
+  when the window no longer fits, and never during the drag or after a
+  resize). Every Clipthrough window calls
   `WindowFitter.Attach(this)` in its constructor.
 - **Responsive workspace:** the main window has a 480x360 minimum and reflows
   instead of overflowing. `WorkspaceBreakpoints.Classify` sets the bp-* classes
@@ -114,8 +117,9 @@ handled in headless and they show only as a window that kept its old size.
 - **Fonts in tests:** the test app loads Inter with `.WithInterFont()`, as the app does. Without it, headless measures text in a stub font about 1.6 times as wide, and every assertion about what fits measures text that does not exist.
 - **Regression tests:** `ResponsiveWorkspaceHeadlessTests` covers each
   breakpoint; `WindowFitHeadlessTests` covers open, DPI change, screen change,
-  show from the tray, caret placement and dialogs; `SettingsNarrowHeadlessTests`
-  covers the hotkey rows; `WindowPlacementHeadlessTests` covers restoring the
+  a drag onto a smaller screen, show from the tray, caret placement and
+  dialogs; `SettingsNarrowHeadlessTests` covers the hotkey rows;
+  `WindowPlacementHeadlessTests` covers restoring the
   placement.
 - **Screenshots:** `LayoutSurveyCapture` renders every surface at seven
   working areas when `CLIPTHROUGH_LAYOUT_CAPTURE_DIR` is set. Run it before and

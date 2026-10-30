@@ -105,6 +105,8 @@ public sealed class DatabaseMaintenanceScopeTests
         public void SuppressNext(string? content = null) { }
 
         public void CancelSuppressNext() { }
+
+        public void SuppressNextForeignCopy() { }
     }
 
     private sealed class RecordingMonitor : IClipboardMonitorService
@@ -132,6 +134,8 @@ public sealed class DatabaseMaintenanceScopeTests
         public void SuppressNext(string? content = null) { }
 
         public void CancelSuppressNext() { }
+
+        public void SuppressNextForeignCopy() { }
     }
 
     private sealed class RecordingOcrQueue : IBackgroundOcrQueue
