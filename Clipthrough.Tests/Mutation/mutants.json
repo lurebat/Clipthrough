@@ -2931,8 +2931,8 @@
     "id": "size-cap-ignores-stored-icons",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "The cap must bound what is on disk (the 12.5x under-count fixed earlier); since U-E1 icons are counted once, from app_icons.",
-    "find": " + \") FROM clips), 0) + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons), 0);\";",
-    "replace": " + \") FROM clips), 0) + 0;\";",
+    "find": "             + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons\n                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1')), 0);",
+    "replace": "             + 0;",
     "filter": "FullyQualifiedName~Maintenance_LibrarySizeCap_CountsTheSourceAppIconsItStores"
   },
   {
@@ -4366,5 +4366,29 @@
     "find": "        if (_databaseInitializer is { IsIntegrityCheckOwed: true })\n        {\n            Trace.TraceInformation(\"Daily backup deferred until the library's background integrity check has passed.\");\n            return;\n        }\n\n        if (BetweenIntegrityStateReads is { } between)\n        {\n            await between().ConfigureAwait(false);\n        }\n\n        // Live check F3: a backup copies the library page for page, damage included,\n        // and the rotation below keeps only a week, so backing up a library that\n        // failed its check would push the good backups out one day at a time.\n        if (_databaseInitializer is { HasFailedIntegrityCheck: true })\n        {\n            Trace.TraceWarning(\"Daily backup skipped: the library failed its integrity check this session, so the existing backups are kept as they are.\");\n            return;\n        }\n",
     "replace": "        if (_databaseInitializer is { HasFailedIntegrityCheck: true })\n        {\n            Trace.TraceWarning(\"Daily backup skipped: the library failed its integrity check this session, so the existing backups are kept as they are.\");\n            return;\n        }\n\n        if (BetweenIntegrityStateReads is { } between)\n        {\n            await between().ConfigureAwait(false);\n        }\n\n        // Live check F3: a backup copies the library page for page, damage included,\n        // and the rotation below keeps only a week, so backing up a library that\n        // failed its check would push the good backups out one day at a time.\n        if (_databaseInitializer is { IsIntegrityCheckOwed: true })\n        {\n            Trace.TraceInformation(\"Daily backup deferred until the library's background integrity check has passed.\");\n            return;\n        }\n",
     "filter": "FullyQualifiedName~WhenTheCheckFailsBetweenItsTwoReads"
+  },
+  {
+    "id": "size-total-counts-icons-while-move-owed",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-13-5 (owner decision, option 2): while the deferred payload move is owed, orphaned icons cannot be swept, so counting app_icons makes the size cap evict clips to pay for icons nothing uses.",
+    "find": "                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1')), 0);",
+    "replace": "                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1') OR 1 = 1), 0);",
+    "filter": "FullyQualifiedName~WhileTheMoveIsOwed"
+  },
+  {
+    "id": "size-total-leaves-icons-out-after-the-move",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-13-5: icons leave the size total only while the move is owed; once it is done each distinct icon counts once again.",
+    "find": "                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1')), 0);",
+    "replace": "                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1') AND 1 = 0), 0);",
+    "filter": "FullyQualifiedName~WhileTheMoveIsOwed_TheSizeTotalLeavesIconsOut"
+  },
+  {
+    "id": "size-cap-walk-frees-icons-while-move-owed",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-13-5: while icons are out of the size total, an eviction that frees an icon frees nothing the total counted; a walk that subtracts the icon stops with the library still over its cap. Guards the merge with the F-11-1 walk (ReadIconReferencesAsync).",
+    "find": "                SELECT {StoredRowBytes}\n                FROM clips\n                WHERE NOT {UserKeptClipPredicate}",
+    "replace": "                SELECT {StoredRowBytes} + COALESCE((SELECT LENGTH(png) FROM app_icons WHERE hash = clips.source_app_icon_hash), 0)\n                FROM clips\n                WHERE NOT {UserKeptClipPredicate}",
+    "filter": "FullyQualifiedName~WhileTheMoveIsOwed_EvictingAnIconsLastClipFreesOnlyItsPayload"
   }
 ]
