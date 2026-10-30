@@ -1145,14 +1145,30 @@ public sealed class DatabaseInitializer : Clipthrough.Services.Search.IPausableW
     /// Whether a quick_check failed this session. The daily backup is not taken from
     /// such a library (live check F3), so the older, good backups are kept.
     /// </summary>
-    public bool HasFailedIntegrityCheck { get; private set; }
+    /// <remarks>
+    /// Volatile, like <see cref="IsIntegrityCheckOwed"/>: a failing check writes this
+    /// before it clears that, and the backup reads them in the reverse order.
+    /// </remarks>
+    public bool HasFailedIntegrityCheck
+    {
+        get => _hasFailedIntegrityCheck;
+        private set => _hasFailedIntegrityCheck = value;
+    }
+
+    private volatile bool _hasFailedIntegrityCheck;
 
     /// <summary>
     /// Whether this session still owes the integrity check a deferred upgrade start
     /// skipped (it runs at the start of <see cref="RunDeferredPayloadMoveAsync"/>).
     /// The daily backup waits for it.
     /// </summary>
-    public bool IsIntegrityCheckOwed { get; private set; }
+    public bool IsIntegrityCheckOwed
+    {
+        get => _isIntegrityCheckOwed;
+        private set => _isIntegrityCheckOwed = value;
+    }
+
+    private volatile bool _isIntegrityCheckOwed;
 
     /// <summary>
     /// Stops the background upgrade - the deferred move and the merge drain - and

@@ -759,6 +759,45 @@ public sealed class DeferredPayloadMoveTests
     }
 
     /// <summary>
+    /// The startup backup reads two things the background check writes: whether
+    /// the check failed, and whether it is still owed. A failing check sets the
+    /// first, then clears the second. Read in that same order, a check that lands
+    /// between the two reads is seen as neither failed nor owed, and the backup
+    /// copies the damaged library (Finding 4b: never back up a library that failed
+    /// its check this session).
+    /// </summary>
+    [Fact]
+    public async Task TheDailyBackup_IsNotTaken_WhenTheCheckFailsBetweenItsTwoReads()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        SeedSchema8Library(scope, 3);
+        await SeedFillerPagesAsync(scope);
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+        CorruptTheMiddleOfTheFile(scope);
+        Assert.True(scope.DatabaseInitializer.IsIntegrityCheckOwed);
+
+        var checkRan = false;
+        Clipthrough.Services.DatabaseBackupService.BetweenIntegrityStateReads = async () =>
+        {
+            checkRan = true;
+            await Assert.ThrowsAsync<InvalidOperationException>(() => scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(progress: null));
+        };
+        try
+        {
+            var backup = new Clipthrough.Services.DatabaseBackupService(scope.StorageOptionsService, null, null, null, settingsService: scope.SettingsService, databaseInitializer: scope.DatabaseInitializer);
+            await backup.EnsureDailyBackupAsync();
+        }
+        finally
+        {
+            Clipthrough.Services.DatabaseBackupService.BetweenIntegrityStateReads = null;
+        }
+
+        Assert.True(scope.DatabaseInitializer.HasFailedIntegrityCheck || !checkRan, "The forced check did not fail, so this proves nothing.");
+        Assert.False(System.IO.File.Exists(TodaysBackup(scope)), "A daily backup was taken from a library that failed its integrity check");
+    }
+
+    /// <summary>
     /// The startup backup ran while the background check was still reading the file
     /// (F2: written at t+43 s, the move began at t+46 s), so it could copy a library
     /// about to fail. Until the owed check has passed it waits; afterwards it runs.

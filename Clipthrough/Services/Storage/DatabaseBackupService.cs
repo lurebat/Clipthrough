@@ -63,8 +63,33 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         _retention = retention < 1 ? 1 : retention;
     }
 
+    /// <summary>
+    /// Test seam: runs between the two reads of the initializer's integrity state
+    /// in <see cref="EnsureDailyBackupAsync"/>, where a background check can finish.
+    /// </summary>
+    internal static Func<Task>? BetweenIntegrityStateReads { get; set; }
+
     public async Task EnsureDailyBackupAsync(CancellationToken cancellationToken = default)
     {
+        // Owed first, then failed: a failing check sets HasFailedIntegrityCheck before
+        // it clears IsIntegrityCheckOwed, so once this reads "not owed" the failure,
+        // if any, is already visible to the read below. The other order let a check
+        // finishing between the two reads look neither owed nor failed, and the
+        // damaged library was backed up (Finding 4b).
+        //
+        // A deferred upgrade start skipped the check, and the background run has not
+        // done it yet. The view model asks again once that run has finished.
+        if (_databaseInitializer is { IsIntegrityCheckOwed: true })
+        {
+            Trace.TraceInformation("Daily backup deferred until the library's background integrity check has passed.");
+            return;
+        }
+
+        if (BetweenIntegrityStateReads is { } between)
+        {
+            await between().ConfigureAwait(false);
+        }
+
         // Live check F3: a backup copies the library page for page, damage included,
         // and the rotation below keeps only a week, so backing up a library that
         // failed its check would push the good backups out one day at a time.
@@ -74,13 +99,6 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
             return;
         }
 
-        // A deferred upgrade start skipped the check, and the background run has not
-        // done it yet. The view model asks again once that run has finished.
-        if (_databaseInitializer is { IsIntegrityCheckOwed: true })
-        {
-            Trace.TraceInformation("Daily backup deferred until the library's background integrity check has passed.");
-            return;
-        }
         var dbPath = _storageOptionsService.Current.DatabasePath;
         if (string.IsNullOrEmpty(dbPath) || !File.Exists(dbPath))
         {
