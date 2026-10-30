@@ -412,7 +412,7 @@ public static partial class ClipDisplayFormatter
     private static string CollapseWhitespace(string content) => string.Join(" ", content
         .Split(['\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
-    private static string GetDisplayRichText(ClipEntry clip)
+    public static string GetDisplayRichText(ClipEntry clip)
     {
         if (!string.IsNullOrWhiteSpace(clip.ContentPrefix) && !LooksLikeRawRichText(clip.ContentPrefix))
         {

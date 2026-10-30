@@ -67,7 +67,8 @@ public sealed class StorageOptionsService : IStorageOptionsService
         => DatabaseMaintenanceScope.EnterAsync(
             _services?.GetService<IClipboardMonitorService>(),
             _services?.GetService<IBackgroundOcrQueue>(),
-            _services?.GetService<IEmbeddingWorker>());
+            _services?.GetService<IEmbeddingWorker>(),
+            _services?.GetService<Clipthrough.Database.DatabaseInitializer>());
 
     public StorageOptions Current { get; private set; }
 
@@ -423,6 +424,8 @@ public sealed class StorageOptionsService : IStorageOptionsService
                 // launch falls back to the unlock prompt — which accepts the new
                 // password the user just chose. Persisting first would instead point
                 // storage.json at a key the still-old DB rejects, locking them out.
+                // Removing encryption has no prompt to fall back on; LoadFromDisk
+                // drops a remembered key the plaintext file does not need.
                 SqliteConnection.ClearAllPools();
                 File.Move(tempPath, dbPath, overwrite: true);
                 tempPath = null; // dbPath owns it now.
@@ -619,6 +622,24 @@ public sealed class StorageOptionsService : IStorageOptionsService
             }.Normalize();
 
             options = EnsureLegacyDefaultDatabaseCopied(options);
+
+            // A remembered key on a file that opens without one is stale: removing
+            // encryption swaps the plaintext file in before storage.json is
+            // rewritten, so a crash or failed write in between leaves exactly this.
+            // Keying every connection to a plaintext file fails with "file is not
+            // a database", and there is no prompt to fall back on because the file
+            // needs no password. Only a successful keyless read drops it, and only
+            // of a non-empty file: an empty one opens keyless too, and dropping
+            // the key there would build the library unencrypted.
+            if (options.DatabasePassword.Length > 0
+                && File.Exists(options.DatabasePath)
+                && new FileInfo(options.DatabasePath).Length > 0
+                && !RequiresPassword(options.DatabasePath))
+            {
+                Trace.TraceWarning("Dropping the remembered database password: the database is not encrypted.");
+                options = options with { DatabasePassword = string.Empty };
+                needsMigration = true;
+            }
 
             if (needsMigration)
             {

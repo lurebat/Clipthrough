@@ -107,22 +107,33 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
             // Read the snapshot through SQLite rather than checkpointing and
             // copying the file, so commits still living in the WAL are included
             // even while other connections are reading or writing.
-            var tempPath = todayPath + ".tmp";
-            await Task.Run(
-                () =>
-                {
-                    var password = _storageOptionsService.Current.DatabasePassword;
-                    SqliteDatabaseCopier.CopyDatabase(dbPath, password, tempPath);
-                    // Owner decision on OD-4a: the purge serves the lifetime
-                    // promise. With the lifetime off sensitive clips are kept
-                    // like any other, so a restored backup brings them back.
-                    if (_settingsService?.Current.EnableSensitiveClipLifetime == true)
+            var tempPath = todayPath + TempSuffix;
+            DeleteStrandedTempCopies(backupDir, tempPath);
+            try
+            {
+                await Task.Run(
+                    () =>
                     {
-                        PurgeSensitiveClips(tempPath, password);
-                    }
-                },
-                cancellationToken).ConfigureAwait(false);
-            File.Move(tempPath, todayPath, overwrite: true);
+                        var password = _storageOptionsService.Current.DatabasePassword;
+                        SqliteDatabaseCopier.CopyDatabase(dbPath, password, tempPath);
+                        // Owner decision on OD-4a: the purge serves the lifetime
+                        // promise. With the lifetime off sensitive clips are kept
+                        // like any other, so a restored backup brings them back.
+                        if (_settingsService?.Current.EnableSensitiveClipLifetime == true)
+                        {
+                            PurgeSensitiveClips(tempPath, password);
+                        }
+                    },
+                    cancellationToken).ConfigureAwait(false);
+                File.Move(tempPath, todayPath, overwrite: true);
+            }
+            finally
+            {
+                // On any failure the temp copy may hold clips the purge never
+                // removed, and retention only prunes finished backups.
+                DeleteTempCopy(tempPath);
+            }
+
             Trace.TraceInformation($"Database backup written: {todayPath}");
 
             PruneOldBackups(backupDir);
@@ -130,6 +141,61 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException)
         {
             Trace.TraceWarning($"Database backup failed: {ex.Message}");
+        }
+    }
+
+    private const string TempSuffix = ".tmp";
+
+    /// <summary>
+    /// Removes a temp copy and any journal beside it. Best effort: a copy that
+    /// cannot be removed now is swept by a later backup.
+    /// </summary>
+    private static void DeleteTempCopy(string tempPath)
+    {
+        foreach (var suffix in new[] { string.Empty, "-wal", "-shm", "-journal" })
+        {
+            try
+            {
+                File.Delete(tempPath + suffix);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Trace.TraceWarning($"Could not remove the backup temp copy '{Path.GetFileName(tempPath + suffix)}': {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Sweeps temp copies a crash left behind on earlier days. Each day writes
+    /// its own temp name, so nothing else would ever overwrite or prune them,
+    /// and one that died mid-purge still holds sensitive clips. Today's name is
+    /// skipped: this run overwrites it.
+    /// </summary>
+    private static void DeleteStrandedTempCopies(string backupDir, string currentTempPath)
+    {
+        try
+        {
+            foreach (var path in Directory.EnumerateFiles(backupDir, BackupNamePattern + TempSuffix + "*"))
+            {
+                if (path.StartsWith(currentTempPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    File.Delete(path);
+                    Trace.TraceInformation($"Removed a stranded backup temp copy: {Path.GetFileName(path)}");
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Trace.TraceWarning($"Could not remove the stranded backup temp copy '{Path.GetFileName(path)}': {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceWarning($"Could not list stranded backup temp copies: {ex.Message}");
         }
     }
 
@@ -145,9 +211,10 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
     ///
     /// Deleting the rows is not enough on its own: their bytes stay in free
     /// pages and the full-text index keeps the original segments until a merge.
-    /// So the index is optimized and the file vacuumed whenever anything was
-    /// removed. A copy whose schema has no <c>is_sensitive</c> column is left
-    /// alone.
+    /// So the index is optimized and the file vacuumed on every purge, including
+    /// one that removes nothing: live expiry may have deleted a sensitive clip
+    /// before the copy, leaving the same residue. A copy whose schema has no
+    /// <c>is_sensitive</c> column is left alone.
     /// </summary>
     internal static int PurgeSensitiveClips(string path, string? password)
     {
@@ -164,14 +231,17 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
 
         var removed = Execute(connection, "DELETE FROM clips WHERE is_sensitive = 1;");
 
+        // Not only when this purge removed rows: live expiry may already have
+        // deleted a sensitive clip, and the copy carries its index segments
+        // all the same (rubber-duck F-06-3).
+        if (HasTable(connection, "clips_fts"))
+        {
+            Execute(connection, "INSERT INTO clips_fts(clips_fts) VALUES('optimize');");
+        }
+
+        Execute(connection, "VACUUM;");
         if (removed > 0)
         {
-            if (HasTable(connection, "clips_fts"))
-            {
-                Execute(connection, "INSERT INTO clips_fts(clips_fts) VALUES('optimize');");
-            }
-
-            Execute(connection, "VACUUM;");
             Trace.TraceInformation($"Removed {removed} sensitive clip(s) from the backup copy.");
         }
 
@@ -427,7 +497,7 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         // Step 1: Enter maintenance scope — stops workers and clears the pool
         // so no pooled connection holds the live file open during the swap.
         await using var scope = await DatabaseMaintenanceScope.EnterAsync(
-            _clipboardMonitor, _ocrQueue, _embeddingWorker);
+            _clipboardMonitor, _ocrQueue, _embeddingWorker, _databaseInitializer);
 
         await Task.Run(() => RestoreCore(backupPath, dbPath), cancellationToken).ConfigureAwait(false);
     }

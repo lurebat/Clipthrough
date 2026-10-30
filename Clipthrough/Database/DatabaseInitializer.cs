@@ -10,7 +10,7 @@ using Microsoft.Data.Sqlite;
 
 namespace Clipthrough.Database;
 
-public sealed class DatabaseInitializer
+public sealed class DatabaseInitializer : Clipthrough.Services.Search.IPausableWorker
 {
     private const string Schema = """
         PRAGMA foreign_keys = ON;
@@ -388,6 +388,14 @@ public sealed class DatabaseInitializer
     private readonly SqliteConnectionFactory _connectionFactory;
     private readonly ISensitivityService _sensitivityService;
 
+    // The background upgrade's pause state (F-13-1). Each running attempt is
+    // listed with the token that stops it and the task that completes once it
+    // has closed its connection.
+    private readonly object _backgroundGate = new();
+    private readonly List<(CancellationTokenSource Stop, Task Done)> _backgroundAttempts = [];
+    private int _backgroundPauseCount;
+    private TaskCompletionSource _backgroundResumed = CompletedSignal();
+
     public DatabaseInitializer(SqliteConnectionFactory connectionFactory, ISensitivityService sensitivityService)
     {
         _connectionFactory = connectionFactory;
@@ -457,6 +465,10 @@ public sealed class DatabaseInitializer
             await schemaCommand.ExecuteNonQueryAsync(cancellationToken);
         }
         TraceStep(sw, "schema-ddl");
+
+        // A repair an earlier launch did not live to finish: its table now looks
+        // current, so only the marker says it is still empty (rubber-duck F-11-2).
+        ftsSchemaRecreated |= await IsFtsRebuildPendingAsync(connection, cancellationToken);
 
         // Schema-version gate. On an established DB this short-circuits all
         // the Ensure*/Backfill* helpers (each of which costs at least one
@@ -1025,7 +1037,14 @@ public sealed class DatabaseInitializer
     /// the synchronous move does; reads and writes in the meantime follow the
     /// partly-moved rules (PartlyMovedLibraryTests).
     /// </summary>
-    public async Task<bool> RunDeferredPayloadMoveAsync(IProgress<LibraryUpgradeProgress>? progress, CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// Paused by <see cref="PauseAsync"/> for a whole-database operation, after
+    /// which it starts over against whatever library is live by then.
+    /// </remarks>
+    public Task<bool> RunDeferredPayloadMoveAsync(IProgress<LibraryUpgradeProgress>? progress, CancellationToken cancellationToken = default)
+        => RunPausableAsync(token => RunDeferredPayloadMoveCoreAsync(progress, token), cancellationToken);
+
+    private async Task<bool> RunDeferredPayloadMoveCoreAsync(IProgress<LibraryUpgradeProgress>? progress, CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -1108,6 +1127,12 @@ public sealed class DatabaseInitializer
     internal static Action<long>? AfterPayloadRowMoved { get; set; }
 
     /// <summary>
+    /// Test seam: runs between the UTC backfill's read and its writes, with no
+    /// transaction open, where the background backfill can meet a capture.
+    /// </summary>
+    internal static Func<CancellationToken, Task>? BeforeUtcBackfillWrites { get; set; }
+
+    /// <summary>
     /// Whether a quick_check failed this session. The daily backup is not taken from
     /// such a library (live check F3), so the older, good backups are kept.
     /// </summary>
@@ -1119,6 +1144,132 @@ public sealed class DatabaseInitializer
     /// The daily backup waits for it.
     /// </summary>
     public bool IsIntegrityCheckOwed { get; private set; }
+
+    /// <summary>
+    /// Stops the background upgrade - the deferred move and the merge drain - and
+    /// waits until it has closed its connection, for a whole-database operation
+    /// (rekey, restore, library move) that must not run beside a writer (F-13-1).
+    /// A run stopped this way is not over: it waits, and when the last pause is
+    /// released it starts again from the top - every step resumes from what it
+    /// committed - against the library that is live by then.
+    /// </summary>
+    public async Task<IAsyncDisposable> PauseAsync()
+    {
+        CancellationTokenSource[] running;
+        Task[] stopped;
+        lock (_backgroundGate)
+        {
+            if (_backgroundPauseCount++ == 0)
+            {
+                _backgroundResumed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+
+            running = _backgroundAttempts.Select(static a => a.Stop).ToArray();
+            stopped = _backgroundAttempts.Select(static a => a.Done).ToArray();
+        }
+
+        // Outside the lock: cancelling can run the attempt's unwinding inline.
+        foreach (var stop in running)
+        {
+            try
+            {
+                stop.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // That attempt finished meanwhile.
+            }
+        }
+
+        await Task.WhenAll(stopped).ConfigureAwait(false);
+        return new BackgroundPause(this);
+    }
+
+    private void ReleasePause()
+    {
+        lock (_backgroundGate)
+        {
+            if (--_backgroundPauseCount == 0)
+            {
+                _backgroundResumed.TrySetResult();
+            }
+        }
+    }
+
+    private static TaskCompletionSource CompletedSignal()
+    {
+        var signal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        signal.SetResult();
+        return signal;
+    }
+
+    /// <summary>
+    /// Runs one piece of background upgrade work so that <see cref="PauseAsync"/>
+    /// can stop it and it then starts over once the pause is released. Only the
+    /// caller's own token ends it for good.
+    /// </summary>
+    private async Task<T> RunPausableAsync<T>(Func<CancellationToken, Task<T>> body, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            Task? resumed = null;
+            CancellationTokenSource? stop = null;
+            TaskCompletionSource? done = null;
+            lock (_backgroundGate)
+            {
+                if (_backgroundPauseCount > 0)
+                {
+                    resumed = _backgroundResumed.Task;
+                }
+                else
+                {
+                    stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    _backgroundAttempts.Add((stop, done.Task));
+                }
+            }
+
+            if (resumed is not null)
+            {
+                await resumed.WaitAsync(cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            try
+            {
+                return await body(stop!.Token).ConfigureAwait(false);
+            }
+            catch (Exception) when (stop!.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                // Paused. Whatever the stop interrupted rolled back; go round and wait.
+            }
+            finally
+            {
+                lock (_backgroundGate)
+                {
+                    _backgroundAttempts.RemoveAll(a => a.Stop == stop);
+                }
+
+                stop!.Dispose();
+                done!.SetResult();
+            }
+        }
+    }
+
+    private sealed class BackgroundPause(DatabaseInitializer owner) : IAsyncDisposable
+    {
+        private int _released;
+
+        public ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0)
+            {
+                owner.ReleasePause();
+            }
+
+            return ValueTask.CompletedTask;
+        }
+    }
 
     private static async Task EnsureSourceAppIconHashColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
@@ -1456,10 +1607,14 @@ public sealed class DatabaseInitializer
     /// and expired wrong by that offset until the store boundary converted them.
     /// Idempotent: a value already at +00:00, and text with no offset at all,
     /// parses with a zero offset and is left exactly as it is.
+    /// On a deferred upgrade it runs in the background while the app captures, so
+    /// each column is rewritten only if it still holds the value read: a re-copy
+    /// in between sets captured_at and last_copied_at, already in UTC, and those
+    /// are kept (F-13-3).
     /// </remarks>
     private static async Task BackfillUtcTimestampsAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
-        var updates = new List<(long Id, string?[] Values)>();
+        var updates = new List<(long Id, string?[] Read, string?[] Values)>();
         await using (var select = connection.CreateCommand())
         {
             select.CommandText = """
@@ -1471,11 +1626,13 @@ public sealed class DatabaseInitializer
             await using var reader = await select.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
+                var read = new string?[3];
                 var values = new string?[3];
                 var changed = false;
                 for (var i = 0; i < 3; i++)
                 {
                     var raw = reader.IsDBNull(i + 1) ? null : reader.GetString(i + 1);
+                    read[i] = raw;
                     values[i] = raw;
                     if (raw is not null
                         && DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed)
@@ -1488,7 +1645,7 @@ public sealed class DatabaseInitializer
 
                 if (changed)
                 {
-                    updates.Add((reader.GetInt64(0), values));
+                    updates.Add((reader.GetInt64(0), read, values));
                 }
             }
         }
@@ -1498,20 +1655,37 @@ public sealed class DatabaseInitializer
             return;
         }
 
+        if (BeforeUtcBackfillWrites is { } beforeWrites)
+        {
+            await beforeWrites(cancellationToken);
+        }
+
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         await using var update = connection.CreateCommand();
         update.Transaction = transaction;
-        update.CommandText = "UPDATE clips SET captured_at = $c, first_copied_at = $f, last_copied_at = $l WHERE id = $id;";
+        update.CommandText = """
+            UPDATE clips
+            SET captured_at = CASE WHEN captured_at IS $readC THEN $c ELSE captured_at END,
+                first_copied_at = CASE WHEN first_copied_at IS $readF THEN $f ELSE first_copied_at END,
+                last_copied_at = CASE WHEN last_copied_at IS $readL THEN $l ELSE last_copied_at END
+            WHERE id = $id;
+            """;
         var id = update.Parameters.Add("$id", SqliteType.Integer);
         var c = update.Parameters.Add("$c", SqliteType.Text);
         var f = update.Parameters.Add("$f", SqliteType.Text);
         var l = update.Parameters.Add("$l", SqliteType.Text);
-        foreach (var (clipId, values) in updates)
+        var readC = update.Parameters.Add("$readC", SqliteType.Text);
+        var readF = update.Parameters.Add("$readF", SqliteType.Text);
+        var readL = update.Parameters.Add("$readL", SqliteType.Text);
+        foreach (var (clipId, read, values) in updates)
         {
             id.Value = clipId;
             c.Value = (object?)values[0] ?? DBNull.Value;
             f.Value = (object?)values[1] ?? DBNull.Value;
             l.Value = (object?)values[2] ?? DBNull.Value;
+            readC.Value = (object?)read[0] ?? DBNull.Value;
+            readF.Value = (object?)read[1] ?? DBNull.Value;
+            readL.Value = (object?)read[2] ?? DBNull.Value;
             await update.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -1726,6 +1900,7 @@ public sealed class DatabaseInitializer
             INSERT INTO app_metadata (key, value) VALUES ('fts_merge_pending', '1')
             ON CONFLICT(key) DO UPDATE SET value = excluded.value;
             """, cancellationToken);
+        await ExecuteNonQueryAsync(connection, $"DELETE FROM app_metadata WHERE key = '{FtsRebuildPendingKey}';", cancellationToken);
     }
 
     /// <summary>Pages each merge step works through; a step measured 10-60 ms at this size.</summary>
@@ -1743,7 +1918,10 @@ public sealed class DatabaseInitializer
     /// Returns false at once when no rebuild left work; stops when a step does
     /// nothing, which FTS5 reports as fewer than two changes.
     /// </summary>
-    public async Task<bool> DrainSearchIndexMergesAsync(CancellationToken cancellationToken = default)
+    public Task<bool> DrainSearchIndexMergesAsync(CancellationToken cancellationToken = default)
+        => RunPausableAsync(DrainSearchIndexMergesCoreAsync, cancellationToken);
+
+    private async Task<bool> DrainSearchIndexMergesCoreAsync(CancellationToken cancellationToken)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
@@ -1779,6 +1957,22 @@ public sealed class DatabaseInitializer
     }
 
     /// <summary>
+    /// Set before <see cref="MigrateFtsSchemaIfNeededAsync"/> drops the index and
+    /// cleared once the rebuild has committed, so a launch killed anywhere in
+    /// between leaves a record that the recreated table is still empty. Nothing
+    /// else can tell: by then its definition is current and the schema version
+    /// may be too.
+    /// </summary>
+    private const string FtsRebuildPendingKey = "fts_rebuild_pending";
+
+    private static async Task<bool> IsFtsRebuildPendingAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM app_metadata WHERE key = '{FtsRebuildPendingKey}';";
+        return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) > 0;
+    }
+
+    /// <summary>
     /// Detects if the existing FTS table has an older (2- or 4-column) schema
     /// or an older tokenizer (e.g. unicode61) and drops it along with its
     /// triggers so the Schema DDL can recreate them with the current 5-column
@@ -1794,6 +1988,18 @@ public sealed class DatabaseInitializer
         {
             return false;
         }
+
+        // Before the drop, which is the start of the window. app_metadata is
+        // created here when an old library predates it; the schema DDL would
+        // create the same table moments later.
+        await ExecuteNonQueryAsync(connection, $"""
+            CREATE TABLE IF NOT EXISTS app_metadata (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            INSERT INTO app_metadata (key, value) VALUES ('{FtsRebuildPendingKey}', '1')
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+            """, cancellationToken);
 
         // Drop old triggers and FTS table so they're recreated with the new schema/tokenizer.
         await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_ai;", cancellationToken);
@@ -1872,7 +2078,8 @@ public sealed class DatabaseInitializer
             }
         }
 
-        if (await ReadSchemaVersionAsync(connection, cancellationToken) < CurrentSchemaVersion)
+        if (await ReadSchemaVersionAsync(connection, cancellationToken) < CurrentSchemaVersion
+            || await IsFtsRebuildPendingAsync(connection, cancellationToken))
         {
             return true;
         }
@@ -1904,15 +2111,19 @@ public sealed class DatabaseInitializer
         {
             await VerifyIntegrityAsync(connection, cancellationToken);
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException) when (!cancellationToken.IsCancellationRequested)
         {
             HasFailedIntegrityCheck = true;
             throw;
         }
         finally
         {
-            // Run, whatever its outcome: a failure is HasFailedIntegrityCheck's to report.
-            IsIntegrityCheckOwed = false;
+            // Run, whatever its outcome: a failure is HasFailedIntegrityCheck's to
+            // report. A check stopped part-way (a pause, F-13-1) has not run.
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                IsIntegrityCheckOwed = false;
+            }
         }
     }
 
@@ -1933,7 +2144,7 @@ public sealed class DatabaseInitializer
                 }
             }
         }
-        catch (SqliteException ex)
+        catch (SqliteException ex) when (!cancellationToken.IsCancellationRequested)
         {
             // Damage bad enough to break the walk itself aborts the pragma instead
             // of reporting rows, so without this the user gets a bare "SQLite Error

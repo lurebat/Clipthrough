@@ -133,6 +133,42 @@ public sealed class ClipClipboardWriterTests
     }
 
     /// <summary>
+    /// A rich clip as capture actually stores it: <c>Content</c> is the source
+    /// app's plain text and the markup lives only in <c>ContentBytes</c>.
+    /// </summary>
+    /// <remarks>
+    /// The test above cannot tell the two apart, because its fixture puts the
+    /// markup in both fields. The writer used to publish <c>Content</c> as the
+    /// HTML/RTF payload, so step-paste and paste-newest put the flattened text
+    /// on the clipboard as "HTML" and the formatting was lost. Here the two
+    /// sources disagree, so only the stored markup can satisfy the assertion.
+    /// </remarks>
+    [AvaloniaFact]
+    public async Task ARichClipAsCaptured_PublishesTheStoredMarkup_NotItsPlainText()
+    {
+        const string plain = "hello world";
+        var cases = new (ClipContentFormat Format, string Markup)[]
+        {
+            (ClipContentFormat.Html, "<p>hello <b>world</b></p>"),
+            (ClipContentFormat.Rtf, @"{\rtf1\ansi hello {\b world}\par}"),
+        };
+
+        foreach (var (format, markup) in cases)
+        {
+            var (interaction, monitor) = Fresh();
+            var clip = Clip(ContentType.RichText, plain, Encoding.UTF8.GetBytes(markup), format);
+
+            Assert.True(await ClipClipboardWriter.TryCopyAsync(clip, interaction, monitor, maxImageBytes: null));
+
+            Assert.NotEqual(plain, interaction.LastCopiedRichContent);
+            Assert.Equal(markup, interaction.LastCopiedRichContent);
+            Assert.Equal(format, interaction.LastCopiedRichContentFormat);
+            Assert.Equal(plain, interaction.LastCopiedRichPlainText);
+            Assert.Equal(plain, monitor.LastSuppressedContent);
+        }
+    }
+
+    /// <summary>
     /// The control. Plain text must still go as plain text, or "never write
     /// anything" would satisfy the failure tests above.
     /// </summary>

@@ -1,6 +1,10 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
+using Avalonia.Input;
+using Avalonia.Platform.Storage;
+using Clipthrough.Models;
 using Clipthrough.Services;
 using SkiaSharp;
 using Xunit;
@@ -68,5 +72,62 @@ public sealed class DragDropImageEncodingTests : IDisposable
         File.WriteAllText(path, "not an image");
 
         Assert.Null(DragDropService.TryBuildImageRequestFromFile(path, sourceInfo: null));
+    }
+
+    /// <summary>
+    /// Rubber-duck F-09-2. The drop handler awaits this on the UI thread, and
+    /// it used to read, decode and PNG-encode the dropped file before handing
+    /// the task back, so a large photo froze the window for the whole encode.
+    /// The returned task must still be running when the call returns; the
+    /// image is big enough that the work cannot finish in that instant.
+    /// </summary>
+    [Fact]
+    public async Task ADroppedNonPngImageFile_IsDecodedAndReEncodedOffTheCallingThread()
+    {
+        var path = WriteNoise("large.jpg", 1600, 1200);
+        var drop = new DataTransfer();
+        drop.Add(DataTransferItem.CreateFile(LocalFile(path)));
+
+        var pending = new DragDropService().TryBuildCaptureRequestsAsync(drop, sourceInfo: null);
+
+        Assert.False(
+            pending.IsCompleted,
+            "TryBuildCaptureRequestsAsync read, decoded and re-encoded the dropped image before returning, i.e. on the caller's (UI) thread");
+        var request = Assert.Single(await pending.WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.Equal(ContentType.Image, request.ContentType);
+        Assert.True(request.ContentBytes!.Take(8).SequenceEqual(Png), "the stored bytes are not PNG");
+        Assert.Equal((1600, 1200), (request.ImageWidth, request.ImageHeight));
+        Assert.Equal("large", request.ContentText);
+    }
+
+    private string WriteNoise(string name, int width, int height)
+    {
+        var random = new Random(9);
+        var pixels = new SKColor[width * height];
+        for (var i = 0; i < pixels.Length; i++)
+        {
+            pixels[i] = new SKColor((uint)random.Next() | 0xFF000000);
+        }
+
+        using var bitmap = new SKBitmap(width, height);
+        bitmap.Pixels = pixels;
+        using var image = SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Jpeg, 90);
+        var path = Path.Combine(_dir, name);
+        File.WriteAllBytes(path, data.ToArray());
+        return path;
+    }
+
+    // IStorageFile cannot be implemented outside Avalonia, so borrow the
+    // implementation Avalonia's own storage providers hand out for local files.
+    private static IStorageFile LocalFile(string path)
+    {
+        var type = typeof(IStorageFile).Assembly.GetType("Avalonia.Platform.Storage.FileIO.BclStorageFile", throwOnError: true)!;
+        return (IStorageFile)Activator.CreateInstance(
+            type,
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            args: [new FileInfo(path)],
+            culture: null)!;
     }
 }
