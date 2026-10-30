@@ -2875,8 +2875,8 @@
     "id": "export-skips-hydration",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "F-10. Export writes the clip to a file the user keeps; from a list row it must not be a prefix.",
-    "find": "        await SelectedClip.EnsureContentHydratedAsync();\n        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);\n        _clipboardMonitorService.SuppressNext(exportResult.PrimaryPath);",
-    "replace": "        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);\n        _clipboardMonitorService.SuppressNext(exportResult.PrimaryPath);",
+    "find": "        await target.EnsureContentHydratedAsync();\n        var exportResult = await _clipExportService.ExportAsync(target.Clip);\n        _clipboardMonitorService.SuppressNext(exportResult.PrimaryPath);",
+    "replace": "        var exportResult = await _clipExportService.ExportAsync(target.Clip);\n        _clipboardMonitorService.SuppressNext(exportResult.PrimaryPath);",
     "filter": "FullyQualifiedName~ExportingALongListRow_ExportsAllOfIt"
   },
   {
@@ -3275,8 +3275,8 @@
     "id": "sensitive-export-is-not-confirmed",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "F-18 / OD-3a. Exporting a sensitive clip writes plaintext that outlives its lifetime; the user must choose it knowingly.",
-    "find": "        if (SelectedClip.Clip.IsSensitive\n            && (ConfirmAsync is null\n",
-    "replace": "        if (SelectedClip.Clip.IsSensitive && !SelectedClip.Clip.IsSensitive\n            && (ConfirmAsync is null\n",
+    "find": "        if (target.Clip.IsSensitive\n            && (ConfirmAsync is null\n",
+    "replace": "        if (target.Clip.IsSensitive && !target.Clip.IsSensitive\n            && (ConfirmAsync is null\n",
     "filter": "FullyQualifiedName~ExportingASensitiveClip_AsksFirst|FullyQualifiedName~ExportingASensitiveClip_WithNoWayToAsk"
   },
   {
@@ -3291,8 +3291,8 @@
     "id": "backup-purge-leaves-free-pages",
     "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
     "why": "F-19. Deleted rows stay in free pages and in un-merged FTS segments until the copy is optimized and vacuumed. The engine's SQLITE_SECURE_DELETE zeroes the free pages, so the test checks the freelist is empty, not only the bytes.",
-    "find": "        if (removed > 0)\n        {\n            if (HasTable(connection, \"clips_fts\"))\n",
-    "replace": "        if (removed < 0)\n        {\n            if (HasTable(connection, \"clips_fts\"))\n",
+    "find": "        if (HasTable(connection, \"clips_fts\"))\n        {\n            Execute(connection, \"INSERT INTO clips_fts(clips_fts) VALUES('optimize');\");\n        }\n\n        Execute(connection, \"VACUUM;\");\n",
+    "replace": "        if (removed < 0)\n        {\n        if (HasTable(connection, \"clips_fts\"))\n        {\n            Execute(connection, \"INSERT INTO clips_fts(clips_fts) VALUES('optimize');\");\n        }\n\n        Execute(connection, \"VACUUM;\");\n        }\n",
     "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WithTheLifetimeOn_TheDailyBackup_HoldsNoSensitiveClip"
   },
   {
@@ -3830,5 +3830,37 @@
     "find": "        catch (NullReferenceException ex) when (decodeWidth is > 0)",
     "replace": "        catch (NullReferenceException ex) when (decodeWidth is < 0)",
     "filter": "FullyQualifiedName~ClipBitmapFactoryHeadlessTests"
+  },
+  {
+    "id": "f06-1-export-rereads-selection",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-06-1: export must write the clip the user confirmed, not whatever SelectedClip became while the dialog was open.",
+    "find": "var exportResult = await _clipExportService.ExportAsync(target.Clip);",
+    "replace": "var exportResult = await _clipExportService.ExportAsync((SelectedClip ?? target).Clip);",
+    "filter": "FullyQualifiedName~ExportingASensitiveClip_ExportsTheConfirmedClip"
+  },
+  {
+    "id": "f06-2-failed-backup-keeps-temp",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Rubber-duck F-06-2: a backup that fails after the copy (e.g. in the purge) must not leave the unpurged .db.tmp, which retention never prunes.",
+    "find": "                DeleteTempCopy(tempPath);",
+    "replace": "                if (tempPath.Length < 0) DeleteTempCopy(tempPath);",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WhenThePurgeFails"
+  },
+  {
+    "id": "f06-2-stranded-temp-not-swept",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Rubber-duck F-06-2: a temp copy stranded by a crash on an earlier day is never overwritten or pruned, so the next backup sweeps it.",
+    "find": "            DeleteStrandedTempCopies(backupDir, tempPath);",
+    "replace": "            if (tempPath.Length < 0) DeleteStrandedTempCopies(backupDir, tempPath);",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.ATempCopyLeftByAnEarlierCrash"
+  },
+  {
+    "id": "f06-3-backup-optimize-only-when-purge-removed-rows",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Rubber-duck F-06-3: with the lifetime on, the backup copy is optimized and vacuumed even when the purge removes nothing, because live expiry may already have deleted a sensitive clip whose index segments the copy still carries.",
+    "find": "        if (HasTable(connection, \"clips_fts\"))\n        {\n            Execute(connection, \"INSERT INTO clips_fts(clips_fts) VALUES('optimize');\");\n        }\n\n        Execute(connection, \"VACUUM;\");\n",
+    "replace": "        if (removed > 0)\n        {\n        if (HasTable(connection, \"clips_fts\"))\n        {\n            Execute(connection, \"INSERT INTO clips_fts(clips_fts) VALUES('optimize');\");\n        }\n\n        Execute(connection, \"VACUUM;\");\n        }\n",
+    "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WithTheLifetimeOn_ASensitiveClipLiveExpiryAlreadyDeleted"
   }
 ]

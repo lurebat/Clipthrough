@@ -3140,7 +3140,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task ExportSelectedAsync()
     {
-        if (SelectedClip is null)
+        // Captured once: a capture can move the selection while the dialog
+        // below is open, and the confirmation covers this clip only.
+        var target = SelectedClip;
+        if (target is null)
         {
             return;
         }
@@ -3150,7 +3153,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // into a OneDrive-synced folder. For a sensitive clip that is the
         // user's call to make knowingly (OD-3a); without a way to ask, it is
         // not made for them.
-        if (SelectedClip.Clip.IsSensitive
+        if (target.Clip.IsSensitive
             && (ConfirmAsync is null
                 || !await ConfirmAsync(
                     AppText.ExportSensitiveConfirmTitle,
@@ -3162,8 +3165,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        await SelectedClip.EnsureContentHydratedAsync();
-        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);
+        await target.EnsureContentHydratedAsync();
+        var exportResult = await _clipExportService.ExportAsync(target.Clip);
         _clipboardMonitorService.SuppressNext(exportResult.PrimaryPath);
         await _systemInteractionService.CopyTextAsync(exportResult.PrimaryPath);
         await _systemInteractionService.OpenPathAsync(exportResult.PrimaryPath);
