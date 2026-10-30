@@ -105,6 +105,39 @@ public sealed class ReleasePackagingTests
     }
 
     /// <summary>
+    /// The release ZIP is the same publish output without Velopack in front
+    /// of it, so the only thing that can refuse a runtime below the floor is
+    /// the .NET host, which reads the framework version from
+    /// Clipthrough.runtimeconfig.json. With the SDK default of 10.0.0 the ZIP
+    /// ran on any 10.0.x. The host treats the version as a minimum (the default
+    /// roll-forward still picks the latest installed patch), so it has to be
+    /// the same floor the installer enforces.
+    /// </summary>
+    [Fact]
+    public void TheAppItselfRequiresTheSameServicedRuntime()
+    {
+        // The referenced app project's runtimeconfig is copied next to the
+        // tests; it is the file the host reads, built from the same project
+        // properties the release publish uses.
+        var path = Path.Combine(AppContext.BaseDirectory, "Clipthrough.runtimeconfig.json");
+        Assert.True(File.Exists(path), path + " was not found; the app's runtimeconfig is no longer copied next to the tests.");
+
+        using var config = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
+        var options = config.RootElement.GetProperty("runtimeOptions");
+        Assert.False(options.TryGetProperty("frameworks", out _), "The app now loads more than one shared framework; the floor below covers only one.");
+        var framework = options.GetProperty("framework");
+        Assert.Equal("Microsoft.NETCore.App", framework.GetProperty("name").GetString());
+
+        var version = Version.Parse(framework.GetProperty("version").GetString()!);
+        Assert.True(
+            version.Build >= MinimumRuntimePatch,
+            $"Clipthrough.runtimeconfig.json requires Microsoft.NETCore.App {version}, so the release ZIP runs on any {version.Major}.{version.Minor}.x below the {MinimumRuntimePatch} floor.");
+
+        var installer = VelopackDotnetDependency.Match(FrameworkArgument().Split(',', StringSplitOptions.TrimEntries).Single(d => d.StartsWith("net", StringComparison.Ordinal)));
+        Assert.Equal(installer.Groups["version"].Value, version.ToString(3));
+    }
+
+    /// <summary>
     /// Anti-vacuity: the pattern refuses what Velopack refuses, so the test
     /// above cannot pass on a string the client would ignore.
     /// </summary>
