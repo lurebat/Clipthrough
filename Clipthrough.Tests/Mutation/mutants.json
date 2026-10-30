@@ -3547,8 +3547,8 @@
     "id": "wide-layout-changes-its-split",
     "why": "Changes the Wide split from 1:2, which was meant to stay exactly as it always was.",
     "file": "Clipthrough/Views/MainWindow.Layout.cs",
-    "find": "                    ? new ColumnDefinitions(\"*,6,2*\")",
-    "replace": "                    ? new ColumnDefinitions(\"2*,6,3*\")",
+    "find": "                GridDefinitions.Set(split, width == WorkspaceWidth.Wide ? \"*,6,2*\" : \"2*,6,3*\", \"*\");",
+    "replace": "                GridDefinitions.Set(split, width == WorkspaceWidth.Wide ? \"2*,6,3*\" : \"2*,6,3*\", \"*\");",
     "filter": "FullyQualifiedName~ResponsiveWorkspaceHeadlessTests.Wide_"
   },
   {
@@ -3846,5 +3846,13 @@
     "find": "new(@\"\\bbusy_timeout\\s*(?:=|\\(\\s*[\\w{}$@.]+\\s*\\))\", RegexOptions",
     "replace": "new(@\"\\bbusy_timeout\\s*[=(]\", RegexOptions",
     "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
+  },
+  {
+    "id": "grid-keeps-cells-cached-against-old-definitions",
+    "why": "Swaps a grid's definitions without clearing Avalonia's cell cache. Crossing the Short line at the same width leaves the Search options button indexed at column 2 of a two-column filter row, and the layout pass throws ArgumentOutOfRangeException from Grid.MeasureCellsGroup; on Windows that is inside the window procedure and kills the app (seen live on a display-mode change).",
+    "file": "Clipthrough/Views/GridDefinitions.cs",
+    "find": "        if (changed)",
+    "replace": "        if (changed && grid.Name == \"never\")",
+    "filter": "FullyQualifiedName~WorkspaceBreakpointTransitionHeadlessTests"
   }
 ]
