@@ -87,9 +87,29 @@ public sealed partial class MainWindowViewModelHeadlessTests
 
             await viewModel.CopySelectedCommand.Execute().ToTask();
             await viewModel.CopySelectedCommand.Execute().ToTask();
-            await Task.Delay(100);
 
-            Assert.Equal(["invoice 2024"], await scope.SearchHistoryService.GetRecentSearchesAsync());
+            Assert.Equal(["invoice 2024"], await WaitForRecordedSearchesAsync(scope));
+        }
+    }
+
+    /// <summary>
+    /// Choosing a result records the query on the thread pool and does not wait
+    /// for it, so the row lands some time after the copy returns. A fixed 100 ms
+    /// sleep lost that race whenever the write was slow (a loaded machine, or a
+    /// background writer holding the lock). Waits for the row itself.
+    /// </summary>
+    private static async Task<System.Collections.Generic.IReadOnlyList<string>> WaitForRecordedSearchesAsync(TemporaryDatabaseScope scope)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (true)
+        {
+            var searches = await scope.SearchHistoryService.GetRecentSearchesAsync();
+            if (searches.Count > 0 || DateTime.UtcNow > deadline)
+            {
+                return searches;
+            }
+
+            await Task.Delay(10);
         }
     }
 
