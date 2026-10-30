@@ -266,15 +266,20 @@ public sealed class StorageLifecycleTests : IDisposable
         });
         Assert.NotNull(clip);
 
+        // Nothing in the app sets user_version, so a fresh library reads 0 - the
+        // same value a copy that dropped it reads. A sentinel is what lets a
+        // "preserved" assertion fail.
+        const long UserVersionSentinel = 4242;
         long userVersion;
         await using (var connection = factory.CreateConnection())
         {
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version;";
+            command.CommandText = $"PRAGMA user_version = {UserVersionSentinel}; PRAGMA user_version;";
             userVersion = Convert.ToInt64(await command.ExecuteScalarAsync(), System.Globalization.CultureInfo.InvariantCulture);
         }
 
+        Assert.Equal(UserVersionSentinel, userVersion);
         SqliteConnection.ClearAllPools();
         return (storage, store, dbPath, userVersion);
     }

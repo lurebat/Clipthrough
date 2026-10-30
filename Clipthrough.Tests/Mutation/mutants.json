@@ -2990,5 +2990,13 @@
     "find": "                && new FileInfo(options.DatabasePath).Length > 0",
     "replace": "                && new FileInfo(options.DatabasePath).Length >= 0",
     "filter": "RememberedPassword_OnAnEmptyDatabaseFile_IsKept"
+  },
+  {
+    "id": "rekey-export-drops-user-version",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "Adding or removing encryption writes the copy with sqlcipher_export, which does not carry user_version on this SQLite3MC build; without the explicit PRAGMA the copy reads 0. The fixture seeds a non-zero sentinel, because a fresh library and a dropped value both read 0 (rubber-duck F-04-2).",
+    "find": "                    \"PRAGMA rekeyed.user_version = \" + userVersion.ToString(CultureInfo.InvariantCulture) + \"; \" +",
+    "replace": "                    (userVersion.ToString(CultureInfo.InvariantCulture).Length < 0 ? \"PRAGMA rekeyed.user_version = \" + userVersion.ToString(CultureInfo.InvariantCulture) + \"; \" : string.Empty) +",
+    "filter": "FullyQualifiedName~StorageLifecycleTests.Rekey_PlaintextLibrary_BecomesEncryptedAndKeepsEverything|FullyQualifiedName~StorageLifecycleTests.Rekey_EncryptedLibrary_ToNoPassword_OpensWithoutAKey"
   }
 ]
