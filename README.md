@@ -10,6 +10,7 @@ Clipthrough is an Avalonia desktop clipboard history app focused on rich clipboa
 - FTS5 full-text search with fuzzy option, favorites, sensitivity tagging, and clip pinning
 - **Excluded applications** — list apps in Settings whose clipboard writes are never captured. Entries match a process name, executable file name, full path, or a `*`/`?` wildcard (e.g. `1Password`, `KeePass.exe`, `*bitwarden*`, `C:\Program Files\Acme\*`). The check runs before Clipthrough reads the clipboard, so an excluded app's payload never enters the process. Best effort: a clipboard change Windows reports no owner for is still captured — apps needing a hard guarantee should publish the standard `Clipboard Viewer Ignore` format, which Clipthrough always honors.
 - **Clipboard-history opt-out** — content its source marks `CanIncludeInClipboardHistory = 0` is not captured. Chrome, Edge and Bitwarden publish that for copied passwords. On by default; **Settings → Excluded applications** turns it off.
+- **Drag and drop is an import** — the exclusion and opt-out rules above apply to clipboard capture. Content you drop onto Clipthrough is a deliberate import and is kept even when its source app is excluded, publishes `Clipboard Viewer Ignore`, or marks it `CanIncludeInClipboardHistory = 0`.
 - Per-session log window with a filterable activity trail
 - Configurable local hotkeys (recorded in the settings window) and global hotkeys for paste cycling
 - First-run welcome flow for storage path, password, and hotkey setup
