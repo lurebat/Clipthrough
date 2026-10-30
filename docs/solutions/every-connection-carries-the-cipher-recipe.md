@@ -54,7 +54,10 @@ journal and back.
 - `ConnectionConstructionGuardTests` fails on a hand-built connection, the
   ADO.NET provider factory or a reassigned connection string, in shipping code
   and in tests. Tests use `TestConnections.Create(connectionString)`, which
-  passes the string's settings to the factory.
+  passes the string's settings to the factory. Its rules are patterns, not
+  substrings, so a target-typed `new(...)`, a namespace-qualified type name or
+  different spacing is still caught; each spelling is pinned by one of its
+  `*_CatchesEverySpelling` theories.
 - `CipherRecipeTests` checks the written format without asking the library:
   it decrypts page 1 with .NET's PBKDF2 and AES under SQLCipher 4's parameters.
   It runs that check against a fixture the old build wrote first, so it can
@@ -62,7 +65,9 @@ journal and back.
 - `SqlCipherFixtureCompatibilityTests` opens the four committed fixtures the old
   build wrote (`tools/sqlite-compat/fixtures`) through the factory.
 - Mutants `cipher-recipe-dropped`, `cipher-recipe-without-legacy`,
-  `cipher-recipe-only-for-keyed-connections` and `a-test-builds-its-own-connection`.
+  `cipher-recipe-only-for-keyed-connections`, `a-test-builds-its-own-connection`,
+  `guard-target-typed-construction`, `guard-qualified-construction` and
+  `guard-connectionstring-spacing`.
 - After any bump of `SQLite3MC.PCLRaw.bundle`, `SQLitePCLRaw.core` or
   `Microsoft.Data.Sqlite`, re-run the storage mutants: the pairing of
   Microsoft.Data.Sqlite 10 with SQLitePCLRaw.core 3 is ours to verify, not

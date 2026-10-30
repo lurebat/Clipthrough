@@ -3166,5 +3166,29 @@
     "find": "            if (placement is null || !(placement.Width > 0) || !(placement.Height > 0))",
     "replace": "            if (placement is null)",
     "filter": "FullyQualifiedName~WindowPlacementStoreTests"
+  },
+  {
+    "id": "guard-target-typed-construction",
+    "file": "Clipthrough.Tests/Unit/ConnectionConstructionGuardTests.cs",
+    "why": "Rubber-duck F-10-2: the construction rule must catch a target-typed new() (SqliteConnection c = new(cs)); disabling that alternative lets the bypass through.",
+    "find": "+ @\"|\\bSqliteConnection\\s*\\??\\s+",
+    "replace": "+ @\"|(?!)\\bSqliteConnection\\s*\\??\\s+",
+    "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
+  },
+  {
+    "id": "guard-qualified-construction",
+    "file": "Clipthrough.Tests/Unit/ConnectionConstructionGuardTests.cs",
+    "why": "Rubber-duck F-10-2: the construction rule must catch a namespace-qualified type (new Microsoft.Data.Sqlite.SqliteConnection(...)); a live bypass of exactly this form was in the headless tests.",
+    "find": "(?:global::)?(?:\\w+\\s*\\.\\s*)*SqliteConnection",
+    "replace": "(?:global::)?SqliteConnection",
+    "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
+  },
+  {
+    "id": "guard-connectionstring-spacing",
+    "file": "Clipthrough.Tests/Unit/ConnectionConstructionGuardTests.cs",
+    "why": "Rubber-duck F-10-2: the connection-string rule must catch an assignment whatever the spacing (.ConnectionString=cs); reverting to the fixed \" =\" spelling lets it through.",
+    "find": "@\"\\.\\s*ConnectionString\\s*=(?!=)\"",
+    "replace": "@\"\\.ConnectionString =(?!=)\"",
+    "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
   }
 ]
