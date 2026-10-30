@@ -84,6 +84,9 @@ search starts at one page.
 - `Refresh_ResetsPaging_EvenWhenAClipWriteStraddlesTheQueryChange` - holds a
   clip write open via `BlockingWriteClipStore` so the refresh takes its retry
   path, then changes the query. Defends invariant 2.
+  It waits for `WhenRefreshesIdleAsync` rather than for the count it asserts:
+  startup queues a refresh of its own, and a wait that stops at the expected
+  count passes on a transient value.
 - `LoadMore_KeepsItsPage_WhenARefreshRequestedWhileItLoadsLandsAfterIt` and
   `LoadMore_KeepsItsPage_WhenItLandsDuringAnInFlightRefresh` hold the page and
   the refresh in flight with `BlockingWriteClipStore.BeforeSearch` and force
