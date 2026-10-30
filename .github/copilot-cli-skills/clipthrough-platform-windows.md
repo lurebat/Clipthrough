@@ -77,9 +77,9 @@ Common ordering bugs (we hit each of these before — see commits `db1d332`, `2d
 
 ## SendInput struct layout
 
-`INPUT` size differs between architectures and contains a `KEYBDINPUT` / `MOUSEINPUT` / `HARDWAREINPUT` union. We've been bitten by `Marshal.SizeOf<INPUT>()` returning the wrong number on x64 (32 instead of 24 in some configs). The fix that ships in this codebase:
+`INPUT` size differs between architectures and contains a `KEYBDINPUT` / `MOUSEINPUT` / `HARDWAREINPUT` union. We were bitten by `Marshal.SizeOf<INPUT>()` returning 32 on x64 when `InputUnion` lacked `MOUSEINPUT`; Win32's `sizeof(INPUT)` is 40, and `SendInput` silently rejects every call whose `cbSize` does not match. The fix that ships in this codebase:
 
-- Use the explicit `cbSize` constant from the struct definition rather than `Marshal.SizeOf`.
+- Pass `Marshal.SizeOf<INPUT>()` as `cbSize` - correct once the union is complete - and `Debug.Assert` that it is 40.
 - Include all three union members (`KEYBDINPUT`, `MOUSEINPUT`, `HARDWAREINPUT`) in `InputUnion`, even though we only ever populate `KEYBDINPUT`. This forces the correct overall size.
 
 When `SendInput` returns fewer events than requested, log `Marshal.GetLastWin32Error()` — the most common causes are UIPI (the target window runs at a higher integrity level than us) or input being blocked by a `BlockInput` / secure-desktop transition.
@@ -96,7 +96,7 @@ Pair every successful `RegisterHotKey` with `UnregisterHotKey` on shutdown, and 
 
 ## Source-app resolution
 
-`WindowsSourceApplicationResolver` walks `GetForegroundWindow → GetWindowThreadProcessId → OpenProcess(QueryLimitedInformation) → QueryFullProcessImageName`, then loads the icon via `ExtractAssociatedIcon` / `Shell32`. It deliberately uses `PROCESS_QUERY_LIMITED_INFORMATION` (not `PROCESS_QUERY_INFORMATION`) so it works against elevated processes from a non-elevated Clipthrough.
+`WindowsSourceApplicationResolver.TryResolve(includeIcon)` starts from the **clipboard owner**, not the foreground window: `GetClipboardOwner → GetWindowThreadProcessId → Process.GetProcessById`, then `Process.MainModule.FileName` for the path and `Icon.ExtractAssociatedIcon` for the icon. `MainModule` throws `Win32Exception` for elevated or protected processes from a non-elevated Clipthrough; the path is then null and the name still resolves. The foreground window is only a fallback for the window title, because the owner is often a hidden helper window.
 
 When a process refuses to disclose its path (system processes, some store apps), fall back to the window class / `GetWindowText` instead of failing the capture.
 
@@ -116,7 +116,7 @@ When a process refuses to disclose its path (system processes, some store apps),
 | RTF → clipboard                                            | `CopyRichContentAsync(rtf, plainFallback, ClipContentFormat.Rtf)`    |
 | Restore the user's previous app and paste                  | `RestoreCapturedForeground()` then `SimulatePasteKeystroke()`        |
 | Bind a global hotkey                                       | `TryRegisterGlobalHotKey(window, gesture, callback)`                 |
-| Capture which app was foregrounded                         | `WindowsSourceApplicationResolver.Resolve()`                         |
+| Capture which app was foregrounded                         | `WindowsSourceApplicationResolver.TryResolve()`                         |
 | Encrypt secrets at rest (per-user)                         | `IDataProtectionService.Protect(bytes)` / `.Unprotect(bytes)`        |
 
 ## Don't

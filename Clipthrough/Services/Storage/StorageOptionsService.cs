@@ -91,14 +91,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
         try
         {
-            var builder = new SqliteConnectionStringBuilder
-            {
-                DataSource = dbPath,
-                Mode = SqliteOpenMode.ReadOnly,
-            };
-
-            using var connection = new SqliteConnection(builder.ToString());
-            connection.StateChange += ApplyBusyTimeoutOnOpen;
+            using var connection = Clipthrough.Database.SqliteConnectionFactory.Create(dbPath, password: null, SqliteOpenMode.ReadOnly);
             connection.Open();
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT count(*) FROM sqlite_master;";
@@ -152,15 +145,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
         try
         {
-            var builder = new SqliteConnectionStringBuilder
-            {
-                DataSource = dbPath,
-                Mode = SqliteOpenMode.ReadOnly,
-                Password = password,
-            };
-
-            using var connection = new SqliteConnection(builder.ToString());
-            connection.StateChange += ApplyBusyTimeoutOnOpen;
+            using var connection = Clipthrough.Database.SqliteConnectionFactory.Create(dbPath, password, SqliteOpenMode.ReadOnly);
             connection.Open();
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT count(*) FROM sqlite_master;";
@@ -570,20 +555,8 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
     private static SqliteConnection OpenUnpooled(string path, string key, SqliteOpenMode mode)
     {
-        var builder = new SqliteConnectionStringBuilder
-        {
-            DataSource = path,
-            Mode = mode,
-            // Unpooled so the file is released on Dispose and can be renamed.
-            Pooling = false,
-        };
-        if (key.Length > 0)
-        {
-            builder.Password = key;
-        }
-
-        var connection = new SqliteConnection(builder.ToString());
-        connection.StateChange += ApplyBusyTimeoutOnOpen;
+        // Unpooled so the file is released on Dispose and can be renamed.
+        var connection = Clipthrough.Database.SqliteConnectionFactory.Create(path, key, mode, pooling: false);
         try
         {
             connection.Open();
@@ -598,25 +571,11 @@ public sealed class StorageOptionsService : IStorageOptionsService
     }
     private SqliteConnection OpenConnection(StorageOptions options)
     {
-        var builder = new SqliteConnectionStringBuilder
-        {
-            DataSource = options.DatabasePath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            ForeignKeys = true,
-            // Private cache (the default) is required: shared cache surfaces
-            // in-process write contention as SQLITE_LOCKED, which busy_timeout
-            // does NOT retry. Private cache surfaces it as SQLITE_BUSY, which
-            // the 5-second busy_timeout below DOES retry.
-        };
-
-        if (!string.IsNullOrWhiteSpace(options.DatabasePassword))
-        {
-            builder.Password = options.DatabasePassword;
-        }
-
-        var connection = new SqliteConnection(builder.ToString());
-        connection.StateChange += ApplyBusyTimeoutOnOpen;
-        return connection;
+        return Clipthrough.Database.SqliteConnectionFactory.Create(
+            options.DatabasePath,
+            string.IsNullOrWhiteSpace(options.DatabasePassword) ? null : options.DatabasePassword,
+            SqliteOpenMode.ReadWriteCreate,
+            foreignKeys: true);
     }
 
     public void SetInMemoryPassword(string password)
@@ -885,22 +844,6 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
     private static string EscapeSqlLiteral(string value) => value.Replace("'", "''", StringComparison.Ordinal);
 
-    /// <summary>
-    /// StateChange handler that applies <c>PRAGMA busy_timeout = 5000</c>
-    /// every time a connection transitions to the Open state. Mirrored from
-    /// <see cref="Clipthrough.Database.SqliteConnectionFactory"/> so that
-    /// every connection opened by this service (rekey probe, checkpoint,
-    /// path-move backup) also respects the contention retry budget.
-    /// </summary>
-    private static void ApplyBusyTimeoutOnOpen(object? sender, StateChangeEventArgs e)
-    {
-        if (e.CurrentState == ConnectionState.Open && sender is SqliteConnection connection)
-        {
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "PRAGMA busy_timeout = 5000;";
-            cmd.ExecuteNonQuery();
-        }
-    }
 
     private sealed class StorageOptionsDocument
     {

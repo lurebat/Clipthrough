@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="using:Clipthrough.Localization"
         x:Class="Clipthrough.Views.RekeyDialog"
         Title="Re-encrypt database"
         Width="460"
@@ -43,12 +44,12 @@
             </StackPanel>
             <CheckBox Name="ShowPasswordsBox" Content="Show passwords" />
             <CheckBox Name="RememberPasswordBox"
-                      Content="Remember new password (saved as plaintext in storage.json)" />
+                      Content="{x:Static loc:AppText.RekeyRememberNewPassword}" />
             <TextBlock Name="WarningText"
                        Classes="body-muted"
                        Foreground="{DynamicResource DangerBrush}"
                        TextWrapping="Wrap"
-                       Text="⚠ The new password will be saved as plaintext in storage.json. Anyone with access to your user profile can read it." />
+                       Text="{x:Static loc:AppText.RekeyRememberNewPasswordWarning}" />
             <TextBlock Name="ErrorText"
                        Foreground="{DynamicResource DangerBrush}"
                        TextWrapping="Wrap"

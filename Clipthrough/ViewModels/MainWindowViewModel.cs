@@ -48,7 +48,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly IClipStoreService _clipStoreService;
     private readonly IClipAngelImportService _clipAngelImportService;
     private readonly IClipboardMonitorService _clipboardMonitorService;
-    private readonly IClipSampleDataService _clipSampleDataService;
     private readonly ISettingsService _settingsService;
     private readonly ISystemInteractionService _systemInteractionService;
     private readonly IStorageOptionsService _storageOptionsService;
@@ -198,12 +197,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _editedClipSelectionLength;
     private long? _checkedSelectionAnchorId;
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, IClipAngelImportService? clipAngelImportService = null, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null, Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null, ICopilotAuthService? copilotAuthService = null, IUpdateService? updateService = null, IDatabaseBackupService? databaseBackupService = null, IDragDropService? dragDropService = null)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, IClipAngelImportService? clipAngelImportService = null, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null, Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null, ICopilotAuthService? copilotAuthService = null, IUpdateService? updateService = null, IDatabaseBackupService? databaseBackupService = null, IDragDropService? dragDropService = null)
     {
         _clipStoreService = clipStoreService;
         _clipAngelImportService = clipAngelImportService ?? new ClipAngelImportService(clipStoreService);
         _clipboardMonitorService = clipboardMonitorService;
-        _clipSampleDataService = clipSampleDataService;
         _settingsService = settingsService;
         _systemInteractionService = systemInteractionService;
         _storageOptionsService = storageOptionsService;
@@ -301,7 +299,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         JumpToTopCommand = ReactiveCommand.Create(() => { if (Clips.Count > 0) SelectedClip = Clips[0]; });
         OpenHelpCommand = ReactiveCommand.Create(OpenHelp);
         OpenAboutCommand = ReactiveCommand.Create(OpenAbout);
-        Maintenance = new DatabaseMaintenanceViewModel(databaseBackupService ?? new DatabaseBackupService(storageOptionsService, null, null, null), _storageOptionsService, _systemInteractionService, _notificationService, _clipboardMonitorService, _backgroundOcrQueue, _embeddingWorker, ReportError);
+        Maintenance = new DatabaseMaintenanceViewModel(databaseBackupService ?? new DatabaseBackupService(storageOptionsService, null, null, null), _storageOptionsService, _systemInteractionService, _notificationService, ReportError);
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
         SaveSettingsCommand = ReactiveCommand.CreateFromTask(SaveSettingsAsync);
         BrowseDatabasePathCommand = ReactiveCommand.CreateFromTask<Window?>(BrowseDatabasePathAsync);
@@ -2075,10 +2073,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         && !string.Equals(SettingsDatabasePassword, SettingsDatabasePasswordConfirm, StringComparison.Ordinal);
 
     /// <summary>
-    /// True when Save is about to persist a non-empty encryption password as
-    /// plaintext to disk (i.e. the user enabled "Remember password" and the
-    /// stored value would change). Drives the plaintext-storage confirmation
-    /// dialog.
+    /// True when Save is about to remember a non-empty encryption password (the
+    /// user enabled "Remember password" and the stored value would change).
+    /// Drives the confirmation dialog. The password is written DPAPI-protected,
+    /// never as plaintext - see <c>StorageOptionsService.BuildDocument</c>.
     /// </summary>
     public bool IsPendingPlaintextEncryptionPasswordChange =>
         SettingsRememberDatabasePassword
@@ -2098,7 +2096,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// True when the inline plaintext-storage warning under the password field
+    /// True when the inline remember-password warning under the password field
     /// should be visible: user typed a password and ticked "Remember".
     /// </summary>
     public bool IsRememberPasswordWarningVisible =>
@@ -2530,11 +2528,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             });
 
             if (sw is not null) Trace.TraceInformation($"[refresh-timing] ui-applied={applied} @ {sw.ElapsedMilliseconds}ms");
-
-            if (applied && !string.IsNullOrWhiteSpace(request.Filters.SearchText))
-            {
-                await _searchHistoryService.SaveSearchAsync(request.Filters.SearchText).ConfigureAwait(false);
-            }
         }
         finally
         {
@@ -2890,6 +2883,39 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await ToggleFavoriteStateAsync(clip);
     }
 
+    private string? _lastCommittedSearch;
+
+    /// <summary>
+    /// Records the current query in search history (F-36, OD-9b). Called only
+    /// when the user commits to a search - Enter in the search box, choosing a
+    /// result (click, copy, paste, open), or moving from the search box into the list
+    /// with the keyboard - never when a refresh lands. Recording on refresh
+    /// stored every pause-separated prefix: "inv", "invoice 2", "invoice 2024".
+    /// Once per query; an empty query is never recorded.
+    /// </summary>
+    internal Task CommitSearchQueryAsync()
+    {
+        var query = SearchText?.Trim();
+        if (string.IsNullOrEmpty(query) || string.Equals(query, _lastCommittedSearch, StringComparison.Ordinal))
+        {
+            return Task.CompletedTask;
+        }
+
+        _lastCommittedSearch = query;
+        // ISearchHistoryService has its own connection and no off-thread hop.
+        return Task.Run(async () =>
+        {
+            try
+            {
+                await _searchHistoryService.SaveSearchAsync(query).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Trace.TraceWarning($"Recording the search failed: {ex.Message}");
+            }
+        });
+    }
+
     private async Task CopySelectedAsync()
     {
         _ = await TryCopySelectedAsync();
@@ -2930,6 +2956,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 SelectedClip = clip;
             }
+
+            // Choosing a result commits the search that found it (OD-9b).
+            _ = CommitSearchQueryAsync();
 
             // Selection kicks hydration off but does not wait for it, and a list
             // row carries no content_bytes. Reading FullContent before those
@@ -2999,6 +3028,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             return;
         }
+
+        // Copying a result commits the search that found it (OD-9b), whichever copy it is.
+        _ = CommitSearchQueryAsync();
 
         try
         {
@@ -3093,6 +3125,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        _ = CommitSearchQueryAsync();
         var editorPath = ResolveExternalEditorPath(SelectedClip);
         if (!string.IsNullOrWhiteSpace(editorPath) && !System.IO.File.Exists(ExtractExecutablePath(editorPath)))
         {
@@ -5714,7 +5747,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var ocrWasRunning = _backgroundOcrQueue.IsRunning;
         var embeddingWasRunning = _embeddingWorker?.IsRunning ?? false;
         await _backgroundOcrQueue.StopAsync();
-        if (_embeddingWorker is not null)
+        // Paused, not stopped, when the worker owns its lifetime (F-23): a
+        // settings save during the import must not restart it.
+        IAsyncDisposable? embeddingPause = null;
+        if (_embeddingWorker is Clipthrough.Services.Search.IPausableWorker pausable)
+            embeddingPause = await pausable.PauseAsync();
+        else if (_embeddingWorker is not null)
             await _embeddingWorker.StopAsync();
 
         try
@@ -5745,7 +5783,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 _backgroundOcrQueue.Start();
             }
 
-            if (embeddingWasRunning)
+            if (embeddingPause is not null)
+            {
+                await embeddingPause.DisposeAsync();
+            }
+            else if (embeddingWasRunning)
             {
                 _embeddingWorker?.Start();
             }
@@ -6141,14 +6183,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 {
                     if (enabled)
                     {
+                        // A paused worker reports not running, so this also
+                        // records the wish while a maintenance pause holds it.
                         if (!worker.IsRunning)
                         {
                             worker.Start();
                             worker.Poke();
                         }
                     }
-                    else if (worker.IsRunning)
+                    else
                     {
+                        // Unconditionally: guarding on IsRunning skipped a "turn
+                        // it off" that arrived while a maintenance pause held the
+                        // worker stopped, and the release then restarted it (F-23).
                         await worker.StopAsync().ConfigureAwait(false);
                     }
                 }

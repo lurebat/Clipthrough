@@ -41,16 +41,10 @@ public sealed class ClipAngelImportService : IClipAngelImportService
         var temp = await DecryptToTempAsync(dbPath, cancellationToken).ConfigureAwait(false);
         try
         {
-            await using var conn = new SqliteConnection($"Data Source={temp};Mode=ReadOnly");
-            conn.StateChange += (_, e) =>
-            {
-                if (e.CurrentState == System.Data.ConnectionState.Open)
-                {
-                    using var cmd = conn.CreateCommand();
-                    cmd.CommandText = "PRAGMA busy_timeout = 5000;";
-                    cmd.ExecuteNonQuery();
-                }
-            };
+            // Pooling off: a pooled connection keeps the decrypted copy open after
+            // Dispose, TryDelete then fails silently, and a plaintext copy of the
+            // user's ClipAngel history is left in %TEMP% (found by F-34's tests).
+            await using var conn = Clipthrough.Database.SqliteConnectionFactory.Create(temp, password: null, SqliteOpenMode.ReadOnly, pooling: false);
             await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             int total;
@@ -102,7 +96,21 @@ public sealed class ClipAngelImportService : IClipAngelImportService
         if (!IsSupported)
             throw new PlatformNotSupportedException("ClipAngel import is only supported on Windows.");
 
-        var temp = await DecryptToTempAsync(dbPath, cancellationToken).ConfigureAwait(false);
+        return await ImportCoreAsync(token => DecryptToTempAsync(dbPath, token), progress, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The import proper, over a plain SQLite copy that <paramref name="makePlainCopy"/>
+    /// produces and this method deletes when it is done, whether it succeeds or not.
+    /// Split from the RC4 decryption (F-34) so the row loop, the blob cap and the
+    /// temp-file cleanup can be tested on a plain fixture.
+    /// </summary>
+    internal async Task<ClipAngelImportResult> ImportCoreAsync(
+        Func<CancellationToken, Task<string>> makePlainCopy,
+        IProgress<ClipAngelImportProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        var temp = await makePlainCopy(cancellationToken).ConfigureAwait(false);
         int imported = 0, skipped = 0, failed = 0;
         var errors = new List<string>();
 
@@ -110,16 +118,10 @@ public sealed class ClipAngelImportService : IClipAngelImportService
 
         try
         {
-            await using var conn = new SqliteConnection($"Data Source={temp};Mode=ReadOnly");
-            conn.StateChange += (_, e) =>
-            {
-                if (e.CurrentState == System.Data.ConnectionState.Open)
-                {
-                    using var cmd = conn.CreateCommand();
-                    cmd.CommandText = "PRAGMA busy_timeout = 5000;";
-                    cmd.ExecuteNonQuery();
-                }
-            };
+            // Pooling off: a pooled connection keeps the decrypted copy open after
+            // Dispose, TryDelete then fails silently, and a plaintext copy of the
+            // user's ClipAngel history is left in %TEMP% (found by F-34's tests).
+            await using var conn = Clipthrough.Database.SqliteConnectionFactory.Create(temp, password: null, SqliteOpenMode.ReadOnly, pooling: false);
             await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             int total;
