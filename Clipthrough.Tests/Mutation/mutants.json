@@ -252,7 +252,7 @@
     "why": "Reverts the daily backup to a raw file copy. A checkpoint that cannot finish leaves committed frames in the WAL, and the copied .db then opens as 'database disk image is malformed' - an unopenable backup nobody notices until they need it.",
     "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
     "filter": "DatabaseBackupServiceTests",
-    "find": "                () => SqliteDatabaseCopier.CopyDatabase(dbPath, _storageOptionsService.Current.DatabasePassword, tempPath),",
+    "find": "                () => SqliteDatabaseCopier.CopyDatabase(dbPath, key, tempPath),",
     "replace": "                () => File.Copy(dbPath, tempPath, overwrite: true),"
   },
   {
@@ -3246,5 +3246,29 @@
     "find": "@\"\\.\\s*ConnectionString\\s*=(?!=)\"",
     "replace": "@\"\\.ConnectionString =(?!=)\"",
     "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
+  },
+  {
+    "id": "plain-text-copy-skips-search-commit",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-09-3 (S40/OD-9b). Copying a result as plain text (Ctrl+Shift+C, Copy as plain text menus) is acting on it, so it must commit the search that found it; without the call the query never reaches search history.",
+    "find": "whichever copy it is.\n        _ = CommitSearchQueryAsync();",
+    "replace": "whichever copy it is.\n        _ = clip.Clip.Id < 0 ? CommitSearchQueryAsync() : Task.CompletedTask;",
+    "filter": "CopyingAResultAsPlainText_RecordsTheQuery"
+  },
+  {
+    "id": "backup-publishes-snapshot-across-rekey",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "A rekey that finishes between the daily snapshot and its publish has already re-keyed every published backup; publishing the old-key (or plaintext) copy leaves a restore point that does not restore, or plaintext history beside an encrypted library (rubber-duck F-04-3).",
+    "find": "                    if (!string.Equals(current.DatabasePassword, key, StringComparison.Ordinal))",
+    "replace": "                    if (!string.Equals(current.DatabasePassword, key, StringComparison.Ordinal) && key.Length < 0)",
+    "filter": "FullyQualifiedName~Rekey_InTheGapBeforeTheDailyBackupIsPublished_LeavesNoBackupTheNewKeyCannotOpen"
+  },
+  {
+    "id": "window-close-does-not-flush-the-placement",
+    "file": "Clipthrough/Views/MainWindow.Layout.cs",
+    "why": "Rubber-duck F-14-4. The placement store writes in the background and the process exits as soon as the main window has closed, so without waiting for the write on Closed the last size and position can be cut off on the way to the disk.",
+    "find": "        Closed += (_, _) => m_placementStore?.Flush();",
+    "replace": "        Closed += (_, _) => (m_placementStore is null ? m_placementStore : null)?.Flush();",
+    "filter": "FullyQualifiedName~WindowPlacementHeadlessTests.ClosingTheWindow_SavesAndThenWaitsForTheWrite"
   }
 ]
