@@ -2934,5 +2934,13 @@
     "find": "            .Select(s => (Screen: s, Overlap: OverlapArea(frame, s.WorkingArea)))",
     "replace": "            .Select(s => (Screen: s, Overlap: OverlapArea(new PixelRect(remembered.Position, OuterPixels(remembered.ClientSize, frameExtra, s.Scaling)), s.WorkingArea)))",
     "filter": "FullyQualifiedName~WindowGeometryTests.ARememberedWindowMostlyOnA100PercentScreen"
+  },
+  {
+    "id": "window-close-does-not-flush-the-placement",
+    "file": "Clipthrough/Views/MainWindow.Layout.cs",
+    "why": "Rubber-duck F-14-4. The placement store writes in the background and the process exits as soon as the main window has closed, so without waiting for the write on Closed the last size and position can be cut off on the way to the disk.",
+    "find": "        Closed += (_, _) => m_placementStore?.Flush();",
+    "replace": "        Closed += (_, _) => (m_placementStore is null ? m_placementStore : null)?.Flush();",
+    "filter": "FullyQualifiedName~WindowPlacementHeadlessTests.ClosingTheWindow_SavesAndThenWaitsForTheWrite"
   }
 ]
