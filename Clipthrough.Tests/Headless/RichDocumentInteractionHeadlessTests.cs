@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Avalonia.Controls;
@@ -450,13 +451,21 @@ public sealed class RichDocumentInteractionHeadlessTests
     /// but a paste that is refused only when it lands would still have parsed
     /// whatever another application left on the clipboard - which is the
     /// hostile-markup exposure the preview is otherwise guarded against. So
-    /// this asserts that no import was even started, not only that the
+    /// this asserts that no importer was even called, not only that the
     /// document is unchanged.
+    ///
+    /// It counts calls on an importer registered for the test, not
+    /// <c>ContentImporting</c>. That event is raised after the decode, and only
+    /// for content that would change the document, which a read-only view never
+    /// does - so it stays at zero even for a paste that read and parsed the
+    /// clipboard and was refused at apply time (rubber-duck F-12-2). The plain
+    /// text flavour is read without an importer and is not observed here;
+    /// <c>IClipboard</c> cannot be implemented outside Avalonia.
     ///
     /// The guarantor is VellumText (<c>RichTextView.CanPasteHere</c>); our part
     /// is setting <c>IsReadOnly</c>. The editable control at the end is what
     /// makes the refusals mean something: the same clipboard, the same
-    /// gesture, and the paste lands.
+    /// gesture, and the importer runs and the paste lands.
     /// </remarks>
     [AvaloniaFact]
     public async Task PasteIntoTheRenderedPreview_IsRefusedBeforeAnythingIsImported()
@@ -466,11 +475,11 @@ public sealed class RichDocumentInteractionHeadlessTests
         {
             var editorView = view.Viewer.View;
             Assert.NotNull(editorView);
-            var importsStarted = 0;
-            view.Viewer.ContentImporting += (_, _) => importsStarted++;
+            var importer = new RecordingImporter(VellumText.Interop.Html.HtmlFormat.Instance);
+            view.Viewer.Formats.Add(importer);
 
             var clipboard = TopLevel.GetTopLevel(window)!.Clipboard!;
-            await WriteClipboardTextAsync(clipboard, "PASTED FROM ELSEWHERE");
+            await WriteClipboardHtmlAsync(clipboard, "<p><b>PASTED FROM ELSEWHERE</b></p>");
             string DocumentText() => VellumText.DocumentText.Of(view.Viewer.State.Doc);
             var before = DocumentText();
 
@@ -488,7 +497,7 @@ public sealed class RichDocumentInteractionHeadlessTests
             Dispatcher.UIThread.RunJobs();
 
             Assert.Equal(before, DocumentText());
-            Assert.Equal(0, importsStarted);
+            Assert.Equal(0, importer.Calls);
 
             // The control: the same pane made editable takes the same paste.
             view.Viewer.IsReadOnly = false;
@@ -498,12 +507,47 @@ public sealed class RichDocumentInteractionHeadlessTests
             Dispatcher.UIThread.RunJobs();
 
             Assert.Contains("PASTED FROM ELSEWHERE", DocumentText(), StringComparison.Ordinal);
-            Assert.True(importsStarted > 0, "the editable paste raised no ContentImporting, so counting it above proves nothing");
+            Assert.True(importer.Calls > 0, "the editable paste never called the importer, so counting its calls above proves nothing");
         }
         finally
         {
             window.Close();
             Dispatcher.UIThread.RunJobs();
+        }
+    }
+
+    private static async Task WriteClipboardHtmlAsync(IClipboard clipboard, string html)
+    {
+        var format = VellumText.Interop.Html.HtmlFormat.Instance;
+        // ImportAsync(string, CancellationToken) is a default interface method with no
+        // optional token (VellumText 0.8.0-audit.6 and later).
+        var document = (await ((VellumText.IDocumentImporter)format).ImportAsync(html, CancellationToken.None)).Doc;
+        await clipboard.SetDataAsync(VellumText.Avalonia.RichTextClipboard.Build(document, [format]));
+    }
+
+    /// <summary>An importer that counts its calls and otherwise defers to <paramref name="inner"/>.</summary>
+    private sealed class RecordingImporter(VellumText.IDocumentImporter inner) : VellumText.IDocumentImporter
+    {
+        private int _calls;
+
+        public int Calls => Volatile.Read(ref _calls);
+
+        public string Format => inner.Format;
+
+        public string MediaType => inner.MediaType;
+
+        public System.Text.Encoding? TextEncoding => inner.TextEncoding;
+
+        public Task<VellumText.ImportResult> ImportAsync(System.IO.Stream source, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _calls);
+            return inner.ImportAsync(source, cancellationToken);
+        }
+
+        public Task<VellumText.ImportResult> ImportAsync(string source, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _calls);
+            return inner.ImportAsync(source, cancellationToken);
         }
     }
 
