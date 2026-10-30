@@ -37,7 +37,9 @@ public sealed class ConnectionConstructionGuardTests
         + @"|\bSqliteConnection\s*\??\s+\w+\s*(?:\([^()]*\)\s*)?=>?\s*new\s*\(",
         RegexOptions.CultureInvariant);
     private static readonly Regex ProviderFactory = new(@"\bSqliteFactory\s*\.", RegexOptions.CultureInvariant);
-    private static readonly Regex BusyTimeout = new(@"\bbusy_timeout\s*[=(]", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    // "=" or a parenthesised single argument - busy_timeout(5000), ({ms}) - but
+    // not prose that mentions the pragma, like "busy_timeout (5 s)".
+    private static readonly Regex BusyTimeout = new(@"\bbusy_timeout\s*(?:=|\(\s*[\w{}$@.]+\s*\))", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
     private static readonly Regex ConnectionStringAssignment = new(@"\.\s*ConnectionString\s*=(?!=)", RegexOptions.CultureInvariant);
 
     private static string ProductionSourceRoot()
@@ -147,6 +149,16 @@ public sealed class ConnectionConstructionGuardTests
     [InlineData("cmd.CommandText = \"PRAGMA busy_timeout" + "=5000;\";")]
     [InlineData("cmd.CommandText = \"PRAGMA BUSY_TIMEOUT" + " = 5000;\";")]
     [InlineData("cmd.CommandText = \"PRAGMA busy_timeout" + "(5000);\";")]
+    [InlineData("cmd.CommandText = $\"PRAGMA busy_timeout" + "({timeoutMs});\";")]
+    [InlineData("cmd.CommandText = $\"PRAGMA busy_timeout" + " = {timeoutMs};\";")]
     public void BusyTimeoutRule_CatchesEverySpelling(string snippet)
         => Assert.Matches(BusyTimeout, snippet);
+
+    // Prose that names the pragma is not a second place setting it: a comment
+    // explaining how long a writer waits must not fail the guard.
+    [Theory]
+    [InlineData("/// and a capture waits for it under busy_timeout" + " (5 s); an encrypted batch can take seconds.")]
+    [InlineData("// busy_timeout" + " (per connection, not persistent) is applied on open.")]
+    public void BusyTimeoutRule_IgnoresProse(string snippet)
+        => Assert.DoesNotMatch(BusyTimeout, snippet);
 }
