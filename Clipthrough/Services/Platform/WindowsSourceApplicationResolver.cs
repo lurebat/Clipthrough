@@ -42,6 +42,23 @@ public sealed class WindowsSourceApplicationResolver : ISourceApplicationResolve
 
     public byte[]? TryResolveIcon(string? processPath) => TryGetProcessIcon(processPath);
 
+    public int? TryGetClipboardOwnerProcessId()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+
+        var owner = GetClipboardOwner();
+        if (owner == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        _ = GetWindowThreadProcessId(owner, out var processId);
+        return processId == 0 ? null : (int)processId;
+    }
+
     private static ClipboardSourceApplicationInfo? ResolveCore(bool includeIcon)
     {
         var owner = GetClipboardOwner();

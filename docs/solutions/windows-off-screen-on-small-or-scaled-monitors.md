@@ -55,7 +55,10 @@ Four separate assumptions, each wrong on a scaled or changed monitor:
 - **Fit triggers:** `Views/WindowFitter.cs` fits a window each time it opens,
   including every show from the tray. It also refits after `ScalingChanged`
   (only when the window no longer fits, so a drag between monitors is not
-  fought) and after the screens change. Every Clipthrough window calls
+  fought), after the screens change, and when a drag by the caption ends on
+  another screen (`WindowFitter.MoveSizeLoop`, from WM_EXITSIZEMOVE; again only
+  when the window no longer fits, and never during the drag or after a
+  resize). Every Clipthrough window calls
   `WindowFitter.Attach(this)` in its constructor.
 - **Responsive workspace:** the main window has a 480x360 minimum and reflows
   instead of overflowing. `WorkspaceBreakpoints.Classify` sets the bp-* classes
@@ -69,11 +72,40 @@ Four separate assumptions, each wrong on a scaled or changed monitor:
   rectangle on a monitor that is gone comes back on the primary screen,
   clamped to it.
 
+### Replacing Grid definitions at runtime crashed the app
+
+The first version assigned new `RowDefinitions`/`ColumnDefinitions` straight
+from `OnPropertyChanged(ClientSize)`. Changing the display mode between
+1280x720 at 150% and the native mode then froze Clipthrough and killed it with
+`ArgumentOutOfRangeException` in `Grid.MeasureCellsGroup`, thrown from
+`Window.HandleResized` inside the window procedure.
+
+Root cause, from the Avalonia 12.1.1 source: Grid caches each child's cell
+(row and column, clamped to the definition counts of the time) and rebuilds
+that cache only when a child's `Grid.Row`/`Column`/`Span` changes, the
+children change, a spacing changes, or an existing definition changes unit
+type. The definitions setters only call `InvalidateMeasure()`. The filter row
+goes from three columns and one row (Short) to two columns and two rows (not
+Short) with no child changing cell, so the Search options button stayed
+cached at column 2 against two columns. A display-mode change crossed the
+600 DIP Short line; resizing by hand rarely does so without also crossing a
+width breakpoint, which moves children and clears the cache. Timing and
+re-entrancy were not the cause: the same exception reproduces headless from
+a single resize.
+
+Fix: every definition change goes through `GridDefinitions.Set`, which assigns
+the collections only when they differ and then clears the cell cache by
+toggling the first definition's unit type (the one public route to the Grid's
+internal `Invalidate()`). `RequestWorkspaceBreakpoint` also coalesces nested
+requests. Regression tests: `WorkspaceBreakpointTransitionHeadlessTests`,
+which record dispatcher exceptions, because the app's handler marks them
+handled in headless and they show only as a window that kept its old size.
 ## Prevention
 
 - **New windows:** call `WindowFitter.Attach(this)` in the constructor. Give
   the window content that scrolls, so that whatever is fitted to a short screen
   keeps its buttons outside the scroller.
+- **Grid definitions:** never assign `RowDefinitions` or `ColumnDefinitions` on a live Grid directly; use `GridDefinitions.Set`. Test layout changes as transitions, not only as fresh windows: a stale cache only shows when one layout follows another.
 - **Units:** never compare a `Width` or `Height` with a `PixelRect`. Go through
   `WindowGeometry`, which states the unit of each parameter.
 - **Layout tests:** test against the working area, not the window. A window
@@ -85,8 +117,9 @@ Four separate assumptions, each wrong on a scaled or changed monitor:
 - **Fonts in tests:** the test app loads Inter with `.WithInterFont()`, as the app does. Without it, headless measures text in a stub font about 1.6 times as wide, and every assertion about what fits measures text that does not exist.
 - **Regression tests:** `ResponsiveWorkspaceHeadlessTests` covers each
   breakpoint; `WindowFitHeadlessTests` covers open, DPI change, screen change,
-  show from the tray, caret placement and dialogs; `SettingsNarrowHeadlessTests`
-  covers the hotkey rows; `WindowPlacementHeadlessTests` covers restoring the
+  a drag onto a smaller screen, show from the tray, caret placement and
+  dialogs; `SettingsNarrowHeadlessTests` covers the hotkey rows;
+  `WindowPlacementHeadlessTests` covers restoring the
   placement.
 - **Screenshots:** `LayoutSurveyCapture` renders every surface at seven
   working areas when `CLIPTHROUGH_LAYOUT_CAPTURE_DIR` is set. Run it before and

@@ -238,6 +238,118 @@ public sealed class DeferredPayloadMoveTests
     private static long AppIconHashIndexCount(TemporaryDatabaseScope scope) =>
         Scalar(scope, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_clips_source_app_icon_hash';");
 
+    private static async Task<ClipEntry> CaptureAsync(TemporaryDatabaseScope scope, string text, int payloadBytes, byte[]? icon = null)
+    {
+        var payload = new byte[payloadBytes];
+        var textBytes = Encoding.UTF8.GetBytes(text);
+        Array.Copy(textBytes, payload, Math.Min(textBytes.Length, payload.Length));
+        var clip = await scope.ClipStoreService.CaptureFastAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = text,
+            ContentBytes = payload,
+            SourceAppIconBytes = icon,
+        });
+        Assert.NotNull(clip);
+        return clip;
+    }
+
+    private static byte[] UniqueIcon(int length, int seed) => [.. Enumerable.Range(0, length).Select(i => (byte)((i * 7) + seed))];
+
+    /// <summary>
+    /// A deferred upgrade start, as schema 8 left it: the icon-hash index does not
+    /// exist yet, so orphaned icons are not swept until the background run builds it.
+    /// </summary>
+    private static async Task<long[]> StartDeferredUpgradeAsync(TemporaryDatabaseScope scope, AppSettings settings)
+    {
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(settings);
+        var ids = SeedSchema8Library(scope, 3);
+        Scalar(scope, "DROP INDEX idx_clips_source_app_icon_hash;");
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+        return ids;
+    }
+
+    private static readonly AppSettings NoCaps = new()
+    {
+        EnableMaxLibrarySize = false,
+        EnableMaxEntryCount = false,
+        EnableNormalClipLifetime = false,
+        EnableSensitiveClipLifetime = false,
+        MaxClipSizeBytes = 2_097_152,
+    };
+
+    /// <summary>
+    /// Rubber-duck F-13-5 (owner decision: option 2). While the move is owed,
+    /// orphaned icons cannot be swept - finding them means scanning rows that still
+    /// hold their payloads inline - so the size total leaves icons out until the
+    /// move is done, and then counts each distinct icon once again.
+    /// </summary>
+    [Fact]
+    public async Task WhileTheMoveIsOwed_TheSizeTotalLeavesIconsOut_AndCountsThemOnceItIsDone()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await StartDeferredUpgradeAsync(scope, NoCaps);
+        var orphaned = await CaptureAsync(scope, "copied with an icon", 9, UniqueIcon(4096, 1));
+        await scope.ClipStoreService.DeleteAsync(orphaned.Id);
+        Assert.Equal(1, Scalar(scope, "SELECT COUNT(*) FROM app_icons WHERE LENGTH(png) = 4096;"));
+
+        var during = await scope.ClipStoreService.ApplyMaintenanceAsync();
+        Assert.True(during.TotalStoredBytes == 3 * (5 + Icon.Length), $"While the move is owed the size total was {during.TotalStoredBytes}, not the rows' {3 * (5 + Icon.Length)}.");
+
+        Assert.True(await scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(progress: null));
+        var after = await scope.ClipStoreService.ApplyMaintenanceAsync();
+        Assert.Equal((3 * 5) + Icon.Length, after.TotalStoredBytes);
+    }
+
+    /// <summary>
+    /// F-13-5, the harm: under a size cap, an orphaned icon counted while the move is
+    /// owed evicted a clip the library had room for.
+    /// </summary>
+    [Fact]
+    public async Task WhileTheMoveIsOwed_NoClipIsEvictedToPayForIconBytes()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        var ids = await StartDeferredUpgradeAsync(scope, NoCaps);
+        var orphaned = await CaptureAsync(scope, "copied with a large icon", 9, UniqueIcon(16_384, 2));
+        await scope.ClipStoreService.DeleteAsync(orphaned.Id);
+        var x = await CaptureAsync(scope, "first large clip", 520_000);
+        var y = await CaptureAsync(scope, "second large clip", 520_000);
+
+        // 1,040,000 + 915 of rows fits 1 MiB; with the 16 KiB orphan it does not.
+        scope.SettingsService.SetCurrent(NoCaps with { EnableMaxLibrarySize = true, MaxLibrarySizeMegabytes = 1 });
+        await scope.ClipStoreService.ApplyMaintenanceAsync();
+
+        Assert.True(await scope.ClipStoreService.GetByIdAsync(x.Id) is not null, "A clip was evicted to pay for an orphaned icon while the move was owed.");
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(y.Id));
+        Assert.Equal(ids.Length + 2, Scalar(scope, "SELECT COUNT(*) FROM clips;"));
+    }
+
+    /// <summary>
+    /// F-13-5, the other side: while icons are out of the total, evicting the last
+    /// clip that uses one frees nothing the total counted, so the eviction walk must
+    /// not subtract the icon either - or it stops with the library still over the cap.
+    /// </summary>
+    [Fact]
+    public async Task WhileTheMoveIsOwed_EvictingAnIconsLastClipFreesOnlyItsPayload()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        var ids = await StartDeferredUpgradeAsync(scope, NoCaps);
+        var oldest = await CaptureAsync(scope, "small clip with the only copy of an icon", 100, UniqueIcon(65_536, 3));
+        const int capBytes = 1_048_576;
+        var large = await CaptureAsync(scope, "large clip", capBytes + 1000 - (ids.Length * (5 + Icon.Length)) - 100);
+
+        // Rows are 1,000 bytes over the cap: evicting the small clip is not enough,
+        // unless its 64 KiB icon is wrongly counted as freed.
+        scope.SettingsService.SetCurrent(NoCaps with { EnableMaxLibrarySize = true, MaxLibrarySizeMegabytes = 1 });
+        var result = await scope.ClipStoreService.ApplyMaintenanceAsync();
+
+        Assert.Null(await scope.ClipStoreService.GetByIdAsync(oldest.Id));
+        Assert.True(await scope.ClipStoreService.GetByIdAsync(large.Id) is null, "The eviction stopped with the library over its cap: an icon was counted as freed while icons were out of the total.");
+        Assert.True(result.TotalStoredBytes <= capBytes, $"The library is {result.TotalStoredBytes} bytes, over its {capBytes}-byte cap.");
+    }
+
     /// <summary>
     /// Rubber-duck F-13-4: the move drops idx_clips_ocr_images, because the
     /// definition a schema-8 library has also required content_bytes, which the
@@ -717,6 +829,15 @@ public sealed class DeferredPayloadMoveTests
         Assert.Equal(edited.Length, Scalar(scope, $"SELECT stored_bytes FROM clips WHERE id = {ids[0]};"));
     }
 
+    /// <summary>
+    /// With the sensitive-clip lifetime on, the backup also purges and vacuums its
+    /// copy, and on a damaged library that fails by itself - so "no backup file"
+    /// would hold whether or not the integrity guard ran. With the lifetime off the
+    /// copy of the damaged file succeeds, and only the guard keeps it from being
+    /// published: the case Finding 4b is about.
+    /// </summary>
+    private static Task KeepBackupCopyingTheDamagedLibraryAsync(TemporaryDatabaseScope scope) =>
+        scope.SettingsService.SaveAsync(scope.SettingsService.Current with { EnableSensitiveClipLifetime = false });
     private static string BackupDirectory(TemporaryDatabaseScope scope) =>
         System.IO.Path.Combine(System.IO.Path.GetDirectoryName(scope.DatabasePath)!, "backups");
 
@@ -751,11 +872,52 @@ public sealed class DeferredPayloadMoveTests
             System.IO.File.WriteAllBytes(path, [1, 2, 3]);
         }
 
+        await KeepBackupCopyingTheDamagedLibraryAsync(scope);
         var backup = new Clipthrough.Services.DatabaseBackupService(scope.StorageOptionsService, null, null, null, settingsService: scope.SettingsService, databaseInitializer: scope.DatabaseInitializer);
         await backup.EnsureDailyBackupAsync();
 
         Assert.False(System.IO.File.Exists(TodaysBackup(scope)), "A backup was taken from a library that failed its integrity check.");
         Assert.All(older, path => Assert.True(System.IO.File.Exists(path), $"{System.IO.Path.GetFileName(path)} was pruned."));
+    }
+
+    /// <summary>
+    /// The startup backup reads two things the background check writes: whether
+    /// the check failed, and whether it is still owed. A failing check sets the
+    /// first, then clears the second. Read in that same order, a check that lands
+    /// between the two reads is seen as neither failed nor owed, and the backup
+    /// copies the damaged library (Finding 4b: never back up a library that failed
+    /// its check this session).
+    /// </summary>
+    [Fact]
+    public async Task TheDailyBackup_IsNotTaken_WhenTheCheckFailsBetweenItsTwoReads()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        SeedSchema8Library(scope, 3);
+        await SeedFillerPagesAsync(scope);
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+        CorruptTheMiddleOfTheFile(scope);
+        Assert.True(scope.DatabaseInitializer.IsIntegrityCheckOwed);
+
+        await KeepBackupCopyingTheDamagedLibraryAsync(scope);
+        var checkRan = false;
+        Clipthrough.Services.DatabaseBackupService.BetweenIntegrityStateReads = async () =>
+        {
+            checkRan = true;
+            await Assert.ThrowsAsync<InvalidOperationException>(() => scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(progress: null));
+        };
+        try
+        {
+            var backup = new Clipthrough.Services.DatabaseBackupService(scope.StorageOptionsService, null, null, null, settingsService: scope.SettingsService, databaseInitializer: scope.DatabaseInitializer);
+            await backup.EnsureDailyBackupAsync();
+        }
+        finally
+        {
+            Clipthrough.Services.DatabaseBackupService.BetweenIntegrityStateReads = null;
+        }
+
+        Assert.True(scope.DatabaseInitializer.HasFailedIntegrityCheck || !checkRan, "The forced check did not fail, so this proves nothing.");
+        Assert.False(System.IO.File.Exists(TodaysBackup(scope)), "A daily backup was taken from a library that failed its integrity check");
     }
 
     /// <summary>

@@ -93,6 +93,20 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
 
     public void CancelSuppressNext() => _suppressionGate.Disarm();
 
+    public void SuppressNextForeignCopy() => _suppressionGate.ArmForAnyWriter();
+
+    /// <summary>
+    /// True when another process owns the clipboard, so the change being handled
+    /// is not Clipthrough's own write whatever suppression is pending.
+    /// </summary>
+    /// <remarks>
+    /// Unknown counts as ours: with no owner to go on, the suppression keeps the
+    /// behaviour it always had rather than risk capturing our own output.
+    /// </remarks>
+    private bool IsClipboardOwnedByAnotherProcess()
+        => _sourceApplicationResolver.TryGetClipboardOwnerProcessId() is { } ownerProcessId
+            && ownerProcessId != Environment.ProcessId;
+
     public bool IsRunning => _isStarted;
 
     public void Start()
@@ -240,19 +254,40 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
         {
             return;
         }
-        HandleClipboardChanged();
+        _ = HandleClipboardChangedAsync();
     }
 
-    private async void HandleClipboardChanged()
+    /// <summary>
+    /// Lets a test drive a capture against a headless window's clipboard,
+    /// which has no window procedure to deliver WM_CLIPBOARDUPDATE.
+    /// </summary>
+    internal void AttachForTests(Window window)
+    {
+        _window = window;
+        _isStarted = true;
+    }
+
+    /// <summary>One coalesced capture. Never throws: every failure is reported.</summary>
+    internal async Task HandleClipboardChangedAsync()
     {
         if (!_isStarted || _isDisposed || _window?.Clipboard is not { } clipboard)
         {
             return;
         }
 
-        if (_suppressionGate.ShouldSuppress())
+        // A suppression armed for our own write stands only while we still own
+        // the clipboard. Another application's copy that lands inside the
+        // coalesce window used to be swallowed with it, unread and never
+        // captured (F-05-4). It is read now; if it repeats what we wrote,
+        // IsOwnRepublish below still drops it.
+        if (_suppressionGate.ShouldSuppress(out var coversAnyWriter))
         {
-            return;
+            if (coversAnyWriter || !IsClipboardOwnedByAnotherProcess())
+            {
+                return;
+            }
+
+            Trace.TraceInformation("Clipboard changed by another application while a suppression for Clipthrough's own write was pending; capturing it.");
         }
 
         var publishedBusy = false;

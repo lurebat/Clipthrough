@@ -51,7 +51,7 @@ public partial class MainWindow : Window
     {
         m_systemInteractionService = systemInteractionService;
         InitializeComponent();
-        ApplyWorkspaceBreakpoint(WorkspaceBreakpoints.Classify(ClientSize));
+        RequestWorkspaceBreakpoint(WorkspaceBreakpoints.Classify(ClientSize));
         InitializePlacement(placementStore);
         Opened += OnOpened;
         Activated += OnActivated;
@@ -966,6 +966,12 @@ public partial class MainWindow : Window
             viewModel.SelectedClip = clip;
             return;
         }
+
+        // Clicking a result picks it, which commits the search that found it
+        // (S40/OD-9b). Here rather than on SelectionChanged, because the app
+        // also moves the selection itself - refreshes, auto-select - and that
+        // is not the user picking anything.
+        _ = viewModel.CommitSearchQueryAsync();
 
         // Stash the pointer position so PointerMoved can detect a drag
         // gesture once the pointer has travelled past the system threshold.

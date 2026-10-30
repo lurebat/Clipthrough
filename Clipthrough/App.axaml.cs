@@ -634,7 +634,7 @@ public partial class App : Application
 
     private void CopyWithoutSaving()
     {
-        _clipboardMonitorService?.SuppressNext();
+        _clipboardMonitorService?.SuppressNextForeignCopy();
     }
 
     /// <summary>

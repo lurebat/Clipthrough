@@ -3003,8 +3003,8 @@
     "id": "size-cap-ignores-stored-icons",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "The cap must bound what is on disk (the 12.5x under-count fixed earlier); since U-E1 icons are counted once, from app_icons.",
-    "find": " + \") FROM clips), 0) + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons), 0);\";",
-    "replace": " + \") FROM clips), 0) + 0;\";",
+    "find": "             + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons\n                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1')), 0);",
+    "replace": "             + 0;",
     "filter": "FullyQualifiedName~Maintenance_LibrarySizeCap_CountsTheSourceAppIconsItStores"
   },
   {
@@ -4211,8 +4211,8 @@
     "id": "wide-layout-changes-its-split",
     "why": "Changes the Wide split from 1:2, which was meant to stay exactly as it always was.",
     "file": "Clipthrough/Views/MainWindow.Layout.cs",
-    "find": "                    ? new ColumnDefinitions(\"*,6,2*\")",
-    "replace": "                    ? new ColumnDefinitions(\"2*,6,3*\")",
+    "find": "                GridDefinitions.Set(split, width == WorkspaceWidth.Wide ? \"*,6,2*\" : \"2*,6,3*\", \"*\");",
+    "replace": "                GridDefinitions.Set(split, width == WorkspaceWidth.Wide ? \"2*,6,3*\" : \"2*,6,3*\", \"*\");",
     "filter": "FullyQualifiedName~ResponsiveWorkspaceHeadlessTests.Wide_"
   },
   {
@@ -5142,5 +5142,165 @@
     "find": "_startupArguments = dataRoot.RelaunchArguments;",
     "replace": "_startupArguments = dataRoot.Directory.Length < 0 ? dataRoot.RelaunchArguments : [];",
     "filter": "FullyQualifiedName~StartWithWindowsCommandTests"
+  },
+  {
+    "id": "daily-backup-reads-failed-before-owed",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Finding 4b: never back up a library that failed its integrity check this session. A failing check sets HasFailedIntegrityCheck and then clears IsIntegrityCheckOwed; reading failed-then-owed lets a check that finishes between the reads look neither, and the damaged library is backed up.",
+    "find": "        if (_databaseInitializer is { IsIntegrityCheckOwed: true })\n        {\n            Trace.TraceInformation(\"Daily backup deferred until the library's background integrity check has passed.\");\n            return;\n        }\n\n        if (BetweenIntegrityStateReads is { } between)\n        {\n            await between().ConfigureAwait(false);\n        }\n\n        // Live check F3: a backup copies the library page for page, damage included,\n        // and the rotation below keeps only a week, so backing up a library that\n        // failed its check would push the good backups out one day at a time.\n        if (_databaseInitializer is { HasFailedIntegrityCheck: true })\n        {\n            Trace.TraceWarning(\"Daily backup skipped: the library failed its integrity check this session, so the existing backups are kept as they are.\");\n            return;\n        }\n",
+    "replace": "        if (_databaseInitializer is { HasFailedIntegrityCheck: true })\n        {\n            Trace.TraceWarning(\"Daily backup skipped: the library failed its integrity check this session, so the existing backups are kept as they are.\");\n            return;\n        }\n\n        if (BetweenIntegrityStateReads is { } between)\n        {\n            await between().ConfigureAwait(false);\n        }\n\n        // Live check F3: a backup copies the library page for page, damage included,\n        // and the rotation below keeps only a week, so backing up a library that\n        // failed its check would push the good backups out one day at a time.\n        if (_databaseInitializer is { IsIntegrityCheckOwed: true })\n        {\n            Trace.TraceInformation(\"Daily backup deferred until the library's background integrity check has passed.\");\n            return;\n        }\n",
+    "filter": "FullyQualifiedName~WhenTheCheckFailsBetweenItsTwoReads"
+  },
+  {
+    "id": "grid-keeps-cells-cached-against-old-definitions",
+    "why": "Swaps a grid's definitions without clearing Avalonia's cell cache. Crossing the Short line at the same width leaves the Search options button indexed at column 2 of a two-column filter row, and the layout pass throws ArgumentOutOfRangeException from Grid.MeasureCellsGroup; on Windows that is inside the window procedure and kills the app (seen live on a display-mode change).",
+    "file": "Clipthrough/Views/GridDefinitions.cs",
+    "find": "        if (changed)",
+    "replace": "        if (changed && grid.Name == \"never\")",
+    "filter": "FullyQualifiedName~WorkspaceBreakpointTransitionHeadlessTests"
+  },
+  {
+    "id": "load-more-page-not-counted",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "A refresh built before a load-more page landed must not apply its shallower result over that page; the page counter is how it knows one landed.",
+    "find": "                _loadMorePageVersion++;\n",
+    "replace": "                _loadMorePageVersion += result.Items.Count < 0 ? 1 : 0;\n",
+    "filter": "FullyQualifiedName~LoadMore_KeepsItsPage"
+  },
+  {
+    "id": "overtaken-refresh-applied",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "A refresh that a load-more page overtook was read to the old depth; applying it deletes the page the user just scrolled in, so it must be discarded and re-run.",
+    "find": "if (_loadMorePageVersion != pagesAtRequest)",
+    "replace": "if (_loadMorePageVersion != pagesAtRequest && pagesAtRequest < 0)",
+    "filter": "FullyQualifiedName~LoadMore_KeepsItsPage"
+  },
+  {
+    "id": "refresh-records-query-at-request-time",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Paging invariant 2: recording the query when the request is built lets a retried attempt compare the new query against itself and re-read at the old depth, so a write straddling a query change kept the extra page.",
+    "find": "                    return new RefreshRequest(BuildFilters(offset: 0, limit: limit), UseSemanticClipSearch);\n",
+    "replace": "                    _lastRefreshFilters = BuildFilters(offset: 0, limit: limit);\n                    _lastRefreshUsedSemantic = UseSemanticClipSearch;\n                    return new RefreshRequest(BuildFilters(offset: 0, limit: limit), UseSemanticClipSearch);\n",
+    "filter": "FullyQualifiedName~Refresh_ResetsPaging_EvenWhenAClipWriteStraddlesTheQueryChange"
+  },
+  {
+    "id": "size-total-counts-icons-while-move-owed",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-13-5 (owner decision, option 2): while the deferred payload move is owed, orphaned icons cannot be swept, so counting app_icons makes the size cap evict clips to pay for icons nothing uses.",
+    "find": "                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1')), 0);",
+    "replace": "                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1') OR 1 = 1), 0);",
+    "filter": "FullyQualifiedName~WhileTheMoveIsOwed"
+  },
+  {
+    "id": "size-total-leaves-icons-out-after-the-move",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-13-5: icons leave the size total only while the move is owed; once it is done each distinct icon counts once again.",
+    "find": "                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1')), 0);",
+    "replace": "                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1') AND 1 = 0), 0);",
+    "filter": "FullyQualifiedName~WhileTheMoveIsOwed_TheSizeTotalLeavesIconsOut"
+  },
+  {
+    "id": "size-cap-walk-frees-icons-while-move-owed",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-13-5: while icons are out of the size total, an eviction that frees an icon frees nothing the total counted; a walk that subtracts the icon stops with the library still over its cap. Guards the merge with the F-11-1 walk (ReadIconReferencesAsync).",
+    "find": "                if (iconsCounted && !reader.IsDBNull(1))",
+    "replace": "                if ((iconsCounted || connection.ConnectionString.Length > 0) && !reader.IsDBNull(1))",
+    "filter": "FullyQualifiedName~WhileTheMoveIsOwed_EvictingAnIconsLastClipFreesOnlyItsPayload"
+  },
+  {
+    "id": "integrity-failure-notification-omits-unbacked-note",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-13-10 (owner decision, option 1): the integrity-failure notification says to restore a backup, but the daily backup waited for the check, so nothing copied this session is in one; it must say so, and where a restore keeps the replaced library.",
+    "find": "                Message = _databaseInitializer.HasFailedIntegrityCheck\n                    ? ",
+    "replace": "                Message = _databaseInitializer.HasFailedIntegrityCheck && ex.Message.Length < 0\n                    ? ",
+    "filter": "FullyQualifiedName~ACorruptLibrary_IsNotMovedInTheBackground"
+  },
+  {
+    "id": "unbacked-note-on-every-run-failure",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-13-10: the backup note belongs to the failed integrity check, the only failure that says to restore a backup; other background-run failures do not get it.",
+    "find": "                Message = _databaseInitializer.HasFailedIntegrityCheck\n                    ? ",
+    "replace": "                Message = _databaseInitializer.HasFailedIntegrityCheck || ex.Message.Length >= 0\n                    ? ",
+    "filter": "FullyQualifiedName~ABackgroundRunFailureOtherThanTheCheck_HasNoBackupNote"
+  },
+  {
+    "id": "own-write-suppression-ignores-owner",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "why": "Rubber-duck F-05-4: a suppression armed for our own write swallowed another application's copy that landed inside the coalesce window, unread and never captured.",
+    "find": "            if (coversAnyWriter || !IsClipboardOwnedByAnotherProcess())",
+    "replace": "            if (coversAnyWriter || !IsClipboardOwnedByAnotherProcess() || Environment.ProcessId > 0)",
+    "filter": "FullyQualifiedName~ClipboardSuppressionOwnerHeadlessTests"
+  },
+  {
+    "id": "copy-without-saving-arm-is-ordinary",
+    "file": "Clipthrough/Services/Capture/ClipboardSuppressionGate.cs",
+    "why": "F-05-4: copy-without-saving must swallow the copy the user makes in another application; as an ordinary arm the owner check lets that copy through and it is kept.",
+    "find": "        Interlocked.Increment(ref _pendingForAnyWriter);",
+    "replace": "        Interlocked.Increment(ref _pending);",
+    "filter": "FullyQualifiedName~ClipboardSuppressionOwnerHeadlessTests"
+  },
+  {
+    "id": "unknown-clipboard-owner-counts-as-foreign",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "why": "F-05-4: with no clipboard owner to go on, the suppression must hold as before; treating unknown as another process re-captures our own writes.",
+    "find": "        => _sourceApplicationResolver.TryGetClipboardOwnerProcessId() is { } ownerProcessId\n            && ownerProcessId != Environment.ProcessId;",
+    "replace": "        => _sourceApplicationResolver.TryGetClipboardOwnerProcessId() is not { } ownerProcessId\n            || ownerProcessId != Environment.ProcessId;",
+    "filter": "FullyQualifiedName~ClipboardSuppressionOwnerHeadlessTests"
+  },
+  {
+    "id": "f06-6-drop-honours-history-opt-out",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "S39 refinement (rubber-duck F-06-6): a drop is a deliberate import and bypasses the clipboard-history opt-out; making drops honour it must be a decision, not an accident.",
+    "find": "        IReadOnlyList<ClipCaptureRequest> requests;\n        try\n        {\n            requests = await _dragDropService.TryBuildCaptureRequestsAsync(drop, sourceInfo);",
+    "replace": "        if (drop is Avalonia.Input.IAsyncDataTransfer asyncDrop && await ClipboardMonitorService.ShouldIgnoreClipboardAsync(asyncDrop, _settingsService.Current.HonorClipboardHistoryOptOut))\n        {\n            return 0;\n        }\n\n        IReadOnlyList<ClipCaptureRequest> requests;\n        try\n        {\n            requests = await _dragDropService.TryBuildCaptureRequestsAsync(drop, sourceInfo);",
+    "filter": "FullyQualifiedName~ADropMarkedNotForClipboardHistory_IsStillImported"
+  },
+  {
+    "id": "result-click-skips-search-commit",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "Rubber-duck F-09-3, click part (S40/OD-9b). Clicking a result in the list is picking it, so the pointer-press handler must commit the search that found it; without the call a search that ends in a click is never recorded.",
+    "find": "is not the user picking anything.\n        _ = viewModel.CommitSearchQueryAsync();",
+    "replace": "is not the user picking anything.\n        _ = pointerKind == PointerUpdateKind.RightButtonPressed ? viewModel.CommitSearchQueryAsync() : Task.CompletedTask;",
+    "filter": "SearchHistoryClickHeadlessTests.ClickingAResult_RecordsTheQuery"
+  },
+  {
+    "id": "automatic-selection-records-search",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-09-3, click part (S40/OD-9b). Only a user's pick records a search. Committing on every SelectedClip change would also record on refreshes, auto-select and programmatic selection; this mutant is that wrong hook, and the automatic-selection test must catch it.",
+    "find": "UpdateSelectedClipPresentation();\n            _ = EnsureSelectedClipHydratedAsync();",
+    "replace": "UpdateSelectedClipPresentation();\n            _ = EnsureSelectedClipHydratedAsync();\n            _ = CommitSearchQueryAsync();",
+    "filter": "SearchHistoryClickHeadlessTests.AutomaticSelection_RecordsNothing"
+  },
+  {
+    "id": "drag-end-never-refits-on-another-screen",
+    "file": "Clipthrough/Views/WindowFitter.cs",
+    "why": "Rubber-duck F-14-3. A drag between two screens at the same scaling raises no DPI change; if the end of the move is never acted on, a 2200 DIP window dragged from an ultrawide onto a 1920 DIP monitor stays wider than it.",
+    "find": "|| end == start)",
+    "replace": "|| end == start || end.Scaling > 0)",
+    "filter": "FullyQualifiedName~WindowFitHeadlessTests.Dragging|FullyQualifiedName~WindowFitHeadlessTests.Resizing"
+  },
+  {
+    "id": "drag-refits-on-every-step",
+    "file": "Clipthrough/Views/WindowFitter.cs",
+    "why": "Rubber-duck F-14-3, owner condition: never move or resize the window while the user is still dragging it. Fitting on each WM_MOVING step would shrink it under the cursor mid-drag.",
+    "find": "        public void Moving() => _moved = true;",
+    "replace": "        public void Moving() { _moved = true; Dispatcher.UIThread.Post(() => Fit(window, onlyIfTooLarge: true), DispatcherPriority.Background); }",
+    "filter": "FullyQualifiedName~WindowFitHeadlessTests.Dragging|FullyQualifiedName~WindowFitHeadlessTests.Resizing"
+  },
+  {
+    "id": "resize-across-screens-is-refitted-like-a-move",
+    "file": "Clipthrough/Views/WindowFitter.cs",
+    "why": "Rubber-duck F-14-3. A border drag is the user choosing a size; treating a resize that ends on another screen as a move would undo the size they just chose.",
+    "find": "if (!_moved || _sized ||",
+    "replace": "if (!_moved && !_sized ||",
+    "filter": "FullyQualifiedName~WindowFitHeadlessTests.Dragging|FullyQualifiedName~WindowFitHeadlessTests.Resizing"
+  },
+  {
+    "id": "drag-end-moves-a-window-that-still-fits",
+    "file": "Clipthrough/Views/WindowFitter.cs",
+    "why": "Rubber-duck F-14-3, owner condition: never touch a window that still fits. A full fit at the end of a drag would pull a window the user deliberately left hanging off an edge back inside.",
+    "find": "            Dispatcher.UIThread.Post(() => Fit(window, onlyIfTooLarge: true), DispatcherPriority.Background);",
+    "replace": "            Dispatcher.UIThread.Post(() => Fit(window, onlyIfTooLarge: start.Value.Scaling < 0), DispatcherPriority.Background);",
+    "filter": "FullyQualifiedName~WindowFitHeadlessTests.Dragging|FullyQualifiedName~WindowFitHeadlessTests.Resizing"
   }
 ]
