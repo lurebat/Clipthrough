@@ -101,8 +101,15 @@ public sealed partial class MainWindowViewModelHeadlessTests
             clipboardMonitor.Emit(clip);
         }
 
-        await Task.Delay(500);
-        Dispatcher.UIThread.RunJobs();
+        // Until the database start has finished and the burst has landed, not a
+        // fixed 500 ms: the burst is emitted while the library is still loading,
+        // and under load the start alone outlasted the sleep.
+        var clock = Stopwatch.StartNew();
+        while ((viewModel.IsLoadingDatabase || viewModel.SelectedClip?.Id != 6) && clock.Elapsed < TimeSpan.FromSeconds(10))
+        {
+            await Task.Delay(20);
+            Dispatcher.UIThread.RunJobs();
+        }
 
         // Measured from the end of startup. The old absolute "2 to 4 searches,
         // clip 6 selected" counted the startup refresh, which this test raced
