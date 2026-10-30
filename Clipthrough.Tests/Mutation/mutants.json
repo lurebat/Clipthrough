@@ -2982,5 +2982,21 @@
     "find": "            Dispatcher.UIThread.Post(() => Fit(window, onlyIfTooLarge: true), DispatcherPriority.Background);",
     "replace": "            Dispatcher.UIThread.Post(() => Fit(window, onlyIfTooLarge: start.Value.Scaling < 0), DispatcherPriority.Background);",
     "filter": "FullyQualifiedName~WindowFitHeadlessTests.Dragging|FullyQualifiedName~WindowFitHeadlessTests.Resizing"
+  },
+  {
+    "id": "load-more-page-not-counted",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "A refresh built before a load-more page landed must not apply its shallower result over that page; the page counter is how it knows one landed.",
+    "find": "                _loadMorePageVersion++;\n",
+    "replace": "                _loadMorePageVersion += result.Items.Count < 0 ? 1 : 0;\n",
+    "filter": "FullyQualifiedName~LoadMore_KeepsItsPage"
+  },
+  {
+    "id": "overtaken-refresh-applied",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "A refresh that a load-more page overtook was read to the old depth; applying it deletes the page the user just scrolled in, so it must be discarded and re-run.",
+    "find": "if (_loadMorePageVersion != pagesAtRequest)",
+    "replace": "if (_loadMorePageVersion != pagesAtRequest && pagesAtRequest < 0)",
+    "filter": "FullyQualifiedName~LoadMore_KeepsItsPage"
   }
 ]
