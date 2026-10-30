@@ -93,12 +93,42 @@ public sealed class WindowPlacementHeadlessTests
         Assert.Equal(new SavedWindowPlacement(300, 150, 1000, 700, Maximized: true), store.Saved[^1]);
     }
 
+    [AvaloniaFact]
+    public void ClosingTheWindow_SavesAndThenWaitsForTheWrite()
+    {
+        // The process exits as soon as the main window has closed, and the
+        // store writes in the background: without the flush the last placement
+        // could be cut off on its way to the disk.
+        var store = new RecordingPlacementStore(null);
+        using var screenScope = WindowFitter.UseScreens(new TestScreens(FullHd));
+        using var harness = MainWindowTestHarness.Create(placementStore: store);
+        harness.Window.Position = new PixelPoint(300, 150);
+        harness.Window.Width = 1000;
+        harness.Window.Height = 700;
+        Dispatcher.UIThread.RunJobs();
+
+        harness.Window.Close();
+        Dispatcher.UIThread.RunJobs();
+
+        var lastSave = store.Events.LastIndexOf("save 300,150 1000x700");
+        Assert.True(lastSave >= 0, $"the placement was not saved on close: [{string.Join(", ", store.Events)}]");
+        Assert.True(store.Events.IndexOf("flush", lastSave) > lastSave, $"close did not wait for the save to be written: [{string.Join(", ", store.Events)}]");
+    }
+
     private sealed class RecordingPlacementStore(SavedWindowPlacement? saved) : IWindowPlacementStore
     {
         public List<SavedWindowPlacement> Saved { get; } = [];
 
+        public List<string> Events { get; } = [];
+
         public SavedWindowPlacement? Load() => saved;
 
-        public void Save(SavedWindowPlacement placement) => Saved.Add(placement);
+        public void Save(SavedWindowPlacement placement)
+        {
+            Saved.Add(placement);
+            Events.Add($"save {placement.X},{placement.Y} {placement.Width}x{placement.Height}");
+        }
+
+        public void Flush() => Events.Add("flush");
     }
 }

@@ -25,6 +25,18 @@ public sealed class WindowPlacementStoreTests : IDisposable
     }
 
     [Fact]
+    public void Flush_LeavesTheLastSaveOnDisk()
+    {
+        var placement = new SavedWindowPlacement(10, 20, 900, 700, Maximized: false);
+        var store = new WindowPlacementStore(StorePath);
+        store.Save(placement);
+
+        store.Flush();
+
+        Assert.Equal(placement, new WindowPlacementStore(StorePath).Load());
+    }
+
+    [Fact]
     public void NoFile_LoadsNothing()
     {
         Assert.Null(new WindowPlacementStore(StorePath).Load());

@@ -90,6 +90,16 @@ public sealed class SettingsLostUpdateHeadlessTests
 
         var saving = harness.ViewModel.SaveSettingsCommand.Execute().ToTask();
 
+        // The dialog saves from inside Task.Run, so its save can reach the
+        // service after this test's own update below. Wait until it holds the
+        // gate: otherwise the test's update takes the hold and waits for a
+        // release that only comes after it returns. Bounded so a dialog save that
+        // never arrives fails the test instead of hanging the run.
+        await harness.Settings.SaveHeld.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(
+            harness.Settings.LastMutation!(AppSettings.Default).ThemeMode == ThemeMode.Dark,
+            "The save holding the gate is not the settings dialog's.");
+
         // Lands while the dialog save sits in the gate, exactly as a debounced
         // filter save does.
         await harness.Settings.UpdateAsync(c => c with { LastShowFavoritesOnly = true });

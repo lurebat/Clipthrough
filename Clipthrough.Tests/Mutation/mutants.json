@@ -3030,5 +3030,13 @@
     "find": "                    if (!string.Equals(current.DatabasePassword, key, StringComparison.Ordinal))",
     "replace": "                    if (!string.Equals(current.DatabasePassword, key, StringComparison.Ordinal) && key.Length < 0)",
     "filter": "FullyQualifiedName~Rekey_InTheGapBeforeTheDailyBackupIsPublished_LeavesNoBackupTheNewKeyCannotOpen"
+  },
+  {
+    "id": "window-close-does-not-flush-the-placement",
+    "file": "Clipthrough/Views/MainWindow.Layout.cs",
+    "why": "Rubber-duck F-14-4. The placement store writes in the background and the process exits as soon as the main window has closed, so without waiting for the write on Closed the last size and position can be cut off on the way to the disk.",
+    "find": "        Closed += (_, _) => m_placementStore?.Flush();",
+    "replace": "        Closed += (_, _) => (m_placementStore is null ? m_placementStore : null)?.Flush();",
+    "filter": "FullyQualifiedName~WindowPlacementHeadlessTests.ClosingTheWindow_SavesAndThenWaitsForTheWrite"
   }
 ]
