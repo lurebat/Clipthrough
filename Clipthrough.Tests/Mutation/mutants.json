@@ -2747,8 +2747,8 @@
     "id": "tool-copies-survive-exit",
     "file": "Clipthrough/Services/Capture/ClipExportService.cs",
     "why": "F-18. Session working copies of possibly sensitive clips must not outlive the session.",
-    "find": "        TryDeleteDirectory(_sessionRoot);\n    }\n",
-    "replace": "        _ = _sessionRoot;\n    }\n",
+    "find": "        TryDeleteDirectory(_sessionRoot);\n        RetryUnsweptFolders();\n    }\n",
+    "replace": "        _ = _sessionRoot;\n        RetryUnsweptFolders();\n    }\n",
     "filter": "FullyQualifiedName~ClipExportServiceTests.AToolCopy_LandsInTheSessionFolder"
   },
   {
@@ -3390,5 +3390,29 @@
     "find": "                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);",
     "replace": "                await Task.Delay(3000).ConfigureAwait(false);\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);",
     "filter": "FullyQualifiedName~StartupExpiresSensitiveClips_BeforeTakingTheDailyBackup"
+  },
+  {
+    "id": "f06-7-no-retry-on-tool-copy",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "Rubber-duck F-06-7: an abandoned folder a tool still held at startup is retried on the next tool copy, not left until another start.",
+    "find": "        RetryUnsweptFolders();\n        EnsureSessionLock();",
+    "replace": "        if (_sessionRoot.Length < 0) RetryUnsweptFolders();\n        EnsureSessionLock();",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AnAbandonedFolderLockedAtStartup_IsRemovedOnceReleased"
+  },
+  {
+    "id": "f06-7-no-retry-at-exit",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "Rubber-duck F-06-7: an abandoned folder a tool still held at startup is retried at exit.",
+    "find": "        TryDeleteDirectory(_sessionRoot);\n        RetryUnsweptFolders();",
+    "replace": "        TryDeleteDirectory(_sessionRoot);\n        if (_sessionRoot.Length < 0) RetryUnsweptFolders();",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AnAbandonedFolderLockedAtStartup_IsRemovedAtExit"
+  },
+  {
+    "id": "f06-7-failed-sweep-forgotten",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "Rubber-duck F-06-7: a folder the startup sweep could not remove is remembered for retry.",
+    "find": "                    _unsweptFolders.Add(folder);",
+    "replace": "                    _ = folder;",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AnAbandonedFolderLockedAtStartup"
   }
 ]

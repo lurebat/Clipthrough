@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -34,6 +35,10 @@ public sealed class ClipExportService : IClipExportService, IDisposable
     private readonly object _sessionLockGate = new();
     private FileStream? _sessionLock;
 
+    // Abandoned folders the startup sweep could not remove because a tool still
+    // held a file in them; retried on each tool copy and at exit (rubber-duck F-06-7).
+    private readonly List<string> _unsweptFolders = [];
+
     public ClipExportService()
         : this(
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Clipthrough Exports"),
@@ -58,6 +63,7 @@ public sealed class ClipExportService : IClipExportService, IDisposable
 
     public Task<ClipExportResult> ExportForToolAsync(ClipEntry clip, CancellationToken cancellationToken = default)
     {
+        RetryUnsweptFolders();
         EnsureSessionLock();
         return ExportCoreAsync(clip, _sessionRoot, includeMetadata: false, cancellationToken);
     }
@@ -71,6 +77,15 @@ public sealed class ClipExportService : IClipExportService, IDisposable
         }
 
         TryDeleteDirectory(_sessionRoot);
+        RetryUnsweptFolders();
+    }
+
+    private void RetryUnsweptFolders()
+    {
+        lock (_sessionLockGate)
+        {
+            _unsweptFolders.RemoveAll(TryDeleteDirectory);
+        }
     }
 
     private void EnsureSessionLock()
@@ -116,9 +131,9 @@ public sealed class ClipExportService : IClipExportService, IDisposable
                     ? !IsLockHeld(lockPath)
                     : int.TryParse(pidText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var pid)
                         && !IsProcessRunning(pid);
-                if (abandoned)
+                if (abandoned && !TryDeleteDirectory(folder))
                 {
-                    TryDeleteDirectory(folder);
+                    _unsweptFolders.Add(folder);
                 }
             }
         }
@@ -168,7 +183,8 @@ public sealed class ClipExportService : IClipExportService, IDisposable
         }
     }
 
-    private static void TryDeleteDirectory(string path)
+    /// <summary>True when the folder is gone afterwards.</summary>
+    private static bool TryDeleteDirectory(string path)
     {
         try
         {
@@ -176,11 +192,14 @@ public sealed class ClipExportService : IClipExportService, IDisposable
             {
                 Directory.Delete(path, recursive: true);
             }
+
+            return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // An editor may still hold a file open; the next start sweeps it.
             System.Diagnostics.Trace.TraceWarning($"Could not remove tool-copy folder '{path}': {ex.Message}");
+            return false;
         }
     }
 
