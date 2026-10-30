@@ -266,15 +266,20 @@ public sealed class StorageLifecycleTests : IDisposable
         });
         Assert.NotNull(clip);
 
+        // Nothing in the app sets user_version, so a fresh library reads 0 - the
+        // same value a copy that dropped it reads. A sentinel is what lets a
+        // "preserved" assertion fail.
+        const long UserVersionSentinel = 4242;
         long userVersion;
         await using (var connection = factory.CreateConnection())
         {
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
-            command.CommandText = "PRAGMA user_version;";
+            command.CommandText = $"PRAGMA user_version = {UserVersionSentinel}; PRAGMA user_version;";
             userVersion = Convert.ToInt64(await command.ExecuteScalarAsync(), System.Globalization.CultureInfo.InvariantCulture);
         }
 
+        Assert.Equal(UserVersionSentinel, userVersion);
         SqliteConnection.ClearAllPools();
         return (storage, store, dbPath, userVersion);
     }
@@ -434,6 +439,41 @@ public sealed class StorageLifecycleTests : IDisposable
         await backups.RestoreAsync(listed.Path);
         SqliteConnection.ClearAllPools();
         Assert.Equal(Marker, ReadRows(dbPath, "new-pass"));
+    }
+
+    /// <summary>
+    /// The startup backup runs outside the storage lifecycle, so a rekey can
+    /// land after it has copied the database and before it publishes the copy.
+    /// RekeyBackups has already enumerated the folder by then, and the copy -
+    /// keyed to the old password, or still plaintext - was published as
+    /// today's restore point: one that does not restore, and when encryption
+    /// was being turned on, the history in plaintext beside the encrypted file.
+    /// </summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("old-pass")]
+    public async Task Rekey_InTheGapBeforeTheDailyBackupIsPublished_LeavesNoBackupTheNewKeyCannotOpen(string oldKey)
+    {
+        var dbPath = Path.Combine(_root, "clipthrough.db");
+        Exec(dbPath, oldKey, "PRAGMA journal_mode=WAL; CREATE TABLE clips (v TEXT); INSERT INTO clips VALUES ('" + Marker + "');");
+        var storage = NewStorage(dbPath);
+        storage.SetInMemoryPassword(oldKey);
+        var backups = new DatabaseBackupService(storage, null, null, null)
+        {
+            SnapshotTakenForTests = () => storage.RekeyAsync(oldKey, "new-pass", rememberNewPassword: false),
+        };
+
+        await backups.EnsureDailyBackupAsync();
+        SqliteConnection.ClearAllPools();
+
+        Assert.Equal("new-pass", storage.Current.DatabasePassword);
+        foreach (var file in Directory.GetFiles(Path.Combine(_root, "backups")))
+        {
+            Assert.True(
+                StorageOptionsService.CanOpenWithPassword(file, "new-pass"),
+                $"'{Path.GetFileName(file)}' does not open with the key the library now uses.");
+            Assert.False(FileContains(file, Marker), $"'{Path.GetFileName(file)}' holds the history in plaintext.");
+        }
     }
 
     // ─── storage.json writes (F-22) ───────────────────────────────────────────

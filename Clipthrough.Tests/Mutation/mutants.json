@@ -252,7 +252,7 @@
     "why": "Reverts the daily backup to a raw file copy. A checkpoint that cannot finish leaves committed frames in the WAL, and the copied .db then opens as 'database disk image is malformed' - an unopenable backup nobody notices until they need it.",
     "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
     "filter": "DatabaseBackupServiceTests",
-    "find": "                () => SqliteDatabaseCopier.CopyDatabase(dbPath, _storageOptionsService.Current.DatabasePassword, tempPath),",
+    "find": "                () => SqliteDatabaseCopier.CopyDatabase(dbPath, key, tempPath),",
     "replace": "                () => File.Copy(dbPath, tempPath, overwrite: true),"
   },
   {
@@ -3014,5 +3014,21 @@
     "find": "            .Select(s => (Screen: s, Overlap: OverlapArea(frame, s.WorkingArea)))",
     "replace": "            .Select(s => (Screen: s, Overlap: OverlapArea(new PixelRect(remembered.Position, OuterPixels(remembered.ClientSize, frameExtra, s.Scaling)), s.WorkingArea)))",
     "filter": "FullyQualifiedName~WindowGeometryTests.ARememberedWindowMostlyOnA100PercentScreen"
+  },
+  {
+    "id": "rekey-export-drops-user-version",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "Adding or removing encryption writes the copy with sqlcipher_export, which does not carry user_version on this SQLite3MC build; without the explicit PRAGMA the copy reads 0. The fixture seeds a non-zero sentinel, because a fresh library and a dropped value both read 0 (rubber-duck F-04-2).",
+    "find": "                    \"PRAGMA rekeyed.user_version = \" + userVersion.ToString(CultureInfo.InvariantCulture) + \"; \" +",
+    "replace": "                    (userVersion.ToString(CultureInfo.InvariantCulture).Length < 0 ? \"PRAGMA rekeyed.user_version = \" + userVersion.ToString(CultureInfo.InvariantCulture) + \"; \" : string.Empty) +",
+    "filter": "FullyQualifiedName~StorageLifecycleTests.Rekey_PlaintextLibrary_BecomesEncryptedAndKeepsEverything|FullyQualifiedName~StorageLifecycleTests.Rekey_EncryptedLibrary_ToNoPassword_OpensWithoutAKey"
+  },
+  {
+    "id": "backup-publishes-snapshot-across-rekey",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "A rekey that finishes between the daily snapshot and its publish has already re-keyed every published backup; publishing the old-key (or plaintext) copy leaves a restore point that does not restore, or plaintext history beside an encrypted library (rubber-duck F-04-3).",
+    "find": "                    if (!string.Equals(current.DatabasePassword, key, StringComparison.Ordinal))",
+    "replace": "                    if (!string.Equals(current.DatabasePassword, key, StringComparison.Ordinal) && key.Length < 0)",
+    "filter": "FullyQualifiedName~Rekey_InTheGapBeforeTheDailyBackupIsPublished_LeavesNoBackupTheNewKeyCannotOpen"
   }
 ]
