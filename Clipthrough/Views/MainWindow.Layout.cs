@@ -43,6 +43,10 @@ public partial class MainWindow
         PositionChanged += (_, _) => RememberNormalPlacement();
         Closing += (_, _) => SavePlacement();
 
+        // Closed, not Closing: the app cancels Closing to hide to the tray, and
+        // only a real close is followed by the process exiting.
+        Closed += (_, _) => m_placementStore?.Flush();
+
         if (store?.Load() is not { } saved)
         {
             return;
