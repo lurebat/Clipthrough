@@ -41,6 +41,8 @@ With a chosen folder, everything lives inside it, the library included (`clipthr
 
 If the chosen folder can't be used, Clipthrough shows a message and does not start. This happens when no folder follows `--data-dir` (a value starting with `-`, as in `--data-dir -p`, counts as no folder), when the variable is blank or relative, when the path is invalid, or when Clipthrough can't create or write to the folder. Clipthrough never falls back to the default folder, so your clips never end up somewhere you didn't choose.
 
+**Start with Windows** starts Clipthrough on the same data folder. With the variable or the portable marker, the sign-in entry is just `Clipthrough.exe`, because both are still there at sign-in. When `--data-dir` chose the folder, the entry carries it: `"…\Clipthrough.exe" --data-dir "D:\Clipthrough data"`. There is one sign-in entry per Windows user, not one per data folder. Turning Start with Windows on in a session started with `--data-dir`, such as an isolated test folder, points sign-in at that folder. The next start of your usual session points sign-in back, if Start with Windows is on there. Each session applies its own Start with Windows setting when it starts.
+
 Only one Clipthrough runs at a time, whatever its data folder. A second copy started with a different `--data-dir` exits while the first is running.
 
 ## Development

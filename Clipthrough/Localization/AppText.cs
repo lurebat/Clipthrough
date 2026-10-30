@@ -138,7 +138,7 @@ public static class AppText
         [nameof(RegexNeedsBacktrackingStatus)] = "This pattern needs the backtracking regex engine (backreferences, lookarounds or atomic groups). Turn it on in Settings > Search.",
         [nameof(RegexTooSlowStatus)] = "Pattern too slow: the regex search was stopped. Simplify the pattern, or switch off the backtracking engine in Settings > Search.",
         [nameof(OpenedInEditorStatus)] = "Opened in editor",
-        [nameof(SettingsHintText)] = "Enter shortcuts in forms like Ctrl+Shift+R, Ctrl+Shift+F, or F8. Disable any shortcut you do not want active. Startup registration applies on Windows.",
+        [nameof(SettingsHintText)] = "Enter shortcuts in forms like Ctrl+Shift+R, Ctrl+Shift+F, or F8. Disable any shortcut you do not want active. Startup registration applies on Windows. In a session started with --data-dir, Start with Windows starts Clipthrough on that folder at sign-in, replacing the previous sign-in entry.",
         [nameof(SettingsStorageHintText)] = "The path is stored outside the clip database so you can move or encrypt it. Leave the password empty to keep SQLite unencrypted.",
         [nameof(SettingsDatabasePasswordWarning)] = "⚠ Saved in storage.json encrypted for your Windows account (DPAPI) so the database can unlock on startup. Any program running as you can still decrypt it. Where DPAPI is unavailable the password is kept in memory only and asked for again next launch.",
         [nameof(SettingsConfirmEncryptionPasswordTitle)] = "Save encryption password?",

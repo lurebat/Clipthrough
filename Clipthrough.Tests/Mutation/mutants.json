@@ -5110,5 +5110,37 @@
     "find": "args[i + 1].StartsWith('-')))",
     "replace": "args[i + 1].StartsWith(\"--\", StringComparison.Ordinal)))",
     "filter": "FullyQualifiedName~AppDataRootValidationTests|FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "startup-entry-carries-data-dir",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "When --data-dir chose the folder, the Start with Windows entry must carry it, or sign-in opens the default folder (coordinator decision, option a).",
+    "find": "command.Append(' ').Append(argument.StartsWith('-') ? argument : QuoteArgument(argument));",
+    "replace": "command.Append(argument.Length < 0 ? QuoteArgument(argument) : string.Empty);",
+    "filter": "FullyQualifiedName~StartWithWindowsCommandTests"
+  },
+  {
+    "id": "startup-entry-quotes-folder",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "The folder in the sign-in entry must be quoted, or a folder with spaces splits into several arguments.",
+    "find": "argument.StartsWith('-') ? argument : QuoteArgument(argument)",
+    "replace": "argument.StartsWith('-') || argument.Length > 0 ? argument : QuoteArgument(argument)",
+    "filter": "FullyQualifiedName~StartWithWindowsCommandTests"
+  },
+  {
+    "id": "startup-entry-doubles-trailing-backslashes",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "A drive-root folder (D:\\) ends in a backslash that escapes the closing quote unless doubled, and then reads back as D:\".",
+    "find": "return quoted.Append('\\\\', backslashes * 2).Append('\"').ToString();",
+    "replace": "return quoted.Append('\\\\', backslashes).Append('\"').ToString();",
+    "filter": "FullyQualifiedName~StartWithWindowsCommandTests"
+  },
+  {
+    "id": "startup-entry-root-from-constructor",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "The DI-built service must take its sign-in arguments from the injected data root.",
+    "find": "_startupArguments = dataRoot.RelaunchArguments;",
+    "replace": "_startupArguments = dataRoot.Directory.Length < 0 ? dataRoot.RelaunchArguments : [];",
+    "filter": "FullyQualifiedName~StartWithWindowsCommandTests"
   }
 ]

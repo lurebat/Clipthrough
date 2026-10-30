@@ -39,6 +39,15 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
     private WindowsBalloonNotificationHost? _notificationHost;
     private nint _capturedPasteTarget;
 
+    // Appended to the Start with Windows command (AppDataRoot.RelaunchArguments),
+    // so a login starts Clipthrough on the data folder --data-dir chose.
+    private readonly IReadOnlyList<string> _startupArguments;
+
+    public SystemInteractionService(AppDataRoot dataRoot)
+    {
+        _startupArguments = dataRoot.RelaunchArguments;
+    }
+
     public async Task CopyTextAsync(string text)
     {
         var clipboard = GetClipboard();
@@ -732,7 +741,7 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
 
         try
         {
-            SyncStartWithWindowsCore(enabled);
+            SyncStartWithWindowsCore(enabled, BuildStartupCommand);
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -755,7 +764,7 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
     }
 
     [SupportedOSPlatform("windows")]
-    private static void SyncStartWithWindowsCore(bool enabled)
+    private static void SyncStartWithWindowsCore(bool enabled, Func<string, string> buildCommand)
     {
         using var runKey = Registry.CurrentUser.CreateSubKey(WindowsRunRegistryPath, writable: true);
         if (runKey is null)
@@ -775,7 +784,7 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
             return;
         }
 
-        var command = QuoteCommandArgument(processPath);
+        var command = buildCommand(processPath);
         var existingValue = runKey.GetValue(WindowsRunValueName) as string;
         if (string.Equals(existingValue, command, StringComparison.Ordinal))
         {
@@ -783,6 +792,46 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         }
 
         runKey.SetValue(WindowsRunValueName, command, RegistryValueKind.String);
+    }
+
+    /// <summary>
+    /// The command the Run key starts at login: the executable, then the
+    /// data-folder arguments when the command line chose the folder.
+    /// </summary>
+    internal string BuildStartupCommand(string processPath)
+    {
+        var command = new StringBuilder(QuoteCommandArgument(processPath));
+        foreach (var argument in _startupArguments)
+        {
+            command.Append(' ').Append(argument.StartsWith('-') ? argument : QuoteArgument(argument));
+        }
+
+        return command.ToString();
+    }
+
+    /// <summary>
+    /// Quotes one argument after the program name so the started process reads
+    /// it back unchanged: backslashes are literal except before a quote, so a
+    /// run of them before the closing quote - a drive root such as D:\ - is
+    /// doubled, or it would escape the quote.
+    /// </summary>
+    private static string QuoteArgument(string value)
+    {
+        var quoted = new StringBuilder("\"");
+        var backslashes = 0;
+        foreach (var c in value)
+        {
+            if (c == '\\')
+            {
+                backslashes++;
+                continue;
+            }
+
+            quoted.Append('\\', c == '"' ? (backslashes * 2) + 1 : backslashes).Append(c);
+            backslashes = 0;
+        }
+
+        return quoted.Append('\\', backslashes * 2).Append('"').ToString();
     }
 
     private static string QuoteCommandArgument(string value)
