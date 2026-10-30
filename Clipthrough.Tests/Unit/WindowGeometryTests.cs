@@ -166,6 +166,23 @@ public sealed class WindowGeometryTests
         Assert.Equal(remembered, restored);
     }
 
+    [Fact]
+    public void ARememberedWindowMostlyOnA100PercentScreen_StaysThereBesideA250PercentOne()
+    {
+        // Saved at x=1000 px on the 100% screen, 1200 DIP wide: 920 px of it on
+        // the left screen and 280 px over the seam. Sized at the right screen's
+        // 250% instead, the same frame is 3000x2000 px and "mostly" on the right,
+        // which is where it used to come back.
+        var right = new ScreenArea(new PixelRect(1920, 0, 3840, 2112), 2.5);
+        var remembered = new WindowPlacement(new Size(1200, 800), new PixelPoint(1000, 100));
+
+        var restored = WindowGeometry.Restore(remembered, NoMinimum, NoFrame, [FullHd, right]);
+
+        Assert.True(restored.Position.X < 1920, $"restored at x={restored.Position.X} px, on the 250% screen");
+        Assert.Equal(new Size(1200, 800), restored.ClientSize);
+        AssertFrameInside(restored.ClientSize, NoFrame, restored.Position, FullHd);
+    }
+
     private static void AssertFrameInside(Size client, Size frameExtra, PixelPoint position, ScreenArea screen)
     {
         var right = position.X + (int)System.Math.Ceiling((client.Width + frameExtra.Width) * screen.Scaling);
