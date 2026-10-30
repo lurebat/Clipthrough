@@ -123,6 +123,16 @@ public sealed class AppDataRootResolverTests : IDisposable
         Assert.Equal(AppDataRootSource.Default, root.Source);
     }
 
+    // Help is read before the data folder, so it prints even when that folder
+    // is unusable; the password's value is still not an option.
+    [Theory]
+    [InlineData(true, "--help")]
+    [InlineData(true, "--data-dir", "--help")]
+    [InlineData(false, "--password", "--help")]
+    [InlineData(false, "--data-dir", "D:\\data")]
+    public void Help_IsReadWithoutTheRestOfTheCommandLine(bool expected, params string[] args)
+        => Assert.Equal(expected, CommandLineOptions.IsHelpRequested(args));
+
     [Fact]
     public void ARelativeCommandLinePath_ResolvesAgainstTheCurrentDirectory()
     {

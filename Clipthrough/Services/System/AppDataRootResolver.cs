@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Clipthrough.Localization;
 using Clipthrough.Models;
 
 namespace Clipthrough.Services;
@@ -38,15 +39,28 @@ public static class AppDataRootResolver
         string executableDirectory,
         string localApplicationData)
     {
+        // A source that is present decides, whether or not it works: an
+        // unusable choice is reported, never passed over for the next one.
         var commandLine = CommandLineOptions.ReadDataDirectory(args);
         if (commandLine is not null)
         {
-            return AppDataRoot.Chosen(ExpandPath(commandLine), AppDataRootSource.CommandLine);
+            if (string.IsNullOrWhiteSpace(commandLine))
+            {
+                throw new AppDataRootException(AppText.DataFolderMissingValue);
+            }
+
+            return Choose(commandLine, AppDataRootSource.CommandLine);
         }
 
+        // Empty is how an unset variable reads on some platforms; blank is a mistake.
         if (!string.IsNullOrEmpty(environmentValue))
         {
-            return AppDataRoot.Chosen(ExpandPath(environmentValue), AppDataRootSource.EnvironmentVariable);
+            if (string.IsNullOrWhiteSpace(environmentValue))
+            {
+                throw new AppDataRootException(AppText.FormatDataFolderBlank(AppDataRootSource.EnvironmentVariable));
+            }
+
+            return Choose(environmentValue, AppDataRootSource.EnvironmentVariable);
         }
 
         if (File.Exists(Path.Combine(executableDirectory, PortableMarkerFileName)))
@@ -57,5 +71,43 @@ public static class AppDataRootResolver
         return AppDataRoot.Default(localApplicationData);
     }
 
-    private static string ExpandPath(string value) => Environment.ExpandEnvironmentVariables(value.Trim());
+    private static AppDataRoot Choose(string value, AppDataRootSource source)
+    {
+        // Checked before expanding too: the expansion is a Win32 call, and stops at a NUL.
+        var expanded = Environment.ExpandEnvironmentVariables(value.Trim());
+        if (value.IndexOfAny(Path.GetInvalidPathChars()) >= 0 || expanded.IndexOfAny(Path.GetInvalidPathChars()) >= 0)
+        {
+            throw new AppDataRootException(AppText.FormatDataFolderInvalid(value, source, AppText.DataFolderInvalidCharacters));
+        }
+
+        try
+        {
+            return AppDataRoot.Chosen(expanded, source);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new AppDataRootException(AppText.FormatDataFolderInvalid(value, source, ex.Message), ex);
+        }
+    }
+
+    /// <summary>
+    /// Creates the folder if needed and proves a file can be written in it, so
+    /// an unusable folder stops startup with a message instead of failing
+    /// later - or worse, half-working - in whichever service writes first.
+    /// Throws <see cref="AppDataRootException"/> when it cannot be used.
+    /// </summary>
+    public static void EnsureUsable(AppDataRoot dataRoot)
+    {
+        try
+        {
+            Directory.CreateDirectory(dataRoot.Directory);
+            var probe = Path.Combine(dataRoot.Directory, $".write-test-{Guid.NewGuid():N}.tmp");
+            using var stream = new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None, bufferSize: 1, FileOptions.DeleteOnClose);
+            stream.WriteByte(0);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
+        {
+            throw new AppDataRootException(AppText.FormatDataFolderUnusable(dataRoot.Directory, dataRoot.Source, ex.Message), ex);
+        }
+    }
 }

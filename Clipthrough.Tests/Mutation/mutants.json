@@ -4974,5 +4974,45 @@
     "find": "@\"\\bSpecialFolder\\s*\\.\\s*Local\" + \"ApplicationData\\\\b\"",
     "replace": "@\"\\bSpecialFolder\\.Local\" + \"ApplicationData\\\\b\"",
     "filter": "FullyQualifiedName~AppDataRootGuardTests"
+  },
+  {
+    "id": "dataroot-missing-value-reported",
+    "file": "Clipthrough/CommandLineOptions.cs",
+    "why": "--data-dir without a folder must be reported, not ignored in favour of the next source (no silent fallback, user decision).",
+    "find": "dataDirectory = string.Empty;",
+    "replace": "dataDirectory = null;",
+    "filter": "FullyQualifiedName~AppDataRootValidationTests"
+  },
+  {
+    "id": "dataroot-blank-env-reported",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "A blank CLIPTHROUGH_DATA_DIR must be reported as blank (no silent fallback, user decision).",
+    "find": "if (string.IsNullOrWhiteSpace(environmentValue))",
+    "replace": "if (string.IsNullOrWhiteSpace(environmentValue) && environmentValue.Length < 0)",
+    "filter": "FullyQualifiedName~AppDataRootValidationTests"
+  },
+  {
+    "id": "dataroot-invalid-chars-before-expansion",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "ExpandEnvironmentVariables stops at a NUL, so a path with one silently became a different folder unless checked before expanding.",
+    "find": "if (value.IndexOfAny(Path.GetInvalidPathChars()) >= 0 || expanded.IndexOfAny(Path.GetInvalidPathChars()) >= 0)",
+    "replace": "if (expanded.IndexOfAny(Path.GetInvalidPathChars()) >= 0)",
+    "filter": "FullyQualifiedName~AppDataRootValidationTests"
+  },
+  {
+    "id": "dataroot-write-probe-in-root",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "An unwritable data folder must be caught at startup by writing a probe file inside it (clear error, user decision).",
+    "find": "var probe = Path.Combine(dataRoot.Directory, $\".write-test-{Guid.NewGuid():N}.tmp\");",
+    "replace": "var probe = Path.Combine(Path.GetTempPath(), $\".write-test-{Guid.NewGuid():N}.tmp\");",
+    "filter": "FullyQualifiedName~AppDataRootValidationTests"
+  },
+  {
+    "id": "dataroot-startup-validates",
+    "file": "Clipthrough/Program.cs",
+    "why": "Startup must check the folder is usable and report it, rather than start and fail in whichever service writes first.",
+    "find": "            AppDataRootResolver.EnsureUsable(dataRoot);",
+    "replace": "            if (dataRoot.Directory.Length < 0) AppDataRootResolver.EnsureUsable(dataRoot);",
+    "filter": "FullyQualifiedName~AppDataRootValidationTests"
   }
 ]

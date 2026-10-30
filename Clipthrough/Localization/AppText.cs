@@ -320,6 +320,16 @@ public static class AppText
         ["Format.StorageUsage"] = "{0}",
         ["Format.StorageLoadFault"] = "{0} could not be read and was moved to {1}. Clipthrough does not know where your library is, so it started as if for the first time. If your library is not in the default location, choose it again.",
         ["Format.StorageLoadFaultNotMoved"] = "{0} could not be read, and could not be moved aside. Clipthrough started with the default library location.",
+        ["DataFolderErrorTitle"] = "Clipthrough cannot use its data folder",
+        ["DataFolderSource.CommandLine"] = "the --data-dir option",
+        ["DataFolderSource.EnvironmentVariable"] = "the CLIPTHROUGH_DATA_DIR environment variable",
+        ["DataFolderSource.Portable"] = "the portable.flag marker",
+        ["DataFolderInvalidCharacters"] = "it contains characters a path cannot have",
+        ["Format.DataFolderMissingValue"] = "The --data-dir option needs a folder after it, for example --data-dir \"D:\\Clipthrough data\". Clipthrough did not start.",
+        ["Format.DataFolderBlank"] = "{0} is set, but to nothing. Set it to a folder, or remove it to use the default folder. Clipthrough did not start.",
+        ["Format.DataFolderInvalid"] = "\"{0}\", from {1}, is not a folder path Clipthrough can use: {2}\n\nClipthrough did not start, and did not fall back to another folder. Correct {1}, or remove it to use the default folder.",
+        ["Format.DataFolderUnusable"] = "Clipthrough cannot create or write to its data folder {0}, chosen by {1}: {2}\n\nClipthrough did not start, and did not fall back to another folder, so nothing was written anywhere else. Choose a folder Clipthrough can write to, or remove {1} to use the default folder.",
+        ["Format.DataFolderDefaultUnusable"] = "Clipthrough cannot create or write to its data folder {0}: {1}\n\nClipthrough did not start. To keep its data somewhere else, start it with --data-dir <folder> or set CLIPTHROUGH_DATA_DIR.",
         ["Format.EntryUsage"] = "{0:N0} clips",
         ["Format.StorageCapacity"] = "Cap {0:N0} MB",
         ["Format.EntryCapacity"] = "Cap {0:N0} clips",
@@ -741,6 +751,33 @@ public static class AppText
     public static string FormatStorageLoadFault(string fileName, string quarantineName) => Format("Format.StorageLoadFault", fileName, quarantineName);
     public static string FormatStorageLoadFaultNotMoved(string fileName) => Format("Format.StorageLoadFaultNotMoved", fileName);
 
+    public static string DataFolderErrorTitle => Text(nameof(DataFolderErrorTitle));
+
+    public static string GetDataFolderSourceLabel(AppDataRootSource source) => source switch
+    {
+        AppDataRootSource.CommandLine => Text("DataFolderSource.CommandLine"),
+        AppDataRootSource.EnvironmentVariable => Text("DataFolderSource.EnvironmentVariable"),
+        AppDataRootSource.Portable => Text("DataFolderSource.Portable"),
+        _ => string.Empty,
+    };
+
+    public static string DataFolderMissingValue => Text("Format.DataFolderMissingValue");
+
+    public static string DataFolderInvalidCharacters => Text(nameof(DataFolderInvalidCharacters));
+
+    public static string FormatDataFolderBlank(AppDataRootSource source)
+        => Format("Format.DataFolderBlank", Capitalize(GetDataFolderSourceLabel(source)));
+
+    public static string FormatDataFolderInvalid(string value, AppDataRootSource source, string reason)
+        => Format("Format.DataFolderInvalid", value, GetDataFolderSourceLabel(source), reason);
+
+    public static string FormatDataFolderUnusable(string directory, AppDataRootSource source, string reason)
+        => source == AppDataRootSource.Default
+            ? Format("Format.DataFolderDefaultUnusable", directory, reason)
+            : Format("Format.DataFolderUnusable", directory, GetDataFolderSourceLabel(source), reason);
+
+    private static string Capitalize(string text)
+        => text.Length == 0 ? text : char.ToUpper(text[0], CurrentCulture) + text[1..];
     public static string FormatEntryUsage(int count) => Format("Format.EntryUsage", count);
 
     public static string FormatStorageCapacity(int megabytes) => Format("Format.StorageCapacity", megabytes);

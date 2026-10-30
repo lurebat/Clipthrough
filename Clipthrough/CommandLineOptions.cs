@@ -24,11 +24,6 @@ public static class CommandLineOptions
     /// </summary>
     public static bool LogPopupTimings { get; private set; }
 
-    /// <summary>
-    /// Set when the user passed <c>--help</c> / <c>-h</c>. <see cref="Program.Main"/>
-    /// prints the usage block and exits before any other startup work runs.
-    /// </summary>
-    public static bool ShowHelp { get; private set; }
 
     public const string DataDirectoryOption = "--data-dir";
 
@@ -51,18 +46,35 @@ public static class CommandLineOptions
         "                             CLIPTHROUGH_DATA_DIR and a portable.flag marker.\n";
 
     /// <summary>
-    /// The value of <c>--data-dir</c>, or null when it is absent. Separate from
-    /// <see cref="Parse"/> because it is needed before tracing starts: the log
-    /// file lives in the data folder it names.
+    /// Whether <c>--help</c>, <c>-h</c> or <c>/?</c> was passed. Read before any
+    /// other startup work, so help prints even when the data folder is unusable.
     /// </summary>
-    public static string? ReadDataDirectory(IReadOnlyList<string> args)
+    public static bool IsHelpRequested(IReadOnlyList<string> args) => Scan(args).Help;
+
+    /// <summary>
+    /// The value of <c>--data-dir</c>: null when the option is absent, empty
+    /// when it is present without a folder. Separate from <see cref="Parse"/>
+    /// because it is needed before tracing starts: the log file lives in the
+    /// data folder it names.
+    /// </summary>
+    public static string? ReadDataDirectory(IReadOnlyList<string> args) => Scan(args).DataDirectory;
+
+    // The options read before tracing starts, so without Parse's side effects.
+    private static (bool Help, string? DataDirectory) Scan(IReadOnlyList<string> args)
     {
-        string? value = null;
+        var help = false;
+        string? dataDirectory = null;
         for (var i = 0; i < args.Count; i++)
         {
             var arg = args[i];
             if (string.IsNullOrEmpty(arg))
             {
+                continue;
+            }
+
+            if (IsHelpOption(arg))
+            {
+                help = true;
                 continue;
             }
 
@@ -72,15 +84,28 @@ public static class CommandLineOptions
                 continue;
             }
 
+            // Present without a folder - last, or followed by another option -
+            // is reported at startup rather than ignored.
+            if (string.Equals(arg, DataDirectoryOption, StringComparison.OrdinalIgnoreCase)
+                && (i + 1 >= args.Count || args[i + 1].StartsWith("--", StringComparison.Ordinal)))
+            {
+                dataDirectory = string.Empty;
+                continue;
+            }
+
             if (TryReadValue(args, ref i, arg, DataDirectoryOption, null, out var directory))
             {
-                value = directory;
+                dataDirectory = directory;
             }
         }
 
-        return value;
+        return (help, dataDirectory);
     }
 
+    private static bool IsHelpOption(string arg)
+        => string.Equals(arg, "--help", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(arg, "-h", StringComparison.Ordinal)
+            || string.Equals(arg, "/?", StringComparison.Ordinal);
     public static void Parse(string[]? args)
     {
         if (args is null || args.Length == 0)
@@ -96,13 +121,6 @@ public static class CommandLineOptions
                 continue;
             }
 
-            if (string.Equals(arg, "--help", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(arg, "-h", StringComparison.Ordinal)
-                || string.Equals(arg, "/?", StringComparison.Ordinal))
-            {
-                ShowHelp = true;
-                continue;
-            }
 
             if (TryReadValue(args, ref i, arg, "--password", "-p", out var password))
             {
