@@ -172,6 +172,34 @@ public sealed class HotkeyClipActionsTests
         Assert.Equal(text, interaction.LastCopiedText?.Trim());
     }
 
+    /// <summary>
+    /// Rubber-duck F-16-3. A selection inside one run of text can come off the
+    /// clipboard as a fragment with no tags at all, only entities. It is still
+    /// HTML: converting it must decode the entities, not copy them verbatim.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task HtmlToMarkdownHotkey_OnARichClipWithATaglessFragment_DecodesItsEntities()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        var clip = await RichBrowserClip.CaptureTaglessAsync(scope.ClipStoreService, "Fish &amp; Chips", "Fish & Chips");
+        var interaction = new TestSystemInteractionService();
+
+        var copied = await HotkeyClipActions.TransformAndCopyAsync(
+            clip!,
+            CustomHotkeyTarget.Parse("builtin:HtmlToMarkdown"),
+            "Ctrl+Alt+H",
+            scope.ClipStoreService,
+            interaction,
+            new TestClipboardMonitorService(),
+            ai: null,
+            presets: Array.Empty<AiPreset>());
+
+        Assert.True(copied);
+        // The exporter backslash-escapes '&', which Markdown renders as a bare '&'.
+        Assert.Equal("Fish \\& Chips", interaction.LastCopiedText?.Trim());
+    }
+
     [AvaloniaFact]
     public async Task StepPaste_OnAnImageClip_CopiesThePictureNotTheWindowTitle()
     {
