@@ -56,6 +56,12 @@ internal sealed class MainWindowTestHarness : IDisposable
     /// </summary>
     public TestNotificationService Notifications => _scope.NotificationService;
 
+    /// <summary>The store the view model reads, so a test can put real clips behind a search.</summary>
+    public ClipStoreService ClipStore => _scope.ClipStoreService;
+
+    /// <summary>The search history the view model records into.</summary>
+    public SearchHistoryService SearchHistory => _scope.SearchHistoryService;
+
     public TextBox SearchBox => Window.FindControl<TextBox>("SearchTextBox")!;
 
     public ListBox ClipList => Window.FindControl<ListBox>("ClipsListBox")!;
