@@ -6192,7 +6192,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // working, and the change can simply be made again.
             //
             // The two files are independent - settings.json and storage.json,
-            // both in LocalApplicationData - and AppSettings carries no storage
+            // both in the data folder (AppDataRoot) - and AppSettings carries no storage
             // location or password, so neither write needs the other to have
             // happened first.
             try

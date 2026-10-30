@@ -14,7 +14,9 @@ namespace Clipthrough.Services;
 /// <remarks>
 /// Precedence, first match wins: the <c>--data-dir</c> command-line option, the
 /// <c>CLIPTHROUGH_DATA_DIR</c> environment variable, a <c>portable.flag</c>
-/// marker beside the executable, and finally %LOCALAPPDATA%\Clipthrough.
+/// marker at the application root (see <see cref="FindApplicationRoot"/>), and
+/// finally %LOCALAPPDATA%\Clipthrough. A source that is present decides: an
+/// unusable choice is an <see cref="AppDataRootException"/>, never a fallback.
 /// </remarks>
 public static class AppDataRootResolver
 {

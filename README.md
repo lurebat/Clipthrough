@@ -27,6 +27,22 @@ Clipthrough is an Avalonia desktop clipboard history app focused on rich clipboa
 - **Release polish** — Help -> About shows the current app version, image clips can use a dedicated external editor path, and session logs capture app-level warnings without known benign Avalonia compositor noise.
 - Windows publish artifact via GitHub Actions, plus a tagged-release workflow
 
+## Where Clipthrough keeps its data
+
+By default Clipthrough keeps its settings, logs and window position in `%LOCALAPPDATA%\Clipthrough`, and the clip library in `%LOCALAPPDATA%\ClipthroughData\clipthrough.db`. Three ways choose another data folder. The first one present wins:
+
+1. **The `--data-dir <folder>` command-line option**, for example `Clipthrough.exe --data-dir "D:\Clipthrough data"`. `--data-dir=<folder>` works too.
+2. **The `CLIPTHROUGH_DATA_DIR` environment variable**, set to a folder. In either, a relative path is taken from the directory you start Clipthrough in.
+3. **Portable mode**: an empty file named exactly `portable.flag` beside Clipthrough keeps all data in a `ClipthroughData` folder next to it.
+   - For the plain ZIP, put `portable.flag` beside `Clipthrough.exe`. The data then goes to `ClipthroughData` in that same folder.
+   - For the Velopack `-Portable.zip`, put `portable.flag` in the top folder, beside `Update.exe` and the `Clipthrough.exe` launcher, not inside `current\`. Each update replaces `current\`, and it would delete a marker or data kept there. A marker inside `current\` is ignored. Velopack's own `.portable` file does not turn on portable mode.
+
+With a chosen folder, everything lives inside it, the library included (`clipthrough.db`, unless you move it in Settings). In portable mode a library inside the portable folder is recorded relative to it, so it is still found after the folder moves to another drive letter or parent folder. After an update, Clipthrough restarts on the same data folder. It passes `--data-dir` to the restart when that option chose the folder.
+
+If the chosen folder can't be used, Clipthrough shows a message and does not start. This happens when the folder is missing after `--data-dir`, blank in the variable, an invalid path, or a folder Clipthrough can't create or write to. Clipthrough never falls back to the default folder, so your clips never end up somewhere you didn't choose.
+
+Only one Clipthrough runs at a time, whatever its data folder. A second copy started with a different `--data-dir` exits while the first is running.
+
 ## Development
 
 ### Requirements
