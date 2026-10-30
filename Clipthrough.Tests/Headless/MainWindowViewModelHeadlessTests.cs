@@ -2937,14 +2937,25 @@ public sealed partial class MainWindowViewModelHeadlessTests
             m_release.TrySetResult();
         }
 
-        public Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default)
+        /// <summary>
+        /// Awaited before each search reaches the store, so a test can hold a
+        /// refresh (offset 0) or a load-more page (offset past it) in flight.
+        /// </summary>
+        public Func<ClipSearchFilters, Task>? BeforeSearch { get; set; }
+
+        public async Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default)
         {
             lock (m_gate)
             {
                 m_searches.Add(filters.SearchText ?? string.Empty);
             }
 
-            return inner.SearchAsync(filters, cancellationToken);
+            if (BeforeSearch is { } beforeSearch)
+            {
+                await beforeSearch(filters);
+            }
+
+            return await inner.SearchAsync(filters, cancellationToken);
         }
 
         public async Task SetFavoriteAsync(long clipId, bool isFavorite, CancellationToken cancellationToken = default)
