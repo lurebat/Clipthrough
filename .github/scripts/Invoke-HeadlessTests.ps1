@@ -36,6 +36,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# xUnit's adapter writes a cleanup failure as "[Test Case Cleanup Failure (test)]: ...",
+# so the marker opens the message. Anywhere else it is quoted text, for example in an
+# assertion's expected value, and the failure is real.
 $cleanupMarker = '[Test Case Cleanup Failure'
 # NotExecuted is how the TRX records a skipped test.
 $passingOutcomes = @('Passed', 'NotExecuted')
@@ -61,7 +64,7 @@ function Read-TestRun([string]$trxPath) {
             Name     = $result.testName
             Method   = $methods[$result.testId]
             Outcome  = $result.outcome
-            Cleanup  = $message.Contains($cleanupMarker, [StringComparison]::Ordinal)
+            Cleanup  = $message.StartsWith($cleanupMarker, [StringComparison]::Ordinal)
             Message  = ($message -split "`n")[0]
         }
     })

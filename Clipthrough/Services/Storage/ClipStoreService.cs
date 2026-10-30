@@ -992,16 +992,13 @@ public sealed class ClipStoreService : IClipStoreService
             }
         }
 
+        // Before the size cap reads its total, and whether or not this pass deleted
+        // anything: icons orphaned by the purges above (rubber-duck F-11-1), or
+        // since the last pass by a re-copy that replaced a clip's icon (F-11-3).
+        await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);
+
         if (settings.EnableMaxLibrarySize)
         {
-            // The purges above may have orphaned icons that the sweep below would
-            // delete anyway; counting them here evicts clips to pay for them
-            // (rubber-duck F-11-1).
-            if (removedClipIds.Count > 0)
-            {
-                await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);
-            }
-
             var totalStoredBytes = await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken, transaction);
             finalStoredBytes = totalStoredBytes;
             var maxBytes = settings.MaxLibrarySizeMegabytes * 1024L * 1024L;
@@ -1018,6 +1015,10 @@ public sealed class ClipStoreService : IClipStoreService
         {
             // A removed clip may have been the last user of its icon (U-E1).
             await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);
+            // Not load-bearing on this code: orphans are swept before the size
+            // total is read and the walk subtracts the icons its evictions free,
+            // so this re-reads the number it already has. Kept because a drift
+            // would only show as a wrong size in the status bar, silently.
             if (finalStoredBytes is not null)
             {
                 finalStoredBytes = await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken, transaction);
@@ -1592,6 +1593,12 @@ public sealed class ClipStoreService : IClipStoreService
     /// shorter trigram, so a shorter term would match nothing and drop real
     /// matches. Regex is never prefiltered - a pattern has no reliable literal
     /// terms - and its cost is bounded by the regex engine choice instead.
+    ///
+    /// "Case-insensitively" means the index's folding, which is narrower than a
+    /// .NET regex's IgnoreCase. A case-insensitive search therefore requires only
+    /// the runs of each term between characters the two treat differently (see
+    /// <see cref="FoldsLikeTheTrigramIndex"/>), and those runs that are still
+    /// three code points long.
     /// </remarks>
     internal static string? BuildPrefilterExpression(ClipSearchFilters filters)
     {
@@ -1608,7 +1615,60 @@ public sealed class ClipStoreService : IClipStoreService
             return null;
         }
 
+        if (!filters.CaseSensitive)
+        {
+            terms = [.. terms.SelectMany(SplitAtFoldMismatches).Where(static t => TrigramIndexableLength(t) >= 3)];
+            if (terms.Length == 0)
+            {
+                return null;
+            }
+        }
+
         return string.Join(" AND ", terms.Select(static t => "\"" + t.Replace("\"", "\"\"", StringComparison.Ordinal) + "\""));
+    }
+
+    private static IEnumerable<string> SplitAtFoldMismatches(string term)
+    {
+        var start = 0;
+        for (var i = 0; i <= term.Length; i++)
+        {
+            if (i == term.Length || !FoldsLikeTheTrigramIndex(term[i]))
+            {
+                if (i > start)
+                {
+                    yield return term[start..i];
+                }
+
+                start = i + 1;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether every character a case-insensitive .NET regex treats as equal to
+    /// <paramref name="c"/> is also folded together with it by the trigram index,
+    /// so requiring <paramref name="c"/> in FTS cannot drop a regex match (F-07-3).
+    /// The regex equivalences are wider: I and i also match U+0130 in every
+    /// culture and I matches U+0131 in Turkish, and letters newer than SQLite's
+    /// folding table do not fold at all. So only ASCII other than I and i, and
+    /// characters with no case mapping, are kept. The prefilter splits a term at
+    /// anything else and requires only the runs between - a looser filter, never
+    /// a different match. ThePrefilterSafeCharacters_FoldLikeTheRegex checks this
+    /// against the real index and regex for every BMP character.
+    /// </summary>
+    private static bool FoldsLikeTheTrigramIndex(char c)
+    {
+        if (c < 0x80)
+        {
+            return c is not ('I' or 'i');
+        }
+
+        var culture = CultureInfo.CurrentCulture;
+        return !char.IsSurrogate(c)
+            && char.ToUpperInvariant(c) == c
+            && char.ToLowerInvariant(c) == c
+            && char.ToUpper(c, culture) == c
+            && char.ToLower(c, culture) == c;
     }
     private async Task<ClipSearchResult> SearchInMemoryAsync(SqliteConnection connection, ClipSearchFilters filters, CancellationToken cancellationToken)
     {

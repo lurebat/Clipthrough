@@ -29,4 +29,27 @@ public sealed partial class MainWindowViewModelHeadlessTests
         await viewModel.RefreshCommand.Execute().ToTask();
         Assert.Contains(viewModel.Clips, c => c.Clip.Id == clip.Id);
     }
+
+    /// <summary>
+    /// Rubber-duck F-08-3. CreateLoadedViewModelAsync used to poll the clip count
+    /// for about a second and then assert it, so a startup slower than that - a
+    /// loaded CI agent - failed its seven callers with a genuine assertion, which
+    /// the CI gate rightly refuses to retry. Startup is held here for three
+    /// seconds, well past that budget; the helper must wait for startup itself.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task TheLoadedViewModelHelper_WaitsForASlowStartup()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        await CaptureTextClipAsync(scope.ClipStoreService, "first");
+        await CaptureTextClipAsync(scope.ClipStoreService, "second");
+        scope.SettingsService.SetHasSavedSettings(false);
+        scope.SettingsService.InitializeDelay = TimeSpan.FromSeconds(3);
+
+        using var viewModel = await CreateLoadedViewModelAsync(scope, new TestClipboardMonitorService(), expectedClips: 2);
+
+        Assert.True(viewModel.DatabaseStartupTask is { IsCompleted: true }, "The helper returned before the database start finished.");
+        Assert.False(viewModel.IsLoadingDatabase);
+    }
 }

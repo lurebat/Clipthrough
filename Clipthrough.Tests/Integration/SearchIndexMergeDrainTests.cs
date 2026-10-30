@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,8 +20,9 @@ namespace Clipthrough.Tests.Integration;
 /// A rebuild of a library small enough for a test leaves little merge work, so
 /// the pending state is built directly: many single-row segments written with
 /// automerge off, then automerge restored. That is the shape a rebuild leaves -
-/// segments a level could merge - without its size. The oracle is FTS5's own:
-/// a merge step that has nothing to do changes fewer than two rows.
+/// segments a level could merge - without its size. The oracle reads FTS5's
+/// structure record (rubber-duck F-13-6): it must not be the drain's own stop
+/// rule, a merge step changing fewer than two rows, or a wrong rule would pass.
 /// </remarks>
 public sealed class SearchIndexMergeDrainTests
 {
@@ -41,19 +44,82 @@ public sealed class SearchIndexMergeDrainTests
         command.ExecuteNonQuery();
     }
 
-    /// <summary>True when one more merge step would still find work.</summary>
+    /// <summary>
+    /// True when one more merge step would still find work, by FTS5's rule for a
+    /// positive 'merge' (fts5IndexMerge): some level is part-way through an
+    /// incremental merge, or holds at least 'usermerge' segments. Read from the
+    /// structure record, without running a step, so it shares nothing with the
+    /// drain's total_changes() test.
+    /// </summary>
     private static bool MergeWorkLeft(TemporaryDatabaseScope scope)
     {
-        using var connection = scope.ConnectionFactory.CreateConnection();
-        connection.Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT total_changes();";
-        var before = Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
-        using var step = connection.CreateCommand();
-        step.CommandText = "INSERT INTO clips_fts(clips_fts, rank) VALUES ('merge', 64);";
-        step.ExecuteNonQuery();
-        var after = Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
-        return after - before >= 2;
+        var userMerge = Scalar(scope, "SELECT COALESCE((SELECT v FROM clips_fts_config WHERE k = 'usermerge'), 4);");
+        return ReadStructureLevels(scope).Any(level => level.Merging > 0 || (long)level.Segments >= userMerge);
+    }
+
+    /// <summary>
+    /// Decodes FTS5's structure record (clips_fts_data id 10, fts5StructureDecode):
+    /// a 4-byte cookie, an optional 4-byte V2 marker, then varints - level count,
+    /// segment count, write counter, and per level the segments in an incremental
+    /// merge and the segment count followed by each segment (three varints, eight
+    /// in V2). Asserts the totals and the length agree, so a misread fails loudly.
+    /// </summary>
+    private static List<(ulong Merging, ulong Segments)> ReadStructureLevels(TemporaryDatabaseScope scope)
+    {
+        byte[] data;
+        using (var connection = scope.ConnectionFactory.CreateConnection())
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT block FROM clips_fts_data WHERE id = 10;";
+            data = (byte[])command.ExecuteScalar()!;
+        }
+
+        var i = 4;
+        var v2 = data.Length >= 8 && data[4] == 0xFF && data[5] == 0 && data[6] == 0 && data[7] == 1;
+        if (v2)
+        {
+            i += 4;
+        }
+
+        var levelCount = ReadVarint(data, ref i);
+        var segmentCount = ReadVarint(data, ref i);
+        ReadVarint(data, ref i);
+        var levels = new List<(ulong Merging, ulong Segments)>();
+        ulong segmentsSeen = 0;
+        for (ulong level = 0; level < levelCount; level++)
+        {
+            var merging = ReadVarint(data, ref i);
+            var segments = ReadVarint(data, ref i);
+            for (ulong segment = 0; segment < segments * (v2 ? 8UL : 3UL); segment++)
+            {
+                ReadVarint(data, ref i);
+            }
+
+            segmentsSeen += segments;
+            levels.Add((merging, segments));
+        }
+
+        Assert.Equal(segmentCount, segmentsSeen);
+        Assert.Equal(data.Length, i);
+        return levels;
+    }
+
+    /// <summary>SQLite's varint: big-endian 7-bit groups, the ninth byte whole.</summary>
+    private static ulong ReadVarint(byte[] data, ref int i)
+    {
+        ulong value = 0;
+        for (var n = 0; n < 8; n++)
+        {
+            var b = data[i++];
+            value = (value << 7) | ((ulong)b & 0x7F);
+            if ((b & 0x80) == 0)
+            {
+                return value;
+            }
+        }
+
+        return (value << 8) | data[i++];
     }
 
     private static string RandomWords(Random rng, int length)
@@ -108,6 +174,12 @@ public sealed class SearchIndexMergeDrainTests
         await scope.DatabaseInitializer.InitializeAsync();
         await SeedPendingMergesAsync(scope, 15);
         var segmentsBefore = Scalar(scope, "SELECT COUNT(DISTINCT segid) FROM clips_fts_idx;");
+        Assert.True(MergeWorkLeft(scope), "The fixture has no merge work by the structure record, so this proves nothing.");
+
+        // One step leaves the merge part-way: the oracle has to see that, or a
+        // drain that stopped early would pass.
+        Execute(scope, "INSERT INTO clips_fts(clips_fts, rank) VALUES ('merge', 64);");
+        Assert.True(MergeWorkLeft(scope), "The oracle reads a part-way merge as finished.");
 
         var steps = 0;
         DatabaseInitializer.BetweenSearchIndexMergeSteps = _ =>

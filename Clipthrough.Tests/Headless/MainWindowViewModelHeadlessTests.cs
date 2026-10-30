@@ -417,10 +417,7 @@ public sealed partial class MainWindowViewModelHeadlessTests
         clipboardMonitor.Emit(clip);
         Dispatcher.UIThread.RunJobs();
 
-        // Settle the refresh the capture started. It ends by writing the list
-        // summary to StatusText, and when that landed after the transform it
-        // overwrote the message under test (seen in about one headless run in
-        // ten).
+        // Settle the startup refresh, so the list holds the captured row.
         for (var attempt = 0; attempt < 200 && !viewModel.StatusText.Contains("matching", StringComparison.Ordinal); attempt++)
         {
             await Task.Delay(10);
@@ -429,11 +426,35 @@ public sealed partial class MainWindowViewModelHeadlessTests
 
         Assert.Contains("matching", viewModel.StatusText, StringComparison.Ordinal);
 
-        var row = viewModel.Clips.Single(c => c.Clip.Id == clip.Id);
-        await row.ApplyTextTransformationCommand.Execute(TextTransformation.MarkdownToHtml).ToTask();
-        Dispatcher.UIThread.RunJobs();
+        // Startup also owes a 300 ms debounced filter refresh, which no state
+        // here reveals, and every refresh ends by writing the list summary to
+        // StatusText. Landing after the transform it replaced the message under
+        // test (about one headless run in ten). So assert on what the transform
+        // wrote, recorded as it happens, and let refreshes write what they like.
+        var statusWrites = new List<string>();
+        void RecordStatus(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(MainWindowViewModel.StatusText))
+            {
+                statusWrites.Add(viewModel.StatusText);
+            }
+        }
 
-        Assert.Equal(AppText.TransformInputTooDeeplyNested, viewModel.StatusText);
+        viewModel.PropertyChanged += RecordStatus;
+        try
+        {
+            var row = viewModel.Clips.Single(c => c.Clip.Id == clip.Id);
+            await row.ApplyTextTransformationCommand.Execute(TextTransformation.MarkdownToHtml).ToTask();
+            Dispatcher.UIThread.RunJobs();
+        }
+        finally
+        {
+            viewModel.PropertyChanged -= RecordStatus;
+        }
+
+        var transformStatuses = statusWrites.Where(s => !s.Contains("matching", StringComparison.Ordinal)).ToList();
+        Assert.True(transformStatuses.Count > 0, "The transform wrote no status at all.");
+        Assert.Equal(AppText.TransformInputTooDeeplyNested, transformStatuses[^1]);
         Assert.Null(systemInteraction.LastCopiedRichContent);
         var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
         Assert.DoesNotContain(all.Items, c => c.SourceClipId == clip.Id);
@@ -753,6 +774,16 @@ public sealed partial class MainWindowViewModelHeadlessTests
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
         await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
+
+        // InitializeAsync opens the database on a worker thread and returns.
+        // Until that lands every refresh is a no-op, so the RefreshAsync that
+        // selects the new clip would be dropped and the original stay selected.
+        for (var attempt = 0; attempt < 200 && viewModel.IsLoadingDatabase; attempt++)
+        {
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
+        Assert.False(viewModel.IsLoadingDatabase);
 
         var clip = CreateImageClipEntry(CreatePngBytes(unchecked((int)0xFFFF0000)), "original image");
         viewModel.SelectedClip = new ClipItemViewModel(clip);
@@ -3486,7 +3517,7 @@ public sealed partial class MainWindowViewModelHeadlessTests
         // non-header pages so PRAGMA quick_check inside DatabaseInitializer
         // fails. This is the scenario today's incident produced and the one
         // the startup-error overlay is meant to cover.
-        using (var seed = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+        using (var seed = TestConnections.Create(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
         {
             DataSource = scope.DatabasePath,
             Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadWriteCreate,
