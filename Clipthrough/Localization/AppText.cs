@@ -60,7 +60,7 @@ public static class AppText
         [nameof(SettingsExcludedAppsTitle)] = "Excluded applications",
         [nameof(SettingsExcludedAppsDescription)] = "Clipboard changes produced by these applications are never captured - nothing is read, stored, or indexed. One entry per line. An entry can be a process name (1Password), an executable file name (KeePass.exe), a full path, or a wildcard pattern such as *vault* or C:\\Program Files\\Acme\\*.",
         [nameof(SettingsExcludedAppsWatermark)] = "1Password\nKeePass.exe\n*bitwarden*",
-        [nameof(SettingsExcludedAppsCaveat)] = "Best effort: Clipthrough can only exclude an application it can identify. When Windows does not report an owner for a clipboard change - a hidden helper window, a process that has already exited, or a protected process - the clip is captured, because silently discarding every unattributable clip would lose far more history than it protects. Applications that need a hard guarantee should publish the standard 'Clipboard Viewer Ignore' format, which Clipthrough always honors regardless of this list. Content marked 'CanIncludeInClipboardHistory = 0' - what Chrome, Edge and Bitwarden publish for passwords - is also skipped while the option below is on.",
+        [nameof(SettingsExcludedAppsCaveat)] = "Best effort: Clipthrough can only exclude an application it can identify. When Windows does not report an owner for a clipboard change - a hidden helper window, a process that has already exited, or a protected process - the clip is captured, because silently discarding every unattributable clip would lose far more history than it protects. Applications that need a hard guarantee should publish the standard 'Clipboard Viewer Ignore' format, which Clipthrough always honors regardless of this list. Content marked 'CanIncludeInClipboardHistory = 0' - what Chrome, Edge and Bitwarden publish for passwords - is also skipped while the option below is on. These rules apply to clipboard capture only: content you drag and drop onto Clipthrough is a deliberate import and is kept regardless.",
         [nameof(SettingsHonorClipboardHistoryOptOutLabel)] = "Skip content its source marks as not for clipboard history (browser and password-manager passwords)",
         [nameof(SettingsClipLimitLabel)] = "Max clip size (KB)",
         [nameof(SettingsDatabasePathLabel)] = "Database path",
@@ -257,6 +257,7 @@ public static class AppText
         [nameof(SettingsLoadFailedTitle)] = "Settings could not be read",
         [nameof(StorageLoadFailedTitle)] = "Library location could not be read",
         [nameof(LibraryOptimizeFailedTitle)] = "Library storage was not optimized",
+        [nameof(LibraryIntegrityFailedUnbackedClips)] = "Clips copied since Clipthrough started are not in any backup. If you restore one, the current library is kept next to it with \".before-restore-\" and the date and time added to its name, and those clips are still in that file.",
         [nameof(ClipCaptureFailedEmptyPayload)] = "The clipboard payload was empty.",
         [nameof(ClipDragImportTitle)] = "Imported by drag",
         [nameof(ClipDragImportBadgeLabel)] = "Dropped",
@@ -633,6 +634,13 @@ public static class AppText
     public static string SettingsLoadFailedTitle => Text(nameof(SettingsLoadFailedTitle));
     public static string StorageLoadFailedTitle => Text(nameof(StorageLoadFailedTitle));
     public static string LibraryOptimizeFailedTitle => Text(nameof(LibraryOptimizeFailedTitle));
+
+    /// <summary>
+    /// Added to the integrity-failure notification (F-13-10): the daily backup waits
+    /// for the check, so nothing copied this session is in a backup, and a restore
+    /// keeps the replaced library as <c>&lt;library&gt;.before-restore-&lt;stamp&gt;</c>.
+    /// </summary>
+    public static string LibraryIntegrityFailedUnbackedClips => Text(nameof(LibraryIntegrityFailedUnbackedClips));
 
     public static string ClipDragImportTitle => Text(nameof(ClipDragImportTitle));
 

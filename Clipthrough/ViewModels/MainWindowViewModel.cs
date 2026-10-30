@@ -3027,7 +3027,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Records the current query in search history (F-36, OD-9b). Called only
     /// when the user commits to a search - Enter in the search box, choosing a
-    /// result (copy, paste, open), or moving from the search box into the list
+    /// result (click, copy, paste, open), or moving from the search box into the list
     /// with the keyboard - never when a refresh lands. Recording on refresh
     /// stored every pause-separated prefix: "inv", "invoice 2", "invoice 2024".
     /// Once per query; an empty query is never recorded.
@@ -6788,7 +6788,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _notificationService.Publish(new AppNotification
             {
                 Title = AppText.LibraryOptimizeFailedTitle,
-                Message = ex.Message,
+
+                // Only after a failed integrity check, which is what says to restore a
+                // backup: the daily backup waited for the check, so nothing copied
+                // this session is in one (F-13-10).
+                Message = _databaseInitializer.HasFailedIntegrityCheck
+                    ? $"{ex.Message}\n\n{AppText.LibraryIntegrityFailedUnbackedClips}"
+                    : ex.Message,
                 Level = AppNotificationLevel.Error,
                 IsPersistent = true,
                 Actions =
@@ -7937,6 +7943,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// and emitted on the captured-clips stream so the UI sees it instantly.
     /// Returns the number of clips imported.
     /// </summary>
+    /// <remarks>
+    /// A drop is a deliberate import, so the clipboard-capture rules do not
+    /// apply: it is kept even when its source app is excluded, publishes
+    /// "Clipboard Viewer Ignore", or marks it CanIncludeInClipboardHistory = 0.
+    /// See the S39 refinement under "Settled decisions" in AGENTS.md.
+    /// </remarks>
     public async Task<int> ImportDroppedDataAsync(Avalonia.Input.IDataTransfer drop, ClipboardSourceApplicationInfo? sourceInfo)
     {
         if (drop is null)
