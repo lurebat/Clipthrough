@@ -2841,7 +2841,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Records the current query in search history (F-36, OD-9b). Called only
     /// when the user commits to a search - Enter in the search box, choosing a
-    /// result (copy, paste, open), or moving from the search box into the list
+    /// result (click, copy, paste, open), or moving from the search box into the list
     /// with the keyboard - never when a refresh lands. Recording on refresh
     /// stored every pause-separated prefix: "inv", "invoice 2", "invoice 2024".
     /// Once per query; an empty query is never recorded.

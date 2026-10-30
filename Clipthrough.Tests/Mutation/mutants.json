@@ -3198,5 +3198,21 @@
     "find": "        Closed += (_, _) => m_placementStore?.Flush();",
     "replace": "        Closed += (_, _) => (m_placementStore is null ? m_placementStore : null)?.Flush();",
     "filter": "FullyQualifiedName~WindowPlacementHeadlessTests.ClosingTheWindow_SavesAndThenWaitsForTheWrite"
+  },
+  {
+    "id": "result-click-skips-search-commit",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "Rubber-duck F-09-3, click part (S40/OD-9b). Clicking a result in the list is picking it, so the pointer-press handler must commit the search that found it; without the call a search that ends in a click is never recorded.",
+    "find": "is not the user picking anything.\n        _ = viewModel.CommitSearchQueryAsync();",
+    "replace": "is not the user picking anything.\n        _ = pointerKind == PointerUpdateKind.RightButtonPressed ? viewModel.CommitSearchQueryAsync() : Task.CompletedTask;",
+    "filter": "SearchHistoryClickHeadlessTests.ClickingAResult_RecordsTheQuery"
+  },
+  {
+    "id": "automatic-selection-records-search",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-09-3, click part (S40/OD-9b). Only a user's pick records a search. Committing on every SelectedClip change would also record on refreshes, auto-select and programmatic selection; this mutant is that wrong hook, and the automatic-selection test must catch it.",
+    "find": "UpdateSelectedClipPresentation();\n            _ = EnsureSelectedClipHydratedAsync();",
+    "replace": "UpdateSelectedClipPresentation();\n            _ = EnsureSelectedClipHydratedAsync();\n            _ = CommitSearchQueryAsync();",
+    "filter": "SearchHistoryClickHeadlessTests.AutomaticSelection_RecordsNothing"
   }
 ]
