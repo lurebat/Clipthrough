@@ -3734,6 +3734,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return markup;
         }
 
+        return GetShownText(clip);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="result"/> is <paramref name="shown"/> again. The
+    /// Markdown exporter ends its last block with a line break that a clip's own
+    /// text does not carry, so trailing line breaks on the result do not count.
+    /// </summary>
+    private static bool ReadsAs(string result, string shown)
+        => result.AsSpan().TrimEnd("\r\n").SequenceEqual(shown);
+
+    /// <summary>
+    /// What a hydrated clip reads as: its text, or its file paths one per line.
+    /// </summary>
+    private static string GetShownText(ClipItemViewModel clip)
+    {
         if (clip.Clip.ContentType != ContentType.Files)
         {
             return clip.Clip.Content ?? string.Empty;
@@ -3814,7 +3830,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     continue;
                 }
                 result = await transform(source, CancellationToken.None);
-                if (string.Equals(result, source, StringComparison.Ordinal))
+                // No change is a result equal to its input or, when the input was
+                // not what the clip shows (HTML -> Markdown reads a rich clip's
+                // markup), a result that reads as the clip already does: a
+                // fragment whose Markdown is just its text changes nothing.
+                var shown = GetShownText(target);
+                if (string.Equals(result, source, StringComparison.Ordinal)
+                    || (!string.Equals(source, shown, StringComparison.Ordinal) && ReadsAs(result, shown)))
                 {
                     continue;
                 }

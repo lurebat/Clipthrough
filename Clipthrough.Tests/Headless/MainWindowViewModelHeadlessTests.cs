@@ -328,6 +328,77 @@ public sealed partial class MainWindowViewModelHeadlessTests
     }
 
     /// <summary>
+    /// Rubber-duck F-16-3 follow-up. HTML -&gt; Markdown reads a rich clip's
+    /// markup, so the result must be compared with the text the clip shows, not
+    /// with that markup: a tagless fragment whose Markdown is just its text is no
+    /// change, and must not leave a duplicate clip behind.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RowTransform_HtmlToMarkdown_WhenTheMarkdownIsTheClipsText_ReportsNoChangeAndCreatesNothing()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, new TestSessionLogService());
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var clip = (await RichBrowserClip.CaptureTaglessAsync(scope.ClipStoreService, "Fish", "Fish"))!;
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        // Settle the refresh the capture started; its list summary would
+        // otherwise overwrite the status under test.
+        for (var attempt = 0; attempt < 200 && !viewModel.StatusText.Contains("matching", StringComparison.Ordinal); attempt++)
+        {
+            await Task.Delay(10);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.Contains("matching", viewModel.StatusText, StringComparison.Ordinal);
+
+        var row = viewModel.Clips.Single(c => c.Clip.Id == clip.Id);
+        await row.ApplyTextTransformationCommand.Execute(TextTransformation.HtmlToMarkdown).ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("No text or file clips changed by transformation", viewModel.StatusText);
+        Assert.Null(systemInteraction.LastCopiedText);
+        var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        Assert.DoesNotContain(all.Items, c => c.SourceClipId == clip.Id);
+    }
+
+    /// <summary>
+    /// The other half: a tagless fragment whose entities decode still converts
+    /// from the list, because its Markdown differs from the text it shows.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RowTransform_HtmlToMarkdown_OnATaglessFragmentWithEntities_ConvertsIt()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, new TestSessionLogService());
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var clip = (await RichBrowserClip.CaptureTaglessAsync(scope.ClipStoreService, "Fish &amp; Chips", "Fish & Chips"))!;
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        var row = viewModel.Clips.Single(c => c.Clip.Id == clip.Id);
+        await row.ApplyTextTransformationCommand.Execute(TextTransformation.HtmlToMarkdown).ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        var stored = Assert.Single(all.Items, c => c.SourceClipId == clip.Id);
+        // The exporter backslash-escapes '&', which Markdown renders as a bare '&'.
+        Assert.Equal("Fish \\& Chips", stored.ContentPrefix.Trim());
+        Assert.Equal("Fish \\& Chips", systemInteraction.LastCopiedText?.Trim());
+    }
+
+    /// <summary>
     /// Input too deeply nested to convert safely (F-48) is left alone, and the
     /// status says why rather than a bare "no change".
     /// </summary>

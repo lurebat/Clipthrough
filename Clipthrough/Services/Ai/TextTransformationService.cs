@@ -65,7 +65,17 @@ public static partial class TextTransformationService
         }
 
         var fragment = Presentation.ClipboardMarkupDecoder.ExtractHtmlFragment(markup);
-        return string.IsNullOrWhiteSpace(fragment) ? null : fragment;
+        if (string.IsNullOrWhiteSpace(fragment))
+        {
+            return null;
+        }
+
+        // The fragment is HTML whatever it looks like. A selection inside one run
+        // of text arrives with no tags, only entities ("Fish &amp; Chips"), and the
+        // converter leaves input with no markup alone as plain text, so the
+        // entities were copied verbatim (F-16-3). A container makes it read as the
+        // markup it is.
+        return LooksLikeHtml(fragment) ? fragment : $"<div>{fragment}</div>";
     }
 
     /// <summary>

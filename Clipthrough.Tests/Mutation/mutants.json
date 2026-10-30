@@ -4355,8 +4355,8 @@
     "id": "source-url-read-through-the-string-view",
     "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
     "why": "Live check C7: the string accessor decodes every format as UTF-16, so Chromium's UTF-8 source URL became byte-pair mojibake. The bytes must be read and decoded per format.",
-    "find": "            var bytesValue = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(formatName));\n            if (bytesValue is { Length: > 0 })\n            {\n                var decoded = DecodeSourceUrl(formatName, bytesValue);",
-    "replace": "            var bytesValue = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(formatName));\n            if (bytesValue is { Length: > 0 } && formatName.Length < 0)\n            {\n                var decoded = DecodeSourceUrl(formatName, bytesValue);",
+    "find": "            var bytesValue = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(formatName));\n            if (bytesValue is { Length: > 0 })\n            {\n                var decoded = DecodeSourceUrl(formatName, bytesValue, ansiCodePage);",
+    "replace": "            var bytesValue = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(formatName));\n            if (bytesValue is { Length: > 0 } && formatName.Length < 0)\n            {\n                var decoded = DecodeSourceUrl(formatName, bytesValue, ansiCodePage);",
     "filter": "FullyQualifiedName~ClipboardSourceUrlTests"
   },
   {
@@ -4646,5 +4646,45 @@
     "find": "            .Select(s => (Screen: s, Overlap: OverlapArea(frame, s.WorkingArea)))",
     "replace": "            .Select(s => (Screen: s, Overlap: OverlapArea(new PixelRect(remembered.Position, OuterPixels(remembered.ClientSize, frameExtra, s.Scaling)), s.WorkingArea)))",
     "filter": "FullyQualifiedName~WindowGeometryTests.ARememberedWindowMostlyOnA100PercentScreen"
+  },
+  {
+    "id": "source-url-ansi-decoded-as-latin1",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "why": "Rubber-duck F-16-1. The ANSI UniformResourceLocator format is in the system ANSI code page; decoding it as Latin-1 turns 0x80 into a C1 control instead of the euro sign in cp1252, and 0xC0 into A-grave instead of Cyrillic A in cp1251.",
+    "find": "\"UniformResourceLocator\" => AnsiEncoding(ansiCodePage).GetString(bytes),",
+    "replace": "\"UniformResourceLocator\" => (ansiCodePage < 0 ? AnsiEncoding(ansiCodePage) : Encoding.Latin1).GetString(bytes),",
+    "filter": "TheAnsiUrlFormat_IsDecodedInTheAnsiCodePage"
+  },
+  {
+    "id": "cf-html-header-read-past-the-markup",
+    "file": "Clipthrough/Presentation/ClipboardMarkupDecoder.cs",
+    "why": "Rubber-duck F-16-2. A CF_HTML header is the lines before the first <. Reading header fields anywhere treats header-like text in a bare HTML fragment (a Markdown->HTML result) as offsets and slices the fragment to \"<p>Before S\".",
+    "find": "        return markup < 0 ? html : html[..markup];",
+    "replace": "        return markup < 0 || html.Length > 0 ? html : html[..markup];",
+    "filter": "FullyQualifiedName~ExtractHtmlFragment_OnABareFragment_IgnoresHeaderLikeTextInItsContent|FullyQualifiedName~HtmlToMarkdownHotkey_OnAMarkdownToHtmlResult_KeepsTextThatLooksLikeAHeader"
+  },
+  {
+    "id": "markup-source-leaves-a-tagless-fragment-bare",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "why": "Rubber-duck F-16-3. A rich clip's fragment is HTML even with no tags (\"Fish &amp; Chips\"); passed bare, the converter takes it for plain text and the hotkey copies the entities verbatim.",
+    "find": "        return LooksLikeHtml(fragment) ? fragment : $\"<div>{fragment}</div>\";",
+    "replace": "        return LooksLikeHtml(fragment) || fragment.Length > 0 ? fragment : $\"<div>{fragment}</div>\";",
+    "filter": "HtmlToMarkdownHotkey_OnARichClipWithATaglessFragment_DecodesItsEntities"
+  },
+  {
+    "id": "transform-no-change-ignores-the-shown-text",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-16-3 follow-up. HTML -> Markdown reads a rich clip's markup; comparing the result only with that markup saves a duplicate clip when the Markdown is just the text the clip already shows (a tagless \"Fish\").",
+    "find": "                    || (!string.Equals(source, shown, StringComparison.Ordinal) && ReadsAs(result, shown)))",
+    "replace": "                    || (source.Length < 0 && !string.Equals(source, shown, StringComparison.Ordinal) && ReadsAs(result, shown)))",
+    "filter": "RowTransform_HtmlToMarkdown_WhenTheMarkdownIsTheClipsText_ReportsNoChangeAndCreatesNothing"
+  },
+  {
+    "id": "transform-no-change-counts-the-exporters-line-break",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-16-3 follow-up. The Markdown exporter ends its output with a line break the clip's text lacks; an exact comparison never sees \"Fish\\n\" as \"Fish\" and saves a duplicate clip.",
+    "find": "        => result.AsSpan().TrimEnd(\"\\r\\n\").SequenceEqual(shown);",
+    "replace": "        => result.AsSpan().TrimEnd(\"\\r\\n\".Length < 0 ? \"\\r\\n\" : \"\\0\").SequenceEqual(shown);",
+    "filter": "RowTransform_HtmlToMarkdown_WhenTheMarkdownIsTheClipsText_ReportsNoChangeAndCreatesNothing"
   }
 ]
