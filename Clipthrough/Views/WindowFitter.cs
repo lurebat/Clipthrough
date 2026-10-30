@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Threading;
@@ -22,7 +23,8 @@ internal interface IScreenSource
 
 /// <summary>
 /// Keeps windows inside a screen's working area: when they open, when they are
-/// shown again, when their DPI changes, and when monitors come and go.
+/// shown again, when their DPI changes, when monitors come and go, and when a
+/// drag leaves them on another screen.
 /// </summary>
 /// <remarks>
 /// Avalonia does none of this for us. A <c>CenterOwner</c> window larger than
@@ -49,7 +51,8 @@ internal static class WindowFitter
 
     /// <summary>
     /// Fits <paramref name="window"/> when it opens, and shrinks it into the
-    /// new screen after a DPI change or when the set of monitors changes.
+    /// new screen after a DPI change, when the set of monitors changes, or when the
+    /// user drags it onto another screen (Windows only; see <see cref="MoveSizeLoop"/>).
     /// </summary>
     /// <param name="fitOnOpen">False for a window that places itself when it opens.</param>
     public static void Attach(Window window, bool fitOnOpen = true)
@@ -61,6 +64,14 @@ internal static class WindowFitter
 
         window.ScalingChanged += OnScalingChanged;
         var screensChanged = s_screens.OnChanged(window, OnScreensChanged);
+        var moveSizeLoop = new MoveSizeLoop(window);
+        s_moveSizeLoops.AddOrUpdate(window, moveSizeLoop);
+        Win32Properties.CustomWndProcHookCallback moveSizeHook = moveSizeLoop.Hook;
+        if (OperatingSystem.IsWindows())
+        {
+            Win32Properties.AddWndProcHookCallback(window, moveSizeHook);
+        }
+
         window.Closed += OnClosed;
 
         // Opened is raised on every Show, so a window hidden to the tray is refitted
@@ -89,6 +100,12 @@ internal static class WindowFitter
             window.Opened -= OnOpened;
             window.ScalingChanged -= OnScalingChanged;
             screensChanged.Dispose();
+            if (OperatingSystem.IsWindows())
+            {
+                Win32Properties.RemoveWndProcHookCallback(window, moveSizeHook);
+            }
+
+            s_moveSizeLoops.Remove(window);
             window.Closed -= OnClosed;
         }
     }
@@ -189,6 +206,81 @@ internal static class WindowFitter
     private sealed class Disposer(Action dispose) : IDisposable
     {
         public void Dispose() => dispose();
+    }
+
+    private static readonly ConditionalWeakTable<Window, MoveSizeLoop> s_moveSizeLoops = new();
+
+    /// <summary>The window's move/size loop tracker, for tests: headless has no window messages.</summary>
+    internal static MoveSizeLoop? MoveSizeLoopOf(Window window)
+        => s_moveSizeLoops.TryGetValue(window, out var loop) ? loop : null;
+
+    /// <summary>
+    /// A user dragging the window by its caption or border, which Windows runs
+    /// as a modal loop: WM_ENTERSIZEMOVE, then WM_MOVING or WM_SIZING for each
+    /// step, then WM_EXITSIZEMOVE when the button is released.
+    /// </summary>
+    /// <remarks>
+    /// A drag between two screens at the same scaling raises no DPI change, so
+    /// a window dragged from an ultrawide onto a smaller monitor stayed wider
+    /// than it. Only the end of a move is acted on, never a step of it, and only
+    /// when it ended on another screen: a resize is the user choosing a size,
+    /// and a window that still fits is left where it was put.
+    /// </remarks>
+    internal sealed class MoveSizeLoop(Window window)
+    {
+        private const uint WmSizing = 0x0214;
+        private const uint WmMoving = 0x0216;
+        private const uint WmEnterSizeMove = 0x0231;
+        private const uint WmExitSizeMove = 0x0232;
+
+        private ScreenArea? _startScreen;
+        private bool _moved;
+        private bool _sized;
+
+        public void Enter()
+        {
+            _startScreen = s_screens.ScreenOf(window);
+            _moved = false;
+            _sized = false;
+        }
+
+        public void Moving() => _moved = true;
+
+        public void Sizing() => _sized = true;
+
+        public void Exit()
+        {
+            var start = _startScreen;
+            _startScreen = null;
+            if (!_moved || _sized || start is null || s_screens.ScreenOf(window) is not { } end || end == start)
+            {
+                return;
+            }
+
+            // Posted, like the DPI path: WM_EXITSIZEMOVE arrives inside the window procedure.
+            Dispatcher.UIThread.Post(() => Fit(window, onlyIfTooLarge: true), DispatcherPriority.Background);
+        }
+
+        public nint Hook(nint hWnd, uint msg, nint wParam, nint lParam, ref bool handled)
+        {
+            switch (msg)
+            {
+                case WmEnterSizeMove:
+                    Enter();
+                    break;
+                case WmMoving:
+                    Moving();
+                    break;
+                case WmSizing:
+                    Sizing();
+                    break;
+                case WmExitSizeMove:
+                    Exit();
+                    break;
+            }
+
+            return 0;
+        }
     }
 
     private sealed class AvaloniaScreenSource : IScreenSource
