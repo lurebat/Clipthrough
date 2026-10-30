@@ -3110,5 +3110,13 @@
     "find": "            if (placement is null || !(placement.Width > 0) || !(placement.Height > 0))",
     "replace": "            if (placement is null)",
     "filter": "FullyQualifiedName~WindowPlacementStoreTests"
+  },
+  {
+    "id": "embedding-pause-skips-concurrent-drain",
+    "file": "Clipthrough/Services/Search/EmbeddingWorker.cs",
+    "why": "Rubber-duck F-09-1. A pause (or second stop) that arrives while an earlier stop is still draining must await that drain. Returning because the loop is already marked stopped lets a rekey, move or restore run while the loop still holds the database open.",
+    "find": "drain = _draining;",
+    "replace": "drain = cancelled ? _draining : Task.CompletedTask;",
+    "filter": "Pause_WhileAStopIsStillDraining_WaitsForTheLoopToFinish"
   }
 ]
