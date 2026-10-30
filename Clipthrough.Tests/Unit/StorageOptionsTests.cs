@@ -7,6 +7,8 @@ namespace Clipthrough.Tests.Unit;
 
 public sealed class StorageOptionsTests
 {
+    private static readonly string s_fakeLocalAppData = Path.Combine(Path.GetTempPath(), "ct-storage-options-" + Guid.NewGuid().ToString("N"));
+
     [Fact]
     public void Normalize_ExpandsEnvironmentVariablesAndTrimsPassword()
     {
@@ -19,7 +21,7 @@ public sealed class StorageOptionsTests
                 DatabasePassword = "  secret  ",
             };
 
-            var normalized = options.Normalize();
+            var normalized = options.Normalize(AppDataRoot.Default(s_fakeLocalAppData));
 
             Assert.Equal(Path.Combine(Path.GetTempPath(), "clipthrough-test.db"), normalized.DatabasePath);
             Assert.Equal("secret", normalized.DatabasePassword);
@@ -31,33 +33,33 @@ public sealed class StorageOptionsTests
     }
 
     [Fact]
-    public void Normalize_UsesDefaultPathWhenMissing()
+    public void Normalize_UsesTheDefaultRootsUninstallSafeLibraryWhenMissing()
     {
-        var normalized = new StorageOptions { DatabasePath = " " }.Normalize();
+        var normalized = new StorageOptions { DatabasePath = " " }.Normalize(AppDataRoot.Default(s_fakeLocalAppData));
 
-        Assert.Equal(StorageOptions.GetDefaultDatabasePath(), normalized.DatabasePath);
+        Assert.Equal(Path.Combine(s_fakeLocalAppData, "ClipthroughData", "clipthrough.db"), normalized.DatabasePath);
     }
 
     [Fact]
-    public void GetDefaultDatabasePath_UsesUninstallSafeDataDirectory()
+    public void Normalize_UsesTheLibraryInsideAChosenRootWhenMissing()
     {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var root = AppDataRoot.Chosen(Path.Combine(s_fakeLocalAppData, "chosen"), AppDataRootSource.CommandLine);
 
-        var defaultPath = StorageOptions.GetDefaultDatabasePath();
+        var normalized = new StorageOptions().Normalize(root);
 
-        Assert.Equal(Path.Combine(localAppData, "ClipthroughData", "clipthrough.db"), defaultPath);
-        Assert.NotEqual(StorageOptions.GetLegacyDefaultDatabasePath(), defaultPath);
+        Assert.Equal(Path.Combine(s_fakeLocalAppData, "chosen", "clipthrough.db"), normalized.DatabasePath);
     }
 
+    // Against the data folder, never the working directory: that is current\
+    // under Velopack, which the next update deletes, and whatever folder a
+    // shortcut or script happened to start in otherwise.
     [Fact]
-    public void IsLegacyDefaultDatabasePath_RecognizesPreviousDefaultLocation()
+    public void Normalize_ResolvesARelativeLibraryAgainstTheDataRoot()
     {
-        var legacyPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Clipthrough",
-            "clipthrough.db");
+        var root = AppDataRoot.Chosen(Path.Combine(s_fakeLocalAppData, "chosen"), AppDataRootSource.Portable);
 
-        Assert.True(StorageOptions.IsLegacyDefaultDatabasePath(legacyPath));
-        Assert.False(StorageOptions.IsLegacyDefaultDatabasePath(StorageOptions.GetDefaultDatabasePath()));
+        var normalized = new StorageOptions { DatabasePath = Path.Combine("library", "clips.db") }.Normalize(root);
+
+        Assert.Equal(Path.Combine(s_fakeLocalAppData, "chosen", "library", "clips.db"), normalized.DatabasePath);
     }
 }

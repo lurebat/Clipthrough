@@ -43,10 +43,17 @@ public sealed class UpdateService : IUpdateService
 
     private readonly ISettingsService _settingsService;
 
-    public UpdateService(ISettingsService settingsService)
+    // Velopack restarts the app after applying an update; these bring it back
+    // to the same data folder (AppDataRoot.RelaunchArguments).
+    private readonly string[] _restartArguments;
+
+    public UpdateService(ISettingsService settingsService, AppDataRoot dataRoot)
     {
         _settingsService = settingsService;
+        _restartArguments = [.. dataRoot.RelaunchArguments];
     }
+
+    internal System.Collections.Generic.IReadOnlyList<string> RestartArguments => _restartArguments;
 
     public async Task<UpdateCheckResult> CheckForUpdatesAsync(
         bool ignoreAutoUpdateDisabled = false,
@@ -82,7 +89,7 @@ public sealed class UpdateService : IUpdateService
                 {
                     var pendingVersion = pendingUpdate.Version?.ToString();
                     Trace.TraceInformation($"Applying downloaded update {pendingVersion} on startup (AutoApplyUpdatesOnStartup=true).");
-                    mgr.ApplyUpdatesAndRestart(pendingUpdate);
+                    mgr.ApplyUpdatesAndRestart(pendingUpdate, _restartArguments);
                     return new UpdateCheckResult(true, pendingVersion, $"Applying update {pendingVersion}");
                 }
 
@@ -136,7 +143,7 @@ public sealed class UpdateService : IUpdateService
 
             var version = pendingUpdate.Version?.ToString();
             Trace.TraceInformation($"User-initiated apply: restarting to install update {version}.");
-            mgr.ApplyUpdatesAndRestart(pendingUpdate);
+            mgr.ApplyUpdatesAndRestart(pendingUpdate, _restartArguments);
             return true;
         }
         catch (Exception ex)

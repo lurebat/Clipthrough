@@ -8,6 +8,12 @@ public interface IStorageOptionsService
 {
     StorageOptions Current { get; }
 
+    /// <summary>
+    /// The data folder this session runs from. A relative or missing library
+    /// path is resolved against it, never against the working directory.
+    /// </summary>
+    AppDataRoot DataRoot { get; }
+
     bool HasSavedConfig { get; }
 
     /// <summary>

@@ -161,7 +161,7 @@ public sealed class SettingsViewModel : ViewModelBase
         set => this.RaiseAndSetIfChanged(ref _maxClipSizeKilobytes, value);
     }
 
-    private string _databasePath = StorageOptions.Default.DatabasePath;
+    private string _databasePath = string.Empty;
     public string DatabasePath
     {
         get => _databasePath;

@@ -138,7 +138,7 @@ public static class AppText
         [nameof(RegexNeedsBacktrackingStatus)] = "This pattern needs the backtracking regex engine (backreferences, lookarounds or atomic groups). Turn it on in Settings > Search.",
         [nameof(RegexTooSlowStatus)] = "Pattern too slow: the regex search was stopped. Simplify the pattern, or switch off the backtracking engine in Settings > Search.",
         [nameof(OpenedInEditorStatus)] = "Opened in editor",
-        [nameof(SettingsHintText)] = "Enter shortcuts in forms like Ctrl+Shift+R, Ctrl+Shift+F, or F8. Disable any shortcut you do not want active. Startup registration applies on Windows.",
+        [nameof(SettingsHintText)] = "Enter shortcuts in forms like Ctrl+Shift+R, Ctrl+Shift+F, or F8. Disable any shortcut you do not want active. Startup registration applies on Windows. In a session started with --data-dir, turning Start with Windows on starts Clipthrough on that folder at sign-in, replacing the previous sign-in entry. Just starting a session never changes another session's entry.",
         [nameof(SettingsStorageHintText)] = "The path is stored outside the clip database so you can move or encrypt it. Leave the password empty to keep SQLite unencrypted.",
         [nameof(SettingsDatabasePasswordWarning)] = "⚠ Saved in storage.json encrypted for your Windows account (DPAPI) so the database can unlock on startup. Any program running as you can still decrypt it. Where DPAPI is unavailable the password is kept in memory only and asked for again next launch.",
         [nameof(SettingsConfirmEncryptionPasswordTitle)] = "Save encryption password?",
@@ -321,6 +321,17 @@ public static class AppText
         ["Format.StorageUsage"] = "{0}",
         ["Format.StorageLoadFault"] = "{0} could not be read and was moved to {1}. Clipthrough does not know where your library is, so it started as if for the first time. If your library is not in the default location, choose it again.",
         ["Format.StorageLoadFaultNotMoved"] = "{0} could not be read, and could not be moved aside. Clipthrough started with the default library location.",
+        ["DataFolderErrorTitle"] = "Clipthrough cannot use its data folder",
+        ["DataFolderSource.CommandLine"] = "the --data-dir option",
+        ["DataFolderSource.EnvironmentVariable"] = "the CLIPTHROUGH_DATA_DIR environment variable",
+        ["DataFolderSource.Portable"] = "the portable.flag marker",
+        ["DataFolderInvalidCharacters"] = "it contains characters a path cannot have",
+        ["Format.DataFolderMissingValue"] = "The --data-dir option needs a folder after it, for example --data-dir \"D:\\Clipthrough data\". A value that starts with - is read as another option, not a folder. Clipthrough did not start.",
+        ["Format.DataFolderNotAbsolute"] = "CLIPTHROUGH_DATA_DIR must be a full path that starts with a drive or a \\\\server\\share, such as D:\\Clipthrough data, but it is \"{0}\". A relative path would depend on the folder Clipthrough starts in, which differs between a shortcut, a script and sign-in. Clipthrough did not start, and did not fall back to another folder.",
+        ["Format.DataFolderBlank"] = "{0} is set, but to nothing. Set it to a folder, or remove it to use the default folder. Clipthrough did not start.",
+        ["Format.DataFolderInvalid"] = "\"{0}\", from {1}, is not a folder path Clipthrough can use: {2}\n\nClipthrough did not start, and did not fall back to another folder. Correct {1}, or remove it to use the default folder.",
+        ["Format.DataFolderUnusable"] = "Clipthrough cannot create or write to its data folder {0}, chosen by {1}: {2}\n\nClipthrough did not start, and did not fall back to another folder, so nothing was written anywhere else. Choose a folder Clipthrough can write to, or remove {1} to use the default folder.",
+        ["Format.DataFolderDefaultUnusable"] = "Clipthrough cannot create or write to its data folder {0}: {1}\n\nClipthrough did not start. To keep its data somewhere else, start it with --data-dir <folder> or set CLIPTHROUGH_DATA_DIR.",
         ["Format.EntryUsage"] = "{0:N0} clips",
         ["Format.StorageCapacity"] = "Cap {0:N0} MB",
         ["Format.EntryCapacity"] = "Cap {0:N0} clips",
@@ -749,6 +760,35 @@ public static class AppText
     public static string FormatStorageLoadFault(string fileName, string quarantineName) => Format("Format.StorageLoadFault", fileName, quarantineName);
     public static string FormatStorageLoadFaultNotMoved(string fileName) => Format("Format.StorageLoadFaultNotMoved", fileName);
 
+    public static string DataFolderErrorTitle => Text(nameof(DataFolderErrorTitle));
+
+    public static string GetDataFolderSourceLabel(AppDataRootSource source) => source switch
+    {
+        AppDataRootSource.CommandLine => Text("DataFolderSource.CommandLine"),
+        AppDataRootSource.EnvironmentVariable => Text("DataFolderSource.EnvironmentVariable"),
+        AppDataRootSource.Portable => Text("DataFolderSource.Portable"),
+        _ => string.Empty,
+    };
+
+    public static string DataFolderMissingValue => Text("Format.DataFolderMissingValue");
+
+    public static string DataFolderInvalidCharacters => Text(nameof(DataFolderInvalidCharacters));
+
+    public static string FormatDataFolderNotAbsolute(string value) => Format("Format.DataFolderNotAbsolute", value);
+
+    public static string FormatDataFolderBlank(AppDataRootSource source)
+        => Format("Format.DataFolderBlank", Capitalize(GetDataFolderSourceLabel(source)));
+
+    public static string FormatDataFolderInvalid(string value, AppDataRootSource source, string reason)
+        => Format("Format.DataFolderInvalid", value, GetDataFolderSourceLabel(source), reason);
+
+    public static string FormatDataFolderUnusable(string directory, AppDataRootSource source, string reason)
+        => source == AppDataRootSource.Default
+            ? Format("Format.DataFolderDefaultUnusable", directory, reason)
+            : Format("Format.DataFolderUnusable", directory, GetDataFolderSourceLabel(source), reason);
+
+    private static string Capitalize(string text)
+        => text.Length == 0 ? text : char.ToUpper(text[0], CurrentCulture) + text[1..];
     public static string FormatEntryUsage(int count) => Format("Format.EntryUsage", count);
 
     public static string FormatStorageCapacity(int megabytes) => Format("Format.StorageCapacity", megabytes);
