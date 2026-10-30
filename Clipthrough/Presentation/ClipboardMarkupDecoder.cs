@@ -161,7 +161,7 @@ public static class ClipboardMarkupDecoder
 
     private static string? GetHeaderRegion(string html, string startHeaderName, string endHeaderName)
     {
-        var offsets = s_cfHtmlHeaderRegex.Matches(html);
+        var offsets = s_cfHtmlHeaderRegex.Matches(HeaderBlock(html));
         var startOffset = GetHeaderOffset(offsets, startHeaderName);
         var endOffset = GetHeaderOffset(offsets, endHeaderName);
         if (startOffset is null || endOffset is null || startOffset < 0 || endOffset <= startOffset)
@@ -229,7 +229,19 @@ public static class ClipboardMarkupDecoder
         => !string.IsNullOrWhiteSpace(value)
            && (value.StartsWith("Version:", StringComparison.OrdinalIgnoreCase)
                || value.StartsWith("Format:HTML Format", StringComparison.OrdinalIgnoreCase)
-               || s_cfHtmlHeaderRegex.IsMatch(value));
+               || s_cfHtmlHeaderRegex.IsMatch(HeaderBlock(value)));
+
+    /// <summary>
+    /// The part of a payload a CF_HTML header can occupy: everything before the
+    /// first '&lt;'. The header is ASCII "Name:value" lines ahead of the markup,
+    /// so a field after that is content - a transform's bare HTML fragment that
+    /// quotes "StartFragment:0000000000" must not be sliced by it (F-16-2).
+    /// </summary>
+    private static string HeaderBlock(string html)
+    {
+        var markup = html.IndexOf('<', StringComparison.Ordinal);
+        return markup < 0 ? html : html[..markup];
+    }
 
     private static string RecoverBytePairedString(string value)
     {
