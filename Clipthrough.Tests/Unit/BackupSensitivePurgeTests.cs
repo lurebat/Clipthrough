@@ -120,6 +120,104 @@ public sealed class BackupSensitivePurgeTests
         Assert.Equal(1L, Scalar(backup, $"SELECT count(*) FROM clips_fts WHERE clips_fts MATCH '\"{Secret}\"';"));
     }
 
+    /// <summary>
+    /// Rubber-duck F-06-2. When the purge fails after the copy was written, the
+    /// unpurged temp copy must not stay behind: retention only prunes
+    /// <c>clipthrough-*.db</c>, so a <c>.db.tmp</c> would keep every sensitive
+    /// clip on disk indefinitely.
+    /// </summary>
+    [Fact]
+    public async Task WhenThePurgeFails_NoUnpurgedCopyIsLeftInTheBackupsFolder()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await SeedAsync(scope);
+        using (var connection = scope.ConnectionFactory.CreateConnection())
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TRIGGER block_sensitive_delete BEFORE DELETE ON clips WHEN OLD.is_sensitive = 1
+                BEGIN SELECT RAISE(ABORT, 'test: purge blocked'); END;
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        await BackUpAsync(scope, lifetimeOn: true);
+
+        var backupDir = Path.Combine(Path.GetDirectoryName(scope.DatabasePath)!, "backups");
+        Assert.Empty(Directory.GetFiles(backupDir).Select(Path.GetFileName));
+    }
+
+    /// <summary>
+    /// Rubber-duck F-06-2. A temp copy stranded by a crash on an earlier day has
+    /// a name nothing else ever writes or prunes again, so the next backup
+    /// removes it.
+    /// </summary>
+    [Fact]
+    public async Task ATempCopyLeftByAnEarlierCrash_IsRemovedByTheNextBackup()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await SeedAsync(scope);
+        var backupDir = Path.Combine(Path.GetDirectoryName(scope.DatabasePath)!, "backups");
+        Directory.CreateDirectory(backupDir);
+        var stranded = Path.Combine(backupDir, "clipthrough-20200101.db.tmp");
+        File.WriteAllText(stranded, Secret);
+        File.WriteAllText(stranded + "-wal", Secret);
+
+        await BackUpAsync(scope, lifetimeOn: true);
+
+        Assert.False(File.Exists(stranded));
+        Assert.False(File.Exists(stranded + "-wal"));
+        Assert.Single(Directory.GetFiles(backupDir, "*.db"));
+    }
+
+    /// <summary>
+    /// Rubber-duck F-06-3. Live expiry can delete a sensitive clip before the
+    /// day's backup runs; the purge then removes nothing. The full-text index
+    /// still holds the clip's terms - a delete only adds a tombstone segment
+    /// until a merge - so a page copy carries them into the backup unless the
+    /// index is optimized and the file vacuumed anyway.
+    ///
+    /// The index stores trigrams, so the needle is one: three non-ASCII
+    /// characters, which no other term in this library shares a prefix with,
+    /// so the index stores it whole and a byte search can find it.
+    /// </summary>
+    [Fact]
+    public async Task WithTheLifetimeOn_ASensitiveClipLiveExpiryAlreadyDeleted_LeavesNoTraceInTheBackupFile()
+    {
+        const string Needle = "\u79D8\u5BC6\u9375";
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(AppSettings.Default with { EnableSensitiveClipLifetime = true, SensitiveClipLifetimeMinutes = 5 });
+        var sensitive = await Capture(scope, $"api key {Needle} {Secret}");
+        var ordinary = await Capture(scope, Ordinary);
+        await scope.ClipStoreService.SetSensitiveAsync(sensitive, true);
+        using (var connection = scope.ConnectionFactory.CreateConnection())
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            var hourAgo = DateTimeOffset.UtcNow.AddHours(-1).ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+            command.CommandText = $"UPDATE clips SET captured_at = '{hourAgo}', last_copied_at = '{hourAgo}' WHERE id = {sensitive};";
+            command.ExecuteNonQuery();
+        }
+
+        await scope.ClipStoreService.ApplyMaintenanceAsync();
+        Assert.Null(await scope.ClipStoreService.GetByIdAsync(sensitive));
+        var needle = Encoding.UTF8.GetBytes(Needle);
+
+        // Control: a plain copy (lifetime off, no purge) does still carry the
+        // needle, so its absence below is the purge's doing.
+        await BackUpAsync(scope, lifetimeOn: false);
+        Assert.NotEqual(-1, File.ReadAllBytes(BackupPath(scope)).AsSpan().IndexOf(needle));
+        File.Delete(BackupPath(scope));
+
+        await BackUpAsync(scope, lifetimeOn: true);
+
+        var backup = BackupPath(scope);
+        Assert.Equal(1L, Scalar(backup, $"SELECT count(*) FROM clips WHERE id = {ordinary};"));
+        Assert.Equal(-1, File.ReadAllBytes(backup).AsSpan().IndexOf(needle));
+    }
+
     [Fact]
     public void ACopyWithoutTheSensitiveColumn_IsLeftAlone()
     {
