@@ -150,6 +150,33 @@ public sealed class ResponsiveWorkspaceHeadlessTests
         Assert.True(splitter.Bounds.Y >= list.Bounds.Bottom - 0.5 && splitter.Bounds.Bottom <= preview.Bounds.Y + 0.5, "the splitter is not between the list and the preview");
     }
 
+    [AvaloniaTheory]
+    [InlineData(480, 800)]   // Narrow at the window minimum width, tall enough to keep the footer
+    [InlineData(576, 1118)]  // the portrait screen
+    [InlineData(760, 700)]   // the narrowest Medium
+    [InlineData(1000, 700)]  // Medium
+    public void FooterMeters_FitInsideTheFooter(double width, double height)
+    {
+        using var harness = Open(width, height, out var area);
+        var window = harness.Window;
+        var footer = window.GetVisualDescendants().OfType<Border>().Single(b => b.Classes.Contains("footer-panel"));
+        var meters = window.FindControl<StackPanel>("FooterStats")!.Children.OfType<Border>().ToList();
+        Assert.Equal(2, meters.Count);
+
+        foreach (var (meter, label) in meters.Zip(new[] { "storage meter", "entry meter" }))
+        {
+            OnScreen.AssertVisible(label, meter, window, area);
+            AssertWithin(label, meter, footer, window);
+        }
+
+        // Narrow stacks the meters (MainWindow.axaml, bp-narrow): side by side
+        // they need 576 DIP, more than a 480 DIP window has.
+        if (width < WorkspaceBreakpoints.NarrowBelowWidth)
+        {
+            Assert.True(meters[1].Bounds.Y >= meters[0].Bounds.Bottom, $"the entry meter starts at y={meters[1].Bounds.Y:F0}, beside the storage meter, not under it");
+        }
+    }
+
     [AvaloniaFact]
     public void Short_HidesTheFooterAndCountersAndCollapsesTheModifiers()
     {
