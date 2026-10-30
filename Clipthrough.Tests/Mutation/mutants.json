@@ -5302,5 +5302,85 @@
     "find": "            Dispatcher.UIThread.Post(() => Fit(window, onlyIfTooLarge: true), DispatcherPriority.Background);",
     "replace": "            Dispatcher.UIThread.Post(() => Fit(window, onlyIfTooLarge: start.Value.Scaling < 0), DispatcherPriority.Background);",
     "filter": "FullyQualifiedName~WindowFitHeadlessTests.Dragging|FullyQualifiedName~WindowFitHeadlessTests.Resizing"
+  },
+  {
+    "id": "startup-reconcile-off-leaves-foreign",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "An isolated --data-dir session with Start with Windows off deleted the usual install's sign-in entry at startup; off must never touch another configuration's entry (coordinator decision, option b).",
+    "find": "if (!StartupEntryCommand.IsSameConfiguration(existing, command))",
+    "replace": "if (!StartupEntryCommand.IsSameConfiguration(existing, command) && enabled)",
+    "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
+  },
+  {
+    "id": "startup-reconcile-on-leaves-foreign",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "At startup, a configuration with the setting on must not silently replace another configuration's entry; only the Settings toggle may (coordinator decision).",
+    "find": "Trace.TraceInformation($\"Start with Windows: leaving the sign-in entry of another configuration in place ({existing}).\");",
+    "replace": "if (enabled) { store.Write(command); }",
+    "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
+  },
+  {
+    "id": "startup-reconcile-on-writes-missing",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "Setting on and no entry: startup writes this configuration's entry.",
+    "find": "if (enabled)\n                {\n                    store.Write(command);",
+    "replace": "if (enabled && command.Length < 0)\n                {\n                    store.Write(command);",
+    "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
+  },
+  {
+    "id": "startup-reconcile-off-removes-own",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "Setting off and the entry is this configuration's: startup removes it.",
+    "find": "                store.Delete();\n            }\n        });",
+    "replace": "                _ = store;\n            }\n        });",
+    "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
+  },
+  {
+    "id": "startup-entry-compares-data-dir",
+    "file": "Clipthrough/Services/Platform/StartupEntry.cs",
+    "why": "The same executable with a different --data-dir (or none) is another configuration.",
+    "find": "&& SameDataDirectory(DataDirectory(storedArguments), DataDirectory(commandArguments));",
+    "replace": "&& (SameDataDirectory(DataDirectory(storedArguments), DataDirectory(commandArguments)) || storedArguments.Length > 0);",
+    "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
+  },
+  {
+    "id": "startup-entry-compares-executable",
+    "file": "Clipthrough/Services/Platform/StartupEntry.cs",
+    "why": "Another copy of Clipthrough.exe is another configuration.",
+    "find": "return SamePath(storedArguments[0], commandArguments[0])",
+    "replace": "return storedArguments[0].Length > 0",
+    "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
+  },
+  {
+    "id": "startup-entry-normalizes-paths",
+    "file": "Clipthrough/Services/Platform/StartupEntry.cs",
+    "why": "Ownership is compared on normalized, case-insensitive paths, not raw text, so this configuration's own entry spelled differently is still its own.",
+    "find": "=> string.Equals(Normalize(left), Normalize(right), StringComparison.OrdinalIgnoreCase);",
+    "replace": "=> string.Equals(Normalize(left).Length > 0 ? left : right, right, StringComparison.Ordinal);",
+    "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
+  },
+  {
+    "id": "startup-entry-reads-equals-spelling",
+    "file": "Clipthrough/Services/Platform/StartupEntry.cs",
+    "why": "--data-dir=<folder> in a stored entry names the same folder as --data-dir <folder>.",
+    "find": "else if (arguments[i].StartsWith(CommandLineOptions.DataDirectoryOption + \"=\", StringComparison.OrdinalIgnoreCase))",
+    "replace": "else if (arguments[i].StartsWith(CommandLineOptions.DataDirectoryOption + \"=\", StringComparison.OrdinalIgnoreCase) && arguments.Length < 0)",
+    "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
+  },
+  {
+    "id": "startup-first-event-reconciles",
+    "file": "Clipthrough/App.axaml.cs",
+    "why": "The first settings event is startup and must reconcile, not overwrite or delete whatever entry is there.",
+    "find": "systemInteraction?.ReconcileStartWithWindows(current.StartWithWindows);",
+    "replace": "systemInteraction?.SyncStartWithWindows(current.StartWithWindows);",
+    "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
+  },
+  {
+    "id": "startup-toggle-replaces-foreign",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "Turning Start with Windows on in Settings still replaces another configuration's entry, as before.",
+    "find": "if (!string.Equals(store.Read(), command, StringComparison.Ordinal))",
+    "replace": "if (string.IsNullOrWhiteSpace(store.Read()))",
+    "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
   }
 ]

@@ -558,9 +558,12 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
 
     public bool IsTargetWindowElevated() => false;
 
-    public void SyncStartWithWindows(bool enabled)
-    {
-    }
+    /// <summary>Every Start with Windows call, in order: ("sync" | "reconcile", enabled).</summary>
+    public List<(string Kind, bool Enabled)> StartWithWindowsCalls { get; } = [];
+
+    public void SyncStartWithWindows(bool enabled) => StartWithWindowsCalls.Add(("sync", enabled));
+
+    public void ReconcileStartWithWindows(bool enabled) => StartWithWindowsCalls.Add(("reconcile", enabled));
 }
 
 internal sealed class TestSearchHistoryService : ISearchHistoryService

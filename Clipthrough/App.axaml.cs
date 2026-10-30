@@ -430,6 +430,22 @@ public partial class App : Application
         }
     }
 
+    /// <summary>
+    /// The first settings event is startup: reconcile, which leaves another
+    /// configuration's entry alone. Later ones carry a change the user made in
+    /// Settings, which writes or removes the entry as asked.
+    /// </summary>
+    internal static void ApplyStartWithWindows(ISystemInteractionService? systemInteraction, AppSettings? previous, AppSettings current)
+    {
+        if (previous is null)
+        {
+            systemInteraction?.ReconcileStartWithWindows(current.StartWithWindows);
+        }
+        else if (previous.StartWithWindows != current.StartWithWindows)
+        {
+            systemInteraction?.SyncStartWithWindows(current.StartWithWindows);
+        }
+    }
     private void OnSettingsChanged(object? sender, AppSettings e)
     {
         // The event argument is deliberately ignored. RaiseSettingsChanged
@@ -461,10 +477,8 @@ public partial class App : Application
             UpdateGlobalHotKeyRegistration();
         }
 
-        if (previous is null || previous.StartWithWindows != current.StartWithWindows)
-        {
-            _systemInteractionService?.SyncStartWithWindows(current.StartWithWindows);
-        }
+        ApplyStartWithWindows(_systemInteractionService, previous, current);
+
 
         if (previous is null || previous.ThemeMode != current.ThemeMode)
         {
