@@ -35,6 +35,8 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IPausableWorker, IDispos
     private readonly Subject<IReadOnlyList<ClipEmbeddingRecord>> _batchRecordsCompleted = new();
     private CancellationTokenSource _cts = new();
     private Task? _loop;
+    // Every loop that has been told to stop and may still be running.
+    private Task _draining = Task.CompletedTask;
     private bool _started;
     private bool _disposed;
 
@@ -127,20 +129,33 @@ public sealed class EmbeddingWorker : IEmbeddingWorker, IPausableWorker, IDispos
 
     private async Task StopLoopAsync()
     {
-        Task? loop;
+        Task drain;
+        var cancelled = false;
         lock (_lifetimeGate)
         {
-            if (!_started) return;
-            _started = false;
-            _cts.Cancel();
-            loop = _loop;
-            _loop = null;
+            if (_started)
+            {
+                _started = false;
+                _cts.Cancel();
+                cancelled = true;
+                if (_loop is not null)
+                {
+                    _draining = _draining.IsCompleted ? _loop : Task.WhenAll(_draining, _loop);
+                }
+
+                _loop = null;
+            }
+
+            // A second stop or a pause arriving while an earlier stop is still
+            // draining must wait for that drain too: returning because the loop is
+            // already marked stopped let maintenance run against a live connection.
+            drain = _draining;
         }
 
-        SignalWake();
+        if (cancelled) SignalWake();
         try
         {
-            if (loop is not null) await loop.ConfigureAwait(false);
+            await drain.ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }
     }

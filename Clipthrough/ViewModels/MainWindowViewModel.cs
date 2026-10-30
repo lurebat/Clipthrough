@@ -3119,7 +3119,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task ExportSelectedAsync()
     {
-        if (SelectedClip is null)
+        // Captured once: a capture can move the selection while the dialog
+        // below is open, and the confirmation covers this clip only.
+        var target = SelectedClip;
+        if (target is null)
         {
             return;
         }
@@ -3129,7 +3132,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // into a OneDrive-synced folder. For a sensitive clip that is the
         // user's call to make knowingly (OD-3a); without a way to ask, it is
         // not made for them.
-        if (SelectedClip.Clip.IsSensitive
+        if (target.Clip.IsSensitive
             && (ConfirmAsync is null
                 || !await ConfirmAsync(
                     AppText.ExportSensitiveConfirmTitle,
@@ -3141,7 +3144,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);
+        var exportResult = await _clipExportService.ExportAsync(target.Clip);
         _clipboardMonitorService.SuppressNext(exportResult.PrimaryPath);
         await _systemInteractionService.CopyTextAsync(exportResult.PrimaryPath);
         await _systemInteractionService.OpenPathAsync(exportResult.PrimaryPath);
@@ -4102,7 +4105,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         try
         {
             await Task.Delay(TimeSpan.FromSeconds(5), cts.Token);
-            await CommitPendingDeletesAsync(ids);
+            await CommitPendingDeletesAsync(ids, cts);
         }
         catch (OperationCanceledException)
         {
@@ -4118,7 +4121,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var anyRestored = false;
         foreach (var id in clipIds)
         {
-            if (_pendingDeletes.Remove(id))
+            if (TryRemoveOwnedPendingDelete(id, cts))
             {
                 _hiddenPendingDeletes.Remove(id);
                 anyRestored = true;
@@ -4135,11 +4138,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         StatusText = clipIds.Length == 1 ? "Clip restored" : $"{clipIds.Length} clips restored";
     }
 
-    private async Task CommitPendingDeletesAsync(long[] clipIds)
+    private async Task CommitPendingDeletesAsync(long[] clipIds, CancellationTokenSource cts)
     {
         foreach (var id in clipIds)
         {
-            if (_pendingDeletes.Remove(id, out _))
+            if (TryRemoveOwnedPendingDelete(id, cts))
             {
                 await RunClipMutationAsync(() => _clipStoreService.DeleteAsync(id));
                 // The row is gone from the result set now, so it no longer
@@ -4148,6 +4151,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
         }
     }
+
+    /// <summary>
+    /// Removes the pending delete of <paramref name="clipId"/> only if it still
+    /// belongs to the delete that owns <paramref name="cts"/>.
+    /// </summary>
+    /// <remarks>
+    /// A re-copy withdraws a pending delete, and the user can then delete the
+    /// same clip again, which starts a new undo window under the same id. The
+    /// earlier delete's timer and Undo button must not act on that later delete:
+    /// matching by id alone let the first timer commit the second delete seconds
+    /// into its undo window, and the second Undo then found nothing to restore.
+    /// </remarks>
+    private bool TryRemoveOwnedPendingDelete(long clipId, CancellationTokenSource cts)
+        => _pendingDeletes.TryGetValue(clipId, out var pending)
+            && ReferenceEquals(pending.Cts, cts)
+            && _pendingDeletes.Remove(clipId);
 
     private void WithdrawPendingDelete(long clipId)
     {
