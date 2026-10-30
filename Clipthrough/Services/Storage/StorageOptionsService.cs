@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Clipthrough.Localization;
 using Clipthrough.Models;
 using Clipthrough.Services.Search;
 using Microsoft.Data.Sqlite;
@@ -71,6 +72,9 @@ public sealed class StorageOptionsService : IStorageOptionsService
     public StorageOptions Current { get; private set; }
 
     public bool HasSavedConfig => File.Exists(_configPath);
+
+    /// <inheritdoc />
+    public string? LoadFault { get; private set; }
 
     public bool DatabaseExists => File.Exists(Current.DatabasePath);
 
@@ -263,15 +267,6 @@ public sealed class StorageOptionsService : IStorageOptionsService
             // Release pooled handles on the source before reading it.
             SqliteConnection.ClearAllPools();
 
-            // If the destination already exists, keep a timestamped safety copy.
-            if (File.Exists(newPath))
-            {
-                var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
-                var safeguard = newPath + ".before-move-" + stamp;
-                File.Copy(newPath, safeguard, overwrite: false);
-                Trace.TraceInformation($"Existing target '{newPath}' backed up to '{safeguard}'.");
-            }
-
             // Copy source → temp (in the destination directory for same-volume rename).
             // Read through SQLite, not the file system: this copy becomes the
             // database and the source is deleted immediately afterwards, so a
@@ -279,11 +274,34 @@ public sealed class StorageOptionsService : IStorageOptionsService
             var tempPath = Path.Combine(Path.GetDirectoryName(newPath)!, Path.GetFileName(newPath) + ".moving-" + Guid.NewGuid().ToString("N"));
             SqliteDatabaseCopier.CopyDatabase(oldPath, previous.DatabasePassword, tempPath);
 
+            var stashed = new System.Collections.Generic.List<(string Live, string Stashed)>();
             try
             {
-                // Atomic rename: temp → newPath (overwrites any existing file).
+                // Whatever already sits at the target - a database that was not
+                // shut down cleanly, a cloud-synced copy - is set aside as a set:
+                // main file, -wal and -shm under one stamp. Renaming only the
+                // main file over it would leave its -wal beside the moved
+                // library, and SQLite replays that foreign WAL on the next open,
+                // replacing the user's history with the old target's. The same
+                // hazard RestoreCore guards against.
+                var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+                foreach (var suffix in new[] { string.Empty, "-wal", "-shm" })
+                {
+                    var existing = newPath + suffix;
+                    if (File.Exists(existing))
+                    {
+                        var safeguard = existing + ".before-move-" + stamp;
+                        File.Move(existing, safeguard);
+                        stashed.Add((existing, safeguard));
+                        Trace.TraceInformation($"Existing target file '{existing}' set aside as '{safeguard}'.");
+                    }
+                }
+
+                // Atomic rename: temp → newPath. Nothing is left at newPath now,
+                // but overwrite keeps a racing stray file from failing the move.
                 File.Move(tempPath, newPath, overwrite: true);
                 tempPath = null; // newPath owns it now — don't delete in finally.
+                stashed.Clear(); // The move landed; the set-aside files stay as the safeguard.
 
                 // Remove the source and its WAL/SHM sidecar files.
                 foreach (var suffix in new[] { string.Empty, "-wal", "-shm" })
@@ -308,6 +326,23 @@ public sealed class StorageOptionsService : IStorageOptionsService
                 {
                     try { File.Delete(tempPath); } catch { /* best effort */ }
                 }
+
+                // ...and put the displaced target back where it was, so a failed
+                // move changes nothing at either end.
+                foreach (var (live, safeguard) in stashed)
+                {
+                    try
+                    {
+                        if (!File.Exists(live))
+                        {
+                            File.Move(safeguard, live);
+                        }
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        Trace.TraceError($"Could not put '{safeguard}' back as '{live}' after a failed move: {ex.Message}");
+                    }
+                }
             }
         }
         catch
@@ -328,9 +363,8 @@ public sealed class StorageOptionsService : IStorageOptionsService
     /// Sequence:
     ///   1. Verify current password opens the DB.
     ///   2. Enter maintenance scope (stop workers, clear pool).
-    ///   3. Copy the DB to a temp file through SQLite's online backup API, so
-    ///      commits still in the WAL travel with it.
-    ///   4. Apply PRAGMA rekey to the copy.
+    ///   3-4. Write a copy keyed with the new password (<see cref="WriteRekeyedCopy"/>),
+    ///      read through SQLite so commits still in the WAL travel with it.
     ///   5. Verify the copy opens with the new password.
     ///   6. Atomic rename: temp → live DB path (DB file is the source of truth).
     ///   7. Update Current (key for the session + workers restarted on scope dispose).
@@ -340,6 +374,15 @@ public sealed class StorageOptionsService : IStorageOptionsService
     /// </summary>
     public async Task RekeyAsync(string currentPassword, string newPassword, bool rememberNewPassword, CancellationToken cancellationToken = default)
     {
+        // Both passwords go through the rule every unlock applies. Keying the
+        // file with the raw value - say, a pasted passphrase ending in a space -
+        // and then running the session on the trimmed one locked the user out
+        // of their whole history for good (F-02). The dialog refuses edge
+        // whitespace up front (S42); this keeps the service consistent with it
+        // for every other caller.
+        var currentKey = StorageOptions.NormalizePassword(currentPassword);
+        var newKey = StorageOptions.NormalizePassword(newPassword);
+
         await _gate.WaitAsync(cancellationToken);
         try
         {
@@ -352,7 +395,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
             }
 
             // Step 1: Verify the current password opens the DB before touching anything.
-            var openWith = current with { DatabasePassword = currentPassword ?? string.Empty };
+            var openWith = current with { DatabasePassword = currentKey };
             try
             {
                 await using var probe = OpenConnection(openWith);
@@ -369,36 +412,19 @@ public sealed class StorageOptionsService : IStorageOptionsService
             // Step 2: Enter maintenance scope (stop workers, clear pool).
             await using var scope = await EnterMaintenanceScopeAsync();
 
-            // Step 3: Copy the DB to a temp file. This copy is rekeyed and then
-            // renamed over the live database, so it has to be complete: a raw
-            // file copy taken after a busy checkpoint is malformed, and here
-            // that malformed file would become the user's database.
+            // Steps 3 and 4: write a copy of the DB keyed with the new password.
+            // The copy is renamed over the live database, so it has to be
+            // complete - see WriteRekeyedCopy.
             SqliteConnection.ClearAllPools();
-            var tempPath = dbPath + ".rekeying-" + Guid.NewGuid().ToString("N");
-            SqliteDatabaseCopier.CopyDatabase(dbPath, currentPassword, tempPath);
+            string? tempPath = dbPath + ".rekeying-" + Guid.NewGuid().ToString("N");
 
             try
             {
-                // Step 4: Rekey the copy with the new password.
-                var tempOptions = current with
-                {
-                    DatabasePath = tempPath,
-                    DatabasePassword = currentPassword ?? string.Empty,
-                };
+                WriteRekeyedCopy(dbPath, currentKey, newKey, tempPath);
 
-                await using (var conn = OpenConnection(tempOptions))
-                {
-                    await conn.OpenAsync(cancellationToken);
-                    await using var cmd = conn.CreateCommand();
-                    cmd.CommandText = $"PRAGMA rekey = '{EscapeSqlLiteral(newPassword ?? string.Empty)}';";
-                    await cmd.ExecuteNonQueryAsync(cancellationToken);
-                }
-
-                // Flush pooled connections to the temp file before verifying.
-                SqliteConnection.ClearAllPools();
-
-                // Step 5: Verify the rekeyed copy opens with the new password.
-                if (!CanOpenWithPassword(tempPath, newPassword ?? string.Empty))
+                // Step 5: Verify the rekeyed copy opens with the key the session
+                // will use from here on - not merely with what was passed in.
+                if (!CanOpenWithPassword(tempPath, newKey))
                 {
                     throw new InvalidOperationException(
                         "Rekey verification failed: the rekeyed copy does not open with the new password.");
@@ -412,19 +438,26 @@ public sealed class StorageOptionsService : IStorageOptionsService
                 // launch falls back to the unlock prompt — which accepts the new
                 // password the user just chose. Persisting first would instead point
                 // storage.json at a key the still-old DB rejects, locking them out.
+                // Removing encryption has no prompt to fall back on; LoadFromDisk
+                // drops a remembered key the plaintext file does not need.
                 SqliteConnection.ClearAllPools();
                 File.Move(tempPath, dbPath, overwrite: true);
                 tempPath = null; // dbPath owns it now.
 
                 var updated = (current with
                 {
-                    DatabasePassword = newPassword ?? string.Empty,
+                    DatabasePassword = newKey,
                     RememberPassword = rememberNewPassword,
                 }).Normalize();
 
                 // Step 7: Update in-memory state so the running session (and the
                 // workers restarted on scope dispose) use the new key.
                 Current = updated;
+
+                // Step 7b: Bring the backups along, or every restore point taken
+                // before today stops restoring (F-15). Per-file best effort, and
+                // not cancellable: the live file is already rekeyed.
+                await Task.Run(() => DatabaseBackupService.RekeyBackups(dbPath, currentKey, newKey), CancellationToken.None);
 
                 // Step 8: Persist the remembered password last. If this throws the
                 // DB is already rekeyed and Current is correct for this session.
@@ -447,6 +480,122 @@ public sealed class StorageOptionsService : IStorageOptionsService
         }
     }
 
+    /// <inheritdoc />
+    public async Task RunExclusiveAsync(Action<StorageOptions> action, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            action(Current);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Writes a copy of <paramref name="sourcePath"/>, which opens with
+    /// <paramref name="currentKey"/>, to <paramref name="destinationPath"/>
+    /// keyed with <paramref name="newKey"/>. An empty key means unencrypted.
+    /// The source is only read. A partial destination is removed on failure.
+    /// </summary>
+    /// <remarks>
+    /// Between two keys this copies through the online backup API and applies
+    /// <c>PRAGMA rekey</c> to the copy. That pragma cannot add encryption to a
+    /// plaintext file or strip it from an encrypted one - on SQLCipher 4.5 it
+    /// is a silent no-op there, so "Re-encrypt database" failed verification
+    /// for every unencrypted library (F-16). When either side is empty the
+    /// copy is written with <c>sqlcipher_export</c> into a database attached
+    /// with the target key instead. Like VACUUM it carries the schema, every
+    /// row, the FTS5 shadow tables and triggers; <c>user_version</c> and the
+    /// journal mode are not carried, so both are set to match the source.
+    /// </remarks>
+    internal static void WriteRekeyedCopy(string sourcePath, string currentKey, string newKey, string destinationPath)
+    {
+        if (currentKey.Length == 0 || newKey.Length == 0)
+        {
+            File.Delete(destinationPath);
+            try
+            {
+                // ReadWriteCreate: ATTACH inherits the open flags, and it has to
+                // create the destination. The source exists (checked by callers).
+                using var source = OpenUnpooled(sourcePath, currentKey, SqliteOpenMode.ReadWriteCreate);
+                string journalMode;
+                using (var mode = source.CreateCommand())
+                {
+                    mode.CommandText = "PRAGMA main.journal_mode;";
+                    journalMode = Convert.ToString(mode.ExecuteScalar(), CultureInfo.InvariantCulture) ?? string.Empty;
+                }
+
+                // sqlcipher_export does not carry user_version on this build, so
+                // the copy would read 0 unless it is set explicitly.
+                long userVersion;
+                using (var version = source.CreateCommand())
+                {
+                    version.CommandText = "PRAGMA main.user_version;";
+                    userVersion = Convert.ToInt64(version.ExecuteScalar(), CultureInfo.InvariantCulture);
+                }
+
+                using var export = source.CreateCommand();
+                export.CommandText =
+                    "ATTACH DATABASE $path AS rekeyed KEY $key; " +
+                    "SELECT sqlcipher_export('rekeyed'); " +
+                    "PRAGMA rekeyed.user_version = " + userVersion.ToString(CultureInfo.InvariantCulture) + "; " +
+                    (string.Equals(journalMode, "wal", StringComparison.OrdinalIgnoreCase) ? "PRAGMA rekeyed.journal_mode = WAL; " : string.Empty) +
+                    "DETACH DATABASE rekeyed;";
+                export.Parameters.AddWithValue("$path", destinationPath);
+                export.Parameters.AddWithValue("$key", newKey);
+                export.ExecuteNonQuery();
+            }
+            catch
+            {
+                foreach (var suffix in new[] { string.Empty, "-wal", "-shm", "-journal" })
+                {
+                    try { File.Delete(destinationPath + suffix); } catch { /* best effort */ }
+                }
+
+                throw;
+            }
+
+            return;
+        }
+
+        SqliteDatabaseCopier.CopyDatabase(sourcePath, currentKey, destinationPath);
+        using var copy = OpenUnpooled(destinationPath, currentKey, SqliteOpenMode.ReadWrite);
+        using var rekey = copy.CreateCommand();
+        rekey.CommandText = $"PRAGMA rekey = '{EscapeSqlLiteral(newKey)}';";
+        rekey.ExecuteNonQuery();
+    }
+
+    private static SqliteConnection OpenUnpooled(string path, string key, SqliteOpenMode mode)
+    {
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = mode,
+            // Unpooled so the file is released on Dispose and can be renamed.
+            Pooling = false,
+        };
+        if (key.Length > 0)
+        {
+            builder.Password = key;
+        }
+
+        var connection = new SqliteConnection(builder.ToString());
+        connection.StateChange += ApplyBusyTimeoutOnOpen;
+        try
+        {
+            connection.Open();
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
+        }
+
+        return connection;
+    }
     private SqliteConnection OpenConnection(StorageOptions options)
     {
         var builder = new SqliteConnectionStringBuilder
@@ -543,6 +692,24 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
             options = EnsureLegacyDefaultDatabaseCopied(options);
 
+            // A remembered key on a file that opens without one is stale: removing
+            // encryption swaps the plaintext file in before storage.json is
+            // rewritten, so a crash or failed write in between leaves exactly this.
+            // Keying every connection to a plaintext file fails with "file is not
+            // a database", and there is no prompt to fall back on because the file
+            // needs no password. Only a successful keyless read drops it, and only
+            // of a non-empty file: an empty one opens keyless too, and dropping
+            // the key there would build the library unencrypted.
+            if (options.DatabasePassword.Length > 0
+                && File.Exists(options.DatabasePath)
+                && new FileInfo(options.DatabasePath).Length > 0
+                && !RequiresPassword(options.DatabasePath))
+            {
+                Trace.TraceWarning("Dropping the remembered database password: the database is not encrypted.");
+                options = options with { DatabasePassword = string.Empty };
+                needsMigration = true;
+            }
+
             if (needsMigration)
             {
                 // Synchronous best-effort rewrite so the plaintext / corrupt blob
@@ -553,10 +720,38 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
             return options;
         }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        catch (JsonException ex)
         {
+            // Unreadable content - typically a save torn by a crash, a power
+            // loss or a full disk. The only recovery available is the default
+            // library, so the user must hear about it, and the file must be set
+            // aside before the next save overwrites the evidence (F-22).
+            LoadFault = QuarantineUnreadableConfig(ex);
+            return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Deliberately not quarantined: a locked or briefly unreadable file
+            // is usually transient, and moving it aside would lose a config
+            // that was never corrupt.
             Trace.TraceWarning($"Storage settings load failed: {ex.Message}");
             return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize());
+        }
+    }
+
+    private string QuarantineUnreadableConfig(JsonException ex)
+    {
+        var fileName = Path.GetFileName(_configPath);
+        try
+        {
+            var quarantinePath = AtomicFile.Quarantine(_configPath);
+            Trace.TraceError($"Storage settings could not be parsed and were moved to '{quarantinePath}': {ex.Message}");
+            return AppText.FormatStorageLoadFault(fileName, Path.GetFileName(quarantinePath));
+        }
+        catch (Exception moveFailure) when (moveFailure is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceError($"Storage settings could not be parsed, and moving them aside failed: {moveFailure.Message}");
+            return AppText.FormatStorageLoadFaultNotMoved(fileName);
         }
     }
 
@@ -573,7 +768,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
             Directory.CreateDirectory(directory);
 
             var document = BuildDocument(options);
-            File.WriteAllText(_configPath, JsonSerializer.Serialize(document, JsonOptions));
+            AtomicFile.WriteAllText(_configPath, JsonSerializer.Serialize(document, JsonOptions));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -649,7 +844,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
         Directory.CreateDirectory(directory);
 
         var document = BuildDocument(options);
-        await File.WriteAllTextAsync(_configPath, JsonSerializer.Serialize(document, JsonOptions), cancellationToken);
+        await AtomicFile.WriteAllTextAsync(_configPath, JsonSerializer.Serialize(document, JsonOptions), cancellationToken);
     }
 
     /// <summary>

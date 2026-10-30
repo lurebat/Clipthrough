@@ -32,6 +32,8 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
 
     public bool HasSavedConfig => _hasSavedConfig;
 
+    public string? LoadFault { get; set; }
+
     public bool DatabaseExists => File.Exists(Current.DatabasePath);
 
     /// <summary>
@@ -56,6 +58,12 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
             DatabasePassword = newPassword ?? string.Empty,
             RememberPassword = rememberNewPassword,
         }).Normalize();
+        return Task.CompletedTask;
+    }
+
+    public Task RunExclusiveAsync(Action<StorageOptions> action, CancellationToken cancellationToken = default)
+    {
+        action(Current);
         return Task.CompletedTask;
     }
 

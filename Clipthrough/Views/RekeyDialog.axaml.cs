@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
+using Clipthrough.Localization;
 using Clipthrough.Services;
 
 namespace Clipthrough.Views;
@@ -57,9 +58,9 @@ public partial class RekeyDialog : Window
         var apply = this.FindControl<Button>("ApplyButton")!;
         var cancel = this.FindControl<Button>("CancelButton")!;
 
-        if (!string.Equals(newPwd, confirm, StringComparison.Ordinal))
+        if (ValidateNewPassword(newPwd, confirm) is { } invalid)
         {
-            error.Text = "New password and confirmation do not match.";
+            error.Text = invalid;
             error.IsVisible = true;
             return;
         }
@@ -92,4 +93,26 @@ public partial class RekeyDialog : Window
     }
 
     private void OnCancelClick(object? sender, RoutedEventArgs e) => Close(false);
+
+    /// <summary>
+    /// Returns why the new password cannot be used, or null when it can.
+    /// </summary>
+    internal static string? ValidateNewPassword(string newPassword, string confirmation)
+    {
+        if (!string.Equals(newPassword, confirmation, StringComparison.Ordinal))
+        {
+            return AppText.RekeyPasswordMismatch;
+        }
+
+        // Every unlock trims what the user types (StorageOptions.Normalize), so
+        // a key with edge whitespace could never be entered again. Refuse it
+        // rather than trim it behind the user's back (OD-12a, S42).
+        if (newPassword.Length > 0
+            && (char.IsWhiteSpace(newPassword[0]) || char.IsWhiteSpace(newPassword[^1])))
+        {
+            return AppText.RekeyPasswordEdgeWhitespace;
+        }
+
+        return null;
+    }
 }

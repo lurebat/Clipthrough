@@ -10,6 +10,14 @@ public interface IStorageOptionsService
 
     bool HasSavedConfig { get; }
 
+    /// <summary>
+    /// Describes an unreadable storage.json found at load, or null when the
+    /// storage settings came from where they were supposed to. Set once, at
+    /// construction. When set, <see cref="Current"/> is the default library,
+    /// and the user has to be told so.
+    /// </summary>
+    string? LoadFault { get; }
+
     bool DatabaseExists { get; }
 
     Task SaveAsync(StorageOptions options, CancellationToken cancellationToken = default);
@@ -46,4 +54,12 @@ public interface IStorageOptionsService
     /// <paramref name="currentPassword"/> does not unlock the database.
     /// </summary>
     Task RekeyAsync(string currentPassword, string newPassword, bool rememberNewPassword, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Runs <paramref name="action"/> with the options current at that moment,
+    /// while no move, rekey or other storage save is in progress. For work that
+    /// has to agree with the live database's path and key, such as publishing
+    /// a backup copy taken without holding that lock.
+    /// </summary>
+    Task RunExclusiveAsync(System.Action<StorageOptions> action, CancellationToken cancellationToken = default);
 }

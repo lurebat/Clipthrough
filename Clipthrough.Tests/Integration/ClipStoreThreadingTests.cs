@@ -264,6 +264,8 @@ public sealed class ClipStoreThreadingTests
 
         public bool HasSavedConfig => inner.HasSavedConfig;
 
+        public string? LoadFault => inner.LoadFault;
+
         public bool DatabaseExists => inner.DatabaseExists;
 
         public Task SaveAsync(StorageOptions options, CancellationToken cancellationToken = default)
@@ -276,5 +278,8 @@ public sealed class ClipStoreThreadingTests
 
         public Task RekeyAsync(string currentPassword, string newPassword, bool rememberNewPassword, CancellationToken cancellationToken = default)
             => inner.RekeyAsync(currentPassword, newPassword, rememberNewPassword, cancellationToken);
+
+        public Task RunExclusiveAsync(Action<StorageOptions> action, CancellationToken cancellationToken = default)
+            => inner.RunExclusiveAsync(action, cancellationToken);
     }
 }

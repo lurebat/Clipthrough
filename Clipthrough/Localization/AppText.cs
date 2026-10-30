@@ -185,6 +185,8 @@ public static class AppText
         [nameof(SettingsInvalidMaxLibrarySize)] = "Enter an archive size between 1 and 1048576 MB.",
         [nameof(SettingsInvalidMaxEntryCount)] = "Enter a max entry count between 1 and 5000000.",
         [nameof(SettingsPasswordMismatch)] = "Passwords do not match.",
+        [nameof(RekeyPasswordMismatch)] = "New password and confirmation do not match.",
+        [nameof(RekeyPasswordEdgeWhitespace)] = "The new password starts or ends with a space or other whitespace. Remove it: Clipthrough ignores leading and trailing whitespace when you unlock, so the database could never be opened with it.",
         [nameof(UnlockIncorrectPassword)] = "Incorrect password. Please try again.",
         [nameof(UnlockDatabaseUnreadable)] = "The database could not be opened. It may have been moved, deleted, or is in use by another program.",
         [nameof(SettingsInvalidRuleName)] = "Each sensitivity rule needs a name.",
@@ -239,6 +241,7 @@ public static class AppText
         [nameof(UnexpectedErrorTitle)] = "Something went wrong",
         [nameof(ClipCaptureFailedTitle)] = "Clip capture failed",
         [nameof(SettingsLoadFailedTitle)] = "Settings could not be read",
+        [nameof(StorageLoadFailedTitle)] = "Library location could not be read",
         [nameof(ClipCaptureFailedUnsupportedPayload)] = "The clipboard payload was not a supported text, rich text, image, or file format.",
         [nameof(ClipCaptureFailedEmptyPayload)] = "The clipboard payload was empty.",
         [nameof(ClipDragImportTitle)] = "Imported by drag",
@@ -302,6 +305,8 @@ public static class AppText
         ["Format.RelativeDaysPlural"] = "{0} days ago",
         ["Format.LogCount"] = "{0:N0} session logs",
         ["Format.StorageUsage"] = "{0}",
+        ["Format.StorageLoadFault"] = "{0} could not be read and was moved to {1}. Clipthrough does not know where your library is, so it started as if for the first time. If your library is not in the default location, choose it again.",
+        ["Format.StorageLoadFaultNotMoved"] = "{0} could not be read, and could not be moved aside. Clipthrough started with the default library location.",
         ["Format.EntryUsage"] = "{0:N0} clips",
         ["Format.StorageCapacity"] = "Cap {0:N0} MB",
         ["Format.EntryCapacity"] = "Cap {0:N0} clips",
@@ -522,6 +527,8 @@ public static class AppText
     public static string SettingsInvalidMaxLibrarySize => Text(nameof(SettingsInvalidMaxLibrarySize));
     public static string SettingsInvalidMaxEntryCount => Text(nameof(SettingsInvalidMaxEntryCount));
     public static string SettingsPasswordMismatch => Text(nameof(SettingsPasswordMismatch));
+    public static string RekeyPasswordMismatch => Text(nameof(RekeyPasswordMismatch));
+    public static string RekeyPasswordEdgeWhitespace => Text(nameof(RekeyPasswordEdgeWhitespace));
     public static string UnlockIncorrectPassword => Text(nameof(UnlockIncorrectPassword));
     public static string UnlockDatabaseUnreadable => Text(nameof(UnlockDatabaseUnreadable));
     public static string SettingsInvalidRuleName => Text(nameof(SettingsInvalidRuleName));
@@ -580,6 +587,7 @@ public static class AppText
     public static string ClipCaptureFailedTitle => Text(nameof(ClipCaptureFailedTitle));
 
     public static string SettingsLoadFailedTitle => Text(nameof(SettingsLoadFailedTitle));
+    public static string StorageLoadFailedTitle => Text(nameof(StorageLoadFailedTitle));
 
     public static string ClipDragImportTitle => Text(nameof(ClipDragImportTitle));
 
@@ -687,6 +695,8 @@ public static class AppText
     public static string FormatLogCount(int count) => Format("Format.LogCount", count);
 
     public static string FormatStorageUsage(long bytes) => Format("Format.StorageUsage", FormatByteCount(bytes));
+    public static string FormatStorageLoadFault(string fileName, string quarantineName) => Format("Format.StorageLoadFault", fileName, quarantineName);
+    public static string FormatStorageLoadFaultNotMoved(string fileName) => Format("Format.StorageLoadFaultNotMoved", fileName);
 
     public static string FormatEntryUsage(int count) => Format("Format.EntryUsage", count);
 

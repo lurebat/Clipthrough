@@ -252,7 +252,7 @@
     "why": "Reverts the daily backup to a raw file copy. A checkpoint that cannot finish leaves committed frames in the WAL, and the copied .db then opens as 'database disk image is malformed' - an unopenable backup nobody notices until they need it.",
     "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
     "filter": "DatabaseBackupServiceTests",
-    "find": "                () => SqliteDatabaseCopier.CopyDatabase(dbPath, _storageOptionsService.Current.DatabasePassword, tempPath),",
+    "find": "                () => SqliteDatabaseCopier.CopyDatabase(dbPath, key, tempPath),",
     "replace": "                () => File.Copy(dbPath, tempPath, overwrite: true),"
   },
   {
@@ -2523,8 +2523,8 @@
     "id": "settings-are-written-straight-over-the-live-file",
     "why": "Puts back the direct write. A crash or a full disk part-way through leaves settings.json truncated, and the recovery path for an unreadable settings file is a silent fallback rather than an error.",
     "file": "Clipthrough/Services/Storage/SettingsService.cs",
-    "find": "        var tempPath = _settingsPath + \".tmp\";\n        await File.WriteAllTextAsync(tempPath, json, cancellationToken);\n        File.Move(tempPath, _settingsPath, overwrite: true);",
-    "replace": "        var tempPath = _settingsPath + \".tmp\";\n        await File.WriteAllTextAsync(tempPath.Length > 0 ? _settingsPath : tempPath, json, cancellationToken);",
+    "find": "        await AtomicFile.WriteAllTextAsync(_settingsPath, json, cancellationToken);",
+    "replace": "        await File.WriteAllTextAsync(_settingsPath, json, cancellationToken);",
     "filter": "FullyQualifiedName~SettingsFileIntegrityTests"
   },
   {
@@ -2678,6 +2678,70 @@
     "find": "        var tokens = input.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);",
     "replace": "        var tokens = input.Split('\\n', StringSplitOptions.RemoveEmptyEntries);",
     "filter": "FullyQualifiedName~WhitespaceToJsonArray"
+  },
+  {
+    "id": "move-leaves-target-sidecars",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "F-01. Setting aside only the target's main file leaves its -wal beside the moved library; SQLite replays the foreign WAL on the next open and the user's history reads back as the old target's rows, with the source already deleted.",
+    "find": "                foreach (var suffix in new[] { string.Empty, \"-wal\", \"-shm\" })\n                {\n                    var existing = newPath + suffix;",
+    "replace": "                foreach (var suffix in new[] { string.Empty })\n                {\n                    var existing = newPath + suffix;",
+    "filter": "FullyQualifiedName~StorageLifecycleTests.PathMove_"
+  },
+  {
+    "id": "rekey-keys-with-raw-password",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "F-02. Keying and verifying with the raw new password while the session (and every later unlock) uses the trimmed one locks the user out of the whole history after a rekey to a passphrase ending in a space.",
+    "find": "        var newKey = StorageOptions.NormalizePassword(newPassword);",
+    "replace": "        var newKey = newPassword ?? string.Empty;",
+    "filter": "FullyQualifiedName~StorageLifecycleTests.Rekey_NewPasswordWithEdgeWhitespace"
+  },
+  {
+    "id": "rekey-dialog-accepts-edge-whitespace",
+    "file": "Clipthrough/Views/RekeyDialog.axaml.cs",
+    "why": "OD-12a / S42. The dialog must refuse a new password with leading or trailing whitespace instead of letting the service trim it silently, so the key on disk is always exactly what the user typed.",
+    "find": "            && (char.IsWhiteSpace(newPassword[0]) || char.IsWhiteSpace(newPassword[^1])))",
+    "replace": "            && (char.IsWhiteSpace(newPassword[0]) && !char.IsWhiteSpace(newPassword[0])))",
+    "filter": "FullyQualifiedName~RekeyDialogValidationTests"
+  },
+  {
+    "id": "rekey-empty-side-uses-pragma-rekey",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "F-16. PRAGMA rekey is a silent no-op on SQLCipher 4.5 when either key is empty, so routing plaintext->encrypted or encrypted->plaintext back through it leaves no in-app way to encrypt an existing history (or remove encryption), and the failure blames the password.",
+    "find": "        if (currentKey.Length == 0 || newKey.Length == 0)\n        {\n            File.Delete(destinationPath);",
+    "replace": "        if (currentKey.Length < 0 && newKey.Length < 0)\n        {\n            File.Delete(destinationPath);",
+    "filter": "FullyQualifiedName~StorageLifecycleTests.Rekey_PlaintextLibrary|FullyQualifiedName~StorageLifecycleTests.Rekey_EncryptedLibrary"
+  },
+  {
+    "id": "rekey-skips-backups",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "F-15. Without re-keying the backups, every restore point Settings lists from before a rekey (or before encryption was turned on) fails with 'unreadable or requires a different password', and turning encryption on leaves the history in plaintext beside it.",
+    "find": "                await Task.Run(() => DatabaseBackupService.RekeyBackups(dbPath, currentKey, newKey), CancellationToken.None);",
+    "replace": "                await Task.CompletedTask;",
+    "filter": "FullyQualifiedName~StorageLifecycleTests.Rekey_BackupTakenBefore|FullyQualifiedName~StorageLifecycleTests.Rekey_PlaintextBackup"
+  },
+  {
+    "id": "storage-json-written-in-place",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "F-22. Rewriting storage.json in place truncates it first, so a crash, power loss or full disk mid-save leaves a torn file and the next start opens the default library instead of the user's.",
+    "find": "        await AtomicFile.WriteAllTextAsync(_configPath, JsonSerializer.Serialize(document, JsonOptions), cancellationToken);",
+    "replace": "        await File.WriteAllTextAsync(_configPath, JsonSerializer.Serialize(document, JsonOptions), cancellationToken);",
+    "filter": "FullyQualifiedName~StorageLifecycleTests.SavingStorage_"
+  },
+  {
+    "id": "torn-storage-json-recovered-silently",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "F-22. A torn storage.json must be set aside and reported; falling back to the default library silently drops the remembered password, keeps no copy, and lets the next save overwrite the evidence.",
+    "find": "            LoadFault = QuarantineUnreadableConfig(ex);",
+    "replace": "            Trace.TraceWarning($\"Storage settings load failed: {ex.Message}\");",
+    "filter": "FullyQualifiedName~StorageLifecycleTests.TornStorageJson"
+  },
+  {
+    "id": "storage-load-fault-not-shown",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "F-22. The storage load fault is only worth recording if the user is told: otherwise they are on the default library with no idea why their history is gone.",
+    "find": "                _notificationService.PublishError(AppText.StorageLoadFailedTitle, storageFault);",
+    "replace": "                Trace.TraceWarning(storageFault);",
+    "filter": "FullyQualifiedName~InitializeAsync_WhenStorageConfigWasUnreadable_TellsTheUser"
   },
   {
     "id": "welcome-close-guards-on-raise-result",
@@ -2912,6 +2976,22 @@
     "filter": "FullyQualifiedName~WindowPlacementStoreTests"
   },
   {
+    "id": "startup-keeps-stale-key-on-plaintext-db",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "Removing encryption swaps the plaintext file in before storage.json is rewritten; a crash or failed write in between leaves the old remembered password, and keying a plaintext file fails every connection with 'file is not a database' at the next start (rubber-duck F-04-1).",
+    "find": "                && !RequiresPassword(options.DatabasePath))",
+    "replace": "                && !RequiresPassword(options.DatabasePath)\n                && options.DatabasePath.Length < 0)",
+    "filter": "Rekey_ToNoPassword_ConfigWriteFailsAfterTheSwap_NextStartOpensTheLibrary"
+  },
+  {
+    "id": "startup-drops-key-on-empty-db-file",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "An empty database file opens without a key, so dropping a remembered password whenever a keyless read succeeds would build the library unencrypted after a crash between file creation and the first write (rubber-duck F-04-1 review follow-up).",
+    "find": "                && new FileInfo(options.DatabasePath).Length > 0",
+    "replace": "                && new FileInfo(options.DatabasePath).Length >= 0",
+    "filter": "RememberedPassword_OnAnEmptyDatabaseFile_IsKept"
+  },
+  {
     "id": "footer-meters-orientation-set-on-the-element",
     "file": "Clipthrough/Views/MainWindow.axaml",
     "why": "Rubber-duck F-14-1. A value set on the element beats every style setter, so an inline Orientation on FooterStats silently disables the bp-narrow override and the two meters stay a 576 DIP row in a 480 DIP window.",
@@ -2934,6 +3014,22 @@
     "find": "            .Select(s => (Screen: s, Overlap: OverlapArea(frame, s.WorkingArea)))",
     "replace": "            .Select(s => (Screen: s, Overlap: OverlapArea(new PixelRect(remembered.Position, OuterPixels(remembered.ClientSize, frameExtra, s.Scaling)), s.WorkingArea)))",
     "filter": "FullyQualifiedName~WindowGeometryTests.ARememberedWindowMostlyOnA100PercentScreen"
+  },
+  {
+    "id": "rekey-export-drops-user-version",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "Adding or removing encryption writes the copy with sqlcipher_export, which does not carry user_version on this SQLite3MC build; without the explicit PRAGMA the copy reads 0. The fixture seeds a non-zero sentinel, because a fresh library and a dropped value both read 0 (rubber-duck F-04-2).",
+    "find": "                    \"PRAGMA rekeyed.user_version = \" + userVersion.ToString(CultureInfo.InvariantCulture) + \"; \" +",
+    "replace": "                    (userVersion.ToString(CultureInfo.InvariantCulture).Length < 0 ? \"PRAGMA rekeyed.user_version = \" + userVersion.ToString(CultureInfo.InvariantCulture) + \"; \" : string.Empty) +",
+    "filter": "FullyQualifiedName~StorageLifecycleTests.Rekey_PlaintextLibrary_BecomesEncryptedAndKeepsEverything|FullyQualifiedName~StorageLifecycleTests.Rekey_EncryptedLibrary_ToNoPassword_OpensWithoutAKey"
+  },
+  {
+    "id": "backup-publishes-snapshot-across-rekey",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "A rekey that finishes between the daily snapshot and its publish has already re-keyed every published backup; publishing the old-key (or plaintext) copy leaves a restore point that does not restore, or plaintext history beside an encrypted library (rubber-duck F-04-3).",
+    "find": "                    if (!string.Equals(current.DatabasePassword, key, StringComparison.Ordinal))",
+    "replace": "                    if (!string.Equals(current.DatabasePassword, key, StringComparison.Ordinal) && key.Length < 0)",
+    "filter": "FullyQualifiedName~Rekey_InTheGapBeforeTheDailyBackupIsPublished_LeavesNoBackupTheNewKeyCannotOpen"
   },
   {
     "id": "window-close-does-not-flush-the-placement",
