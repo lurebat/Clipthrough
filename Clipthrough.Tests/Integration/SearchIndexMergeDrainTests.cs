@@ -112,7 +112,7 @@ public sealed class SearchIndexMergeDrainTests
         for (var n = 0; n < 8; n++)
         {
             var b = data[i++];
-            value = (value << 7) | (ulong)(b & 0x7F);
+            value = (value << 7) | ((ulong)b & 0x7F);
             if ((b & 0x80) == 0)
             {
                 return value;
