@@ -3189,7 +3189,7 @@ public sealed partial class MainWindowViewModelHeadlessTests
         // non-header pages so PRAGMA quick_check inside DatabaseInitializer
         // fails. This is the scenario today's incident produced and the one
         // the startup-error overlay is meant to cover.
-        using (var seed = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+        using (var seed = TestConnections.Create(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
         {
             DataSource = scope.DatabasePath,
             Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadWriteCreate,
