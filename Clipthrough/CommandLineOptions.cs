@@ -30,6 +30,8 @@ public static class CommandLineOptions
     /// </summary>
     public static bool ShowHelp { get; private set; }
 
+    public const string DataDirectoryOption = "--data-dir";
+
     public const string UsageText =
         "Clipthrough — clipboard manager\n" +
         "\n" +
@@ -43,7 +45,41 @@ public static class CommandLineOptions
         "                             the value leaks into the process listing.\n" +
         "      --log-popup-timings    Emit Trace lines around the popup show/hide and\n" +
         "                             refresh pipeline so freezes can be diagnosed.\n" +
-        "                             Alias: --log-timings.\n";
+        "                             Alias: --log-timings.\n" +
+        "      --data-dir <path>      Keep settings, logs and the library in <path>\n" +
+        "                             instead of %LOCALAPPDATA%\\Clipthrough. Wins over\n" +
+        "                             CLIPTHROUGH_DATA_DIR and a portable.flag marker.\n";
+
+    /// <summary>
+    /// The value of <c>--data-dir</c>, or null when it is absent. Separate from
+    /// <see cref="Parse"/> because it is needed before tracing starts: the log
+    /// file lives in the data folder it names.
+    /// </summary>
+    public static string? ReadDataDirectory(IReadOnlyList<string> args)
+    {
+        string? value = null;
+        for (var i = 0; i < args.Count; i++)
+        {
+            var arg = args[i];
+            if (string.IsNullOrEmpty(arg))
+            {
+                continue;
+            }
+
+            // Consume the password's value so it is never read as an option.
+            if (TryReadValue(args, ref i, arg, "--password", "-p", out _))
+            {
+                continue;
+            }
+
+            if (TryReadValue(args, ref i, arg, DataDirectoryOption, null, out var directory))
+            {
+                value = directory;
+            }
+        }
+
+        return value;
+    }
 
     public static void Parse(string[]? args)
     {
@@ -75,6 +111,13 @@ public static class CommandLineOptions
                     "Database password supplied via --password CLI argument. " +
                     "This is intended for development/debugging only and leaks the " +
                     "password to the process list.");
+                continue;
+            }
+
+            // Read by ReadDataDirectory before startup; consumed here so its
+            // value is never mistaken for another option.
+            if (TryReadValue(args, ref i, arg, DataDirectoryOption, null, out _))
+            {
                 continue;
             }
 

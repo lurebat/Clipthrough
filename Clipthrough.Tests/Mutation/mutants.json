@@ -4886,5 +4886,37 @@
     "find": "new(@\"\\bbusy_timeout\\s*(?:=|\\(\\s*[\\w{}$@.]+\\s*\\))\", RegexOptions",
     "replace": "new(@\"\\bbusy_timeout\\s*[=(]\", RegexOptions",
     "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
+  },
+  {
+    "id": "dataroot-cli-beats-env",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "--data-dir must win over CLIPTHROUGH_DATA_DIR and the portable marker (data-folder precedence, user decision).",
+    "find": "if (commandLine is not null)",
+    "replace": "if (commandLine is not null && environmentValue is null)",
+    "filter": "FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "dataroot-env-beats-portable",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "CLIPTHROUGH_DATA_DIR must win over the portable marker (data-folder precedence, user decision).",
+    "find": "if (!string.IsNullOrEmpty(environmentValue))",
+    "replace": "if (!string.IsNullOrEmpty(environmentValue) && !File.Exists(Path.Combine(executableDirectory, PortableMarkerFileName)))",
+    "filter": "FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "dataroot-password-value-consumed",
+    "file": "Clipthrough/CommandLineOptions.cs",
+    "why": "The value of --password is consumed, so a password reading \"--data-dir\" cannot choose a data folder.",
+    "find": "\"--password\", \"-p\", out _))",
+    "replace": "\"--password-unused\", \"-p\", out _))",
+    "filter": "FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "dataroot-portable-marker",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "A portable.flag marker beside the executable must keep the data in a folder beside it (portable mode, user decision).",
+    "find": "if (File.Exists(Path.Combine(executableDirectory, PortableMarkerFileName)))",
+    "replace": "if (File.Exists(Path.Combine(executableDirectory, PortableMarkerFileName)) && executableDirectory.Length < 0)",
+    "filter": "FullyQualifiedName~AppDataRootResolverTests"
   }
 ]
