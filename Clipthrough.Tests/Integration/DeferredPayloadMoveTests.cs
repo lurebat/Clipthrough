@@ -717,6 +717,15 @@ public sealed class DeferredPayloadMoveTests
         Assert.Equal(edited.Length, Scalar(scope, $"SELECT stored_bytes FROM clips WHERE id = {ids[0]};"));
     }
 
+    /// <summary>
+    /// With the sensitive-clip lifetime on, the backup also purges and vacuums its
+    /// copy, and on a damaged library that fails by itself - so "no backup file"
+    /// would hold whether or not the integrity guard ran. With the lifetime off the
+    /// copy of the damaged file succeeds, and only the guard keeps it from being
+    /// published: the case Finding 4b is about.
+    /// </summary>
+    private static Task KeepBackupCopyingTheDamagedLibraryAsync(TemporaryDatabaseScope scope) =>
+        scope.SettingsService.SaveAsync(scope.SettingsService.Current with { EnableSensitiveClipLifetime = false });
     private static string BackupDirectory(TemporaryDatabaseScope scope) =>
         System.IO.Path.Combine(System.IO.Path.GetDirectoryName(scope.DatabasePath)!, "backups");
 
@@ -751,6 +760,7 @@ public sealed class DeferredPayloadMoveTests
             System.IO.File.WriteAllBytes(path, [1, 2, 3]);
         }
 
+        await KeepBackupCopyingTheDamagedLibraryAsync(scope);
         var backup = new Clipthrough.Services.DatabaseBackupService(scope.StorageOptionsService, null, null, null, settingsService: scope.SettingsService, databaseInitializer: scope.DatabaseInitializer);
         await backup.EnsureDailyBackupAsync();
 
@@ -777,6 +787,7 @@ public sealed class DeferredPayloadMoveTests
         CorruptTheMiddleOfTheFile(scope);
         Assert.True(scope.DatabaseInitializer.IsIntegrityCheckOwed);
 
+        await KeepBackupCopyingTheDamagedLibraryAsync(scope);
         var checkRan = false;
         Clipthrough.Services.DatabaseBackupService.BetweenIntegrityStateReads = async () =>
         {
