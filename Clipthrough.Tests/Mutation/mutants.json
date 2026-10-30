@@ -3582,5 +3582,13 @@
     "find": "        catch (NullReferenceException ex) when (decodeWidth is > 0)",
     "replace": "        catch (NullReferenceException ex) when (decodeWidth is < 0)",
     "filter": "FullyQualifiedName~ClipBitmapFactoryHeadlessTests"
+  },
+  {
+    "id": "selection-slice-splice-rereads-live-selection",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-12-1: the selection-slice transform spliced the converted slice at EditedClipSelectionStart/Length read after the async conversion, so moving the selection meanwhile replaced the wrong range.",
+    "find": "                    full.AsSpan(0, sliceStart),\n                    transformedSlice,\n                    full.AsSpan(sliceStart + sliceLength));",
+    "replace": "                    full.AsSpan(0, EditedClipSelectionStart),\n                    transformedSlice,\n                    full.AsSpan(EditedClipSelectionStart + EditedClipSelectionLength));",
+    "filter": "FullyQualifiedName~SelectionSliceTransform"
   }
 ]

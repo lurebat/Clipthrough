@@ -3664,12 +3664,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // An explicit target (the row a context menu was opened on) replaces the
         // checked-clips / selection rule, and never uses a selection slice.
         var checkedClips = explicitTarget is null ? Clips.Where(static c => c.IsChecked).ToList() : new List<ClipItemViewModel>();
+
+        // The converters are async, so the user can move the editor selection or
+        // pick another clip while one runs. Splice with the range and text that
+        // were converted, never with the live properties read after the await.
+        var sliceStart = EditedClipSelectionStart;
+        var sliceLength = EditedClipSelectionLength;
+        var sliceFullText = EditedClipText ?? string.Empty;
+        var sliceClip = SelectedClip;
         var useSelectionSlice = explicitTarget is null
             && checkedClips.Count == 0
-            && SelectedClip is not null
-            && EditedClipSelectionLength > 0
-            && EditedClipSelectionStart >= 0
-            && EditedClipSelectionStart + EditedClipSelectionLength <= (EditedClipText?.Length ?? 0);
+            && sliceClip is not null
+            && sliceLength > 0
+            && sliceStart >= 0
+            && sliceStart + sliceLength <= sliceFullText.Length;
 
         var targets = explicitTarget is not null ? new List<ClipItemViewModel> { explicitTarget }
             : checkedClips.Count > 0 ? checkedClips
@@ -3687,10 +3695,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             string source;
             string result;
-            if (useSelectionSlice && ReferenceEquals(target, SelectedClip))
+            if (useSelectionSlice && ReferenceEquals(target, sliceClip))
             {
-                var full = EditedClipText ?? string.Empty;
-                var slice = full.Substring(EditedClipSelectionStart, EditedClipSelectionLength);
+                var full = sliceFullText;
+                var slice = full.Substring(sliceStart, sliceLength);
                 var transformedSlice = await transform(slice, CancellationToken.None);
                 if (string.Equals(slice, transformedSlice, StringComparison.Ordinal))
                 {
@@ -3698,9 +3706,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 }
                 source = full;
                 result = string.Concat(
-                    full.AsSpan(0, EditedClipSelectionStart),
+                    full.AsSpan(0, sliceStart),
                     transformedSlice,
-                    full.AsSpan(EditedClipSelectionStart + EditedClipSelectionLength));
+                    full.AsSpan(sliceStart + sliceLength));
             }
             else
             {
