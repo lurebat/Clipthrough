@@ -54,11 +54,11 @@
     <PackageReference Include="SQLitePCLRaw.core" Version="3.0.5" />
         <PackageReference Include="System.Drawing.Common" Version="10.0.14" />
             <PackageReference Include="Velopack" Version="1.2.0" />
-    <PackageReference Include="VellumText.Core" Version="0.8.0-audit.6" />
-    <PackageReference Include="VellumText.Avalonia" Version="0.8.0-audit.6" />
-    <PackageReference Include="VellumText.Interop.Html" Version="0.8.0-audit.6" />
-    <PackageReference Include="VellumText.Interop.Rtf" Version="0.8.0-audit.6" />
-    <PackageReference Include="VellumText.Interop.Markdown" Version="0.8.0-audit.6" />
+    <PackageReference Include="VellumText.Core" Version="0.8.0-audit.7" />
+    <PackageReference Include="VellumText.Avalonia" Version="0.8.0-audit.7" />
+    <PackageReference Include="VellumText.Interop.Html" Version="0.8.0-audit.7" />
+    <PackageReference Include="VellumText.Interop.Rtf" Version="0.8.0-audit.7" />
+    <PackageReference Include="VellumText.Interop.Markdown" Version="0.8.0-audit.7" />
     </ItemGroup>
 
     <ItemGroup>
