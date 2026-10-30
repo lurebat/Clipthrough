@@ -3374,5 +3374,13 @@
     "find": "                FileAccess.ReadWrite,\n                FileShare.None);",
     "replace": "                FileAccess.ReadWrite,\n                FileShare.None);\n            _sessionLock.Dispose();",
     "filter": "FullyQualifiedName~ClipExportServiceTests.ALiveSessionsFolder_IsKept"
+  },
+  {
+    "id": "f06-5-backup-before-pending-scan",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-06-5: a clip whose sensitivity scan a crash left pending is unflagged, so the startup backup purge would keep it; startup classifies pending clips before the backup.",
+    "find": "                await RecoverPendingSensitivityAsync().ConfigureAwait(false);",
+    "replace": "                await (_isDisposed ? RecoverPendingSensitivityAsync() : Task.CompletedTask).ConfigureAwait(false);",
+    "filter": "FullyQualifiedName~StartupClassifiesClipsWhoseScanNeverRan_BeforeTakingTheDailyBackup"
   }
 ]

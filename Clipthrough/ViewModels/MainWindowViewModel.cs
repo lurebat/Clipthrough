@@ -6304,6 +6304,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             try
             {
+                // Classify first (rubber-duck F-06-5): a clip captured just
+                // before a crash still has is_sensitive = 0 with its scan
+                // pending, and the backup purge only removes flagged rows.
+                // StartBackgroundServices runs the same recovery later; by then
+                // it usually finds nothing.
+                await RecoverPendingSensitivityAsync().ConfigureAwait(false);
+
                 // Expire first (OD-4a). Otherwise a sensitive clip that outlived
                 // its lifetime while the app was closed is copied into a backup
                 // that is kept for a week, before the maintenance loop's first
