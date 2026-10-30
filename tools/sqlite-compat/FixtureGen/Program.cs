@@ -172,6 +172,9 @@ int Verify(string roundTripJson, string work, string outJson)
         results.Add(new CheckResult { Id = $"2.roundtrip.{i:D2}", Row = 2, Status = status, Detail = detail });
     }
     File.WriteAllText(outJson, JsonSerializer.Serialize(results, Db.Json));
-    Console.WriteLine($"=== verify: {results.Count} files, {results.Count(r => r.Status == "FAIL")} FAIL ===");
-    return 0;
+    var fails = results.Count(r => r.Status == "FAIL");
+    var unexpected = results.Count(r => r.Status == "UNEXPECTED-PASS");
+    Console.WriteLine($"=== verify: {results.Count} files, {fails} FAIL, {unexpected} UNEXPECTED-PASS ===");
+    // This step is the rollback-compatibility gate, so a regression must fail the run, not just print.
+    return fails + unexpected == 0 ? 0 : 1;
 }
