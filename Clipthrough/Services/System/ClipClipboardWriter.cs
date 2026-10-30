@@ -75,8 +75,14 @@ public static class ClipClipboardWriter
 
         if (clip.ContentType == ContentType.RichText)
         {
-            var plainText = ClipDisplayFormatter.RenderRichContent(clip.Content);
-            await WriteAsync(monitor, plainText, () => interaction.CopyRichContentAsync(clip.Content, plainText, clip.ContentFormat));
+            // Capture keeps the source app's plain text in Content and the
+            // markup only in ContentBytes. Publishing Content as the HTML/RTF
+            // payload put the flattened text on the clipboard as "rich" text.
+            // Content is the markup only on rows stored without bytes.
+            var markup = ClipDisplayFormatter.GetRawMarkup(clip);
+            var richContent = string.IsNullOrWhiteSpace(markup) ? clip.Content : markup;
+            var plainText = ClipDisplayFormatter.GetDisplayRichText(clip);
+            await WriteAsync(monitor, plainText, () => interaction.CopyRichContentAsync(richContent, plainText, clip.ContentFormat));
             return true;
         }
 

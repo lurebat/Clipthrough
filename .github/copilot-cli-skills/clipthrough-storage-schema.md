@@ -156,7 +156,7 @@ If you add a column you want searchable, you must:
 ### `clip_payloads` and `app_icons` (U-E1)
 
 - `clip_payloads(clip_id INTEGER PRIMARY KEY REFERENCES clips(id) ON DELETE CASCADE, content_bytes BLOB)` — the raw payload, out of the `clips` row so metadata reads never walk a blob's overflow chain (F-06). Read through a correlated subquery in `ClipSelectColumns`; written by `ClipStoreService.WritePayloadAsync` in the same transaction as the row. Trigger `clips_payload_ad` also deletes it, so a payload cannot outlive its clip on a connection with foreign keys off.
-- `app_icons(hash TEXT PRIMARY KEY, png BLOB NOT NULL)` — one row per distinct icon (F-39). Orphans are deleted at startup and after evictions.
+- `app_icons(hash TEXT PRIMARY KEY, png BLOB NOT NULL)` — one row per distinct icon (F-39). Orphans are deleted at startup and after evictions. The size cap counts each icon once, so its eviction walk subtracts an icon when it evicts the last clip using it, and sweeps icons an earlier purge in the same pass orphaned before reading its total.
 - `idx_clips_source_app_icon_hash` — partial, non-null only; finds orphaned icons. Built only once `payload_move_done` is set (or by the background run right after the move): building it reads every row, which before the move took 19.5-20.7 s cold at 60k. Until it exists, `DeleteOrphanedAppIconsAsync` does nothing.
 - The size cap counts each row's `stored_bytes` (now just `byte_size`) plus every distinct icon once: `TotalStoredBytesSql`.
 - Existing libraries move in `DatabaseInitializer.MovePayloadsOutOfClipsAsync`: id-ordered batches, one transaction each, progress in `app_metadata.payload_move_last_id`, resumable after a crash.
@@ -206,6 +206,13 @@ When you change FTS columns, the tokenizer, or rewrite indexed text with the tri
 count, wrong tokenizer). The schema DDL then recreates it **empty**. So a repair
 has to repopulate the index itself — it returns `bool` for exactly that reason,
 and the caller rebuilds on `true` regardless of `schema_version`.
+
+A launch killed between the drop and the end of the rebuild leaves a table whose
+definition is already current, so the next launch's repair check no longer
+fires. The repair therefore records `app_metadata.fts_rebuild_pending` before it
+drops anything, the next launch rebuilds (and runs the integrity check) while
+that key exists, and `RebuildClipSearchIndexAsync` deletes it once the rebuild
+has committed.
 
 This matters because "FTS needs repair" and "schema version is behind" are
 independent. `HasPendingStructuralWorkAsync` already relies on that: its last

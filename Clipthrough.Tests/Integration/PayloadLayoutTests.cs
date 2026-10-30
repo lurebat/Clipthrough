@@ -115,7 +115,10 @@ public sealed class PayloadLayoutTests
     {
         using var scope = new TemporaryDatabaseScope();
         await scope.DatabaseInitializer.InitializeAsync();
-        scope.SettingsService.SetCurrent(new AppSettings { EnableMaxEntryCount = true, MaxEntryCount = 1 });
+        // The size cap off: with it on, the sweep it runs before reading its total
+        // (rubber-duck F-11-1) would remove this orphan too, and the closing sweep
+        // this test defends would go untested.
+        scope.SettingsService.SetCurrent(new AppSettings { EnableMaxEntryCount = true, MaxEntryCount = 1, EnableMaxLibrarySize = false });
 
         var bigIcon = Enumerable.Range(0, 100_000).Select(static i => (byte)i).ToArray();
         await CaptureImageAsync(scope, [1], bigIcon);
