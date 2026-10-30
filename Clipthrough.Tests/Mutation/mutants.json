@@ -1499,8 +1499,8 @@
     "id": "stored-bytes-not-maintained-on-insert",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "Without the insert trigger every new clip is totalled as zero bytes, so the library size cap never fires.",
-    "find": "                SET stored_bytes = new.byte_size\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        await ExecuteNonQueryAsync(connection, \"DROP TRIGGER IF EXISTS clips_stored_bytes_au;\", cancellationToken);",
-    "replace": "                SET stored_bytes = 0\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        await ExecuteNonQueryAsync(connection, \"DROP TRIGGER IF EXISTS clips_stored_bytes_au;\", cancellationToken);",
+    "find": "                SET stored_bytes = new.byte_size\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        // A row the move has not reached still holds its icon inline, and while no",
+    "replace": "                SET stored_bytes = 0\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        // A row the move has not reached still holds its icon inline, and while no",
     "filter": "FullyQualifiedName~ClipStoredBytesTests"
   },
   {
@@ -4334,5 +4334,21 @@
     "find": "        await ExecuteNonQueryAsync(connection, OcrImagesIndex, cancellationToken);",
     "replace": "        await ExecuteNonQueryAsync(connection, OcrImagesIndex.Length < 0 ? OcrImagesIndex : \"SELECT 1;\", cancellationToken);",
     "filter": "FullyQualifiedName~LeavesTheCurrentOcrIndexInPlace"
+  },
+  {
+    "id": "edit-before-move-drops-inline-icon-from-total",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-13-7: writing byte_size on a row the deferred move has not reached set stored_bytes = byte_size, dropping its still-live inline icon from the size total until the move reached it.",
+    "find": "                    + CASE WHEN new.source_app_icon_hash IS NULL THEN COALESCE(LENGTH(new.source_app_icon), 0) ELSE 0 END",
+    "replace": "                    + CASE WHEN new.source_app_icon_hash IS NULL AND 1 = 0 THEN COALESCE(LENGTH(new.source_app_icon), 0) ELSE 0 END",
+    "filter": "FullyQualifiedName~KeepsCountingItsInlineIcon"
+  },
+  {
+    "id": "edit-before-move-counts-stale-inline-icon",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-13-7: once a write gives an unmoved row a newer icon (source_app_icon_hash), its inline icon is stale and app_icons counts the new one; counting the inline one as well over-counts.",
+    "find": "                    + CASE WHEN new.source_app_icon_hash IS NULL THEN COALESCE(LENGTH(new.source_app_icon), 0) ELSE 0 END",
+    "replace": "                    + CASE WHEN new.source_app_icon_hash IS NULL OR 1 = 1 THEN COALESCE(LENGTH(new.source_app_icon), 0) ELSE 0 END",
+    "filter": "FullyQualifiedName~KeepsCountingItsInlineIcon"
   }
 ]

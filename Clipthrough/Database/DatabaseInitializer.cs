@@ -1596,11 +1596,16 @@ public sealed class DatabaseInitializer : Clipthrough.Services.Search.IPausableW
             END;
             """, cancellationToken);
 
+        // A row the move has not reached still holds its icon inline, and while no
+        // write has given it a newer one (source_app_icon_hash), that icon is live
+        // and counts with the row, as schema 8 counted it (rubber-duck F-13-7).
+        // After the move source_app_icon is NULL everywhere and this is byte_size.
         await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_stored_bytes_au;", cancellationToken);
         await ExecuteNonQueryAsync(connection, """
             CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF byte_size ON clips BEGIN
                 UPDATE clips
                 SET stored_bytes = new.byte_size
+                    + CASE WHEN new.source_app_icon_hash IS NULL THEN COALESCE(LENGTH(new.source_app_icon), 0) ELSE 0 END
                 WHERE id = new.id;
             END;
             """, cancellationToken);

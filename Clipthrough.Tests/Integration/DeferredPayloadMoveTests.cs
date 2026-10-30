@@ -679,6 +679,44 @@ public sealed class DeferredPayloadMoveTests
         Assert.Equal(RepairedTimestamps[1], after[1]);
     }
 
+    /// <summary>
+    /// Rubber-duck F-13-7: a row the move has not reached still holds its icon
+    /// inline, counted in its stored_bytes as schema 8 did. Writing the row's
+    /// byte_size (an edit, a re-copy) fired the trigger that sets stored_bytes =
+    /// byte_size, which dropped that still-live icon from the size total until
+    /// the move reached the row. A write that sets an icon of its own makes the
+    /// inline one stale, and then it is rightly not counted: app_icons has the new one.
+    /// </summary>
+    [Fact]
+    public async Task WritingARowTheMoveHasNotReached_KeepsCountingItsInlineIcon()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 1_048_576 });
+        var ids = SeedSchema8Library(scope, 3);
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+
+        byte[] edited = [1, 2, 3, 4, 5, 6, 7];
+        await scope.ClipStoreService.UpdateDeferredContentAsync(ids[0], new ClipCaptureRequest
+        {
+            ContentText = "edited mid-upgrade",
+            ContentBytes = edited,
+            ContentType = ContentType.Image,
+            ContentFormat = ClipContentFormat.Bitmap,
+        });
+        Assert.Equal(Icon.Length, Scalar(scope, $"SELECT LENGTH(source_app_icon) FROM clips WHERE id = {ids[0]} AND source_app_icon_hash IS NULL;"));
+        Assert.True(
+            Scalar(scope, $"SELECT stored_bytes FROM clips WHERE id = {ids[0]};") == edited.Length + Icon.Length,
+            "An edit to a row the move has not reached dropped its still-inline icon from the size total.");
+
+        // A re-copy that brings an icon sets the hash and byte_size in one statement.
+        Scalar(scope, $"INSERT INTO app_icons (hash, png) VALUES ('newer', x'0102'); UPDATE clips SET source_app_icon_hash = 'newer', byte_size = {edited.Length} WHERE id = {ids[1]};");
+        Assert.Equal(edited.Length, Scalar(scope, $"SELECT stored_bytes FROM clips WHERE id = {ids[1]};"));
+
+        Assert.True(await scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(progress: null));
+        Assert.Equal(edited.Length, Scalar(scope, $"SELECT stored_bytes FROM clips WHERE id = {ids[0]};"));
+    }
+
     private static string BackupDirectory(TemporaryDatabaseScope scope) =>
         System.IO.Path.Combine(System.IO.Path.GetDirectoryName(scope.DatabasePath)!, "backups");
 
