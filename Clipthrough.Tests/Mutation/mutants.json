@@ -4406,5 +4406,13 @@
     "find": "$message.StartsWith($cleanupMarker, [StringComparison]::Ordinal)",
     "replace": "$message.Contains($cleanupMarker, [StringComparison]::Ordinal)",
     "filter": "FullyQualifiedName~CiHeadlessGateScriptTests"
+  },
+  {
+    "id": "loaded-viewmodel-helper-polls-one-second",
+    "file": "Clipthrough.Tests/Headless/MainWindowViewModelHeadlessTests.PendingDeletes.cs",
+    "why": "Rubber-duck F-08-3: CreateLoadedViewModelAsync must wait for the database start itself, not poll the clip count for about a second, or a slow startup fails its callers with a genuine assertion.",
+    "find": "        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);\n\n        Assert.Equal(expectedClips, viewModel.Clips.Count);",
+    "replace": "        await viewModel.InitializeAsync();\n        for (var attempt = 0; attempt < 40 && viewModel.Clips.Count < expectedClips; attempt++)\n        {\n            await Task.Delay(25);\n            Dispatcher.UIThread.RunJobs();\n        }\n\n        Assert.Equal(expectedClips, viewModel.Clips.Count);",
+    "filter": "FullyQualifiedName~TheLoadedViewModelHelper_WaitsForASlowStartup"
   }
 ]
