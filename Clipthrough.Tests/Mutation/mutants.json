@@ -2739,16 +2739,16 @@
     "id": "tool-copies-are-ordinary-exports",
     "file": "Clipthrough/Services/Capture/ClipExportService.cs",
     "why": "F-18. A tool copy written as a full export lands in Documents (often OneDrive-synced) with a metadata.json of the raw content, and outlives the session.",
-    "find": "        => ExportCoreAsync(clip, _sessionRoot, includeMetadata: false, cancellationToken);\n",
-    "replace": "        => ExportAsync(clip, cancellationToken);\n",
+    "find": "        return ExportCoreAsync(clip, _sessionRoot, includeMetadata: false, cancellationToken);\n",
+    "replace": "        return ExportAsync(clip, cancellationToken);\n",
     "filter": "FullyQualifiedName~ClipExportServiceTests.AToolCopy_LandsInTheSessionFolder"
   },
   {
     "id": "tool-copies-survive-exit",
     "file": "Clipthrough/Services/Capture/ClipExportService.cs",
     "why": "F-18. Session working copies of possibly sensitive clips must not outlive the session.",
-    "find": "        TryDeleteDirectory(_sessionRoot);\n    }\n",
-    "replace": "        _ = _sessionRoot;\n    }\n",
+    "find": "        TryDeleteDirectory(_sessionRoot);\n        RetryUnsweptFolders();\n    }\n",
+    "replace": "        _ = _sessionRoot;\n        RetryUnsweptFolders();\n    }\n",
     "filter": "FullyQualifiedName~ClipExportServiceTests.AToolCopy_LandsInTheSessionFolder"
   },
   {
@@ -3414,5 +3414,61 @@
     "find": "            .Select(s => (Screen: s, Overlap: OverlapArea(frame, s.WorkingArea)))",
     "replace": "            .Select(s => (Screen: s, Overlap: OverlapArea(new PixelRect(remembered.Position, OuterPixels(remembered.ClientSize, frameExtra, s.Scaling)), s.WorkingArea)))",
     "filter": "FullyQualifiedName~WindowGeometryTests.ARememberedWindowMostlyOnA100PercentScreen"
+  },
+  {
+    "id": "f06-4-sweep-trusts-pid-alone",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "Rubber-duck F-06-4: a crashed session's PID can be reused, so the sweep must judge a folder by whether its session lock is still held, not by the PID.",
+    "find": "                var abandoned = File.Exists(lockPath)",
+    "replace": "                var abandoned = File.Exists(lockPath) && lockPath.Length < 0",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AFolderWhosePidWasReused"
+  },
+  {
+    "id": "f06-4-session-lock-not-held",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "Rubber-duck F-06-4: a live session keeps its lock open for its lifetime, so a second instance starting up does not sweep its tool copies.",
+    "find": "                FileAccess.ReadWrite,\n                FileShare.None);",
+    "replace": "                FileAccess.ReadWrite,\n                FileShare.None);\n            _sessionLock.Dispose();",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.ALiveSessionsFolder_IsKept"
+  },
+  {
+    "id": "f06-5-backup-before-pending-scan",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-06-5: a clip whose sensitivity scan a crash left pending is unflagged, so the startup backup purge would keep it; startup classifies pending clips before the backup.",
+    "find": "                await RecoverPendingSensitivityAsync().ConfigureAwait(false);",
+    "replace": "                await (_isDisposed ? RecoverPendingSensitivityAsync() : Task.CompletedTask).ConfigureAwait(false);",
+    "filter": "FullyQualifiedName~StartupClassifiesClipsWhoseScanNeverRan_BeforeTakingTheDailyBackup"
+  },
+  {
+    "id": "f06-8-slow-backup-precedes-expiry",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-06-8: the backup-order test must catch a backup that precedes expiry even when the backup is slow enough for the second startup maintenance pass to expire the clip first; the delay stands in for a starved thread pool.",
+    "find": "                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);",
+    "replace": "                await Task.Delay(3000).ConfigureAwait(false);\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);",
+    "filter": "FullyQualifiedName~StartupExpiresSensitiveClips_BeforeTakingTheDailyBackup"
+  },
+  {
+    "id": "f06-7-no-retry-on-tool-copy",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "Rubber-duck F-06-7: an abandoned folder a tool still held at startup is retried on the next tool copy, not left until another start.",
+    "find": "        RetryUnsweptFolders();\n        EnsureSessionLock();",
+    "replace": "        if (_sessionRoot.Length < 0) RetryUnsweptFolders();\n        EnsureSessionLock();",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AnAbandonedFolderLockedAtStartup_IsRemovedOnceReleased"
+  },
+  {
+    "id": "f06-7-no-retry-at-exit",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "Rubber-duck F-06-7: an abandoned folder a tool still held at startup is retried at exit.",
+    "find": "        TryDeleteDirectory(_sessionRoot);\n        RetryUnsweptFolders();",
+    "replace": "        TryDeleteDirectory(_sessionRoot);\n        if (_sessionRoot.Length < 0) RetryUnsweptFolders();",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AnAbandonedFolderLockedAtStartup_IsRemovedAtExit"
+  },
+  {
+    "id": "f06-7-failed-sweep-forgotten",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "Rubber-duck F-06-7: a folder the startup sweep could not remove is remembered for retry.",
+    "find": "                    _unsweptFolders.Add(folder);",
+    "replace": "                    _ = folder;",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AnAbandonedFolderLockedAtStartup"
   }
 ]

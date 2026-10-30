@@ -239,8 +239,18 @@ internal sealed class TestClipboardMonitorService : IClipboardMonitorService
 
     public bool IsRunning { get; private set; }
 
+    /// <summary>
+    /// When set, <see cref="Start"/> blocks until it completes (at most 30 s).
+    /// StartBackgroundServices starts the monitor first, so this holds every
+    /// background service behind it - letting a test see what startup did
+    /// before them without any of them racing it. Start runs on a thread-pool
+    /// thread, so blocking it does not stall the dispatcher.
+    /// </summary>
+    public Task? StartGate { get; init; }
+
     public void Start()
     {
+        StartGate?.Wait(TimeSpan.FromSeconds(30));
         IsRunning = true;
     }
 
