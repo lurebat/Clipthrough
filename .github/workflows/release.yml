@@ -83,6 +83,9 @@ jobs:
         # the desktop bundle would make users download one they never load.
         # Velopack silently ignores a string it cannot parse, so
         # ReleasePackagingTests checks this one the way the client reads it.
+        # The ZIP has no Velopack in front of it; there the same floor comes
+        # from Clipthrough.runtimeconfig.json (set in Clipthrough.csproj), which
+        # the test requires to match this one.
         run: |
           vpk pack `
             --packId Clipthrough `

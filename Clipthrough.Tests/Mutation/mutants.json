@@ -252,8 +252,8 @@
     "why": "Reverts the daily backup to a raw file copy. A checkpoint that cannot finish leaves committed frames in the WAL, and the copied .db then opens as 'database disk image is malformed' - an unopenable backup nobody notices until they need it.",
     "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
     "filter": "DatabaseBackupServiceTests",
-    "find": "                    SqliteDatabaseCopier.CopyDatabase(dbPath, password, tempPath);",
-    "replace": "                    File.Copy(dbPath, tempPath, overwrite: true);"
+    "find": "                        SqliteDatabaseCopier.CopyDatabase(dbPath, key, tempPath);",
+    "replace": "                        File.Copy(dbPath, tempPath, overwrite: true);"
   },
   {
     "id": "move-copies-the-file-instead-of-the-database",
@@ -1280,14 +1280,6 @@
     "filter": "Maintenance_ReportsTheSameTotalsTheDatabaseWould"
   },
   {
-    "id": "maintenance-size-total-is-taken-before-the-purge",
-    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
-    "why": "The size total a purge reports must be read after the orphaned-icon sweep (U-E1). The row walk subtracts the icons its own evictions free (rubber-duck F-11-1), but not an icon that was already orphaned when the pass began, which the sweep also deletes; reporting the walk's number overstates the library by it.",
-    "find": "            if (finalStoredBytes is not null)\n            {\n                finalStoredBytes = await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken, transaction);",
-    "replace": "            if (finalStoredBytes is null)\n            {\n                finalStoredBytes = await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken, transaction);",
-    "filter": "FullyQualifiedName~Maintenance_ReportsTheSameTotalsTheDatabaseWould|FullyQualifiedName~Maintenance_LibrarySizeCap_ReportsTheSizeLeftAfterTheOrphanSweep"
-  },
-  {
     "id": "size-purge-names-every-evicted-clip",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "Goes back to listing every doomed clip as its own SQL parameter. Correct for small purges and fatal past SQLITE_MAX_VARIABLE_NUMBER, which is exactly the purge a user gets after lowering the size cap on a large library.",
@@ -1491,8 +1483,8 @@
     "id": "stored-bytes-not-maintained-on-insert",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "Without the insert trigger every new clip is totalled as zero bytes, so the library size cap never fires.",
-    "find": "                SET stored_bytes = new.byte_size\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        await ExecuteNonQueryAsync(connection, \"DROP TRIGGER IF EXISTS clips_stored_bytes_au;\", cancellationToken);",
-    "replace": "                SET stored_bytes = 0\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        await ExecuteNonQueryAsync(connection, \"DROP TRIGGER IF EXISTS clips_stored_bytes_au;\", cancellationToken);",
+    "find": "                SET stored_bytes = new.byte_size\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        // A row the move has not reached still holds its icon inline, and while no",
+    "replace": "                SET stored_bytes = 0\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        // A row the move has not reached still holds its icon inline, and while no",
     "filter": "FullyQualifiedName~ClipStoredBytesTests"
   },
   {
@@ -2851,8 +2843,8 @@
     "id": "no-ocr-coverage-index",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "F-25. Without it OCR coverage reads ocr_status from each image row, after the payload: 1.9 s at 60k, 9.9 s encrypted.",
-    "find": "            WHERE content_type = 'image';\n\n        -- idx_clips_source_app_icon_hash is not here",
-    "replace": "            WHERE content_type = 'files';\n\n        -- idx_clips_source_app_icon_hash is not here",
+    "find": "ON clips(content_type, ocr_status)\n            WHERE content_type = 'image';",
+    "replace": "ON clips(content_type, ocr_status)\n            WHERE content_type = 'files';",
     "filter": "FullyQualifiedName~StartupScanIndexTests.OcrCoverage_IsAnsweredFromTheImageIndex"
   },
   {
@@ -3005,7 +2997,7 @@
     "why": "F-39. An icon whose last clip was evicted would keep counting against the size cap until the next start.",
     "find": "            // A removed clip may have been the last user of its icon (U-E1).\n            await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);\n",
     "replace": "            // A removed clip may have been the last user of its icon (U-E1).\n            await Task.CompletedTask;\n",
-    "filter": "FullyQualifiedName~PayloadLayoutTests.AnIconWhoseLastClipIsEvicted"
+    "filter": "FullyQualifiedName~PayloadLayoutTests.AnIconWhoseLastClipIsEvicted|FullyQualifiedName~ClipRetentionTests.Maintenance_LibrarySizeCap_CountsTheIconAnEvictionFrees"
   },
   {
     "id": "size-cap-ignores-stored-icons",
@@ -3227,8 +3219,8 @@
     "id": "background-move-never-started",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "U4. The app opens without moving an upgraded library's payloads; nothing else ever moves them.",
-    "find": "        _ = RunDeferredPayloadMoveAsync();",
-    "replace": "        _ = Environment.ProcessorCount < 0 ? RunDeferredPayloadMoveAsync() : Task.CompletedTask;",
+    "find": "        DeferredUpgradeRun = RunDeferredPayloadMoveAsync();",
+    "replace": "        DeferredUpgradeRun = Environment.ProcessorCount < 0 ? RunDeferredPayloadMoveAsync() : Task.CompletedTask;",
     "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests.AnUpgradeFromSchema8"
   },
   {
@@ -3699,16 +3691,16 @@
     "id": "tool-copies-are-ordinary-exports",
     "file": "Clipthrough/Services/Capture/ClipExportService.cs",
     "why": "F-18. A tool copy written as a full export lands in Documents (often OneDrive-synced) with a metadata.json of the raw content, and outlives the session.",
-    "find": "        => ExportCoreAsync(clip, _sessionRoot, includeMetadata: false, cancellationToken);\n",
-    "replace": "        => ExportAsync(clip, cancellationToken);\n",
+    "find": "        return ExportCoreAsync(clip, _sessionRoot, includeMetadata: false, cancellationToken);\n",
+    "replace": "        return ExportAsync(clip, cancellationToken);\n",
     "filter": "FullyQualifiedName~ClipExportServiceTests.AToolCopy_LandsInTheSessionFolder"
   },
   {
     "id": "tool-copies-survive-exit",
     "file": "Clipthrough/Services/Capture/ClipExportService.cs",
     "why": "F-18. Session working copies of possibly sensitive clips must not outlive the session.",
-    "find": "        TryDeleteDirectory(_sessionRoot);\n    }\n",
-    "replace": "        _ = _sessionRoot;\n    }\n",
+    "find": "        TryDeleteDirectory(_sessionRoot);\n        RetryUnsweptFolders();\n    }\n",
+    "replace": "        _ = _sessionRoot;\n        RetryUnsweptFolders();\n    }\n",
     "filter": "FullyQualifiedName~ClipExportServiceTests.AToolCopy_LandsInTheSessionFolder"
   },
   {
@@ -3747,8 +3739,8 @@
     "id": "backups-keep-sensitive-clips",
     "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
     "why": "F-19 / OD-4a. A backup is kept for a week; a sensitive clip copied into it outlives its lifetime there.",
-    "find": "                    PurgeSensitiveClips(tempPath, password);\n",
-    "replace": "                    if (Environment.ProcessorCount < 0) PurgeSensitiveClips(tempPath, password);\n",
+    "find": "                            PurgeSensitiveClips(tempPath, key);\n",
+    "replace": "                            if (Environment.ProcessorCount < 0) PurgeSensitiveClips(tempPath, key);\n",
     "filter": "FullyQualifiedName~BackupSensitivePurgeTests"
   },
   {
@@ -4291,8 +4283,8 @@
     "id": "icon-hash-index-never-built-after-the-move",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "The deferred start leaves the icon-hash index to the background run; without it orphaned icons are never removed and the size cap counts them.",
-    "find": "        await ExecuteNonQueryAsync(connection, AppIconHashIndex, cancellationToken);\n        await DeleteOrphanedAppIconsAsync(connection, cancellationToken);\n        return true;",
-    "replace": "        await DeleteOrphanedAppIconsAsync(connection, cancellationToken);\n        return true;",
+    "find": "        await ExecuteNonQueryAsync(connection, AppIconHashIndex, cancellationToken);\n\n        // The move dropped it (F-13-4).",
+    "replace": "\n        // The move dropped it (F-13-4).",
     "filter": "FullyQualifiedName~ADeferredUpgradeStart_LeavesTheIconHashIndexToTheBackgroundRun"
   },
   {
@@ -4339,8 +4331,8 @@
     "id": "no-backup-after-the-background-run",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "The startup backup waits for the background check; without asking again after the run, the day goes without a backup.",
-    "find": "                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n            }\n            catch (Exception backupFailure)",
-    "replace": "                await Task.CompletedTask.ConfigureAwait(false);\n            }\n            catch (Exception backupFailure)",
+    "find": "                    await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n                }\n                catch (Exception backupFailure)",
+    "replace": "                    await Task.CompletedTask.ConfigureAwait(false);\n                }\n                catch (Exception backupFailure)",
     "filter": "FullyQualifiedName~AnUpgradeFromSchema8_OpensAtOnce"
   },
   {
@@ -4467,8 +4459,8 @@
     "id": "size-cap-counts-icons-orphaned-earlier-in-the-pass",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "Rubber-duck F-11-1. An icon orphaned by the lifetime or count purge earlier in the same maintenance pass is still in app_icons when the size cap reads its total, so the cap evicts clips the library has room for to pay for an icon the closing sweep deletes anyway.",
-    "find": "            if (removedClipIds.Count > 0)",
-    "replace": "            if (removedClipIds.Count < 0)",
+    "find": "        await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);\n\n        if (settings.EnableMaxLibrarySize)",
+    "replace": "        if (removedClipIds.Count < 0)\n        {\n            await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);\n        }\n\n        if (settings.EnableMaxLibrarySize)",
     "filter": "FullyQualifiedName~ClipRetentionTests.Maintenance_LibrarySizeCap_DoesNotCountAnIconAnEarlierPurgeOrphaned"
   },
   {
@@ -4630,5 +4622,197 @@
     "find": "        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);\n\n        Assert.Equal(expectedClips, viewModel.Clips.Count);",
     "replace": "        await viewModel.InitializeAsync();\n        for (var attempt = 0; attempt < 40 && viewModel.Clips.Count < expectedClips; attempt++)\n        {\n            await Task.Delay(25);\n            Dispatcher.UIThread.RunJobs();\n        }\n\n        Assert.Equal(expectedClips, viewModel.Clips.Count);",
     "filter": "FullyQualifiedName~TheLoadedViewModelHelper_WaitsForASlowStartup"
+  },
+  {
+    "id": "background-move-leaves-ocr-index-dropped",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-13-4: the payload move drops idx_clips_ocr_images; the deferred background run never recreated it, so OCR backlog/coverage scans ran without it for the rest of the session.",
+    "find": "        await ExecuteNonQueryAsync(connection, OcrImagesIndex, cancellationToken);",
+    "replace": "        await ExecuteNonQueryAsync(connection, OcrImagesIndex.Length < 0 ? OcrImagesIndex : \"SELECT 1;\", cancellationToken);",
+    "filter": "FullyQualifiedName~LeavesTheCurrentOcrIndexInPlace"
+  },
+  {
+    "id": "edit-before-move-drops-inline-icon-from-total",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-13-7: writing byte_size on a row the deferred move has not reached set stored_bytes = byte_size, dropping its still-live inline icon from the size total until the move reached it.",
+    "find": "                    + CASE WHEN new.source_app_icon_hash IS NULL THEN COALESCE(LENGTH(new.source_app_icon), 0) ELSE 0 END",
+    "replace": "                    + CASE WHEN new.source_app_icon_hash IS NULL AND 1 = 0 THEN COALESCE(LENGTH(new.source_app_icon), 0) ELSE 0 END",
+    "filter": "FullyQualifiedName~KeepsCountingItsInlineIcon"
+  },
+  {
+    "id": "edit-before-move-counts-stale-inline-icon",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-13-7: once a write gives an unmoved row a newer icon (source_app_icon_hash), its inline icon is stale and app_icons counts the new one; counting the inline one as well over-counts.",
+    "find": "                    + CASE WHEN new.source_app_icon_hash IS NULL THEN COALESCE(LENGTH(new.source_app_icon), 0) ELSE 0 END",
+    "replace": "                    + CASE WHEN new.source_app_icon_hash IS NULL OR 1 = 1 THEN COALESCE(LENGTH(new.source_app_icon), 0) ELSE 0 END",
+    "filter": "FullyQualifiedName~KeepsCountingItsInlineIcon"
+  },
+  {
+    "id": "ordinary-start-backs-up-twice",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-13-8: the background run's closing maintenance + daily backup are for a deferred start's held-back backup; on every ordinary start they duplicated the startup pass and raced it onto the same temp file.",
+    "find": "            if (upgraded)",
+    "replace": "            if (upgraded || Environment.ProcessorCount > 0)",
+    "filter": "FullyQualifiedName~AnOrdinaryStart_TakesTheDailyBackupOnce"
+  },
+  {
+    "id": "maintenance-keeps-icons-a-recopy-orphaned",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-11-3. Re-copying a clip from a different app replaces its icon hash and orphans the old icon. Sweeping only after a pass deleted clips left that icon counting toward the size cap (evicting clips the library had room for) and the reported total, until some deletion or a restart.",
+    "find": "        await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);\n\n        if (settings.EnableMaxLibrarySize)",
+    "replace": "        if (removedClipIds.Count > 0)\n        {\n            await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);\n        }\n\n        if (settings.EnableMaxLibrarySize)",
+    "filter": "FullyQualifiedName~ClipRetentionTests.Maintenance_DoesNotCountTheIconAReCopyReplaced"
+  },
+  {
+    "id": "f07-3-prefilter-requires-whole-terms-case-insensitively",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-07-3: a case-insensitive prefilter must not require characters the trigram index folds more narrowly than the IgnoreCase regex, or it drops rows the matcher accepts.",
+    "find": "        if (!filters.CaseSensitive)\n        {\n            terms = [.. terms.SelectMany(SplitAtFoldMismatches)",
+    "replace": "        if (!filters.CaseSensitive && filters.SearchText.Length < 0)\n        {\n            terms = [.. terms.SelectMany(SplitAtFoldMismatches)",
+    "filter": "FullyQualifiedName~InMemorySearchPrefilterTests.ACaseInsensitiveSearch_FindsEveryClipItsMatcherAccepts"
+  },
+  {
+    "id": "f07-3-prefilter-keeps-ascii-i",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-07-3: I and i match U+0130 (and U+0131 in Turkish) under IgnoreCase, which the trigram index does not fold to them.",
+    "find": "            return c is not ('I' or 'i');",
+    "replace": "            return c is not ('I' or 'i') || c < 0x80;",
+    "filter": "FullyQualifiedName~InMemorySearchPrefilterTests.ThePrefilterSafeCharacters_FoldLikeTheRegex|FullyQualifiedName~InMemorySearchPrefilterTests.ACaseInsensitiveSearch_FindsEveryClipItsMatcherAccepts"
+  },
+  {
+    "id": "f07-3-prefilter-keeps-cased-non-ascii",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-07-3: letters newer than SQLite's folding table (Georgian Mtavruli, Cherokee, ...) are case-equal to the regex but not folded by the trigram index.",
+    "find": "        return !char.IsSurrogate(c)\n            && char.ToUpperInvariant(c) == c",
+    "replace": "        return !char.IsSurrogate(c)\n            || char.ToUpperInvariant(c) == c",
+    "filter": "FullyQualifiedName~InMemorySearchPrefilterTests.ThePrefilterSafeCharacters_FoldLikeTheRegex|FullyQualifiedName~InMemorySearchPrefilterTests.ACaseInsensitiveSearch_FindsEveryClipItsMatcherAccepts"
+  },
+  {
+    "id": "app-runtime-floor-dropped",
+    "file": "Clipthrough/Clipthrough.csproj",
+    "why": "Rubber-duck F-15-1. Without the floor on the framework reference, Clipthrough.runtimeconfig.json asks for Microsoft.NETCore.App 10.0.0, so the release ZIP run directly starts on any 10.0.x below the security floor the installer enforces.",
+    "find": "<FrameworkReference Update=\"Microsoft.NETCore.App\" RuntimeFrameworkVersion=\"10.0.14\" />",
+    "replace": "<FrameworkReference Update=\"Microsoft.NETCore.App\" RuntimeFrameworkVersion=\"10.0.0\" />",
+    "filter": "FullyQualifiedName~ReleasePackagingTests.TheAppItselfRequiresTheSameServicedRuntime"
+  },
+  {
+    "id": "installer-floor-raised-without-the-app",
+    "file": ".github/workflows/release.yml",
+    "why": "Rubber-duck F-15-1. The installer and the runtimeconfig must name the same floor; raising one alone makes the ZIP and the Velopack package accept different runtimes.",
+    "find": "            --framework net10.0.14-x64-runtime `",
+    "replace": "            --framework net10.0.15-x64-runtime `",
+    "filter": "FullyQualifiedName~ReleasePackagingTests.TheAppItselfRequiresTheSameServicedRuntime"
+  },
+  {
+    "id": "f06-4-sweep-trusts-pid-alone",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "Rubber-duck F-06-4: a crashed session's PID can be reused, so the sweep must judge a folder by whether its session lock is still held, not by the PID.",
+    "find": "                var abandoned = File.Exists(lockPath)",
+    "replace": "                var abandoned = File.Exists(lockPath) && lockPath.Length < 0",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AFolderWhosePidWasReused"
+  },
+  {
+    "id": "f06-4-session-lock-not-held",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "Rubber-duck F-06-4: a live session keeps its lock open for its lifetime, so a second instance starting up does not sweep its tool copies.",
+    "find": "                FileAccess.ReadWrite,\n                FileShare.None);",
+    "replace": "                FileAccess.ReadWrite,\n                FileShare.None);\n            _sessionLock.Dispose();",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.ALiveSessionsFolder_IsKept"
+  },
+  {
+    "id": "f06-5-backup-before-pending-scan",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-06-5: a clip whose sensitivity scan a crash left pending is unflagged, so the startup backup purge would keep it; startup classifies pending clips before the backup.",
+    "find": "                await RecoverPendingSensitivityAsync().ConfigureAwait(false);",
+    "replace": "                await (_isDisposed ? RecoverPendingSensitivityAsync() : Task.CompletedTask).ConfigureAwait(false);",
+    "filter": "FullyQualifiedName~StartupClassifiesClipsWhoseScanNeverRan_BeforeTakingTheDailyBackup"
+  },
+  {
+    "id": "f06-8-slow-backup-precedes-expiry",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-06-8: the backup-order test must catch a backup that precedes expiry even when the backup is slow enough for the second startup maintenance pass to expire the clip first; the delay stands in for a starved thread pool.",
+    "find": "                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);",
+    "replace": "                await Task.Delay(3000).ConfigureAwait(false);\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);",
+    "filter": "FullyQualifiedName~StartupExpiresSensitiveClips_BeforeTakingTheDailyBackup"
+  },
+  {
+    "id": "f06-7-no-retry-on-tool-copy",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "Rubber-duck F-06-7: an abandoned folder a tool still held at startup is retried on the next tool copy, not left until another start.",
+    "find": "        RetryUnsweptFolders();\n        EnsureSessionLock();",
+    "replace": "        if (_sessionRoot.Length < 0) RetryUnsweptFolders();\n        EnsureSessionLock();",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AnAbandonedFolderLockedAtStartup_IsRemovedOnceReleased"
+  },
+  {
+    "id": "f06-7-no-retry-at-exit",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "Rubber-duck F-06-7: an abandoned folder a tool still held at startup is retried at exit.",
+    "find": "        TryDeleteDirectory(_sessionRoot);\n        RetryUnsweptFolders();",
+    "replace": "        TryDeleteDirectory(_sessionRoot);\n        if (_sessionRoot.Length < 0) RetryUnsweptFolders();",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AnAbandonedFolderLockedAtStartup_IsRemovedAtExit"
+  },
+  {
+    "id": "f06-7-failed-sweep-forgotten",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "Rubber-duck F-06-7: a folder the startup sweep could not remove is remembered for retry.",
+    "find": "                    _unsweptFolders.Add(folder);",
+    "replace": "                    _ = folder;",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AnAbandonedFolderLockedAtStartup"
+  },
+  {
+    "id": "guard-target-typed-construction",
+    "file": "Clipthrough.Tests/Unit/ConnectionConstructionGuardTests.cs",
+    "why": "Rubber-duck F-10-2: the construction rule must catch a target-typed new() (SqliteConnection c = new(cs)); disabling that alternative lets the bypass through.",
+    "find": "+ @\"|\\bSqliteConnection\\s*\\??\\s+",
+    "replace": "+ @\"|(?!)\\bSqliteConnection\\s*\\??\\s+",
+    "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
+  },
+  {
+    "id": "guard-qualified-construction",
+    "file": "Clipthrough.Tests/Unit/ConnectionConstructionGuardTests.cs",
+    "why": "Rubber-duck F-10-2: the construction rule must catch a namespace-qualified type (new Microsoft.Data.Sqlite.SqliteConnection(...)); a live bypass of exactly this form was in the headless tests.",
+    "find": "(?:global::)?(?:\\w+\\s*\\.\\s*)*SqliteConnection",
+    "replace": "(?:global::)?SqliteConnection",
+    "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
+  },
+  {
+    "id": "guard-connectionstring-spacing",
+    "file": "Clipthrough.Tests/Unit/ConnectionConstructionGuardTests.cs",
+    "why": "Rubber-duck F-10-2: the connection-string rule must catch an assignment whatever the spacing (.ConnectionString=cs); reverting to the fixed \" =\" spelling lets it through.",
+    "find": "@\"\\.\\s*ConnectionString\\s*=(?!=)\"",
+    "replace": "@\"\\.ConnectionString =(?!=)\"",
+    "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
+  },
+  {
+    "id": "plain-text-copy-skips-search-commit",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-09-3 (S40/OD-9b). Copying a result as plain text (Ctrl+Shift+C, Copy as plain text menus) is acting on it, so it must commit the search that found it; without the call the query never reaches search history.",
+    "find": "whichever copy it is.\n        _ = CommitSearchQueryAsync();",
+    "replace": "whichever copy it is.\n        _ = clip.Clip.Id < 0 ? CommitSearchQueryAsync() : Task.CompletedTask;",
+    "filter": "CopyingAResultAsPlainText_RecordsTheQuery"
+  },
+  {
+    "id": "backup-publishes-snapshot-across-rekey",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "A rekey that finishes between the daily snapshot and its publish has already re-keyed every published backup; publishing the old-key (or plaintext) copy leaves a restore point that does not restore, or plaintext history beside an encrypted library (rubber-duck F-04-3).",
+    "find": "                    if (!string.Equals(current.DatabasePassword, key, StringComparison.Ordinal))",
+    "replace": "                    if (!string.Equals(current.DatabasePassword, key, StringComparison.Ordinal) && key.Length < 0)",
+    "filter": "FullyQualifiedName~Rekey_InTheGapBeforeTheDailyBackupIsPublished_LeavesNoBackupTheNewKeyCannotOpen"
+  },
+  {
+    "id": "window-close-does-not-flush-the-placement",
+    "file": "Clipthrough/Views/MainWindow.Layout.cs",
+    "why": "Rubber-duck F-14-4. The placement store writes in the background and the process exits as soon as the main window has closed, so without waiting for the write on Closed the last size and position can be cut off on the way to the disk.",
+    "find": "        Closed += (_, _) => m_placementStore?.Flush();",
+    "replace": "        Closed += (_, _) => (m_placementStore is null ? m_placementStore : null)?.Flush();",
+    "filter": "FullyQualifiedName~WindowPlacementHeadlessTests.ClosingTheWindow_SavesAndThenWaitsForTheWrite"
+  },
+  {
+    "id": "guard-busy-timeout-flags-prose",
+    "file": "Clipthrough.Tests/Unit/ConnectionConstructionGuardTests.cs",
+    "why": "The busy_timeout rule matched prose such as \"busy_timeout (5 s)\" in a comment, so a code comment failed the guard (found when the upgrade start merged with the strengthened guard, rubber-duck F-10-2 follow-up).",
+    "find": "new(@\"\\bbusy_timeout\\s*(?:=|\\(\\s*[\\w{}$@.]+\\s*\\))\", RegexOptions",
+    "replace": "new(@\"\\bbusy_timeout\\s*[=(]\", RegexOptions",
+    "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
   }
 ]

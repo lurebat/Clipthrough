@@ -190,6 +190,8 @@ Risks, measured unless marked:
 
 - `pwsh run-all.ps1`: build, `FixtureGen gen`, the three harnesses with bench, and `FixtureGen verify` per
   candidate. Its sections are `[R:A]`, `[R:B <tag>]`, `[R:B.2]`, `[R:package sizes]`, `[R:summary]`; `[R:supplementary]` holds the nuget.org registration/deprecation, version-list, Authenticode and search outputs.
+  It exits non-zero when any `FixtureGen verify` step reports a FAIL or UNEXPECTED-PASS (the rollback-compatibility
+  gate); FAIL rows from the harnesses are evaluation findings about a candidate and do not fail the run.
 - NuGet API queries via `Invoke-RestMethod`:
   - `https://api.nuget.org/v3-flatcontainer/<id>/index.json` for version lists;
   - `.../registration5-gz-semver2/<id>/index.json` for dates, licences, dependencies and the `deprecation`

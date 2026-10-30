@@ -63,7 +63,9 @@ Four separate assumptions, each wrong on a scaled or changed monitor:
   between grid rows and columns, because Avalonia grid definitions cannot be
   set from styles. Wide, at 1100 DIP and above, is the original layout.
 - **Remembered placement:** `IWindowPlacementStore` writes window.json beside
-  settings.json. It is restored through `WindowGeometry.Restore`, so a saved
+  settings.json, in the background; the main window's `Closed` waits for the
+  last write (`Flush`), because the process exits right after. It is restored
+  through `WindowGeometry.Restore`, so a saved
   rectangle on a monitor that is gone comes back on the primary screen,
   clamped to it.
 
