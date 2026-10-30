@@ -3886,5 +3886,29 @@
     "find": "OR COALESCE(instr(c.content, char(0)), 0) > 0)",
     "replace": "OR COALESCE(instr(c.content, char(0)), 0) < 0)",
     "filter": "FullyQualifiedName~AClipWithAnEmbeddedNul_IsNeverPassedOffAsComplete"
+  },
+  {
+    "id": "f07-3-prefilter-requires-whole-terms-case-insensitively",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-07-3: a case-insensitive prefilter must not require characters the trigram index folds more narrowly than the IgnoreCase regex, or it drops rows the matcher accepts.",
+    "find": "        if (!filters.CaseSensitive)\n        {\n            terms = [.. terms.SelectMany(SplitAtFoldMismatches)",
+    "replace": "        if (!filters.CaseSensitive && filters.SearchText.Length < 0)\n        {\n            terms = [.. terms.SelectMany(SplitAtFoldMismatches)",
+    "filter": "FullyQualifiedName~InMemorySearchPrefilterTests.ACaseInsensitiveSearch_FindsEveryClipItsMatcherAccepts"
+  },
+  {
+    "id": "f07-3-prefilter-keeps-ascii-i",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-07-3: I and i match U+0130 (and U+0131 in Turkish) under IgnoreCase, which the trigram index does not fold to them.",
+    "find": "            return c is not ('I' or 'i');",
+    "replace": "            return c is not ('I' or 'i') || c < 0x80;",
+    "filter": "FullyQualifiedName~InMemorySearchPrefilterTests.ThePrefilterSafeCharacters_FoldLikeTheRegex|FullyQualifiedName~InMemorySearchPrefilterTests.ACaseInsensitiveSearch_FindsEveryClipItsMatcherAccepts"
+  },
+  {
+    "id": "f07-3-prefilter-keeps-cased-non-ascii",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-07-3: letters newer than SQLite's folding table (Georgian Mtavruli, Cherokee, ...) are case-equal to the regex but not folded by the trigram index.",
+    "find": "        return !char.IsSurrogate(c)\n            && char.ToUpperInvariant(c) == c",
+    "replace": "        return !char.IsSurrogate(c)\n            || char.ToUpperInvariant(c) == c",
+    "filter": "FullyQualifiedName~InMemorySearchPrefilterTests.ThePrefilterSafeCharacters_FoldLikeTheRegex|FullyQualifiedName~InMemorySearchPrefilterTests.ACaseInsensitiveSearch_FindsEveryClipItsMatcherAccepts"
   }
 ]
