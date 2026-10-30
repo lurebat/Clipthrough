@@ -62,6 +62,16 @@ search starts at one page.
    (`Math.Min(filters.Limit, PageSize)`) because it is a recall knob, not a
    depth.
 
+5. **A refresh must not apply a result that a load-more page overtook.** The
+   depth is read when the request is built. A page that lands between then and
+   the apply is not in the result, so the diff deleted it: 201 rows went back to
+   200 and the page the user had just scrolled in vanished. Any refresh could do
+   it - a capture, an OCR result, a filter change - while a page was loading.
+   `LoadMoreAsync` bumps `_loadMorePageVersion` when its page lands, and the
+   apply step discards and re-queues a result built before that, as it already
+   does for `_clipMutationVersion`. Pages land only when the user scrolls,
+   so the re-run cannot loop the way a write stream could.
+
 ## Tests
 
 `MainWindowViewModelHeadlessTests`:
@@ -74,3 +84,10 @@ search starts at one page.
 - `Refresh_ResetsPaging_EvenWhenAClipWriteStraddlesTheQueryChange` - holds a
   clip write open via `BlockingWriteClipStore` so the refresh takes its retry
   path, then changes the query. Defends invariant 2.
+  It waits for `WhenRefreshesIdleAsync` rather than for the count it asserts:
+  startup queues a refresh of its own, and a wait that stops at the expected
+  count passes on a transient value.
+- `LoadMore_KeepsItsPage_WhenARefreshRequestedWhileItLoadsLandsAfterIt` and
+  `LoadMore_KeepsItsPage_WhenItLandsDuringAnInFlightRefresh` hold the page and
+  the refresh in flight with `BlockingWriteClipStore.BeforeSearch` and force
+  each ordering. Defends invariant 5.
