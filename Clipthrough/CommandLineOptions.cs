@@ -84,10 +84,10 @@ public static class CommandLineOptions
                 continue;
             }
 
-            // Present without a folder - last, or followed by another option -
+            // Present without a folder - last, or followed by anything that reads as an option ("-p") -
             // is reported at startup rather than ignored.
             if (string.Equals(arg, DataDirectoryOption, StringComparison.OrdinalIgnoreCase)
-                && (i + 1 >= args.Count || args[i + 1].StartsWith("--", StringComparison.Ordinal)))
+                && (i + 1 >= args.Count || args[i + 1].StartsWith('-')))
             {
                 dataDirectory = string.Empty;
                 continue;

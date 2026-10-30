@@ -128,6 +128,7 @@ public sealed class AppDataRootResolverTests : IDisposable
     [Theory]
     [InlineData(true, "--help")]
     [InlineData(true, "--data-dir", "--help")]
+    [InlineData(true, "--data-dir", "-h")]
     [InlineData(false, "--password", "--help")]
     [InlineData(false, "--data-dir", "D:\\data")]
     public void Help_IsReadWithoutTheRestOfTheCommandLine(bool expected, params string[] args)

@@ -54,6 +54,58 @@ public sealed class AppDataRootValidationTests : IDisposable
         Assert.Equal(AppText.FormatDataFolderBlank(AppDataRootSource.EnvironmentVariable), error.Message);
     }
 
+    // A value that reads as an option is not a folder: "--data-dir -p secret"
+    // must not create a folder called "-p" in the working directory. Reported
+    // as a missing folder, with a working variable present so a fallback to it
+    // would show.
+    [Theory]
+    [InlineData("--data-dir", "-p", "secret")]
+    [InlineData("--data-dir", "-x")]
+    [InlineData("--data-dir=-x")]
+    [InlineData("--data-dir", "--log-timings")]
+    public void AnOptionWhereTheFolderShouldBe_IsAMissingFolder(params string[] args)
+    {
+        var error = Assert.Throws<AppDataRootException>(() => Resolve(args, environment: Path.Combine(_work, "env")));
+
+        Assert.Equal(AppText.DataFolderMissingValue, error.Message);
+    }
+
+    // The variable is set once and read from wherever Clipthrough starts - a
+    // shortcut, a script, sign-in (System32) - so a relative value names a
+    // different folder each time. Rejected up front rather than resolved.
+    [Theory]
+    [InlineData("relative-data")]
+    [InlineData("..\\data")]
+    [InlineData("\\rooted-without-a-drive")]
+    [InlineData("C:drive-relative")]
+    public void ARelativeEnvironmentVariable_IsAnError(string value)
+    {
+        PlacePortableMarker();
+
+        var error = Assert.Throws<AppDataRootException>(() => Resolve([], environment: value));
+
+        Assert.Equal(AppText.FormatDataFolderNotAbsolute(value), error.Message);
+    }
+
+    [Fact]
+    public void AnEnvironmentVariableThatExpandsToAFullPath_IsAccepted()
+    {
+        Environment.SetEnvironmentVariable("CT_DATAROOT_TEST_BASE", _work);
+        try
+        {
+            var root = Resolve([], environment: "%CT_DATAROOT_TEST_BASE%\\env");
+
+            Assert.Equal(Path.Combine(_work, "env"), root.Directory);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CT_DATAROOT_TEST_BASE", null);
+        }
+    }
+
+    private void PlacePortableMarker()
+        => File.WriteAllText(Path.Combine(_exeDirectory, AppDataRootResolver.PortableMarkerFileName), string.Empty);
+
     // An option that names an impossible path does not hand over to the next
     // way of choosing a folder: precedence picks the source, and the source
     // either works or is reported.

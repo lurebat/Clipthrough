@@ -48,7 +48,8 @@ public static class AppDataRootResolver
         var commandLine = CommandLineOptions.ReadDataDirectory(args);
         if (commandLine is not null)
         {
-            if (string.IsNullOrWhiteSpace(commandLine))
+            // A value that reads as an option (--data-dir=-x) is no folder either.
+            if (string.IsNullOrWhiteSpace(commandLine) || commandLine.TrimStart().StartsWith('-'))
             {
                 throw new AppDataRootException(AppText.DataFolderMissingValue);
             }
@@ -102,6 +103,13 @@ public static class AppDataRootResolver
         if (value.IndexOfAny(Path.GetInvalidPathChars()) >= 0 || expanded.IndexOfAny(Path.GetInvalidPathChars()) >= 0)
         {
             throw new AppDataRootException(AppText.FormatDataFolderInvalid(value, source, AppText.DataFolderInvalidCharacters));
+        }
+
+        // The variable is read from wherever Clipthrough starts - a shortcut, a
+        // script, sign-in in System32 - so only a full path names one folder.
+        if (source == AppDataRootSource.EnvironmentVariable && !Path.IsPathFullyQualified(expanded))
+        {
+            throw new AppDataRootException(AppText.FormatDataFolderNotAbsolute(value));
         }
 
         try

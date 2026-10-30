@@ -5078,5 +5078,37 @@
     "find": "Source == AppDataRootSource.CommandLine",
     "replace": "Source == AppDataRootSource.Portable",
     "filter": "FullyQualifiedName~AppDataRootResolverTests|FullyQualifiedName~UpdateServiceTests"
+  },
+  {
+    "id": "dataroot-env-must-be-fully-qualified",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "A relative CLIPTHROUGH_DATA_DIR - including rooted-but-not-qualified forms like \\data and C:data - names a different folder per start directory, so it is rejected up front (coordinator decision).",
+    "find": "if (source == AppDataRootSource.EnvironmentVariable && !Path.IsPathFullyQualified(expanded))",
+    "replace": "if (source == AppDataRootSource.EnvironmentVariable && !Path.IsPathRooted(expanded))",
+    "filter": "FullyQualifiedName~AppDataRootValidationTests|FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "dataroot-env-relative-rejected",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "A relative CLIPTHROUGH_DATA_DIR must be reported, not resolved against the working directory (coordinator decision).",
+    "find": "if (source == AppDataRootSource.EnvironmentVariable && !Path.IsPathFullyQualified(expanded))",
+    "replace": "if (source == AppDataRootSource.EnvironmentVariable && !Path.IsPathFullyQualified(expanded) && expanded.Length < 0)",
+    "filter": "FullyQualifiedName~AppDataRootValidationTests|FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "dataroot-dash-value-is-missing",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "--data-dir=-x names no folder; it must be reported as a missing value rather than create a folder called -x (coordinator decision).",
+    "find": "|| commandLine.TrimStart().StartsWith('-'))",
+    "replace": "|| commandLine.Length < 0)",
+    "filter": "FullyQualifiedName~AppDataRootValidationTests|FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "dataroot-dash-next-arg-not-consumed",
+    "file": "Clipthrough/CommandLineOptions.cs",
+    "why": "A single-dash option after --data-dir (-p, -h) is an option, not the folder; consuming it hid -h from the help check (coordinator decision).",
+    "find": "args[i + 1].StartsWith('-')))",
+    "replace": "args[i + 1].StartsWith(\"--\", StringComparison.Ordinal)))",
+    "filter": "FullyQualifiedName~AppDataRootValidationTests|FullyQualifiedName~AppDataRootResolverTests"
   }
 ]
