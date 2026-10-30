@@ -3382,5 +3382,13 @@
     "find": "                await RecoverPendingSensitivityAsync().ConfigureAwait(false);",
     "replace": "                await (_isDisposed ? RecoverPendingSensitivityAsync() : Task.CompletedTask).ConfigureAwait(false);",
     "filter": "FullyQualifiedName~StartupClassifiesClipsWhoseScanNeverRan_BeforeTakingTheDailyBackup"
+  },
+  {
+    "id": "f06-8-slow-backup-precedes-expiry",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-06-8: the backup-order test must catch a backup that precedes expiry even when the backup is slow enough for the second startup maintenance pass to expire the clip first; the delay stands in for a starved thread pool.",
+    "find": "                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);",
+    "replace": "                await Task.Delay(3000).ConfigureAwait(false);\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);",
+    "filter": "FullyQualifiedName~StartupExpiresSensitiveClips_BeforeTakingTheDailyBackup"
   }
 ]

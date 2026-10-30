@@ -10,21 +10,9 @@ using Xunit;
 
 namespace Clipthrough.Tests.Headless;
 
-/// <summary>F-19 / OD-4a, ordering half: expiry runs before the startup backup.</summary>
+/// <summary>F-19 / OD-4a, ordering half: what startup does before the daily backup.</summary>
 public sealed partial class MainWindowViewModelHeadlessTests
 {
-    private sealed class ObservingBackupService(Func<Task<bool>> isExpiredClipStillLive) : IDatabaseBackupService
-    {
-        public TaskCompletionSource<bool> ExpiredClipLiveAtBackup { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public async Task EnsureDailyBackupAsync(CancellationToken cancellationToken = default)
-            => ExpiredClipLiveAtBackup.TrySetResult(await isExpiredClipStillLive());
-
-        public IReadOnlyList<DatabaseBackupInfo> ListBackups() => Array.Empty<DatabaseBackupInfo>();
-
-        public Task RestoreAsync(string backupPath, CancellationToken cancellationToken = default) => Task.CompletedTask;
-    }
-
     private sealed class ObservingBackupService<T>(Func<Task<T>> observe) : IDatabaseBackupService
     {
         public TaskCompletionSource<T> Observed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -140,18 +128,7 @@ public sealed partial class MainWindowViewModelHeadlessTests
             command.ExecuteNonQuery();
         }
 
-        var backup = new ObservingBackupService(async () => await scope.ClipStoreService.GetByIdAsync(clip.Id) is not null);
-        using var viewModel = CreateViewModel(scope, new TestClipboardMonitorService(), new TestSystemInteractionService(), new TestSessionLogService(), databaseBackupService: backup);
-        await viewModel.InitializeAsync();
-        viewModel.SetMainWindowVisible(true);
-        for (var i = 0; i < 400 && !backup.ExpiredClipLiveAtBackup.Task.IsCompleted; i++)
-        {
-            await Task.Delay(25);
-            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
-        }
-
-        Assert.True(backup.ExpiredClipLiveAtBackup.Task.IsCompleted, "The startup backup never ran.");
-        var observed = await backup.ExpiredClipLiveAtBackup.Task;
+        var observed = await ObserveStartupBackupAsync(scope, async () => await scope.ClipStoreService.GetByIdAsync(clip.Id) is not null);
 
         Assert.False(observed, "The startup backup ran while an expired sensitive clip was still in the library.");
     }
