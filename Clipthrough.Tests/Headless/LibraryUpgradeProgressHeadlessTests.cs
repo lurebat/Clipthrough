@@ -464,8 +464,11 @@ public sealed class LibraryUpgradeProgressHeadlessTests
                 scope.DatabaseInitializer);
 
             await viewModel.InitializeAsync();
+            // On the view model's list, not the service's last publish: the publish
+            // happens on the background run's thread and reaches the list through a
+            // posted UI job, which may still be queued when the service shows it.
             var clock = Stopwatch.StartNew();
-            while (scope.NotificationService.LastNotification?.Title != AppText.LibraryOptimizeFailedTitle && clock.Elapsed < TimeSpan.FromSeconds(20))
+            while (!viewModel.Notifications.Any(n => n.Title == AppText.LibraryOptimizeFailedTitle) && clock.Elapsed < TimeSpan.FromSeconds(20))
             {
                 await Task.Delay(20);
                 Dispatcher.UIThread.RunJobs();

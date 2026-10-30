@@ -717,6 +717,15 @@ public sealed class DeferredPayloadMoveTests
         Assert.Equal(edited.Length, Scalar(scope, $"SELECT stored_bytes FROM clips WHERE id = {ids[0]};"));
     }
 
+    /// <summary>
+    /// With the sensitive-clip lifetime on, the backup also purges and vacuums its
+    /// copy, and on a damaged library that fails by itself - so "no backup file"
+    /// would hold whether or not the integrity guard ran. With the lifetime off the
+    /// copy of the damaged file succeeds, and only the guard keeps it from being
+    /// published: the case Finding 4b is about.
+    /// </summary>
+    private static Task KeepBackupCopyingTheDamagedLibraryAsync(TemporaryDatabaseScope scope) =>
+        scope.SettingsService.SaveAsync(scope.SettingsService.Current with { EnableSensitiveClipLifetime = false });
     private static string BackupDirectory(TemporaryDatabaseScope scope) =>
         System.IO.Path.Combine(System.IO.Path.GetDirectoryName(scope.DatabasePath)!, "backups");
 
@@ -751,11 +760,52 @@ public sealed class DeferredPayloadMoveTests
             System.IO.File.WriteAllBytes(path, [1, 2, 3]);
         }
 
+        await KeepBackupCopyingTheDamagedLibraryAsync(scope);
         var backup = new Clipthrough.Services.DatabaseBackupService(scope.StorageOptionsService, null, null, null, settingsService: scope.SettingsService, databaseInitializer: scope.DatabaseInitializer);
         await backup.EnsureDailyBackupAsync();
 
         Assert.False(System.IO.File.Exists(TodaysBackup(scope)), "A backup was taken from a library that failed its integrity check.");
         Assert.All(older, path => Assert.True(System.IO.File.Exists(path), $"{System.IO.Path.GetFileName(path)} was pruned."));
+    }
+
+    /// <summary>
+    /// The startup backup reads two things the background check writes: whether
+    /// the check failed, and whether it is still owed. A failing check sets the
+    /// first, then clears the second. Read in that same order, a check that lands
+    /// between the two reads is seen as neither failed nor owed, and the backup
+    /// copies the damaged library (Finding 4b: never back up a library that failed
+    /// its check this session).
+    /// </summary>
+    [Fact]
+    public async Task TheDailyBackup_IsNotTaken_WhenTheCheckFailsBetweenItsTwoReads()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        SeedSchema8Library(scope, 3);
+        await SeedFillerPagesAsync(scope);
+        await scope.DatabaseInitializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+        CorruptTheMiddleOfTheFile(scope);
+        Assert.True(scope.DatabaseInitializer.IsIntegrityCheckOwed);
+
+        await KeepBackupCopyingTheDamagedLibraryAsync(scope);
+        var checkRan = false;
+        Clipthrough.Services.DatabaseBackupService.BetweenIntegrityStateReads = async () =>
+        {
+            checkRan = true;
+            await Assert.ThrowsAsync<InvalidOperationException>(() => scope.DatabaseInitializer.RunDeferredPayloadMoveAsync(progress: null));
+        };
+        try
+        {
+            var backup = new Clipthrough.Services.DatabaseBackupService(scope.StorageOptionsService, null, null, null, settingsService: scope.SettingsService, databaseInitializer: scope.DatabaseInitializer);
+            await backup.EnsureDailyBackupAsync();
+        }
+        finally
+        {
+            Clipthrough.Services.DatabaseBackupService.BetweenIntegrityStateReads = null;
+        }
+
+        Assert.True(scope.DatabaseInitializer.HasFailedIntegrityCheck || !checkRan, "The forced check did not fail, so this proves nothing.");
+        Assert.False(System.IO.File.Exists(TodaysBackup(scope)), "A daily backup was taken from a library that failed its integrity check");
     }
 
     /// <summary>
