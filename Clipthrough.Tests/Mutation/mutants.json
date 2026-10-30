@@ -4355,8 +4355,8 @@
     "id": "source-url-read-through-the-string-view",
     "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
     "why": "Live check C7: the string accessor decodes every format as UTF-16, so Chromium's UTF-8 source URL became byte-pair mojibake. The bytes must be read and decoded per format.",
-    "find": "            var bytesValue = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(formatName));\n            if (bytesValue is { Length: > 0 })\n            {\n                var decoded = DecodeSourceUrl(formatName, bytesValue);",
-    "replace": "            var bytesValue = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(formatName));\n            if (bytesValue is { Length: > 0 } && formatName.Length < 0)\n            {\n                var decoded = DecodeSourceUrl(formatName, bytesValue);",
+    "find": "            var bytesValue = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(formatName));\n            if (bytesValue is { Length: > 0 })\n            {\n                var decoded = DecodeSourceUrl(formatName, bytesValue, ansiCodePage);",
+    "replace": "            var bytesValue = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(formatName));\n            if (bytesValue is { Length: > 0 } && formatName.Length < 0)\n            {\n                var decoded = DecodeSourceUrl(formatName, bytesValue, ansiCodePage);",
     "filter": "FullyQualifiedName~ClipboardSourceUrlTests"
   },
   {
@@ -4390,5 +4390,13 @@
     "find": "                Level = AppNotificationLevel.Error,\n                IsPersistent = true,\n                Actions =\n                [\n                    new AppNotificationAction\n                    {\n                        // Any action dismisses its notification; this one does nothing else.",
     "replace": "                Level = AppNotificationLevel.Error,\n                IsPersistent = ex.Message.Length < 0,\n                Actions =\n                [\n                    new AppNotificationAction\n                    {\n                        // Any action dismisses its notification; this one does nothing else.",
     "filter": "FullyQualifiedName~ACorruptLibrary_IsNotMovedInTheBackground"
+  },
+  {
+    "id": "source-url-ansi-decoded-as-latin1",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "why": "Rubber-duck F-16-1. The ANSI UniformResourceLocator format is in the system ANSI code page; decoding it as Latin-1 turns 0x80 into a C1 control instead of the euro sign in cp1252, and 0xC0 into A-grave instead of Cyrillic A in cp1251.",
+    "find": "\"UniformResourceLocator\" => AnsiEncoding(ansiCodePage).GetString(bytes),",
+    "replace": "\"UniformResourceLocator\" => (ansiCodePage < 0 ? AnsiEncoding(ansiCodePage) : Encoding.Latin1).GetString(bytes),",
+    "filter": "TheAnsiUrlFormat_IsDecodedInTheAnsiCodePage"
   }
 ]

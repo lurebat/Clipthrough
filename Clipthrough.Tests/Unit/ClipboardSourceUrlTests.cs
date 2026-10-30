@@ -112,6 +112,24 @@ public sealed class ClipboardSourceUrlTests
         Assert.Equal(Url, await ClipboardMonitorService.ReadSourceUrlAsync(transfer));
     }
 
+    /// <summary>
+    /// The ANSI format is in the system's ANSI code page, not Latin-1. The two
+    /// agree on ASCII, so the fixture above cannot tell them apart; these bytes
+    /// differ in every candidate. 0x80 is the euro sign in cp1252 and a C1
+    /// control in Latin-1; 0xC0 is Cyrillic A in cp1251 and A-grave in both
+    /// cp1252 and Latin-1.
+    /// </summary>
+    [Theory]
+    [InlineData(1252, (byte)0x80, "https://example.com/price/\u20ac")]
+    [InlineData(1251, (byte)0xC0, "https://example.com/price/\u0410")]
+    public async Task TheAnsiUrlFormat_IsDecodedInTheAnsiCodePage(int codePage, byte nonAscii, string expected)
+    {
+        byte[] payload = [.. Encoding.ASCII.GetBytes("https://example.com/price/"), nonAscii];
+        var transfer = WithBothViews("UniformResourceLocator", Buffer(payload, [0]));
+
+        Assert.Equal(expected, await ClipboardMonitorService.ReadSourceUrlAsync(transfer, codePage));
+    }
+
     [Fact]
     public async Task WithOnlyAStringView_ThatStringIsUsed()
     {
