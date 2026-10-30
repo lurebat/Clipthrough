@@ -3126,5 +3126,13 @@
     "find": "await Task.Run(() => TryBuildImageRequestFromFile(path, sourceInfo));",
     "replace": "await Task.FromResult(TryBuildImageRequestFromFile(path, sourceInfo));",
     "filter": "ADroppedNonPngImageFile_IsDecodedAndReEncodedOffTheCallingThread"
+  },
+  {
+    "id": "plain-text-copy-skips-search-commit",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-09-3 (S40/OD-9b). Copying a result as plain text (Ctrl+Shift+C, Copy as plain text menus) is acting on it, so it must commit the search that found it; without the call the query never reaches search history.",
+    "find": "whichever copy it is.\n        _ = CommitSearchQueryAsync();",
+    "replace": "whichever copy it is.\n        _ = clip.Clip.Id < 0 ? CommitSearchQueryAsync() : Task.CompletedTask;",
+    "filter": "CopyingAResultAsPlainText_RecordsTheQuery"
   }
 ]

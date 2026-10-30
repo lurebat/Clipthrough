@@ -93,6 +93,36 @@ public sealed partial class MainWindowViewModelHeadlessTests
         }
     }
 
+    /// <summary>
+    /// Rubber-duck F-09-3. Ctrl+Shift+C (and the Copy as plain text menu items)
+    /// copies the chosen result just as Copy does, but went through its own
+    /// method that never committed the search, so the query was lost.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task CopyingAResultAsPlainText_RecordsTheQuery()
+    {
+        var (scope, viewModel) = await SearchableAsync();
+        using (scope)
+        using (viewModel)
+        {
+            viewModel.SearchText = "invoice 2024";
+            await SettleRefreshAsync();
+            viewModel.SelectedClip = viewModel.Clips.First();
+
+            await viewModel.CopySelectedAsPlainTextAsync();
+
+            // The commit is fire-and-forget; wait for it rather than for a fixed delay.
+            var recorded = await scope.SearchHistoryService.GetRecentSearchesAsync();
+            for (var i = 0; i < 100 && recorded.Count == 0; i++)
+            {
+                await Task.Delay(50);
+                recorded = await scope.SearchHistoryService.GetRecentSearchesAsync();
+            }
+
+            Assert.Equal(["invoice 2024"], recorded);
+        }
+    }
+
     [AvaloniaFact]
     public async Task AnEmptyQuery_IsNeverRecorded()
     {
