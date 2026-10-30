@@ -40,7 +40,7 @@ public sealed class ImportedTimestampTests
         try
         {
             var fixture = Path.Combine(dir, "plain.db");
-            using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = fixture, Pooling = false }.ToString()))
+            using (var connection = TestConnections.Create(new SqliteConnectionStringBuilder { DataSource = fixture, Pooling = false }.ToString()))
             {
                 connection.Open();
                 using var command = connection.CreateCommand();

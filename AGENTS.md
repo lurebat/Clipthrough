@@ -36,6 +36,7 @@ shortcuts, and pluggable source attribution.
 - **Localization**: user-visible strings come from `AppText`. Add new entries to the dictionary in `AppText.cs`. Never hardcode strings in AXAML or VMs.
 - **Theming**: use class selectors (`Classes="surface-panel"`) from `ModernTheme.axaml`. Brushes come from `DynamicResource`s so they respect dark/light mode.
 - **Persistence**: schema changes go in `Database/DatabaseInitializer.cs` with an idempotent migration (ADD COLUMN IF NOT EXISTS, etc.). Bump version only when required.
+- **Connections and encryption**: every `SqliteConnection` - in shipping code and in tests - comes from `SqliteConnectionFactory.Create` (tests: `TestConnections.Create`). The factory adds the cipher recipe that keeps SQLite3 Multiple Ciphers writing the SQLCipher 4 format; a connection without it silently writes a cipher no SQLCipher build can read. `ConnectionConstructionGuardTests` enforces this. See `docs/solutions/every-connection-carries-the-cipher-recipe.md`.
 - **Hotkeys**: global hotkeys are registered via `ISystemInteractionService.TryRegisterGlobalHotKey` which on Windows uses `RegisterHotKey` + `Win32Properties.AddWndProcHookCallback`. Never hold a managed `WndProc` delegate yourself — use the Avalonia helper to avoid GC crashes.
 - **AI transforms** (`IAiTransformService` / `AiTransformService`): OpenAI-compatible chat-completions client. Base URL + API key + model come from `AppSettings.Ai*` with env-var fallback (`OPENAI_BASE_URL`, `OPENAI_API_KEY`). Service has a test-friendly ctor taking an `HttpClient`.
 - **Text transformations** (`TextTransformationService.Apply`): pure static function mapping `TextTransformation` → output. The `BoxTableToHtml` parser scans line-by-line, detects consecutive table-line blocks (box-drawing, Markdown `|---|`, or ASCII `+---+`), converts each to a `<table>`, and preserves surrounding text as escaped `<div>...<br>...</div>` blocks. Returns the original input verbatim if no table block is found.
@@ -263,10 +264,13 @@ the unit that implements it, so whether the code matches is checkable.
 - **S36 - AI key over plain HTTP is an accepted risk (OD-11, F-37).**
   `OPENAI_API_KEY` is sent as the bearer token to whatever AI base URL is
   configured, including a non-loopback `http://` endpoint. This stays.
-- **S37 - update signing is a separate decision (OD-5, U-C7).** The update feed
-  is pinned to the repository path. Whether to Authenticode-sign and verify
-  releases has not been decided; until it is, release integrity rests on the
-  GitHub account and CI token, and F-38 is closed only as far as the pin goes.
+- **S37 - no paid update signing (OD-5, U-C7).** The owner decided against paid
+  code signing (2026-10-28). The update feed is pinned to the repository path,
+  and release integrity rests on that pin plus the GitHub account and CI token:
+  an accepted risk, and F-38 is closed only as far as the pin goes. A free route
+  (SignPath Foundation) is recorded in
+  `docs/plans/2026-10-28-001-fts-rebuild-and-upgrade-start-research.md` but not
+  taken.
 - **S38 - regex search engine (OD-7, U-B6).** Regex search uses
   `RegexOptions.NonBacktracking` by default. A setting switches to the
   backtracking engine, which keeps a 250 ms match timeout reported as "pattern

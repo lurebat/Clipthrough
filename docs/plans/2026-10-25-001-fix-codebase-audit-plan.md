@@ -46,7 +46,7 @@ Add these to the repo's settled decisions (AGENTS.md or a docs/solutions note) w
 - **S36 — accepted risk (OD-11, F-37).** `OPENAI_API_KEY` is used as the bearer token for whatever AI base URL is configured, including a non-loopback `http://` endpoint. This is current behaviour and stays.
   - Assumption: a user who configures a cleartext endpoint while that environment variable is set accepts that the key travels to it.
   - Revisit if the env-key fallback is ever applied without the user configuring the base URL themselves.
-- **S37 — update signing deferred (OD-5).** The feed is pinned to the repository path (U-C7). Whether to Authenticode-sign and verify releases is a separate decision. Until then, release integrity rests on the GitHub account and CI token. F-38 is closed only as far as the feed pin goes.
+- **S37 — no paid update signing (OD-5; user decision, 2026-10-28).** "Signing is money and I don't want to spend it." The feed is pinned to the repository path (U-C7), and release integrity rests on that pin plus the security of the GitHub account and its CI token: an accepted risk. F-38 is closed only as far as the feed pin goes. A free route (SignPath Foundation's open-source programme) is recorded as an option, with no action taken, in `docs/plans/2026-10-28-001-fts-rebuild-and-upgrade-start-research.md`.
 - **S38 — regex search engine (OD-7).** Regex search uses .NET `RegexOptions.NonBacktracking` by default. A user setting switches to the backtracking engine, which has a 250 ms match timeout; a timeout is reported as "pattern too slow".
   - Assumption: the default engine never needs backreferences or lookarounds. Users who need them opt into backtracking.
 - **S39 — clipboard-history opt-out (OD-10).** Content published with `CanIncludeInClipboardHistory` = 0 is not captured while the new setting is on. The setting defaults to on.
@@ -59,10 +59,10 @@ Add these to the repo's settled decisions (AGENTS.md or a docs/solutions note) w
 | OD | Decision | Effect on this plan |
 |---|---|---|
 | OD-1 | (a) Separate payload table plus deduplicated `app_icons`, migrated once, resumably | Phase E is in scope as U-E1; it depends on Phase D |
-| OD-2 | (b) Start evaluating a replacement encrypted-SQLite package now, as its own unit with on-disk compatibility verification; ship U-C5 meanwhile | New unit U-C8 (evaluation only). Adopting a package is a later unit that needs its own approval (new dependency) |
+| OD-2 | (b) Start evaluating a replacement encrypted-SQLite package now, as its own unit with on-disk compatibility verification; ship U-C5 meanwhile. **Then, on the evaluation (owner, 2026-10-27): (a) adopt `SQLite3MC.PCLRaw.bundle` 2.6.1 in SQLCipher v4 legacy mode**, landing before or together with Phase E's migration | New unit U-C8 (evaluation only); adoption is U-C9, with its own approval recorded here and its risks under U-C9 |
 | OD-3 | (a) Editor and Compare write to a per-session temp folder that is deleted afterwards, with no `metadata.json`. Explicit Export stays in Documents but asks for confirmation on sensitive clips | U-C3 as written |
 | OD-4 | (a) Run expiry before the startup backup; purge sensitive rows from backup copies **only while the sensitive-lifetime setting is on** (refined by the owner during Phase C: with it off, backups keep sensitive clips); add `secure_delete` after measuring its cost on the Phase D fixture | U-C4 split into U-C4a (expiry order and purge) and U-C4b (`secure_delete`, depends on U-D0) |
-| OD-5 | (a) Pin the feed to the repo now; decide on signing separately | U-C7 is the pin only. Signing is out of scope (S37) |
+| OD-5 | (a) Pin the feed to the repo now; no paid signing (user decision, 2026-10-28) | U-C7 is the pin only. Signing is out of scope; the remaining risk is accepted (S37) |
 | OD-6 | (a) Separate headless CI step that re-runs only cleanup failures; F-30 comes first | U-F1 is a hard prerequisite of U-F2 |
 | OD-7 | NonBacktracking is the default, with a setting to switch to backtracking. Backtracking keeps the 250 ms timeout and the "pattern too slow" status (owner's own option) | U-B6 reworked: engine setting, tests for both engines; S38 |
 | OD-8 | (a) Commit pending deletes on exit | U-B4 as written; S41 |
@@ -80,7 +80,7 @@ Add these to the repo's settled decisions (AGENTS.md or a docs/solutions note) w
 | B | F-04, F-11, F-12, F-13, F-14, F-17, **F-47, F-48, F-50, F-52** | Capture, transform, delete, search and preview correctness | U-B8 coordinates with U-B1 (same transform path) | yes |
 | C | F-03, F-18, F-19, F-20, F-21 (hardening + evaluation), F-38 (feed pin) | Keep the product's promises on every path | U-C4b needs U-D0; U-C8 informs U-A3 and Phase E | yes, except U-C4b |
 | D | F-05, F-07, F-08, F-09, F-10, F-24, F-25, F-26, F-27 | Performance at realistic size: indexes, plans, bounds | U-D0 first within the phase | yes; coordinate `DatabaseInitializer` edits with A and E |
-| E | F-06, F-39 | Payload storage layout (OD-1a) | D; review the U-C8 outcome before the migration lands | no |
+| E | F-06, F-39 | Payload storage layout (OD-1a) | D; U-C9 lands before or with it | no |
 | F | F-30, F-29, F-31, F-32, F-33, F-34, F-44, F-45 | Test gate and unguarded high-risk code | U-F1 before U-F2 | yes |
 | G | F-23, F-28, F-35, F-36, F-40, F-41, F-42, F-43 | Consolidation, dead code, docs, history recording | A (U-G1 touches the `StorageOptionsService` connections) | after A |
 
@@ -90,6 +90,14 @@ Changes from the pre-decision plan:
 - **Phase E** is confirmed (OD-1a). It now also waits on U-C8, because a package switch would change the engine that runs the migration.
 - **Phases B and C** each gain a user setting: the regex engine and the clipboard-history opt-out.
 - **Phase G's search-history unit** now changes when history is recorded, instead of de-duplicating prefixes.
+
+### Landing order
+
+The draft PRs land in this order (adopted 2026-10-29, after a local integration merge of every open draft):
+
+#3 -> #14 (multi-monitor fit) -> #4 A -> #9 G -> #10 U-C9 -> #6 C -> #5 B -> #12 (VellumText 0.8) -> #12's stacked dependency PR -> #7 D -> #11 E -> #13 upgrade start -> #8 F
+
+Each PR merges its predecessor and targets it as its base, so each lands on master without conflicts and with green suites. A problem that appears only when two PRs are combined is fixed on the one that lands later.
 
 ### How every unit is done
 
@@ -300,6 +308,7 @@ Guard R3: a lifecycle matrix test class.
 - If the cost is user-visible (e.g. capture slower by more than about 10%), stop and return to the owner with the numbers instead of shipping.
 - Test: the free-page half of the probe — the live file no longer contains the expired secret's bytes.
 - Mutant: remove the pragma.
+- **Measured and accepted (owner decision, 2026-10-28):** on the 60k fixture, each probe in its own process on a fresh copy, `secure_delete` costs about 1.00x on capture and on single deletes. The bulk retention purge of 3,072 clips is 1.13x on plaintext (5.95 -> 6.70 s) and 1.00x encrypted. The plaintext purge is over the 10% threshold above; the owner kept the pragma on for every library and accepted that cost. Reproduce with `PerfProbes.P15_DeleteAndPurge`.
 
 **U-C5 (F-21, OD-2) — ClipAngel import hardening (ships whatever U-C8 concludes)**
 - Change: import only when `Clips` is a real table and the schema has no views or triggers. Open with `trusted_schema=OFF` and `query_only`.
@@ -335,6 +344,31 @@ Guard R3: a lifecycle matrix test class.
 *Adoption*
 - Adoption is a **separate later unit that needs owner approval** (a new dependency, Iron law 3).
 - If adopted, it must land before or together with Phase E's migration. Otherwise Phase E must be re-verified on the new engine.
+
+**U-C9 (F-21, OD-2) — adopt SQLite3 Multiple Ciphers (owner decision, 2026-10-27)**
+
+*Decision*: replace `SQLitePCLRaw.bundle_e_sqlcipher` 2.1.11 (SQLite 3.39.2, deprecated, no further releases) with `SQLite3MC.PCLRaw.bundle` 2.6.1 (SQLite 3.54.0) in SQLCipher v4 legacy mode (`cipher=sqlcipher&legacy=4`). The on-disk format does not change, so every installed library opens as it is and a rollback to the old build can still read what the new one writes (evaluation, §2). It lands before or together with Phase E.
+
+*Required by the owner*
+- One connection-string / cipher-recipe helper that every connection goes through, with a guard test proving nothing bypasses it.
+- The fixture compatibility test over all four existing formats (plaintext WAL, SQLCipher 4.5.2, rekeyed, encrypted with an uncheckpointed `-wal`).
+- Tests and mutants for the replacement rekey path, which replaces `sqlcipher_export`.
+- The 60k performance comparison against the current bundle, on a quiet machine requested through the coordinator.
+
+*Risks accepted with the decision*
+1. **Untested dependency pairing.** Microsoft.Data.Sqlite 10.0.11 declares `SQLitePCLRaw.core` 2.1.x; this bundle needs 3.x, so the app runs MDS 10 on core 3.x (pinned at 3.0.5 since 2026-10-28, for 3.0.3's fixes to memory corruption and a connection-handle race). Microsoft has not tested that pair. It is pinned explicitly, and our suite plus the evaluation harness are the only evidence it works. Re-check on every bump of either package (S32).
+2. **Single maintainer.** The package is published by one person (U. Telle), MIT-licensed, with a package id that is not prefix-reserved; the native binaries are Authenticode-signed (SignPath Foundation). Releases are frequent today; nothing guarantees they continue.
+3. **Format fork on a missed recipe.** A connection without the recipe silently uses the library's default cipher: an existing library fails with error 26 ("wrong password") and a new one is unreadable by any SQLCipher build. Mitigated by the single factory and its guard, which also covers the test tree.
+4. **Engine jump 3.39.2 -> 3.54.0** beyond the evaluation's fixtures (query plans on 60k clips) is measured only by the quiet-machine comparison.
+5. **No non-Windows run.** Linux and macOS natives ship in the package but were not exercised.
+
+*Measured (2026-10-27, quiet machine, U-D0 fixture: 60k clips, ~1.6 GB, Release; the current bundle and SQLite3MC on the same Phase D code, each run from a fresh copy of one seeded library)*
+- **Controlled comparison** (each probe group run alone on a fresh copy, so both engines saw the same state):
+  - Search (P1), encrypted: SQLite3MC is faster on every query except FTS fuzzy (5.2 -> 6.2 ms) and FTS no-match (0.3 -> 0.5 ms). Examples: the image filter 2.6 s -> 1.1 s; text-filter sorts about 6 s -> 3 s; regex no-match 15.3 s -> 6.6 s; case-sensitive 2.5 s -> 1.2 s.
+  - Search (P1), plaintext: equal within noise, for example blank Alphabetical 243 vs 231 ms and case-sensitive 365 vs 359 ms.
+  - Capture (P4), encrypted, large clips: about 2x faster (re-copy of 1.9 MB 261 -> 110 ms).
+- **Full probe runs are confounded and are not used as evidence of a regression.** xUnit ran the probes in a different order for the two builds: the old bundle ran P1 last, SQLite3MC ran it fourth, right after P12 rewrote 58,903 embedding statuses. In those runs the old bundle looked faster on alphabetical, case-sensitive and whole-word search (plaintext 108-119 vs 254-362 ms), and on two single-sample probes: MarkAllEmbeddingsForRerunAsync (21.8 vs 37.9 s, plaintext only) and the first blank search after the stats cache is invalidated (5 vs 42 ms plaintext, 33 vs 165 ms encrypted). The isolated reruns removed the first group. The other two were not rerun in isolation and stay open: measure them with a fixed probe order before reading anything into them.
+- Encrypted full runs took 10.8 min with SQLite3MC against 18.4 min with the current bundle.
 
 ### Phase D — realistic-size performance
 
@@ -402,6 +436,15 @@ Guard R3: a lifecycle matrix test class.
 - Switch the readers over only after the copy completes; drop or null the old columns last.
 - Never hold a single `DatabaseMaintenanceScope`-length transaction over 1+ GB.
 - Move the `stored_bytes` triggers along with the data.
+- **Startup cost (owner decision, 2026-10-28, revised below):** the first upgrade start blocked for 87 s on the 1 GB plaintext fixture and 373 s encrypted. The owner chose an SQL-only batch copy (`INSERT ... SELECT` per id range, icons hashed in .NET), still resumable, with the crash-mid-batch test kept, plus a progress UI if it still took over about 10 s.
+  - **Correction (measured 2026-10-28):** those figures are the whole `InitializeAsync` after the version bump, not the payload move. A bump re-runs every version-gated step. On a 420 MB, 5k-clip library the 28.5 s splits into the full FTS rebuild (`RebuildClipSearchIndexAsync`) at 17.2 s, the payload move at 5.5 s, stored-bytes and backfills at 4.2 s, and the integrity check at 0.85 s.
+  - The SQL-only move measured 6.1 s against 5.2-5.5 s for the per-row one: the move is bound by SQLite page I/O, not by marshalling. The decision went back to the owner with these numbers.
+  - **Revised owner decision (2026-10-28): (A)+(B)+(C).**
+    - (A) Revert the SQL-only move and keep the per-row one.
+    - (B) Rebuild the FTS index on a version bump only when the FTS schema was just recreated, or when the stored version predates the last version that changed indexed content: `DatabaseInitializer.LastSearchIndexChangeVersion`, which is 3, the trigram tokenizer. Test: a bump without FTS changes leaves the index intact and searchable. Plus a mutant.
+    - (C) A progress UI over the whole first start after an upgrade, with a headless test that progress shows and the app stays responsive.
+    - Implemented on Phase E (#11); its description lists the commits, tests and mutants. Re-measure the 1 GB plaintext and encrypted first start on that code in a quiet window.
+    - **Integrity check on the deferred start (settled, user-confirmed 2026-10-29): option (b).** Measured cold on the 1 GB fixture, `quick_check` was 71.5 s of a 73 s time to a usable app (2.5 s warm). A deferred upgrade start skips it, and the background worker runs it before the payload move rewrites anything; if it fails, nothing is moved and the app raises an error notification. The blocking upgrade path keeps its check before opening. Implemented on #13 (c2d2ce8).
 
 *Readers*
 - `GetByIdAsync` and hydration join `clip_payloads`. Icons resolve through the hash.
@@ -414,7 +457,7 @@ Guard R3: a lifecycle matrix test class.
 
 *Mutant*: hydration skips the payload join.
 
-*Dependencies*: Phase D. Review the U-C8 outcome before merging, because of a possible engine switch.
+*Dependencies*: Phase D, and U-C9 (the engine switch) lands before or with it. The migration is verified on the new engine.
 
 ### Phase F — test gate and unguarded code
 
@@ -494,9 +537,26 @@ This plan does **not** adopt that version. Clipthrough stays on VellumText 0.7.0
 ## Out of scope
 
 - MainWindowViewModel decomposition beyond what a unit needs (S2).
-- Adopting a replacement encrypted-SQLite package; U-C8 evaluates only, and adoption needs separate approval.
-- Signing and verifying updates (S37; decided separately).
+- Adopting a replacement encrypted-SQLite package was out of scope until the owner approved it after U-C8 (OD-2, 2026-10-27); it is now U-C9.
+- Signing and verifying updates: no paid signing, accepted risk (S37). The free SignPath Foundation route is an unexercised option.
 - F-37 (accepted risk S36) and security F-10 (dropped by the critic); also the image-URL GET in `AiTransformService` (noted under F-37, not counted).
 - Dependency upgrades other than the U-C8 evaluation, including the VellumText async-importer version above. Bumps to Avalonia, Velopack and Onnx are independent; re-run the mutants after any bump (S32).
 - Non-Windows feature work (S8); `LibraryImport` conversion (S9); CA1001/CA2213 (S29).
 - Pull requests: approving this plan, or a phase of it, is not approval to open PRs.
+- **Follow-up (owner: out of scope for now, 2026-10-28): merge cost after a full FTS rebuild.** After an `INSERT INTO clips_fts(clips_fts) VALUES('rebuild')`, the index is left with large segments at one level and an incremental merge still pending. FTS5 charges merge work to later writes in proportion to what each one adds, so the first large captures after a rebuild each pay part of that merge.
+  - Evidence: the U-E1 seed, rebuilt by the pre-(B) migration, decoded from `clips_fts_data` id 10 (the structure record) as 5 levels and 13 segments. Level 3 held 4 segments totalling about 33k pages, and a merge was pending at level 2. The D seed, which had never been rebuilt, had no level holding 4 segments.
+  - Measured on 60k clips: the first 1.9 MB capture on a fresh copy of the rebuilt seed took 2.6 s plaintext and 4.9 s encrypted. The second run on the same copy took 662 ms, against 538 ms on Phase D. Whether merge state accounts for all of it is being confirmed on #11.
+  - Since U-E1 (B), only libraries older than schema 3 and FTS-schema repairs trigger a rebuild. The cost predates Phase E.
+  - A fix would be to run `'optimize'` (or bounded `'merge'` steps) after a rebuild, ahead of the first capture. Its cost needs measuring first.
+  - Researched in `docs/plans/2026-10-28-001-fts-rebuild-and-upgrade-start-research.md`, together with the first start after an upgrade, which still blocks for 74 s plaintext and 5-7 min encrypted on 1 GB. Decisions are pending.
+- **Follow-ups found in the 2026-10-29 live window (pre-existing on master 0.17.1; not fixed, recorded for a later decision).**
+  - **Chromium source URLs are stored as byte-pair mojibake.** A clip copied from Edge stored `source_url` as CJK-looking text; "Open source URL" then logged `Unsupported URL scheme: 楦敬⼺⼯㩃唯敳獲…`, which decodes pairwise (little-endian) to `file:///C:/Users…`, the page's real URL, followed by trailing garbage. `ClipboardMonitorService.TryGetPlatformStringAsync` reads the UTF-8 format `Chromium internal source URL` through the string accessor first, which pairs its bytes into UTF-16 code units. Fix direction: read that format's bytes, decode UTF-8, trim the trailing NULs. The URL refusal itself worked (check C7), so the only effect seen was a garbled source.
+  - **HTML→Markdown on a rich browser clip transforms its plain text.** Check C3: on a rich HTML clip copied from Edge, HTML→Markdown produced the clip's plain text without Markdown structure, through every entry point. The transform reads the clip's plain-text `Content` (`GetTransformSourceTextAsync`), not its stored HTML. It works on a clip whose text is HTML source. Fix direction: for rich clips, feed the stored HTML fragment to the transform.
+  - **Markdown→HTML stores the CF_HTML header in `content`.** Check C3: a Markdown→HTML result clip's text starts with `Version:0.9 StartHTML:…`. VellumText's `HtmlFormat.Export` returns CF_HTML on 0.7 and 0.8, and the result is saved as the clip's content as well as put on the clipboard. Fix direction: keep CF_HTML for the clipboard, store the extracted fragment.
+  - **Upstream bugs worked around on the stack.** SQLite: after another connection's DDL, the first DELETE on a stale connection fails with "no such table" when the table has an FTS5 delete trigger, foreign keys are on and another table references it. It is fixed upstream in SQLite 3.54.1 (check-in e6b9a40732; official 3.35.5-3.54.0 fail, 3.54.1 passes), but the bundled SQLite3MC 2.6.1 is built on 3.54.0, so the workaround on #13 stays. Follow-up: remove the `sqlite_master` read in `SqliteConnectionFactory` once SQLite3MC ships on 3.54.1 or newer; `docs/solutions/stale-schema-delete-no-such-table.md` gives the check (mutant `stale-schema-not-refreshed-on-open` survives once the engine is fixed). Nothing was posted to SQLite. Avalonia.Skia (12.1.1 and 12.1.4): `ImmutableBitmap(Stream, decodeSize, …)` dereferences a null `SKCodec` for unrecognised data, so `Bitmap.DecodeToWidth` throws NullReferenceException; caught on #5; not yet reported upstream.
+- **Follow-ups found while fixing the 2026-10-30 rubber-duck review (not fixed, recorded for a later decision).**
+  - **Capture drops text after a NUL once the text passes about 500 UTF-8 bytes** (likely pre-existing). A probe stored a 410-byte text containing a NUL intact, while a 610-byte one was stored as only the part before the NUL ("left"). Capture passes the text straight to the insert, and the full read returns intact text when the stored value has it, so the loss appears to happen when SQLite binds the string parameter. Found while fixing F-07-2; that test writes its long case with SQL for this reason.
+  - **A refresh can undo a load-more page.** A refresh fixes how many rows to re-read (200) before it runs; if a load-more page lands first, the refresh puts the list back to 200 rows and the page the user just loaded disappears. Forced 3 of 3 with a refresh requested while a load-more page was loading (a capture, an OCR result or a filter change during a scroll load can do that). Surfaced by the intermittent `Refresh_ResetsPaging_EvenWhenAClipWriteStraddlesTheQueryChange`. Fix direction: count load-more appends the way writes are counted, and re-run a refresh a load-more overtook; then make the test wait for refreshes to settle.
+  - **The connection guard is pattern-based.** `ConnectionConstructionGuardTests` catches explicit, qualified, `global::`, target-typed and initializer construction, but not a connection declared first and assigned later (`c = new(cs);`) or `return new(cs);`, which need type information (a Roslyn walk; the test project does not reference `Microsoft.CodeAnalysis`).
+  - **Two daily backups can still share one temp file** on an upgrade start whose integrity check passes quickly: the startup backup and the background run's closing backup both write `clipthrough-<day>.db.tmp`. One then fails and is retried at the next start; nothing is published half-written. Fix direction: a unique temp name per backup in `DatabaseBackupService`. Residual of F-13-8.
+  - **The size cap's icon reference count scans the table while the payload move is owed.** `ReadIconReferencesAsync` (F-11-1) counts each distinct icon's clips; until the move builds `idx_clips_source_app_icon_hash`, each count is a full scan. Measure on a 60k library mid-move before deciding whether to skip the per-icon subtraction in that window.
