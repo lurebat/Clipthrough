@@ -4390,5 +4390,21 @@
     "find": "                SELECT {StoredRowBytes}\n                FROM clips\n                WHERE NOT {UserKeptClipPredicate}",
     "replace": "                SELECT {StoredRowBytes} + COALESCE((SELECT LENGTH(png) FROM app_icons WHERE hash = clips.source_app_icon_hash), 0)\n                FROM clips\n                WHERE NOT {UserKeptClipPredicate}",
     "filter": "FullyQualifiedName~WhileTheMoveIsOwed_EvictingAnIconsLastClipFreesOnlyItsPayload"
+  },
+  {
+    "id": "integrity-failure-notification-omits-unbacked-note",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-13-10 (owner decision, option 1): the integrity-failure notification says to restore a backup, but the daily backup waited for the check, so nothing copied this session is in one; it must say so, and where a restore keeps the replaced library.",
+    "find": "                Message = _databaseInitializer.HasFailedIntegrityCheck\n                    ? ",
+    "replace": "                Message = _databaseInitializer.HasFailedIntegrityCheck && ex.Message.Length < 0\n                    ? ",
+    "filter": "FullyQualifiedName~ACorruptLibrary_IsNotMovedInTheBackground"
+  },
+  {
+    "id": "unbacked-note-on-every-run-failure",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-13-10: the backup note belongs to the failed integrity check, the only failure that says to restore a backup; other background-run failures do not get it.",
+    "find": "                Message = _databaseInitializer.HasFailedIntegrityCheck\n                    ? ",
+    "replace": "                Message = _databaseInitializer.HasFailedIntegrityCheck || ex.Message.Length >= 0\n                    ? ",
+    "filter": "FullyQualifiedName~ABackgroundRunFailureOtherThanTheCheck_HasNoBackupNote"
   }
 ]

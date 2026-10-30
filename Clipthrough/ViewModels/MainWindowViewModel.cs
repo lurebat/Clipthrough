@@ -6663,7 +6663,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _notificationService.Publish(new AppNotification
             {
                 Title = AppText.LibraryOptimizeFailedTitle,
-                Message = ex.Message,
+
+                // Only after a failed integrity check, which is what says to restore a
+                // backup: the daily backup waited for the check, so nothing copied
+                // this session is in one (F-13-10).
+                Message = _databaseInitializer.HasFailedIntegrityCheck
+                    ? $"{ex.Message}\n\n{AppText.LibraryIntegrityFailedUnbackedClips}"
+                    : ex.Message,
                 Level = AppNotificationLevel.Error,
                 IsPersistent = true,
                 Actions =
