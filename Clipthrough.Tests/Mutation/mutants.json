@@ -1280,14 +1280,6 @@
     "filter": "Maintenance_ReportsTheSameTotalsTheDatabaseWould"
   },
   {
-    "id": "maintenance-size-total-is-taken-before-the-purge",
-    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
-    "why": "The size total a purge reports must be read after the orphaned-icon sweep (U-E1). The row walk subtracts the icons its own evictions free (rubber-duck F-11-1), but not an icon that was already orphaned when the pass began, which the sweep also deletes; reporting the walk's number overstates the library by it.",
-    "find": "            if (finalStoredBytes is not null)\n            {\n                finalStoredBytes = await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken, transaction);",
-    "replace": "            if (finalStoredBytes is null)\n            {\n                finalStoredBytes = await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken, transaction);",
-    "filter": "FullyQualifiedName~Maintenance_ReportsTheSameTotalsTheDatabaseWould|FullyQualifiedName~Maintenance_LibrarySizeCap_ReportsTheSizeLeftAfterTheOrphanSweep"
-  },
-  {
     "id": "size-purge-names-every-evicted-clip",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "Goes back to listing every doomed clip as its own SQL parameter. Correct for small purges and fatal past SQLITE_MAX_VARIABLE_NUMBER, which is exactly the purge a user gets after lowering the size cap on a large library.",
@@ -2933,7 +2925,7 @@
     "why": "F-39. An icon whose last clip was evicted would keep counting against the size cap until the next start.",
     "find": "            // A removed clip may have been the last user of its icon (U-E1).\n            await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);\n",
     "replace": "            // A removed clip may have been the last user of its icon (U-E1).\n            await Task.CompletedTask;\n",
-    "filter": "FullyQualifiedName~PayloadLayoutTests.AnIconWhoseLastClipIsEvicted"
+    "filter": "FullyQualifiedName~PayloadLayoutTests.AnIconWhoseLastClipIsEvicted|FullyQualifiedName~ClipRetentionTests.Maintenance_LibrarySizeCap_CountsTheIconAnEvictionFrees"
   },
   {
     "id": "size-cap-ignores-stored-icons",
@@ -3987,8 +3979,8 @@
     "id": "size-cap-counts-icons-orphaned-earlier-in-the-pass",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "Rubber-duck F-11-1. An icon orphaned by the lifetime or count purge earlier in the same maintenance pass is still in app_icons when the size cap reads its total, so the cap evicts clips the library has room for to pay for an icon the closing sweep deletes anyway.",
-    "find": "            if (removedClipIds.Count > 0)",
-    "replace": "            if (removedClipIds.Count < 0)",
+    "find": "        await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);\n\n        if (settings.EnableMaxLibrarySize)",
+    "replace": "        if (removedClipIds.Count < 0)\n        {\n            await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);\n        }\n\n        if (settings.EnableMaxLibrarySize)",
     "filter": "FullyQualifiedName~ClipRetentionTests.Maintenance_LibrarySizeCap_DoesNotCountAnIconAnEarlierPurgeOrphaned"
   },
   {
@@ -4134,5 +4126,13 @@
     "find": "            .Select(s => (Screen: s, Overlap: OverlapArea(frame, s.WorkingArea)))",
     "replace": "            .Select(s => (Screen: s, Overlap: OverlapArea(new PixelRect(remembered.Position, OuterPixels(remembered.ClientSize, frameExtra, s.Scaling)), s.WorkingArea)))",
     "filter": "FullyQualifiedName~WindowGeometryTests.ARememberedWindowMostlyOnA100PercentScreen"
+  },
+  {
+    "id": "maintenance-keeps-icons-a-recopy-orphaned",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-11-3. Re-copying a clip from a different app replaces its icon hash and orphans the old icon. Sweeping only after a pass deleted clips left that icon counting toward the size cap (evicting clips the library had room for) and the reported total, until some deletion or a restart.",
+    "find": "        await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);\n\n        if (settings.EnableMaxLibrarySize)",
+    "replace": "        if (removedClipIds.Count > 0)\n        {\n            await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);\n        }\n\n        if (settings.EnableMaxLibrarySize)",
+    "filter": "FullyQualifiedName~ClipRetentionTests.Maintenance_DoesNotCountTheIconAReCopyReplaced"
   }
 ]

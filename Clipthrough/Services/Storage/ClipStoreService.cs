@@ -987,16 +987,13 @@ public sealed class ClipStoreService : IClipStoreService
             }
         }
 
+        // Before the size cap reads its total, and whether or not this pass deleted
+        // anything: icons orphaned by the purges above (rubber-duck F-11-1), or
+        // since the last pass by a re-copy that replaced a clip's icon (F-11-3).
+        await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);
+
         if (settings.EnableMaxLibrarySize)
         {
-            // The purges above may have orphaned icons that the sweep below would
-            // delete anyway; counting them here evicts clips to pay for them
-            // (rubber-duck F-11-1).
-            if (removedClipIds.Count > 0)
-            {
-                await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);
-            }
-
             var totalStoredBytes = await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken, transaction);
             finalStoredBytes = totalStoredBytes;
             var maxBytes = settings.MaxLibrarySizeMegabytes * 1024L * 1024L;
@@ -1013,6 +1010,10 @@ public sealed class ClipStoreService : IClipStoreService
         {
             // A removed clip may have been the last user of its icon (U-E1).
             await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);
+            // Not load-bearing on this code: orphans are swept before the size
+            // total is read and the walk subtracts the icons its evictions free,
+            // so this re-reads the number it already has. Kept because a drift
+            // would only show as a wrong size in the status bar, silently.
             if (finalStoredBytes is not null)
             {
                 finalStoredBytes = await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken, transaction);

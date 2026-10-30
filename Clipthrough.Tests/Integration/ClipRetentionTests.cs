@@ -231,6 +231,8 @@ public sealed class ClipRetentionTests
         Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(newest.Id));
         Assert.Equal(1, result.PurgedClipCount);
         Assert.Equal(2 * 524_000, result.TotalStoredBytes);
+        // Freed by the eviction itself, so only the sweep after it can remove it.
+        Assert.Equal(0, Scalar(scope, "SELECT COUNT(*) FROM app_icons;"));
     }
 
     /// <summary>
@@ -278,10 +280,9 @@ public sealed class ClipRetentionTests
     }
 
     /// <summary>
-    /// The size a purge reports is read again after the closing orphan sweep, not
-    /// taken from the walk. The walk accounts for icons its own evictions free, but
-    /// not for one nothing referred to before the pass began - re-copying a clip
-    /// from another app leaves one - which the sweep deletes as well.
+    /// The size a purge reports leaves out an icon nothing referred to before the
+    /// pass began - re-copying a clip from another app leaves one - because the
+    /// sweep removes it before the size cap reads its total.
     /// </summary>
     [Fact]
     public async Task Maintenance_LibrarySizeCap_ReportsTheSizeLeftAfterTheOrphanSweep()
@@ -306,6 +307,46 @@ public sealed class ClipRetentionTests
         Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(newest.Id));
         Assert.Equal(0, Scalar(scope, "SELECT COUNT(*) FROM app_icons;"));
         Assert.Equal(600_000, result.TotalStoredBytes);
+    }
+
+    /// <summary>
+    /// Re-copying a clip from a different app replaces its icon hash and leaves
+    /// the old icon in app_icons with nothing referring to it. The orphan sweep ran
+    /// only after a pass had deleted clips, so that icon kept counting toward the
+    /// size cap - here it tips a library that fits over the cap and evicts a clip -
+    /// and toward the reported total, cap or no cap, until some deletion or a
+    /// restart swept it. (Rubber-duck F-11-3)
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Maintenance_DoesNotCountTheIconAReCopyReplaced(bool capSize)
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings
+        {
+            MaxClipSizeBytes = 4096,
+            EnableMaxEntryCount = false,
+            EnableMaxLibrarySize = capSize,
+            MaxLibrarySizeMegabytes = 1,
+        });
+
+        var older = await CaptureAsync(scope, "older");
+        var recopied = await CaptureAsync(scope, "copied from two apps", Enumerable.Repeat((byte)1, 4096).ToArray());
+        Assert.Equal(recopied.Id, (await CaptureAsync(scope, "copied from two apps", Enumerable.Repeat((byte)2, 300).ToArray())).Id);
+
+        // 2 x 524,000 + the current 300-byte icon = 1,048,300, under the
+        // 1,048,576 cap; the replaced 4 KB icon would take it over.
+        Execute(scope, "UPDATE clips SET byte_size = 524000;");
+
+        var result = await scope.ClipStoreService.ApplyMaintenanceAsync();
+
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(older.Id));
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(recopied.Id));
+        Assert.Equal(0, result.PurgedClipCount);
+        Assert.Equal(1, Scalar(scope, "SELECT COUNT(*) FROM app_icons;"));
+        Assert.Equal((2 * 524_000) + 300, result.TotalStoredBytes);
     }
 
     /// <summary>
@@ -489,7 +530,7 @@ public sealed class ClipRetentionTests
         return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
-    private static async Task<ClipEntry> CaptureAsync(TemporaryDatabaseScope scope, string text)
+    private static async Task<ClipEntry> CaptureAsync(TemporaryDatabaseScope scope, string text, byte[]? icon = null)
     {
         var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
         {
@@ -497,6 +538,7 @@ public sealed class ClipRetentionTests
             ContentFormat = ClipContentFormat.PlainText,
             ContentText = text,
             ContentBytes = Encoding.UTF8.GetBytes(text),
+            SourceAppIconBytes = icon,
             SkipPostInsertMaintenance = true,
         });
 
