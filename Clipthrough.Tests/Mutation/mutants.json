@@ -4694,5 +4694,13 @@
     "find": "new(@\"\\bbusy_timeout\\s*(?:=|\\(\\s*[\\w{}$@.]+\\s*\\))\", RegexOptions",
     "replace": "new(@\"\\bbusy_timeout\\s*[=(]\", RegexOptions",
     "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
+  },
+  {
+    "id": "daily-backup-reads-failed-before-owed",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Finding 4b: never back up a library that failed its integrity check this session. A failing check sets HasFailedIntegrityCheck and then clears IsIntegrityCheckOwed; reading failed-then-owed lets a check that finishes between the reads look neither, and the damaged library is backed up.",
+    "find": "        if (_databaseInitializer is { IsIntegrityCheckOwed: true })\n        {\n            Trace.TraceInformation(\"Daily backup deferred until the library's background integrity check has passed.\");\n            return;\n        }\n\n        if (BetweenIntegrityStateReads is { } between)\n        {\n            await between().ConfigureAwait(false);\n        }\n\n        // Live check F3: a backup copies the library page for page, damage included,\n        // and the rotation below keeps only a week, so backing up a library that\n        // failed its check would push the good backups out one day at a time.\n        if (_databaseInitializer is { HasFailedIntegrityCheck: true })\n        {\n            Trace.TraceWarning(\"Daily backup skipped: the library failed its integrity check this session, so the existing backups are kept as they are.\");\n            return;\n        }\n",
+    "replace": "        if (_databaseInitializer is { HasFailedIntegrityCheck: true })\n        {\n            Trace.TraceWarning(\"Daily backup skipped: the library failed its integrity check this session, so the existing backups are kept as they are.\");\n            return;\n        }\n\n        if (BetweenIntegrityStateReads is { } between)\n        {\n            await between().ConfigureAwait(false);\n        }\n\n        // Live check F3: a backup copies the library page for page, damage included,\n        // and the rotation below keeps only a week, so backing up a library that\n        // failed its check would push the good backups out one day at a time.\n        if (_databaseInitializer is { IsIntegrityCheckOwed: true })\n        {\n            Trace.TraceInformation(\"Daily backup deferred until the library's background integrity check has passed.\");\n            return;\n        }\n",
+    "filter": "FullyQualifiedName~WhenTheCheckFailsBetweenItsTwoReads"
   }
 ]
