@@ -21,11 +21,18 @@ namespace Clipthrough.Services;
 public sealed class ClipExportService : IClipExportService, IDisposable
 {
     private const string SessionFolderPrefix = "Clipthrough-tool-copies-";
+
+    // Held open with FileShare.None for as long as the session lives. The OS
+    // releases it when the process dies, so an unheld lock marks a folder as
+    // abandoned even when its PID has since been reused (rubber-duck F-06-4).
+    private const string SessionLockFileName = "session.lock";
     private static readonly JsonSerializerOptions s_jsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     private readonly string _exportRoot;
     private readonly string _sessionTempParent;
     private readonly string _sessionRoot;
+    private readonly object _sessionLockGate = new();
+    private FileStream? _sessionLock;
 
     public ClipExportService()
         : this(
@@ -50,17 +57,46 @@ public sealed class ClipExportService : IClipExportService, IDisposable
         => ExportCoreAsync(clip, _exportRoot, includeMetadata: true, cancellationToken);
 
     public Task<ClipExportResult> ExportForToolAsync(ClipEntry clip, CancellationToken cancellationToken = default)
-        => ExportCoreAsync(clip, _sessionRoot, includeMetadata: false, cancellationToken);
+    {
+        EnsureSessionLock();
+        return ExportCoreAsync(clip, _sessionRoot, includeMetadata: false, cancellationToken);
+    }
 
     public void Dispose()
     {
+        lock (_sessionLockGate)
+        {
+            _sessionLock?.Dispose();
+            _sessionLock = null;
+        }
+
         TryDeleteDirectory(_sessionRoot);
+    }
+
+    private void EnsureSessionLock()
+    {
+        lock (_sessionLockGate)
+        {
+            if (_sessionLock is not null)
+            {
+                return;
+            }
+
+            Directory.CreateDirectory(_sessionRoot);
+            _sessionLock = new FileStream(
+                Path.Combine(_sessionRoot, SessionLockFileName),
+                FileMode.OpenOrCreate,
+                FileAccess.ReadWrite,
+                FileShare.None);
+        }
     }
 
     /// <summary>
     /// Removes tool-copy folders left by a session that did not exit cleanly.
-    /// Only folders this service names, and only when the process that made
-    /// them is gone - a second running instance keeps its own.
+    /// Only folders this service names, and only when no session holds the
+    /// folder's lock - a second running instance keeps its own. A folder
+    /// without a lock (written by an older version) falls back to whether the
+    /// process that made it is gone.
     /// </summary>
     private void RemoveAbandonedSessionFolders()
     {
@@ -75,8 +111,12 @@ public sealed class ClipExportService : IClipExportService, IDisposable
             {
                 var name = Path.GetFileName(folder);
                 var pidText = name[SessionFolderPrefix.Length..].Split('-')[0];
-                if (int.TryParse(pidText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var pid)
-                    && !IsProcessRunning(pid))
+                var lockPath = Path.Combine(folder, SessionLockFileName);
+                var abandoned = File.Exists(lockPath)
+                    ? !IsLockHeld(lockPath)
+                    : int.TryParse(pidText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var pid)
+                        && !IsProcessRunning(pid);
+                if (abandoned)
                 {
                     TryDeleteDirectory(folder);
                 }
@@ -85,6 +125,24 @@ public sealed class ClipExportService : IClipExportService, IDisposable
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             System.Diagnostics.Trace.TraceWarning($"Could not sweep abandoned tool-copy folders: {ex.Message}");
+        }
+    }
+
+    private static bool IsLockHeld(string lockPath)
+    {
+        try
+        {
+            using var probe = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            return false;
+        }
+        catch (FileNotFoundException)
+        {
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Held by a live session, or not ours to judge: keep it.
+            return true;
         }
     }
 

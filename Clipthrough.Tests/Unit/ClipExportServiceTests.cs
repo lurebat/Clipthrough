@@ -86,4 +86,37 @@ public sealed class ClipExportServiceTests : IDisposable
         Assert.False(Directory.Exists(abandoned));
         Assert.True(Directory.Exists(unrelated));
     }
+
+    /// <summary>
+    /// Rubber-duck F-06-4. A crashed session's PID can be reused by any other
+    /// long-running process before the next start; the PID alone then makes
+    /// the abandoned folder look live. Here the PID is this test process -
+    /// certainly running - but no session holds the folder's lock any more.
+    /// </summary>
+    [Fact]
+    public void AFolderWhosePidWasReused_ButWhoseSessionIsGone_IsRemovedAtStartup()
+    {
+        var temp = Path.Combine(_root, "Temp");
+        var abandoned = Path.Combine(temp, $"Clipthrough-tool-copies-{Environment.ProcessId}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(abandoned);
+        File.WriteAllText(Path.Combine(abandoned, "session.lock"), string.Empty);
+        File.WriteAllText(Path.Combine(abandoned, "secret.txt"), "x");
+
+        using var service = new ClipExportService(Path.Combine(_root, "Documents"), temp);
+
+        Assert.False(Directory.Exists(abandoned));
+    }
+
+    /// <summary>A second instance that starts must not sweep a live session's copies.</summary>
+    [Fact]
+    public async Task ALiveSessionsFolder_IsKept_WhenAnotherInstanceStarts()
+    {
+        var temp = Path.Combine(_root, "Temp");
+        using var live = new ClipExportService(Path.Combine(_root, "Documents"), temp);
+        var copy = await live.ExportForToolAsync(Secret());
+
+        using var second = new ClipExportService(Path.Combine(_root, "Documents"), temp);
+
+        Assert.True(File.Exists(copy.PrimaryPath));
+    }
 }

@@ -2739,8 +2739,8 @@
     "id": "tool-copies-are-ordinary-exports",
     "file": "Clipthrough/Services/Capture/ClipExportService.cs",
     "why": "F-18. A tool copy written as a full export lands in Documents (often OneDrive-synced) with a metadata.json of the raw content, and outlives the session.",
-    "find": "        => ExportCoreAsync(clip, _sessionRoot, includeMetadata: false, cancellationToken);\n",
-    "replace": "        => ExportAsync(clip, cancellationToken);\n",
+    "find": "        return ExportCoreAsync(clip, _sessionRoot, includeMetadata: false, cancellationToken);\n",
+    "replace": "        return ExportAsync(clip, cancellationToken);\n",
     "filter": "FullyQualifiedName~ClipExportServiceTests.AToolCopy_LandsInTheSessionFolder"
   },
   {
@@ -3358,5 +3358,21 @@
     "find": "        if (HasTable(connection, \"clips_fts\"))\n        {\n            Execute(connection, \"INSERT INTO clips_fts(clips_fts) VALUES('optimize');\");\n        }\n\n        Execute(connection, \"VACUUM;\");\n",
     "replace": "        if (removed > 0)\n        {\n        if (HasTable(connection, \"clips_fts\"))\n        {\n            Execute(connection, \"INSERT INTO clips_fts(clips_fts) VALUES('optimize');\");\n        }\n\n        Execute(connection, \"VACUUM;\");\n        }\n",
     "filter": "FullyQualifiedName~BackupSensitivePurgeTests.WithTheLifetimeOn_ASensitiveClipLiveExpiryAlreadyDeleted"
+  },
+  {
+    "id": "f06-4-sweep-trusts-pid-alone",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "Rubber-duck F-06-4: a crashed session's PID can be reused, so the sweep must judge a folder by whether its session lock is still held, not by the PID.",
+    "find": "                var abandoned = File.Exists(lockPath)",
+    "replace": "                var abandoned = File.Exists(lockPath) && lockPath.Length < 0",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.AFolderWhosePidWasReused"
+  },
+  {
+    "id": "f06-4-session-lock-not-held",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "Rubber-duck F-06-4: a live session keeps its lock open for its lifetime, so a second instance starting up does not sweep its tool copies.",
+    "find": "                FileAccess.ReadWrite,\n                FileShare.None);",
+    "replace": "                FileAccess.ReadWrite,\n                FileShare.None);\n            _sessionLock.Dispose();",
+    "filter": "FullyQualifiedName~ClipExportServiceTests.ALiveSessionsFolder_IsKept"
   }
 ]
