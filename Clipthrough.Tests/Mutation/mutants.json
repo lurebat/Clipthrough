@@ -3718,5 +3718,21 @@
     "find": "            .Select(s => (Screen: s, Overlap: OverlapArea(frame, s.WorkingArea)))",
     "replace": "            .Select(s => (Screen: s, Overlap: OverlapArea(new PixelRect(remembered.Position, OuterPixels(remembered.ClientSize, frameExtra, s.Scaling)), s.WorkingArea)))",
     "filter": "FullyQualifiedName~WindowGeometryTests.ARememberedWindowMostlyOnA100PercentScreen"
+  },
+  {
+    "id": "app-runtime-floor-dropped",
+    "file": "Clipthrough/Clipthrough.csproj",
+    "why": "Rubber-duck F-15-1. Without the floor on the framework reference, Clipthrough.runtimeconfig.json asks for Microsoft.NETCore.App 10.0.0, so the release ZIP run directly starts on any 10.0.x below the security floor the installer enforces.",
+    "find": "<FrameworkReference Update=\"Microsoft.NETCore.App\" RuntimeFrameworkVersion=\"10.0.14\" />",
+    "replace": "<FrameworkReference Update=\"Microsoft.NETCore.App\" RuntimeFrameworkVersion=\"10.0.0\" />",
+    "filter": "FullyQualifiedName~ReleasePackagingTests.TheAppItselfRequiresTheSameServicedRuntime"
+  },
+  {
+    "id": "installer-floor-raised-without-the-app",
+    "file": ".github/workflows/release.yml",
+    "why": "Rubber-duck F-15-1. The installer and the runtimeconfig must name the same floor; raising one alone makes the ZIP and the Velopack package accept different runtimes.",
+    "find": "            --framework net10.0.14-x64-runtime `",
+    "replace": "            --framework net10.0.15-x64-runtime `",
+    "filter": "FullyQualifiedName~ReleasePackagingTests.TheAppItselfRequiresTheSameServicedRuntime"
   }
 ]

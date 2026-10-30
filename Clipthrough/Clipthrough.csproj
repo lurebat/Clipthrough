@@ -18,6 +18,22 @@
     </ItemGroup>
 
     <ItemGroup>
+        <!--
+          The .NET runtime floor for every shipped artifact, not only the Velopack
+          package. It becomes the framework version in Clipthrough.runtimeconfig.json,
+          which the .NET host treats as a minimum, so the release ZIP run directly is
+          refused on an older 10.0.x and still rolls forward to the latest installed
+          patch. Keep it equal to the vpk pack framework floor in release.yml;
+          ReleasePackagingTests checks both. Not the RuntimeFrameworkVersion property:
+          that also applies to the Windows SDK projection reference and breaks restore.
+        -->
+        <FrameworkReference Update="Microsoft.NETCore.App" RuntimeFrameworkVersion="10.0.14" />
+        <!-- The SDK does not regenerate runtimeconfig.json when only this version
+             changes, so an incremental build would keep the old floor. -->
+        <GenerateRuntimeConfigurationFilesInputs Include="$(MSBuildProjectFullPath)" />
+    </ItemGroup>
+
+    <ItemGroup>
         <AvaloniaResource Include="Assets\**" Exclude="Assets\SemanticModel\**" />
         <Content Include="Assets\SemanticModel\**" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
