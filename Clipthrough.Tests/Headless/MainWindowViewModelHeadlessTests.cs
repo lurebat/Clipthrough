@@ -2167,11 +2167,19 @@ public sealed partial class MainWindowViewModelHeadlessTests
             clipStore: blockingStore);
         await viewModel.InitializeAsync();
 
-        for (var attempt = 0; attempt < 80 && viewModel.Clips.Count < 200; attempt++)
+        // The loading flag drops only once the startup refresh has landed. Startup
+        // also re-applies the saved filters, which queues a refresh of its own;
+        // let it land before paging, and before every count asserted below.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (viewModel.IsLoadingDatabase)
         {
-            await Task.Delay(25);
+            Assert.True(DateTime.UtcNow < deadline, "The view model's database did not finish opening.");
+            await Task.Delay(10);
             Dispatcher.UIThread.RunJobs();
         }
+
+        await viewModel.WhenRefreshesIdleAsync();
+        Dispatcher.UIThread.RunJobs();
 
         Assert.Equal(200, viewModel.Clips.Count);
         await viewModel.LoadMoreCommand.Execute().ToTask();
@@ -2204,12 +2212,8 @@ public sealed partial class MainWindowViewModelHeadlessTests
 
         blockingStore.ReleaseWrites();
         await pendingWrite;
-
-        for (var attempt = 0; attempt < 200 && viewModel.Clips.Count != 200; attempt++)
-        {
-            await Task.Delay(25);
-            Dispatcher.UIThread.RunJobs();
-        }
+        await viewModel.WhenRefreshesIdleAsync();
+        Dispatcher.UIThread.RunJobs();
 
         // All 201 clips still match "keep", so a depth that failed to reset
         // shows up as 201.

@@ -2998,5 +2998,13 @@
     "find": "if (_loadMorePageVersion != pagesAtRequest)",
     "replace": "if (_loadMorePageVersion != pagesAtRequest && pagesAtRequest < 0)",
     "filter": "FullyQualifiedName~LoadMore_KeepsItsPage"
+  },
+  {
+    "id": "refresh-records-query-at-request-time",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Paging invariant 2: recording the query when the request is built lets a retried attempt compare the new query against itself and re-read at the old depth, so a write straddling a query change kept the extra page.",
+    "find": "                    return new RefreshRequest(BuildFilters(offset: 0, limit: limit), UseSemanticClipSearch);\n",
+    "replace": "                    _lastRefreshFilters = BuildFilters(offset: 0, limit: limit);\n                    _lastRefreshUsedSemantic = UseSemanticClipSearch;\n                    return new RefreshRequest(BuildFilters(offset: 0, limit: limit), UseSemanticClipSearch);\n",
+    "filter": "FullyQualifiedName~Refresh_ResetsPaging_EvenWhenAClipWriteStraddlesTheQueryChange"
   }
 ]
