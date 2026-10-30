@@ -24,7 +24,7 @@ using Xunit;
 
 namespace Clipthrough.Tests.Headless;
 
-public sealed class MainWindowViewModelHeadlessTests
+public sealed partial class MainWindowViewModelHeadlessTests
 {
     [AvaloniaFact]
     public async Task CapturedClipRefresh_SelectsNewestClip()
@@ -101,11 +101,21 @@ public sealed class MainWindowViewModelHeadlessTests
             clipboardMonitor.Emit(clip);
         }
 
-        await Task.Delay(500);
-        Dispatcher.UIThread.RunJobs();
+        // Until the database start has finished and the burst has landed, not a
+        // fixed 500 ms: the burst is emitted while the library is still loading,
+        // and under load the start alone outlasted the sleep.
+        var clock = Stopwatch.StartNew();
+        while ((viewModel.IsLoadingDatabase || viewModel.SelectedClip?.Id != 6) && clock.Elapsed < TimeSpan.FromSeconds(10))
+        {
+            await Task.Delay(20);
+            Dispatcher.UIThread.RunJobs();
+        }
 
         Assert.Equal(6, viewModel.SelectedClip?.Id);
-        Assert.InRange(clipStore.SearchCallCount, 2, 4);
+
+        // At least 1, not 2: the count includes the startup refresh, and when the
+        // start is slow the whole burst lands before it and one search serves all.
+        Assert.InRange(clipStore.SearchCallCount, 1, 4);
         Assert.Equal(1, clipStore.MaxConcurrentSearches);
     }
 
@@ -525,6 +535,16 @@ public sealed class MainWindowViewModelHeadlessTests
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
         await viewModel.InitializeAsync();
+
+        // InitializeAsync opens the database on a worker thread and returns.
+        // Until that lands every refresh is a no-op, so the RefreshAsync that
+        // selects the new clip would be dropped and the original stay selected.
+        for (var attempt = 0; attempt < 200 && viewModel.IsLoadingDatabase; attempt++)
+        {
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
+        Assert.False(viewModel.IsLoadingDatabase);
 
         var clip = CreateImageClipEntry(CreatePngBytes(unchecked((int)0xFFFF0000)), "original image");
         viewModel.SelectedClip = new ClipItemViewModel(clip);
@@ -2147,11 +2167,19 @@ public sealed class MainWindowViewModelHeadlessTests
             clipStore: blockingStore);
         await viewModel.InitializeAsync();
 
-        for (var attempt = 0; attempt < 80 && viewModel.Clips.Count < 200; attempt++)
+        // The loading flag drops only once the startup refresh has landed. Startup
+        // also re-applies the saved filters, which queues a refresh of its own;
+        // let it land before paging, and before every count asserted below.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (viewModel.IsLoadingDatabase)
         {
-            await Task.Delay(25);
+            Assert.True(DateTime.UtcNow < deadline, "The view model's database did not finish opening.");
+            await Task.Delay(10);
             Dispatcher.UIThread.RunJobs();
         }
+
+        await viewModel.WhenRefreshesIdleAsync();
+        Dispatcher.UIThread.RunJobs();
 
         Assert.Equal(200, viewModel.Clips.Count);
         await viewModel.LoadMoreCommand.Execute().ToTask();
@@ -2184,12 +2212,8 @@ public sealed class MainWindowViewModelHeadlessTests
 
         blockingStore.ReleaseWrites();
         await pendingWrite;
-
-        for (var attempt = 0; attempt < 200 && viewModel.Clips.Count != 200; attempt++)
-        {
-            await Task.Delay(25);
-            Dispatcher.UIThread.RunJobs();
-        }
+        await viewModel.WhenRefreshesIdleAsync();
+        Dispatcher.UIThread.RunJobs();
 
         // All 201 clips still match "keep", so a depth that failed to reset
         // shows up as 201.
@@ -2634,14 +2658,25 @@ public sealed class MainWindowViewModelHeadlessTests
             m_release.TrySetResult();
         }
 
-        public Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default)
+        /// <summary>
+        /// Awaited before each search reaches the store, so a test can hold a
+        /// refresh (offset 0) or a load-more page (offset past it) in flight.
+        /// </summary>
+        public Func<ClipSearchFilters, Task>? BeforeSearch { get; set; }
+
+        public async Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default)
         {
             lock (m_gate)
             {
                 m_searches.Add(filters.SearchText ?? string.Empty);
             }
 
-            return inner.SearchAsync(filters, cancellationToken);
+            if (BeforeSearch is { } beforeSearch)
+            {
+                await beforeSearch(filters);
+            }
+
+            return await inner.SearchAsync(filters, cancellationToken);
         }
 
         public async Task SetFavoriteAsync(long clipId, bool isFavorite, CancellationToken cancellationToken = default)

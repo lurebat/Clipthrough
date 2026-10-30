@@ -7,6 +7,7 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using Clipthrough.Tests.Layout;
 using Xunit;
 
 namespace Clipthrough.Tests.Headless;
@@ -51,8 +52,8 @@ public sealed class WelcomeNarrowWorkAreaHeadlessTests
             harness.Window.Bounds.Width <= WorkAreaWidth,
             $"the window is {harness.Window.Bounds.Width} DIP wide on a {WorkAreaWidth} DIP work area");
 
-        // The inputs keep a usable width and scroll sideways rather than being
-        // squeezed into what is left beside the fixed left column.
+        // The inputs keep a usable width: the form stacks above the explanation
+        // rather than being squeezed into what is left beside it.
         var path = harness.Window.FindControl<TextBox>("WelcomeDatabasePathTextBox")!;
         Assert.True(path.Bounds.Width >= 200, $"the database path box was squeezed to {path.Bounds.Width:F0} DIP");
 
@@ -80,13 +81,74 @@ public sealed class WelcomeNarrowWorkAreaHeadlessTests
             $"the welcome content is {scroller.Extent.Width:F0} DIP wide in a {scroller.Viewport.Width:F0} DIP viewport at the default window size");
     }
 
+    /// <summary>
+    /// The window used to keep the workspace's 1100x640 DIP minimum, which
+    /// no longer exists: the workspace reflows down to 480x360 instead
+    /// (ResponsiveWorkspaceHeadlessTests). The minimum is what the smallest
+    /// supported screen, 1280x720 at 150%, can hold with room to spare.
+    /// </summary>
     [AvaloniaFact]
-    public void TheWorkspaceKeepsItsMinimumWidth()
+    public void TheWindowMinimumFitsTheSmallestSupportedScreen()
     {
         using var harness = MainWindowTestHarness.Create();
 
         Assert.True(harness.ViewModel.IsMainWorkspaceVisible, "the workspace is not showing, so its minimum is not under test");
-        Assert.Equal(1100, harness.Window.MinWidth);
+        Assert.Equal(480, harness.Window.MinWidth);
+        Assert.Equal(360, harness.Window.MinHeight);
+    }
+
+    /// <summary>
+    /// The first fix for F-49 lowered only the minimum width. The 640 DIP
+    /// minimum height still held the window taller than a 1280x720 laptop at
+    /// 150% (about 400 DIP of client area once maximized), so Create library,
+    /// in the welcome footer, was drawn below the screen.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task OnAShortWorkArea_CreateLibraryIsOnScreen()
+    {
+        using var harness = MainWindowTestHarness.Create();
+        await OpenWelcomeAsync(harness);
+
+        harness.Window.Width = 853;
+        harness.Window.Height = 401;
+        Dispatcher.UIThread.RunJobs();
+
+        OnScreen.AssertVisible("Create library", CreateLibraryButton(harness), harness.Window, new Size(853, 401));
+    }
+
+    /// <summary>The same short screen, where Unlock was below the screen too.</summary>
+    [AvaloniaFact]
+    public void OnAShortWorkArea_UnlockIsReachable()
+    {
+        using var harness = MainWindowTestHarness.Create();
+        harness.ViewModel.OpenPasswordPromptForTests();
+        Dispatcher.UIThread.RunJobs();
+
+        harness.Window.Width = 853;
+        harness.Window.Height = 401;
+        Dispatcher.UIThread.RunJobs();
+
+        var unlock = harness.Window.GetVisualDescendants().OfType<Button>()
+            .Single(b => b.IsEffectivelyVisible && ReferenceEquals(b.Command, harness.ViewModel.UnlockDatabaseCommand));
+        OnScreen.AssertReachable("Unlock", unlock, harness.Window, new Size(853, 401));
+    }
+
+    [AvaloniaFact]
+    public async Task OnAPortraitScreen_TheFormStacksInsteadOfScrollingSideways()
+    {
+        using var harness = MainWindowTestHarness.Create();
+        await OpenWelcomeAsync(harness);
+
+        harness.Window.Width = WorkAreaWidth;
+        harness.Window.Height = WorkAreaHeight;
+        Dispatcher.UIThread.RunJobs();
+
+        var path = harness.Window.FindControl<TextBox>("WelcomeDatabasePathTextBox")!;
+        var scroller = path.GetVisualAncestors().OfType<ScrollViewer>().First();
+        Assert.True(
+            scroller.Extent.Width <= scroller.Viewport.Width + 0.5,
+            $"the welcome content is {scroller.Extent.Width:F0} DIP wide in a {scroller.Viewport.Width:F0} DIP viewport");
+        OnScreen.AssertVisible("database path", path, harness.Window, new Size(WorkAreaWidth, WorkAreaHeight));
     }
 
     private static async Task OpenWelcomeAsync(MainWindowTestHarness harness)

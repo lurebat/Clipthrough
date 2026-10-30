@@ -50,6 +50,12 @@ internal sealed class MainWindowTestHarness : IDisposable
     /// </summary>
     public TestStorageOptionsService StorageOptions => _scope.StorageOptionsService;
 
+    /// <summary>
+    /// The notification service the view model listens to, so a test can raise
+    /// a toast through the real path.
+    /// </summary>
+    public TestNotificationService Notifications => _scope.NotificationService;
+
     public TextBox SearchBox => Window.FindControl<TextBox>("SearchTextBox")!;
 
     public ListBox ClipList => Window.FindControl<ListBox>("ClipsListBox")!;
@@ -61,7 +67,8 @@ internal sealed class MainWindowTestHarness : IDisposable
     /// </param>
     public static MainWindowTestHarness Create(
         Func<AppSettings, AppSettings>? configureSettings = null,
-        bool aiConfigured = false)
+        bool aiConfigured = false,
+        IWindowPlacementStore? placementStore = null)
     {
         var scope = new TemporaryDatabaseScope();
 
@@ -100,7 +107,7 @@ internal sealed class MainWindowTestHarness : IDisposable
             new BackgroundJobIndicator(),
             scope.DatabaseInitializer);
 
-        var window = new MainWindow(systemInteraction) { DataContext = viewModel };
+        var window = new MainWindow(systemInteraction, placementStore) { DataContext = viewModel };
         window.Show();
         Dispatcher.UIThread.RunJobs();
 

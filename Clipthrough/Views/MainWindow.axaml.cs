@@ -35,7 +35,6 @@ public partial class MainWindow : Window
     private ClipItemViewModel? m_dragCandidateClip;
     private PointerPressedEventArgs? m_dragPressedArgs;
     private bool m_dragInProgress;
-    private bool m_fittedToWorkingArea;
     private const double DragThreshold = 4.0;
 
     /// <summary>
@@ -48,10 +47,12 @@ public partial class MainWindow : Window
 
     public MainWindow() : this(null) { }
 
-    public MainWindow(ISystemInteractionService? systemInteractionService)
+    public MainWindow(ISystemInteractionService? systemInteractionService, IWindowPlacementStore? placementStore = null)
     {
         m_systemInteractionService = systemInteractionService;
         InitializeComponent();
+        RequestWorkspaceBreakpoint(WorkspaceBreakpoints.Classify(ClientSize));
+        InitializePlacement(placementStore);
         Opened += OnOpened;
         Activated += OnActivated;
         Closed += OnClosed;
@@ -62,11 +63,10 @@ public partial class MainWindow : Window
 
     private void OnOpened(object? sender, EventArgs e)
     {
-        if (!m_fittedToWorkingArea)
-        {
-            m_fittedToWorkingArea = true;
-            FitToWorkingArea();
-        }
+        // Every show, not only the first: Opened is raised again when the window
+        // comes back from the tray, possibly onto a screen that has since shrunk
+        // or gone. (audit F-49)
+        WindowFitter.Fit(this);
 
         if (m_clipListScrollViewer is not null)
         {
@@ -117,79 +117,6 @@ public partial class MainWindow : Window
             m_focusClipOnNextActivation = false;
             FocusInitialPopupTarget();
         }
-    }
-
-    /// <summary>
-    /// Shrinks the window into the screen's working area when its default size
-    /// does not fit. Windows clamps an oversized window to the screen, but the
-    /// first layout still follows the requested 1360 DIP, so on a 576 DIP-wide
-    /// display the welcome screen opened laid out wider than the window, with
-    /// "Create library" off-screen until the user happened to resize or
-    /// maximize. (audit F-49)
-    /// </summary>
-    /// <remarks>
-    /// The workspace's 1100 DIP minimum still wins over the width set here, so
-    /// this only narrows the window as far as whatever is showing allows.
-    /// </remarks>
-    private void FitToWorkingArea()
-    {
-        if (WindowState != WindowState.Normal || FrameSize is not { } frame)
-        {
-            return;
-        }
-
-        var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary;
-        if (screen is null)
-        {
-            return;
-        }
-
-        var requested = new Size(
-            double.IsNaN(Width) ? ClientSize.Width : Width,
-            double.IsNaN(Height) ? ClientSize.Height : Height);
-        var frameExtra = new Size(frame.Width - ClientSize.Width, frame.Height - ClientSize.Height);
-        var fit = FitToWorkingArea(requested, frameExtra, Position, screen.WorkingArea, screen.Scaling);
-        if (fit is { } placement)
-        {
-            Width = placement.Size.Width;
-            Height = placement.Size.Height;
-            Position = placement.Position;
-        }
-    }
-
-    /// <summary>
-    /// The client size and position that keep a window inside
-    /// <paramref name="workingArea"/>, or null when it already fits.
-    /// </summary>
-    /// <param name="clientSize">Requested client size, in DIP.</param>
-    /// <param name="frameExtra">What the frame adds to the client size, in DIP.</param>
-    /// <param name="position">Current top-left of the frame, in pixels.</param>
-    /// <param name="workingArea">The screen's working area, in pixels.</param>
-    /// <param name="scaling">The screen's DIP-to-pixel scaling.</param>
-    internal static (Size Size, PixelPoint Position)? FitToWorkingArea(
-        Size clientSize,
-        Size frameExtra,
-        PixelPoint position,
-        PixelRect workingArea,
-        double scaling)
-    {
-        var extraWidth = Math.Max(0, frameExtra.Width);
-        var extraHeight = Math.Max(0, frameExtra.Height);
-        var width = Math.Min(clientSize.Width, (workingArea.Width / scaling) - extraWidth);
-        var height = Math.Min(clientSize.Height, (workingArea.Height / scaling) - extraHeight);
-
-        var outerWidth = (int)Math.Ceiling((width + extraWidth) * scaling);
-        var outerHeight = (int)Math.Ceiling((height + extraHeight) * scaling);
-        var x = Math.Max(workingArea.X, Math.Min(position.X, workingArea.Right - outerWidth));
-        var y = Math.Max(workingArea.Y, Math.Min(position.Y, workingArea.Bottom - outerHeight));
-
-        var fitted = new PixelPoint(x, y);
-        if (width == clientSize.Width && height == clientSize.Height && fitted == position)
-        {
-            return null;
-        }
-
-        return (new Size(width, height), fitted);
     }
 
     /// <summary>
