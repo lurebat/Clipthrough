@@ -2915,8 +2915,8 @@
     "id": "transform-skips-hydration",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "F-10. A transform saves its result as a new clip; started from a prefix it would save a clip missing everything after it.",
-    "find": "        await clip.EnsureContentHydratedAsync();\n        if (clip.Clip.ContentType != ContentType.Files)",
-    "replace": "        await Task.CompletedTask;\n        if (clip.Clip.ContentType != ContentType.Files)",
+    "find": "        await clip.EnsureContentHydratedAsync();\n        if (transformation is { } builtin && TextTransformationService.MarkupSource(builtin, clip.Clip) is { } markup)",
+    "replace": "        await Task.CompletedTask;\n        if (transformation is { } builtin && TextTransformationService.MarkupSource(builtin, clip.Clip) is { } markup)",
     "filter": "FullyQualifiedName~TransformingALongListRow_TransformsAllOfIt"
   },
   {
@@ -3371,8 +3371,8 @@
     "id": "row-transform-uses-the-selection",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "The row context menu applies to the row it was opened on. Dropping the explicit target makes it transform the selection or the checked clips instead - a different clip than the one the user right-clicked.",
-    "find": "                explicitTarget: explicitTarget);",
-    "replace": "                explicitTarget: explicitTarget is null ? null : null);",
+    "find": "                explicitTarget: explicitTarget,\n                builtinTransformation: transformation);",
+    "replace": "                explicitTarget: explicitTarget is null ? null : null,\n                builtinTransformation: transformation);",
     "filter": "FullyQualifiedName~RowTransform_AppliesToTheClickedRowOnly"
   },
   {
@@ -3571,8 +3571,8 @@
     "id": "markdown-to-html-export-returns-to-caller-thread",
     "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
     "why": "VellumText 0.8's import is async; the export after it is synchronous. Resuming on the caller's context runs that export on the UI thread - the freeze the async import exists to remove.",
-    "find": ".ImportAsync(input, cancellationToken).ConfigureAwait(false);\n            var html",
-    "replace": ".ImportAsync(input, cancellationToken).ConfigureAwait(true);\n            var html",
+    "find": ".ImportAsync(input, cancellationToken).ConfigureAwait(false);\n            // Export returns a CF_HTML",
+    "replace": ".ImportAsync(input, cancellationToken).ConfigureAwait(true);\n            // Export returns a CF_HTML",
     "filter": "FullyQualifiedName~MarkdownTransformationTests.Conversion_CompletesWithoutTheCallersThread"
   },
   {
@@ -4344,6 +4344,38 @@
     "filter": "FullyQualifiedName~ClipBitmapFactoryHeadlessTests"
   },
   {
+    "id": "source-url-read-through-the-string-view",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "why": "Live check C7: the string accessor decodes every format as UTF-16, so Chromium's UTF-8 source URL became byte-pair mojibake. The bytes must be read and decoded per format.",
+    "find": "            var bytesValue = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(formatName));\n            if (bytesValue is { Length: > 0 })\n            {\n                var decoded = DecodeSourceUrl(formatName, bytesValue, ansiCodePage);",
+    "replace": "            var bytesValue = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(formatName));\n            if (bytesValue is { Length: > 0 } && formatName.Length < 0)\n            {\n                var decoded = DecodeSourceUrl(formatName, bytesValue, ansiCodePage);",
+    "filter": "FullyQualifiedName~ClipboardSourceUrlTests"
+  },
+  {
+    "id": "markdown-to-html-keeps-the-clipboard-header",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "why": "Live check C3: VellumText exports a CF_HTML document, and the Markdown -> HTML clip stored it header and all.",
+    "find": "            var html = Presentation.ClipboardMarkupDecoder.ExtractHtmlFragment(\n                VellumText.Interop.Html.HtmlFormat.Instance.Export(imported.Doc));",
+    "replace": "            var html = input.Length < 0 ? Presentation.ClipboardMarkupDecoder.ExtractHtmlFragment(\n                VellumText.Interop.Html.HtmlFormat.Instance.Export(imported.Doc)) : VellumText.Interop.Html.HtmlFormat.Instance.Export(imported.Doc);",
+    "filter": "FullyQualifiedName~MarkdownToHtml_ReturnsTheFragment|FullyQualifiedName~RowTransform_MarkdownToHtml_StoresAndCopiesHtml"
+  },
+  {
+    "id": "html-to-markdown-reads-the-plain-text",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "why": "Live check C3: HTML -> Markdown on a rich browser clip transformed its plain text, which has no markup, so nothing happened.",
+    "find": "            || Presentation.ClipDisplayFormatter.GetRawMarkup(clip) is not { } markup)",
+    "replace": "            || Presentation.ClipDisplayFormatter.GetRawMarkup(clip) is not { } markup || clip.Id > long.MinValue)",
+    "filter": "FullyQualifiedName~ConvertsItsHtml"
+  },
+  {
+    "id": "html-to-markdown-hotkey-uses-the-list-row",
+    "file": "Clipthrough/Services/Capture/HotkeyClipActions.cs",
+    "why": "The hotkey takes the selected list row, which carries no markup; HTML -> Markdown must fetch the full clip.",
+    "find": "                    clip = await store.GetByIdAsync(clip.Id) ?? clip;",
+    "replace": "                    clip = clip.Id < 0 ? (await store.GetByIdAsync(clip.Id) ?? clip) : clip;",
+    "filter": "FullyQualifiedName~HtmlToMarkdownHotkey_OnARichClipFromTheList"
+  },
+  {
     "id": "integrity-failure-notification-times-out",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "Owner decision after live check F3: the integrity-failure notification says to restore a backup and must stay until the user closes it, not vanish after six seconds.",
@@ -4608,6 +4640,46 @@
     "filter": "FullyQualifiedName~WindowGeometryTests.ARememberedWindowMostlyOnA100PercentScreen"
   },
   {
+    "id": "source-url-ansi-decoded-as-latin1",
+    "file": "Clipthrough/Services/Capture/ClipboardMonitorService.cs",
+    "why": "Rubber-duck F-16-1. The ANSI UniformResourceLocator format is in the system ANSI code page; decoding it as Latin-1 turns 0x80 into a C1 control instead of the euro sign in cp1252, and 0xC0 into A-grave instead of Cyrillic A in cp1251.",
+    "find": "\"UniformResourceLocator\" => AnsiEncoding(ansiCodePage).GetString(bytes),",
+    "replace": "\"UniformResourceLocator\" => (ansiCodePage < 0 ? AnsiEncoding(ansiCodePage) : Encoding.Latin1).GetString(bytes),",
+    "filter": "TheAnsiUrlFormat_IsDecodedInTheAnsiCodePage"
+  },
+  {
+    "id": "cf-html-header-read-past-the-markup",
+    "file": "Clipthrough/Presentation/ClipboardMarkupDecoder.cs",
+    "why": "Rubber-duck F-16-2. A CF_HTML header is the lines before the first <. Reading header fields anywhere treats header-like text in a bare HTML fragment (a Markdown->HTML result) as offsets and slices the fragment to \"<p>Before S\".",
+    "find": "        return markup < 0 ? html : html[..markup];",
+    "replace": "        return markup < 0 || html.Length > 0 ? html : html[..markup];",
+    "filter": "FullyQualifiedName~ExtractHtmlFragment_OnABareFragment_IgnoresHeaderLikeTextInItsContent|FullyQualifiedName~HtmlToMarkdownHotkey_OnAMarkdownToHtmlResult_KeepsTextThatLooksLikeAHeader"
+  },
+  {
+    "id": "markup-source-leaves-a-tagless-fragment-bare",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "why": "Rubber-duck F-16-3. A rich clip's fragment is HTML even with no tags (\"Fish &amp; Chips\"); passed bare, the converter takes it for plain text and the hotkey copies the entities verbatim.",
+    "find": "        return LooksLikeHtml(fragment) ? fragment : $\"<div>{fragment}</div>\";",
+    "replace": "        return LooksLikeHtml(fragment) || fragment.Length > 0 ? fragment : $\"<div>{fragment}</div>\";",
+    "filter": "HtmlToMarkdownHotkey_OnARichClipWithATaglessFragment_DecodesItsEntities"
+  },
+  {
+    "id": "transform-no-change-ignores-the-shown-text",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-16-3 follow-up. HTML -> Markdown reads a rich clip's markup; comparing the result only with that markup saves a duplicate clip when the Markdown is just the text the clip already shows (a tagless \"Fish\").",
+    "find": "                    || (!string.Equals(source, shown, StringComparison.Ordinal) && ReadsAs(result, shown)))",
+    "replace": "                    || (source.Length < 0 && !string.Equals(source, shown, StringComparison.Ordinal) && ReadsAs(result, shown)))",
+    "filter": "RowTransform_HtmlToMarkdown_WhenTheMarkdownIsTheClipsText_ReportsNoChangeAndCreatesNothing"
+  },
+  {
+    "id": "transform-no-change-counts-the-exporters-line-break",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-16-3 follow-up. The Markdown exporter ends its output with a line break the clip's text lacks; an exact comparison never sees \"Fish\\n\" as \"Fish\" and saves a duplicate clip.",
+    "find": "        => result.AsSpan().TrimEnd(\"\\r\\n\").SequenceEqual(shown);",
+    "replace": "        => result.AsSpan().TrimEnd(\"\\r\\n\".Length < 0 ? \"\\r\\n\" : \"\\0\").SequenceEqual(shown);",
+    "filter": "RowTransform_HtmlToMarkdown_WhenTheMarkdownIsTheClipsText_ReportsNoChangeAndCreatesNothing"
+  },
+  {
     "id": "headless-gate-cleanup-marker-anywhere",
     "file": ".github/scripts/Invoke-HeadlessTests.ps1",
     "why": "Rubber-duck F-08-2: only a message that opens with the cleanup marker is a cleanup failure; an assertion that quotes the marker is a real failure and must not be retried.",
@@ -4832,6 +4904,30 @@
     "filter": "FullyQualifiedName~WorkspaceBreakpointTransitionHeadlessTests"
   },
   {
+    "id": "load-more-page-not-counted",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "A refresh built before a load-more page landed must not apply its shallower result over that page; the page counter is how it knows one landed.",
+    "find": "                _loadMorePageVersion++;\n",
+    "replace": "                _loadMorePageVersion += result.Items.Count < 0 ? 1 : 0;\n",
+    "filter": "FullyQualifiedName~LoadMore_KeepsItsPage"
+  },
+  {
+    "id": "overtaken-refresh-applied",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "A refresh that a load-more page overtook was read to the old depth; applying it deletes the page the user just scrolled in, so it must be discarded and re-run.",
+    "find": "if (_loadMorePageVersion != pagesAtRequest)",
+    "replace": "if (_loadMorePageVersion != pagesAtRequest && pagesAtRequest < 0)",
+    "filter": "FullyQualifiedName~LoadMore_KeepsItsPage"
+  },
+  {
+    "id": "refresh-records-query-at-request-time",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Paging invariant 2: recording the query when the request is built lets a retried attempt compare the new query against itself and re-read at the old depth, so a write straddling a query change kept the extra page.",
+    "find": "                    return new RefreshRequest(BuildFilters(offset: 0, limit: limit), UseSemanticClipSearch);\n",
+    "replace": "                    _lastRefreshFilters = BuildFilters(offset: 0, limit: limit);\n                    _lastRefreshUsedSemantic = UseSemanticClipSearch;\n                    return new RefreshRequest(BuildFilters(offset: 0, limit: limit), UseSemanticClipSearch);\n",
+    "filter": "FullyQualifiedName~Refresh_ResetsPaging_EvenWhenAClipWriteStraddlesTheQueryChange"
+  },
+  {
     "id": "size-total-counts-icons-while-move-owed",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "Rubber-duck F-13-5 (owner decision, option 2): while the deferred payload move is owed, orphaned icons cannot be swept, so counting app_icons makes the size cap evict clips to pay for icons nothing uses.",
@@ -4950,29 +5046,5 @@
     "find": "            Dispatcher.UIThread.Post(() => Fit(window, onlyIfTooLarge: true), DispatcherPriority.Background);",
     "replace": "            Dispatcher.UIThread.Post(() => Fit(window, onlyIfTooLarge: start.Value.Scaling < 0), DispatcherPriority.Background);",
     "filter": "FullyQualifiedName~WindowFitHeadlessTests.Dragging|FullyQualifiedName~WindowFitHeadlessTests.Resizing"
-  },
-  {
-    "id": "load-more-page-not-counted",
-    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
-    "why": "A refresh built before a load-more page landed must not apply its shallower result over that page; the page counter is how it knows one landed.",
-    "find": "                _loadMorePageVersion++;\n",
-    "replace": "                _loadMorePageVersion += result.Items.Count < 0 ? 1 : 0;\n",
-    "filter": "FullyQualifiedName~LoadMore_KeepsItsPage"
-  },
-  {
-    "id": "overtaken-refresh-applied",
-    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
-    "why": "A refresh that a load-more page overtook was read to the old depth; applying it deletes the page the user just scrolled in, so it must be discarded and re-run.",
-    "find": "if (_loadMorePageVersion != pagesAtRequest)",
-    "replace": "if (_loadMorePageVersion != pagesAtRequest && pagesAtRequest < 0)",
-    "filter": "FullyQualifiedName~LoadMore_KeepsItsPage"
-  },
-  {
-    "id": "refresh-records-query-at-request-time",
-    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
-    "why": "Paging invariant 2: recording the query when the request is built lets a retried attempt compare the new query against itself and re-read at the old depth, so a write straddling a query change kept the extra page.",
-    "find": "                    return new RefreshRequest(BuildFilters(offset: 0, limit: limit), UseSemanticClipSearch);\n",
-    "replace": "                    _lastRefreshFilters = BuildFilters(offset: 0, limit: limit);\n                    _lastRefreshUsedSemantic = UseSemanticClipSearch;\n                    return new RefreshRequest(BuildFilters(offset: 0, limit: limit), UseSemanticClipSearch);\n",
-    "filter": "FullyQualifiedName~Refresh_ResetsPaging_EvenWhenAClipWriteStraddlesTheQueryChange"
   }
 ]

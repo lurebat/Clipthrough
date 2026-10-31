@@ -76,6 +76,25 @@ public sealed class MarkdownTransformationTests
     }
 
     /// <summary>
+    /// Live check C3 (2026-10-29): a Markdown -> HTML clip's text began
+    /// "Version:0.9 StartHTML:...". VellumText's HtmlFormat.Export returns a
+    /// CF_HTML clipboard document, header included, and the transform stored it
+    /// as the clip. The result is the HTML fragment, as BoxTableToHtml's is;
+    /// the clipboard copy adds its own header (RichClipboardFormatting.BuildCfHtml).
+    /// </summary>
+    [Fact]
+    public async Task MarkdownToHtml_ReturnsTheFragment_NotAClipboardDocument()
+    {
+        var html = await ApplyAsync(TextTransformation.MarkdownToHtml, "# Title\n\nSome **bold** text.");
+
+        Assert.False(Clipthrough.Services.Platform.RichClipboardFormatting.LooksLikeCfHtml(html), html);
+        Assert.DoesNotContain("StartFragment", html, System.StringComparison.OrdinalIgnoreCase);
+        Assert.StartsWith("<", html.TrimStart(), System.StringComparison.Ordinal);
+        Assert.Contains("<h1", html, System.StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("bold", html, System.StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The security posture, stated as a test rather than left to the package
     /// default. This output goes to the clipboard as rich content and is
     /// rendered by whatever application receives it, and the input is arbitrary

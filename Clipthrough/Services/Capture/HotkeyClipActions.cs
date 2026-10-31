@@ -95,6 +95,14 @@ internal static class HotkeyClipActions
                     Trace.TraceWarning($"Custom hotkey '{gesture}': unknown builtin transform '{name}'");
                     return false;
                 }
+
+                // A list row carries no markup; HTML -> Markdown on a rich clip reads it.
+                if (tx is TextTransformation.HtmlToMarkdown && clip.ContentFormat is ClipContentFormat.Html && clip.ContentBytes is null)
+                {
+                    clip = await store.GetByIdAsync(clip.Id) ?? clip;
+                }
+
+                input = TextTransformationService.MarkupSource(tx, clip) ?? input;
                 if (TextTransformationService.RefusalReason(tx, input) is { } refusal)
                 {
                     Trace.TraceWarning($"Custom hotkey '{gesture}': {refusal}");

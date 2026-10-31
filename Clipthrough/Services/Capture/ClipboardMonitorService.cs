@@ -39,6 +39,15 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool RemoveClipboardFormatListener(IntPtr hwnd);
 
+    [DllImport("kernel32.dll")]
+    private static extern uint GetACP();
+
+    /// <summary>
+    /// The system ANSI code page, which the ANSI clipboard formats are in. Only
+    /// Windows has them; elsewhere Latin-1 stands in.
+    /// </summary>
+    private static readonly Lazy<int> SystemAnsiCodePage = new(static () => OperatingSystem.IsWindows() ? (int)GetACP() : 28591);
+
     private readonly IClipStoreService _clipStoreService;
     private readonly ISourceApplicationResolver _sourceApplicationResolver;
     private readonly IAppNotificationService _notificationService;
@@ -468,7 +477,7 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
     private async Task<ClipCaptureRequest?> BuildCaptureRequestAsync(IAsyncDataTransfer clipboardData, ClipboardSourceApplicationInfo? sourceInfo)
     {
         var plainText = await clipboardData.TryGetTextAsync();
-        var relatedSourceUrl = await TryGetPlatformStringAsync(clipboardData, SourceUrlFormats);
+        var relatedSourceUrl = await ReadSourceUrlAsync(clipboardData);
 
         var files = await clipboardData.TryGetFilesAsync();
         var filePaths = Array.Empty<string>();
@@ -705,28 +714,75 @@ public sealed class ClipboardMonitorService : IClipboardMonitorService, IDisposa
         return null;
     }
 
-    private static async Task<string?> TryGetPlatformStringAsync(IAsyncDataTransfer clipboardData, string[] formatNames)
-    {
-        foreach (var formatName in formatNames)
-        {
-            var stringValue = await clipboardData.TryGetValueAsync(DataFormat.CreateStringPlatformFormat(formatName));
-            if (!string.IsNullOrWhiteSpace(stringValue))
-            {
-                return stringValue.Trim();
-            }
+    /// <summary>
+    /// The page a copy came from. Read from the bytes, decoded as the format
+    /// declares, and cut at its terminator: the string accessor decodes every
+    /// format as UTF-16, so Chromium's UTF-8 URL came back as byte pairs - CJK
+    /// characters - followed by whatever lay past the URL in the buffer (live
+    /// check C7). The string is used only where no bytes are offered.
+    /// </summary>
+    internal static Task<string?> ReadSourceUrlAsync(IAsyncDataTransfer clipboardData)
+        => ReadSourceUrlAsync(clipboardData, SystemAnsiCodePage.Value);
 
+    /// <param name="ansiCodePage">The code page of the ANSI <c>UniformResourceLocator</c> format.</param>
+    internal static async Task<string?> ReadSourceUrlAsync(IAsyncDataTransfer clipboardData, int ansiCodePage)
+    {
+        foreach (var formatName in SourceUrlFormats)
+        {
             var bytesValue = await clipboardData.TryGetValueAsync(DataFormat.CreateBytesPlatformFormat(formatName));
             if (bytesValue is { Length: > 0 })
             {
-                var decodedValue = Encoding.UTF8.GetString(bytesValue).Trim('\0', ' ', '\r', '\n', '\t');
-                if (!string.IsNullOrWhiteSpace(decodedValue))
+                var decoded = DecodeSourceUrl(formatName, bytesValue, ansiCodePage);
+                if (!string.IsNullOrWhiteSpace(decoded))
                 {
-                    return decodedValue;
+                    return decoded;
                 }
+
+                continue;
+            }
+
+            var stringValue = await clipboardData.TryGetValueAsync(DataFormat.CreateStringPlatformFormat(formatName));
+            var terminated = stringValue?.Split('\0', 2)[0].Trim();
+            if (!string.IsNullOrWhiteSpace(terminated))
+            {
+                return terminated;
             }
         }
 
         return null;
+    }
+
+    private static string DecodeSourceUrl(string formatName, byte[] bytes, int ansiCodePage)
+    {
+        var text = formatName switch
+        {
+            // UTF-16LE, as the W suffix says.
+            "UniformResourceLocatorW" => Encoding.Unicode.GetString(bytes, 0, bytes.Length & ~1),
+            // The ANSI form, in the system's ANSI code page.
+            "UniformResourceLocator" => AnsiEncoding(ansiCodePage).GetString(bytes),
+            // Chromium's own format is UTF-8.
+            _ => Encoding.UTF8.GetString(bytes),
+        };
+
+        return text.Split('\0', 2)[0].Trim();
+    }
+
+    /// <summary>
+    /// .NET ships only the Unicode code pages, ASCII and Latin-1 by default;
+    /// the Windows ANSI pages (1252, 1251, 932, ...) come from
+    /// <see cref="CodePagesEncodingProvider"/>. Latin-1 maps every byte to one
+    /// character, so it stands in for a code page neither knows.
+    /// </summary>
+    private static Encoding AnsiEncoding(int codePage)
+    {
+        try
+        {
+            return CodePagesEncodingProvider.Instance.GetEncoding(codePage) ?? Encoding.GetEncoding(codePage);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+        {
+            return Encoding.Latin1;
+        }
     }
 
     private static string DescribeFormats(IAsyncDataTransfer clipboardData)
