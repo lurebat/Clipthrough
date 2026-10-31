@@ -39,7 +39,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// Measured at 60k clips, the query itself is 135-750 ms, so the throttle
     /// was the smaller part of the wait; 150 ms still coalesces ordinary typing
     /// into one query, while 80 ms re-queried three to seven times per word and
-    /// made the list jump while typing (docs/plans/2026-10-30-clipthrough-feel-options.md, O10).
+    /// made the list jump while typing.
     /// </summary>
     internal static readonly TimeSpan SearchThrottle = TimeSpan.FromMilliseconds(150);
 

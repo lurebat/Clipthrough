@@ -38,6 +38,11 @@ Showing the main window steals foreground focus, which would break Ctrl+V into "
 
 `RestoreCapturedForeground` uses the AttachThreadInput trick — see below — because plain `SetForegroundWindow` will fail when the calling process doesn't own the foreground.
 
+Between the restore and `SimulatePasteKeystroke`, wait with `PasteTiming.BeforePasteAsync(system, budget)`: it polls `GetForegroundWindow` until the restored target holds the foreground (or, with no restored target, any window not ours), then leaves a settle margin, never longer in total than the budget.
+
+## Dismissing the popup: cloak, don't hide
+
+`MainWindow.Dismiss()` → `ISystemInteractionService.TryCloakWindow(window, releaseForeground: true)`: `DwmSetWindowAttribute(DWMWA_CLOAK, TRUE)`, then `ShowWindow(SW_HIDE)` and `ShowWindow(SW_SHOWNA)`. The hide lets Windows choose the next foreground window exactly as for a real hide; the no-activate show keeps the window "visible" so it goes on rendering while cloaked (PowerToys Command Palette's `HideWindow`). `ShowInTaskbar = false` must be set *before* the cloak, or the re-show brings the taskbar button back. A hidden Avalonia window stops rendering, and DWM shows its last frame on the next show - which is the stale-frame reopen this avoids.
 ## Window placement, DPI and monitors
 
 Window sizes are DIP and positions are pixels: `Window.Width` is DIP, while `Window.Position`, `Screen.WorkingArea` and `GetCaretScreenPosition()` are pixels. Never compare one with the other directly. Use `Views/WindowGeometry.cs`, whose parameters state their units and which converts with the **target** screen's scaling.
@@ -114,7 +119,9 @@ When a process refuses to disclose its path (system processes, some store apps),
 | Plain text → clipboard                                     | `ISystemInteractionService.CopyTextAsync(text)`                      |
 | HTML → clipboard (Teams/Outlook paste-as-table works)      | `CopyRichContentAsync(html, plainFallback, ClipContentFormat.Html)`  |
 | RTF → clipboard                                            | `CopyRichContentAsync(rtf, plainFallback, ClipContentFormat.Rtf)`    |
-| Restore the user's previous app and paste                  | `RestoreCapturedForeground()` then `SimulatePasteKeystroke()`        |
+| Restore the user's previous app and paste                  | `RestoreCapturedForeground()`, `PasteTiming.BeforePasteAsync(...)`, `SimulatePasteKeystroke()` |
+| Take the popup out of sight                                | `MainWindow.Dismiss()` (cloak + standby), not `Hide()`              |
+| Ask whether the OS wants animations                        | `AreOsAnimationsEnabled()` (`SPI_GETCLIENTAREAANIMATION`)           |
 | Bind a global hotkey                                       | `TryRegisterGlobalHotKey(window, gesture, callback)`                 |
 | Capture which app was foregrounded                         | `WindowsSourceApplicationResolver.TryResolve()`                         |
 | Encrypt secrets at rest (per-user)                         | `IDataProtectionService.Protect(bytes)` / `.Unprotect(bytes)`        |
