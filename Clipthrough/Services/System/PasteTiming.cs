@@ -16,7 +16,8 @@ namespace Clipthrough.Services;
 /// budget, so a target that never comes forward is pasted into exactly as late
 /// as before and never later. The settle margin is the one number here no test
 /// can choose: it is about how soon a foreign window acts on input after
-/// activation, and only pasting into real ones can answer that.
+/// activation, and only pasting into real ones can answer that -
+/// tools/paste-timing/Invoke-PasteSweep.ps1 does, at several margins at once.
 /// </remarks>
 public static class PasteTiming
 {
@@ -32,8 +33,28 @@ public static class PasteTiming
     /// </summary>
     public static readonly TimeSpan HotkeyBudget = TimeSpan.FromMilliseconds(120);
 
-    /// <summary>Margin between the target holding the foreground and Ctrl+V.</summary>
-    public static readonly TimeSpan SettleAfterForeground = TimeSpan.FromMilliseconds(30);
+    /// <summary>
+    /// Margin between the target holding the foreground and Ctrl+V.
+    /// <see cref="SettleOverrideVariable"/> overrides it, for re-measuring
+    /// (tools/paste-timing).
+    /// </summary>
+    public static readonly TimeSpan SettleAfterForeground =
+        ResolveSettle(Environment.GetEnvironmentVariable(SettleOverrideVariable));
+
+    /// <summary>Diagnostic override of the settle margin, in milliseconds (0-150).</summary>
+    public const string SettleOverrideVariable = "CLIPTHROUGH_PASTE_SETTLE_MS";
+
+    // A const, not a static field: SettleAfterForeground is initialized first.
+    private const int DefaultSettleMs = 30;
+
+    /// <summary>
+    /// The settle margin for an override value: the default when it is unset
+    /// or not a whole number, and never outside 0-150 ms (the larger budget).
+    /// </summary>
+    internal static TimeSpan ResolveSettle(string? overrideValue)
+        => int.TryParse(overrideValue, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var ms)
+            ? TimeSpan.FromMilliseconds(Math.Min(ms, 150))
+            : TimeSpan.FromMilliseconds(DefaultSettleMs);
 
     /// <summary>How often the foreground is sampled while waiting.</summary>
     public static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(5);

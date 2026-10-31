@@ -5822,5 +5822,13 @@
     "find": "dialog.Classes.Set(MainWindow.MotionClass, owner.Classes.Contains(MainWindow.MotionClass));",
     "replace": "dialog.Classes.Set(MainWindow.MotionClass, !owner.Classes.Contains(MainWindow.MotionClass));",
     "filter": "FullyQualifiedName~FocusAndPressHeadlessTests.AConfirmDialog_FollowsItsOwnersMotionPolicy"
+  },
+  {
+    "id": "paste-settle-override-unclamped",
+    "file": "Clipthrough/Services/System/PasteTiming.cs",
+    "why": "A settle override larger than the budget makes pastes later than the old sleep.",
+    "find": "TimeSpan.FromMilliseconds(Math.Min(ms, 150))",
+    "replace": "TimeSpan.FromMilliseconds(ms)",
+    "filter": "FullyQualifiedName~PasteTimingTests.TheSettleOverride_IsAWholeNumberOfMillisecondsWithinTheBudget"
   }
 ]

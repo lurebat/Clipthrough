@@ -66,8 +66,19 @@ public sealed class PasteTimingTests
         Assert.Equal(TimeSpan.FromMilliseconds(expectedMs), settle);
     }
 
-    /// <summary>
-    /// The budget is the old fixed sleep. A target that never comes forward must
+    [Theory]
+    [InlineData(null, 30)]
+    [InlineData("", 30)]
+    [InlineData("abc", 30)]
+    [InlineData("-5", 30)]
+    [InlineData("0", 0)]
+    [InlineData("15", 15)]
+    [InlineData("150", 150)]
+    [InlineData("900", 150)]
+    public void TheSettleOverride_IsAWholeNumberOfMillisecondsWithinTheBudget(string? value, int expectedMs)
+        => Assert.Equal(TimeSpan.FromMilliseconds(expectedMs), PasteTiming.ResolveSettle(value));
+
+    /// <summary>    /// The budget is the old fixed sleep. A target that never comes forward must
     /// be pasted into when that sleep would have ended - not a settle margin later.
     /// </summary>
     [Fact]
