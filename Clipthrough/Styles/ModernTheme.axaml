@@ -503,8 +503,36 @@
         <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     </Style>
 
-    <Style Selector="ListBox.file-list">
-        <Setter Property="Background" Value="Transparent" />
+    <!--
+      Motion (O3): the row highlight crossfades - 100 ms on hover, 83 ms on
+      selection. The highlight is the ListBoxItem template's presenter: the clip
+      card's Background is a local binding, so styling the card shows nothing.
+      Only under the motion class (MainWindow.Motion.cs, the Animations setting),
+      and never for a key auto-repeat, where the fade would trail the key. A
+      recycled row cannot carry a selection fade elsewhere: Avalonia keeps the
+      selected row's container realized (ListHighlightMotionHeadlessTests).
+    -->
+    <Style Selector=":is(Window).motion ListBox.clip-list ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.1" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector=":is(Window).motion ListBox.clip-list ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.083" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector=":is(Window).motion ListBox.clip-list.key-repeat ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Transitions" Value="{x:Null}" />
+    </Style>
+
+    <Style Selector="ListBox.file-list">        <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
     </Style>
 

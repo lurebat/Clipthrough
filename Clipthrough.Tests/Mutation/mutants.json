@@ -5630,5 +5630,45 @@
     "find": "window.Classes.Set(MotionClass, enabled);",
     "replace": "window.Classes.Set(MotionClass, enabled || !enabled);",
     "filter": "FullyQualifiedName~MotionPolicyHeadlessTests.TurningMotionOff_TakesTheClassOffAtOnce"
+  },
+  {
+    "id": "selection-crossfade-instant",
+    "file": "Clipthrough/Styles/ModernTheme.axaml",
+    "why": "The selection highlight snaps instead of crossfading.",
+    "find": "<BrushTransition Property=\"Background\" Duration=\"0:0:0.083\" />",
+    "replace": "<BrushTransition Property=\"Background\" Duration=\"0:0:0\" />",
+    "filter": "FullyQualifiedName~ListHighlightMotionHeadlessTests.WithMotion_SelectionCrossfades"
+  },
+  {
+    "id": "hover-fade-wrong-duration",
+    "file": "Clipthrough/Styles/ModernTheme.axaml",
+    "why": "Hover fades over something other than 100 ms.",
+    "find": "<BrushTransition Property=\"Background\" Duration=\"0:0:0.1\" />",
+    "replace": "<BrushTransition Property=\"Background\" Duration=\"0:0:0.2\" />",
+    "filter": "FullyQualifiedName~ListHighlightMotionHeadlessTests.Hover_FadesOnlyWithMotion"
+  },
+  {
+    "id": "selection-fade-ignores-motion",
+    "file": "Clipthrough/Styles/ModernTheme.axaml",
+    "why": "The selection fades even with Animations off.",
+    "find": "<Style Selector=\":is(Window).motion ListBox.clip-list ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter\">",
+    "replace": "<Style Selector=\"ListBox.clip-list ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter\">",
+    "filter": "FullyQualifiedName~ListHighlightMotionHeadlessTests.WithoutMotion_SelectionIsInstant"
+  },
+  {
+    "id": "key-repeat-still-fades",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "Holding an arrow key leaves the highlight trailing behind the selection.",
+    "find": "var repeating = m_heldNavigationKey == e.Key;",
+    "replace": "var repeating = m_heldNavigationKey == e.Key && e.Key == Key.None;",
+    "filter": "FullyQualifiedName~ListHighlightMotionHeadlessTests.WithMotion_AKeyRepeat_MovesTheHighlightInstantly"
+  },
+  {
+    "id": "key-release-not-tracked",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "After one held key every later press is treated as a repeat and never fades again.",
+    "find": "        m_heldNavigationKey = null;\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~ListHighlightMotionHeadlessTests.WithMotion_AFreshPressAfterRelease_StillFades"
   }
 ]
