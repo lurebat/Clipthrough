@@ -104,8 +104,24 @@ New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
 $DataDir = (Resolve-Path $DataDir).Path
 $termLog = Join-Path $DataDir 'terminal-lines.txt'
 $results = [System.Collections.Generic.List[object]]::new()
+Remove-Item -LiteralPath $OutputCsv -ErrorAction SilentlyContinue
 
 # ---- targets ----------------------------------------------------------------
+# The command lines exactly as Start-Process will build them. Test-SweepArguments.ps1
+# checks each arrives at its process intact.
+function Get-EdgeArguments {
+    $html = '<title>PasteSweep</title><textarea autofocus style="width:100%;height:90vh" oninput="document.title=''PasteSweep ''+this.value.replace(/\s+/g,'' '')"></textarea>'
+    # Percent-encoded: Start-Process quotes nothing, so a space would split the page into pieces.
+    return "--new-window --inprivate data:text/html,$([Uri]::EscapeDataString($html))"
+}
+
+function Get-TerminalArguments([string]$title, [string]$linesFile) {
+    $reader = "`$host.UI.RawUI.WindowTitle='$title'; while(`$true){ `$l=[Console]::ReadLine(); Add-Content -LiteralPath '$linesFile' -Value `$l }"
+    # wt starts a new command at every ';', quoted or not, so the reader travels
+    # as -EncodedCommand: Base64 has neither ';' nor spaces.
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($reader))
+    return "-w new --title $title pwsh -NoLogo -NoProfile -EncodedCommand $encoded"
+}
 $word = $null; $doc = $null; $startedWord = $false
 function Open-Target([string]$name) {
     switch ($name) {
@@ -118,15 +134,13 @@ function Open-Target([string]$name) {
             return [IntPtr]$script:word.ActiveWindow.Hwnd
         }
         'Edge' {
-            $html = 'data:text/html,<title>PasteSweep</title><textarea autofocus style="width:100%;height:90vh" oninput="document.title=''PasteSweep ''+this.value.replace(/\s+/g,'' '')"></textarea>'
-            Start-Process msedge -ArgumentList '--new-window', '--inprivate', $html | Out-Null
+            Start-Process msedge -ArgumentList (Get-EdgeArguments) | Out-Null
             return Find-Window 'PasteSweep*'
         }
         { $_ -in 'Terminal', 'Elevated' } {
             Set-Content -LiteralPath $termLog -Value $null
             $title = if ($name -eq 'Elevated') { 'PasteSweepElevated' } else { 'PasteSweepTerm' }
-            $reader = "`$host.UI.RawUI.WindowTitle='$title'; while(`$true){ `$l=[Console]::ReadLine(); Add-Content -LiteralPath '$termLog' -Value `$l }"
-            $wtArgs = @('-w', 'new', '--title', $title, 'pwsh', '-NoLogo', '-NoProfile', '-Command', $reader)
+            $wtArgs = Get-TerminalArguments $title $termLog
             if ($name -eq 'Elevated') {
                 Write-Host 'Approve the UAC prompt for the elevated terminal.' -ForegroundColor Yellow
                 Start-Process wt -ArgumentList $wtArgs -Verb RunAs | Out-Null
@@ -212,6 +226,8 @@ foreach ($settle in $SettleValues) {
                         TargetForward = ${wait}?.Forward; ForegroundWaitMs = ${wait}?.Ms
                     }
                     $results.Add($row)
+                    # Written as it happens, so a failure later in the run keeps what was measured.
+                    $row | Export-Csv -LiteralPath $OutputCsv -NoTypeInformation -Append
                     Write-Host ("{0,-8} settle {1,3} ms  trial {2,2}: {3}" -f $target, $settle, $i, $(if ($row.Landed) { 'landed' } elseif (-not $summoned) { 'popup did not open' } else { 'MISSED' }))
                 }
             }
@@ -225,7 +241,6 @@ foreach ($settle in $SettleValues) {
     }
 }
 
-$results | Export-Csv -LiteralPath $OutputCsv -NoTypeInformation
 Write-Host "`nLanded / summoned, per target and settle value:" -ForegroundColor Cyan
 $results | Group-Object Target, SettleMs | ForEach-Object {
     $ok = @($_.Group | Where-Object Landed).Count
