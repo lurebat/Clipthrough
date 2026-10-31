@@ -251,11 +251,13 @@ Guard R3: a lifecycle matrix test class.
   - A selection change during a slow fake import leaves at most one import in flight.
 - Mutants: remove the span pre-screen; import per surface.
 - Upstream (hand-off to the VellumText audit, not this plan): clamp the colspan/rowspan expansion in the importer. When the async-only importer is adopted (see *Dependencies outside this plan*), use its cancellation, if it offers one, for part 2.
+- **Outcome on VellumText 0.8 (owner decision, PR #12, commit 297fc6b): part 3 is removed.** 0.8 budgets the table slots an import may cover (`MaxTableSlots`) inside its importers, so the pre-screen no longer changed the outcome. It was removed test-first, along with its mutant. `HostileRichPayloadTests.SpanBomb_Preview_ReachesTheImporterAndStaysWithinMemory` now runs the 32 × `colspan=1000 rowspan=1000` fixture through the real preview in a child process. It asserts exit 0, bounded peak memory, and that the preview renders rather than falls back; it failed while the pre-screen was in place. Parts 1 and 2 and the preview's unbroken-run guard stay. That guard also bounds Avalonia's line breaking, which happens after import.
 
 **U-B8 (F-48) — Markdown→HTML cannot crash the process**
 - Change: guard `TextTransformationService.Apply(MarkdownToHtml)` (`:331`) and `HtmlToMarkdown` (`:298`) with the preview's unbroken-run rule plus a nesting-depth pre-scan for `[`, `>`, list markers and HTML open tags. Over the limit, the transform returns the input unchanged, and reports a status message (new `AppText` entry). Coordinate with U-B1, which reroutes the same single-clip path.
 - Test: run the production function in a child process (the harness pattern from `e2e/wt/AuditE2E/VellumHarness`) on 8,192 × `[`. Assert exit code 0 and unchanged output. Unguarded, the same test exits with 0xC00000FD.
 - Mutant: disable the depth pre-scan.
+- **Outcome on VellumText 0.8 (owner decision, PR #12, commit 297fc6b): the `HtmlToMarkdown` half is removed; the `MarkdownToHtml` half stays.** 0.8 drops tags nested past its depth limit, keeps their text, and parses on a 256 MiB stack. `HostileRichPayloadTests.NestedDivs_HtmlToMarkdown_ConvertsWithinMemory` runs 20,000 nested divs through the real transform in a child process. It asserts exit 0, bounded memory, and that the text converts rather than comes back unchanged; it failed while the refusal was in place. `RefusalReason` now names Markdown→HTML only. That guard is kept for its UX: 0.8 survives 8 KB of `[` but converts it into a fragment of itself, while the refusal leaves the text alone and says why.
 
 **U-B9 (F-50) — the startup selection is hydrated**
 - Change: after the first refresh selects a clip, call `EnsureContentHydratedAsync` for it, as user-driven selection does. This respects S16: list rows stay payload-free.
@@ -533,6 +535,7 @@ This plan does **not** adopt that version. Clipthrough stays on VellumText 0.7.0
   - U-B7 (F-47) and U-B8 (F-48) ship on 0.7.0 with Clipthrough-side guards.
   - The async importer is their long-term home: cancellation for the preview, and off-UI-thread transforms.
   - The unbounded colspan/rowspan expansion (about 1.5 GB per import) and the nested `<template>`/Markdown recursion that overflows the stack are upstream VellumText defects. They are handed to the VellumText audit. Fixing them upstream does not let U-B7/U-B8 be skipped on 0.7.0. Evidence: `artifacts/codebase-audit/2026-10-25/e2e/logs/vellum-harness*.json`.
+  - On 0.8 those upstream fixes landed. Two of the four Clipthrough-side guards were removed as redundant: the preview's table-span pre-screen and HTML→Markdown's nesting refusal. The other two were kept on purpose: Markdown→HTML's refusal (UX) and the unbroken-run guard (Avalonia line breaking). See the outcome notes under U-B7 and U-B8.
 
 ## Out of scope
 
