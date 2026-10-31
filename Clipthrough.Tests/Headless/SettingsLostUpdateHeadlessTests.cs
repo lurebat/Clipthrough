@@ -71,7 +71,7 @@ public sealed class SettingsLostUpdateHeadlessTests
     public async Task SettingsDialogSave_DoesNotRevertFiltersChangedWhileItWasOpen()
     {
         using var harness = MainWindowTestHarness.Create();
-        await harness.ViewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(harness.ViewModel);
 
         for (var attempt = 0; attempt < 100 && harness.ViewModel.IsLoadingDatabase; attempt++)
         {

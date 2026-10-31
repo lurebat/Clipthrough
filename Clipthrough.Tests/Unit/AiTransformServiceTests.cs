@@ -9,7 +9,7 @@ using Xunit;
 
 namespace Clipthrough.Tests.Unit;
 
-public class AiTransformServiceTests
+public partial class AiTransformServiceTests
 {
     [Fact]
     public async Task ThrowsWhenNoApiKeyConfigured()

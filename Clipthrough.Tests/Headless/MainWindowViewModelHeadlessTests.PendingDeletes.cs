@@ -21,12 +21,7 @@ public sealed partial class MainWindowViewModelHeadlessTests
         int expectedClips)
     {
         var viewModel = CreateViewModel(scope, monitor, new TestSystemInteractionService(), new TestSessionLogService());
-        await viewModel.InitializeAsync();
-        for (var attempt = 0; attempt < 40 && viewModel.Clips.Count < expectedClips; attempt++)
-        {
-            await Task.Delay(25);
-            Dispatcher.UIThread.RunJobs();
-        }
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         Assert.Equal(expectedClips, viewModel.Clips.Count);
         return viewModel;

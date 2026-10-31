@@ -213,7 +213,7 @@ public sealed class MainWindowHeadlessTests
             new BackgroundJobIndicator(),
             scope.DatabaseInitializer);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         var window = new MainWindow
         {
@@ -273,7 +273,7 @@ public sealed class MainWindowHeadlessTests
             new BackgroundJobIndicator(),
             scope.DatabaseInitializer);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         var window = new MainWindow
         {
@@ -352,7 +352,7 @@ public sealed class MainWindowHeadlessTests
             new BackgroundJobIndicator(),
             scope.DatabaseInitializer);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.OpenAiPromptCommand.Execute().Subscribe();
         Dispatcher.UIThread.RunJobs();
 
@@ -414,7 +414,7 @@ public sealed class MainWindowHeadlessTests
             new BackgroundJobIndicator(),
             scope.DatabaseInitializer);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
         {
@@ -477,7 +477,7 @@ public sealed class MainWindowHeadlessTests
             new BackgroundJobIndicator(),
             scope.DatabaseInitializer);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
         {

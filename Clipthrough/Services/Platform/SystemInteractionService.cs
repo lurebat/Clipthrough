@@ -294,7 +294,7 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
     /// appears in the template, the paths in <paramref name="fallbackAppend"/> are appended
     /// as additional arguments.
     /// </summary>
-    private static (string Executable, System.Collections.Generic.List<string> Args) ParseCommandTemplate(
+    internal static (string Executable, System.Collections.Generic.List<string> Args) ParseCommandTemplate(
         string template,
         (string Token, string Value)[] substitutions,
         string[] fallbackAppend)
@@ -330,7 +330,7 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         return (exe, args);
     }
 
-    private static System.Collections.Generic.List<string> TokenizeCommandLine(string input)
+    internal static System.Collections.Generic.List<string> TokenizeCommandLine(string input)
     {
         var result = new System.Collections.Generic.List<string>();
         if (string.IsNullOrWhiteSpace(input))

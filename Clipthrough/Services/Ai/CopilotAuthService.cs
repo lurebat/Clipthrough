@@ -43,7 +43,16 @@ public sealed class CopilotAuthService : ICopilotAuthService, IDisposable
     {
     }
 
-    private CopilotAuthService(HttpClient http, bool ownsHttpClient, IDataProtectionService? dataProtection)
+    /// <summary>
+    /// Persistence pointed at <paramref name="tokenPath"/> instead of the user
+    /// profile, so tests can exercise it without touching a real token (F-31).
+    /// </summary>
+    internal CopilotAuthService(HttpClient http, IDataProtectionService dataProtection, string tokenPath)
+        : this(http, ownsHttpClient: false, dataProtection, tokenPath)
+    {
+    }
+
+    private CopilotAuthService(HttpClient http, bool ownsHttpClient, IDataProtectionService? dataProtection, string? tokenPath = null)
     {
         _http = http;
         _ownsHttpClient = ownsHttpClient;
@@ -56,7 +65,7 @@ public sealed class CopilotAuthService : ICopilotAuthService, IDisposable
         // the token in-memory only — never write cleartext to disk.
         if (dataProtection is not null && dataProtection.CanPersistSecrets)
         {
-            _tokenPath = Path.Combine(
+            _tokenPath = tokenPath ?? Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Clipthrough",
                 "copilot-token.bin");
