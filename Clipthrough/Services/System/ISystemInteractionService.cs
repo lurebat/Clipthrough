@@ -40,6 +40,14 @@ public interface ISystemInteractionService : IDisposable
     void RestoreCapturedForeground();
 
     /// <summary>
+    /// Waits until the window a paste is aimed at holds the foreground - the one
+    /// <see cref="RestoreCapturedForeground"/> last handed it to, or, when there
+    /// was none, any window that is not Clipthrough's - or until
+    /// <paramref name="timeout"/>. Returns whether it got there.
+    /// </summary>
+    Task<bool> WaitForPasteTargetAsync(TimeSpan timeout, System.Threading.CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Takes <paramref name="window"/> out of sight without hiding it: DWM
     /// cloaks it, so it keeps rendering and the next uncloak shows a frame that
     /// is already current. With <paramref name="releaseForeground"/> the window

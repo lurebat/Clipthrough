@@ -5454,5 +5454,53 @@
     "find": "                LeaveStandbyNow();\n                m_settingsWindow.Show(this);",
     "replace": "                m_settingsWindow.Show(this);",
     "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.OpeningAnOwnedWindowFromStandby_SummonsThePopup"
+  },
+  {
+    "id": "paste-and-hide-sleeps",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "Paste-and-hide goes back to a fixed sleep instead of waiting for the target.",
+    "find": "await PasteTiming.BeforePasteAsync(systemInteraction, PasteTiming.AfterHideBudget);",
+    "replace": "await Task.Delay(systemInteraction is null ? TimeSpan.Zero : PasteTiming.AfterHideBudget);",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.Enter_PastesAfterTheTargetIsForward_NotAfterAFixedSleep"
+  },
+  {
+    "id": "paste-settle-not-clipped",
+    "file": "Clipthrough/Services/System/PasteTiming.cs",
+    "why": "The settle margin is not clipped to the budget left.",
+    "find": "return left < SettleAfterForeground ? left : SettleAfterForeground;",
+    "replace": "return left > TimeSpan.Zero ? SettleAfterForeground : left;",
+    "filter": "FullyQualifiedName~PasteTimingTests.RemainingSettle_NeverRunsPastTheBudget"
+  },
+  {
+    "id": "paste-settle-on-top-of-budget",
+    "file": "Clipthrough/Services/System/PasteTiming.cs",
+    "why": "A target that never comes forward is pasted into a settle margin after the old sleep would have ended.",
+    "find": "var settle = RemainingSettle(Stopwatch.GetElapsedTime(started), budget);",
+    "replace": "var settle = SettleAfterForeground + (RemainingSettle(Stopwatch.GetElapsedTime(started), budget) * 0);",
+    "filter": "FullyQualifiedName~PasteTimingTests.BeforePaste_TargetNeverForward_TakesTheOldSleepAndNoMore"
+  },
+  {
+    "id": "paste-wait-sleeps-first",
+    "file": "Clipthrough/Services/System/PasteTiming.cs",
+    "why": "The wait sleeps before its first look, so a target that is already forward still costs a poll.",
+    "find": "        while (true)\n        {\n            if (isReady())",
+    "replace": "        while (true)\n        {\n            await Task.Delay(pollInterval, cancellationToken).ConfigureAwait(true);\n            if (isReady())",
+    "filter": "FullyQualifiedName~PasteTimingTests.WaitUntil_AlreadyForward_DoesNotWaitAtAll"
+  },
+  {
+    "id": "paste-wait-never-gives-up",
+    "file": "Clipthrough/Services/System/PasteTiming.cs",
+    "why": "A target that never comes forward holds the paste far past the old sleep.",
+    "find": "if (Stopwatch.GetElapsedTime(started) >= timeout)",
+    "replace": "if (Stopwatch.GetElapsedTime(started) >= timeout + timeout + TimeSpan.FromSeconds(10))",
+    "filter": "FullyQualifiedName~PasteTimingTests.WaitUntil_GivesUpAtTheTimeout"
+  },
+  {
+    "id": "paste-forward-still-sleeps",
+    "file": "Clipthrough/Services/System/PasteTiming.cs",
+    "why": "The paste still waits out the old sleep even when the target is forward at once.",
+    "find": "await systemInteraction.WaitForPasteTargetAsync(budget, cancellationToken).ConfigureAwait(true);",
+    "replace": "await systemInteraction.WaitForPasteTargetAsync(budget, cancellationToken).ConfigureAwait(true);\n        await Task.Delay(budget - SettleAfterForeground, cancellationToken).ConfigureAwait(true);",
+    "filter": "FullyQualifiedName~PasteTimingTests.BeforePaste_TargetForwardAtOnce_IsMuchShorterThanTheOldSleep"
   }
 ]

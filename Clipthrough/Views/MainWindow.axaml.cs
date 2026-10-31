@@ -1256,8 +1256,11 @@ public partial class MainWindow : Window
         // Step 3: Dismiss Clipthrough. Target has already been scheduled to receive focus.
         Dismiss();
 
-        // Step 4: Give the OS time to process WM_ACTIVATE / WM_SETFOCUS on the target.
-        await Task.Delay(150);
+        // Step 4: Wait for the target to hold the foreground (PasteTiming).
+        if (m_systemInteractionService is { } systemInteraction)
+        {
+            await PasteTiming.BeforePasteAsync(systemInteraction, PasteTiming.AfterHideBudget);
+        }
 
         // Step 5: Deliver Ctrl+V to the (now foreground) target window.
         m_systemInteractionService?.SimulatePasteKeystroke();

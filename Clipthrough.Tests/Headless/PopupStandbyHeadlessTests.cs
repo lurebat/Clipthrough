@@ -290,4 +290,22 @@ public sealed class PopupStandbyHeadlessTests
         Assert.DoesNotContain(harness.Window, harness.SystemInteraction.CloakedWindows);
         harness.Window.OwnedWindows.OfType<SettingsWindow>().Single().Close();
     }
+
+    /// <summary>
+    /// Paste-and-hide: hand the foreground back, go into standby, then wait for
+    /// the target - not a fixed sleep - and only then send Ctrl+V.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task Enter_PastesAfterTheTargetIsForward_NotAfterAFixedSleep()
+    {
+        using var harness = await ReadyAsync();
+        harness.FocusClipList();
+
+        harness.Window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+        await PumpUntilAsync(() => harness.SystemInteraction.SimulatedPasteCount > 0);
+
+        Assert.Equal(["restore", "cloak", "wait", "paste"], harness.SystemInteraction.Events.Where(e => e != "uncloak").ToArray());
+        Assert.Equal([PasteTiming.AfterHideBudget], harness.SystemInteraction.PasteTargetWaits);
+        Assert.True(harness.Window.IsInStandby);
+    }
 }

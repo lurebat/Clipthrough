@@ -532,11 +532,21 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
         Events.Add("restore");
     }
 
-    /// <summary>The paste sequence as it happened: restore, cloak, uncloak, paste.</summary>
+    /// <summary>The paste sequence as it happened: restore, cloak, uncloak, wait, paste.</summary>
     public List<string> Events { get; } = [];
 
     /// <summary>How many times the paste target was handed the foreground.</summary>
     public int RestoreForegroundCount { get; private set; }
+
+    /// <summary>Every wait for the paste target, in order.</summary>
+    public List<TimeSpan> PasteTargetWaits { get; } = [];
+
+    public Task<bool> WaitForPasteTargetAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        PasteTargetWaits.Add(timeout);
+        Events.Add("wait");
+        return Task.FromResult(true);
+    }
 
     /// <summary>Whether TryCloakWindow succeeds, as it does on Windows.</summary>
     public bool CloakSupported { get; set; } = true;

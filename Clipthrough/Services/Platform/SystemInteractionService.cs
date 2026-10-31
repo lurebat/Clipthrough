@@ -36,6 +36,10 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
     private readonly Dictionary<string, WindowsGlobalHotKeyRegistration> _namedHotKeys = new(StringComparer.Ordinal);
     private WindowsBalloonNotificationHost? _notificationHost;
     private nint _capturedPasteTarget;
+    // The window RestoreCapturedForeground last handed the foreground to, which
+    // a paste then waits for. Zero when the paste comes from a global hotkey and
+    // nothing was restored: the target is whatever already has the foreground.
+    private nint _lastRestoredPasteTarget;
 
     // Appended to the Start with Windows command (AppDataRoot.RelaunchArguments),
     // so a login starts Clipthrough on the data folder --data-dir chose.
@@ -408,6 +412,7 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         }
 
         var target = System.Threading.Interlocked.Exchange(ref _capturedPasteTarget, IntPtr.Zero);
+        _lastRestoredPasteTarget = target;
         if (target == IntPtr.Zero)
         {
             Trace.TraceWarning("[Paste] RestoreCapturedForeground: no captured target (HWND is zero).");
@@ -448,6 +453,47 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
                 AttachThreadInput(currentThreadId, targetThreadId, false);
             }
         }
+    }
+
+    public async Task<bool> WaitForPasteTargetAsync(TimeSpan timeout, System.Threading.CancellationToken cancellationToken = default)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return true;
+        }
+
+        var target = System.Threading.Interlocked.Exchange(ref _lastRestoredPasteTarget, IntPtr.Zero);
+        var started = Stopwatch.GetTimestamp();
+        var ready = await PasteTiming.WaitUntilAsync(
+            () => IsPasteTargetForeground(target),
+            timeout,
+            PasteTiming.PollInterval,
+            cancellationToken);
+        if (CommandLineOptions.LogPopupTimings || !ready)
+        {
+            Trace.TraceInformation(
+                $"[Paste] target 0x{target:X} {(ready ? "forward" : "not forward")} after {Stopwatch.GetElapsedTime(started).TotalMilliseconds:F1} ms");
+        }
+
+        return ready;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static bool IsPasteTargetForeground(nint target)
+    {
+        var foreground = GetForegroundWindow();
+        if (foreground == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        if (target != IntPtr.Zero)
+        {
+            return foreground == target;
+        }
+
+        GetWindowThreadProcessId(foreground, out var processId);
+        return processId != (uint)Environment.ProcessId;
     }
 
     public bool TryCloakWindow(Window window, bool releaseForeground)

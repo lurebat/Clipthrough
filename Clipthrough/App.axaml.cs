@@ -29,19 +29,10 @@ public partial class App : Application
     private ISystemInteractionService? _systemInteractionService;
     private ISettingsService? _settingsService;
     /// <summary>
-    /// Pause between putting a clip on the clipboard and sending Ctrl+V, and
-    /// again before touching the database.
+    /// Pause between sending Ctrl+V and deleting the clip that was pasted, so
+    /// the target has read the clipboard before anything else happens. The wait
+    /// *before* Ctrl+V is <see cref="PasteTiming"/>'s.
     /// </summary>
-    /// <remarks>
-    /// 120 ms is the value these hotkeys have always used. Note the paste
-    /// sequence is implemented three times in this codebase and the delays have
-    /// diverged - <see cref="Views.MainWindow"/> waits 150 ms, and two paths
-    /// lower in this file still use bare literals. They are deliberately NOT
-    /// unified here: which delay is correct is a question about how long a
-    /// foreign window needs to see a clipboard update, and nothing in the test
-    /// suite can answer it. Unifying them on a guess would be a behavioural
-    /// change wearing a refactor's clothes.
-    /// </remarks>
     private const int PasteSettleDelayMs = 120;
 
     private IClipStoreService? _clipStoreService;
@@ -682,7 +673,7 @@ public partial class App : Application
                 return;
             }
 
-            await Task.Delay(PasteSettleDelayMs);
+            await PasteTiming.BeforePasteAsync(_systemInteractionService, PasteTiming.HotkeyBudget);
             _systemInteractionService.SimulatePasteKeystroke();
             await Task.Delay(PasteSettleDelayMs);
             await _clipStoreService.DeleteAsync(clip.Id);
@@ -706,7 +697,7 @@ public partial class App : Application
 
             await _clipStoreService.MarkPastedAsync(clip.Id);
             await _clipStoreService.SetFavoriteAsync(clip.Id, true);
-            await Task.Delay(PasteSettleDelayMs);
+            await PasteTiming.BeforePasteAsync(_systemInteractionService, PasteTiming.HotkeyBudget);
             _systemInteractionService.SimulatePasteKeystroke();
         }
         catch (Exception ex) { Trace.TraceWarning($"PasteAndFavorite failed: {ex.Message}"); }
@@ -726,7 +717,7 @@ public partial class App : Application
             _clipboardMonitorService.SuppressNext(clip.Content);
             await _systemInteractionService.CopyTextAsync(clip.Content);
             await _clipStoreService.MarkPastedAsync(clip.Id);
-            await Task.Delay(PasteSettleDelayMs);
+            await PasteTiming.BeforePasteAsync(_systemInteractionService, PasteTiming.HotkeyBudget);
             _systemInteractionService.SimulatePasteKeystroke();
         }
         catch (Exception ex) { Trace.TraceWarning($"PasteAsPlainText failed: {ex.Message}"); }
@@ -806,11 +797,11 @@ public partial class App : Application
                         w.Hide();
                     }
 
-                    await Task.Delay(150);
+                    await PasteTiming.BeforePasteAsync(_systemInteractionService, PasteTiming.AfterHideBudget);
                 }
                 else
                 {
-                    await Task.Delay(120);
+                    await PasteTiming.BeforePasteAsync(_systemInteractionService, PasteTiming.HotkeyBudget);
                 }
                 _systemInteractionService.SimulatePasteKeystroke();
             }
@@ -931,9 +922,7 @@ public partial class App : Application
                 return;
             }
 
-            // Give the target window a moment to become ready and the clipboard
-            // change to propagate before we synthesize the paste keystroke.
-            await Task.Delay(120);
+            await PasteTiming.BeforePasteAsync(_systemInteractionService, PasteTiming.HotkeyBudget);
             _systemInteractionService.SimulatePasteKeystroke();
         }
         catch (Exception ex)
