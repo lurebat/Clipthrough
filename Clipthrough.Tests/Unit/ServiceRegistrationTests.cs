@@ -1,6 +1,8 @@
 using System;
+using System.IO;
 using System.Linq;
 using Clipthrough;
+using Clipthrough.Models;
 using Clipthrough.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -19,10 +21,13 @@ namespace Clipthrough.Tests.Unit;
 /// </summary>
 public class ServiceRegistrationTests
 {
+    // Never created: ValidateOnBuild constructs nothing.
+    private static readonly AppDataRoot s_dataRoot = AppDataRoot.Chosen(Path.Combine(Path.GetTempPath(), "ct-registration-unused"), AppDataRootSource.CommandLine);
+
     [Fact]
     public void EveryRegisteredService_CanBeResolved()
     {
-        var services = App.CreateServiceCollection();
+        var services = App.CreateServiceCollection(s_dataRoot);
 
         // ValidateOnBuild reports every unsatisfiable registration at once rather than
         // failing on the first, so a break names all of them.
@@ -40,7 +45,7 @@ public class ServiceRegistrationTests
     [Fact]
     public void MainWindowViewModel_HasEveryConstructorDependencyRegistered()
     {
-        var services = App.CreateServiceCollection();
+        var services = App.CreateServiceCollection(s_dataRoot);
         var registered = services.Select(descriptor => descriptor.ServiceType).ToHashSet();
 
         var constructor = Assert.Single(typeof(MainWindowViewModel).GetConstructors());

@@ -1,5 +1,6 @@
 using Clipthrough.Models;
 using Clipthrough.Services;
+using System.IO;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -7,12 +8,25 @@ namespace Clipthrough.Tests.Unit;
 
 public sealed class UpdateServiceTests
 {
+    private static readonly AppDataRoot s_dataRoot = AppDataRoot.Chosen(Path.Combine(Path.GetTempPath(), "ct-update-unused"), AppDataRootSource.EnvironmentVariable);
+
+    // The updated app is restarted by Velopack, with these arguments; without
+    // them a session started with --data-dir comes back on the default folder.
+    [Fact]
+    public void TheRestartAfterAnUpdate_KeepsACommandLineDataFolder()
+    {
+        var root = AppDataRoot.Chosen(Path.Combine(Path.GetTempPath(), "ct-update-cli"), AppDataRootSource.CommandLine);
+
+        var service = new UpdateService(new TestSettingsService(), root);
+
+        Assert.Equal(["--data-dir", root.Directory], service.RestartArguments);
+    }
     [Fact]
     public async Task CheckForUpdatesAsync_RespectsDisabledAutoUpdateByDefault()
     {
         var settings = new TestSettingsService();
         settings.SetCurrent(AppSettings.Default with { EnableAutoUpdate = false });
-        var service = new UpdateService(settings);
+        var service = new UpdateService(settings, s_dataRoot);
 
         var result = await service.CheckForUpdatesAsync();
 
@@ -25,7 +39,7 @@ public sealed class UpdateServiceTests
     {
         var settings = new TestSettingsService();
         settings.SetCurrent(AppSettings.Default with { EnableAutoUpdate = false });
-        var service = new UpdateService(settings);
+        var service = new UpdateService(settings, s_dataRoot);
 
         var result = await service.CheckForUpdatesAsync(ignoreAutoUpdateDisabled: true);
 

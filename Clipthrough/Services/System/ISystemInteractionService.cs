@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
@@ -57,5 +57,16 @@ public interface ISystemInteractionService : IDisposable
 
     bool IsTargetWindowElevated();
 
+    /// <summary>
+    /// The user turned Start with Windows on or off: write this configuration's
+    /// entry, or remove the entry.
+    /// </summary>
     void SyncStartWithWindows(bool enabled);
+
+    /// <summary>
+    /// Applies the saved setting at startup, touching the entry only when it is
+    /// missing or belongs to this configuration (same executable, same
+    /// --data-dir). Another configuration's entry is left alone either way.
+    /// </summary>
+    void ReconcileStartWithWindows(bool enabled);
 }

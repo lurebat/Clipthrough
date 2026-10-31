@@ -109,6 +109,20 @@ Size caps and retention are `AppSettings`, not storage options.
 Resolves worker services lazily via `IServiceProvider` to avoid a circular DI
 dependency.
 
+**AppDataRoot (data folder)** — The one folder Clipthrough keeps its own files
+in: settings, `storage.json`, window placement, the Copilot token, logs and the
+default library. `AppDataRootResolver` picks it once at startup. The first source
+present wins: `--data-dir`, `CLIPTHROUGH_DATA_DIR`, the portable marker, then
+`%LOCALAPPDATA%\Clipthrough`. The resolved root is injected through DI. The default root keeps the library in the
+uninstall-safe sibling `ClipthroughData`; a chosen root keeps everything inside
+itself. `Source` records which way chose it.
+
+**portable mode** — A `portable.flag` file at the application root keeps the
+data in `ClipthroughData` beside it. The application root is the executable's
+folder for a plain ZIP, and the folder above `current\` (beside `Update.exe`)
+for a Velopack package, because each update replaces `current\`. In portable
+mode, `storage.json` records a library inside the folder relative to it.
+
 **DPAPI** — Windows Data Protection API used to protect secrets at rest:
 SQLCipher password (`storage.json`) and AI API key (sidecar `.bin` files). Non-Windows falls back to `NoOpDataProtectionService`,
 keeping secrets in memory only.

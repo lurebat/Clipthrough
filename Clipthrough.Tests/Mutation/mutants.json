@@ -4888,6 +4888,262 @@
     "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
   },
   {
+    "id": "dataroot-cli-beats-env",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "--data-dir must win over CLIPTHROUGH_DATA_DIR and the portable marker (data-folder precedence, user decision).",
+    "find": "if (commandLine is not null)",
+    "replace": "if (commandLine is not null && environmentValue is null)",
+    "filter": "FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "dataroot-env-beats-portable",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "CLIPTHROUGH_DATA_DIR must win over the portable marker (data-folder precedence, user decision).",
+    "find": "if (!string.IsNullOrEmpty(environmentValue))",
+    "replace": "if (!string.IsNullOrEmpty(environmentValue) && !File.Exists(Path.Combine(executableDirectory, PortableMarkerFileName)))",
+    "filter": "FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "dataroot-password-value-consumed",
+    "file": "Clipthrough/CommandLineOptions.cs",
+    "why": "The value of --password is consumed, so a password reading \"--data-dir\" cannot choose a data folder.",
+    "find": "\"--password\", \"-p\", out _))",
+    "replace": "\"--password-unused\", \"-p\", out _))",
+    "filter": "FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "dataroot-portable-marker",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "A portable.flag marker beside the executable must keep the data in a folder beside it (portable mode, user decision).",
+    "find": "if (File.Exists(Path.Combine(applicationRoot, PortableMarkerFileName)))",
+    "replace": "if (File.Exists(Path.Combine(applicationRoot, PortableMarkerFileName)) && applicationRoot.Length < 0)",
+    "filter": "FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "dataroot-wiring-storage",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "The DI constructor must read storage.json from the injected data root, not from %LOCALAPPDATA% (configurable data folder).",
+    "find": ": this(dataProtection, dataRoot, dataRoot.StorageConfigPath, services)",
+    "replace": ": this(dataProtection, dataRoot, dataRoot.StorageConfigPath + \".elsewhere\", services)",
+    "filter": "FullyQualifiedName~AppDataRootWiringTests"
+  },
+  {
+    "id": "dataroot-wiring-settings",
+    "file": "Clipthrough/Services/Storage/SettingsService.cs",
+    "why": "The DI constructor must keep settings.json in the injected data root (configurable data folder).",
+    "find": ": this(connectionFactory, dataProtection, dataRoot.SettingsPath)",
+    "replace": ": this(connectionFactory, dataProtection, dataRoot.SettingsPath + \".elsewhere\")",
+    "filter": "FullyQualifiedName~AppDataRootWiringTests"
+  },
+  {
+    "id": "dataroot-wiring-window",
+    "file": "Clipthrough/Services/System/WindowPlacementStore.cs",
+    "why": "The DI constructor must keep window.json in the injected data root (configurable data folder).",
+    "find": ": this(dataRoot.WindowPlacementPath)",
+    "replace": ": this(dataRoot.WindowPlacementPath + \".elsewhere\")",
+    "filter": "FullyQualifiedName~AppDataRootWiringTests"
+  },
+  {
+    "id": "dataroot-wiring-token",
+    "file": "Clipthrough/Services/Ai/CopilotAuthService.cs",
+    "why": "The DI constructor must keep the Copilot token in the injected data root (configurable data folder).",
+    "find": "dataProtection, dataRoot.CopilotTokenPath)",
+    "replace": "dataProtection, dataRoot.CopilotTokenPath + \".elsewhere\")",
+    "filter": "FullyQualifiedName~AppDataRootWiringTests"
+  },
+  {
+    "id": "dataroot-default-library",
+    "file": "Clipthrough/Models/StorageOptions.cs",
+    "why": "A missing library path defaults to the data root's library, not a fixed %LOCALAPPDATA% path (configurable data folder).",
+    "find": "? dataRoot.DefaultDatabasePath",
+    "replace": "? dataRoot.SettingsPath",
+    "filter": "FullyQualifiedName~AppDataRootWiringTests|FullyQualifiedName~StorageOptionsTests"
+  },
+  {
+    "id": "dataroot-legacy-migration-default-root",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "The default root still migrates the pre-0.6.3 library into ClipthroughData after the move to AppDataRoot.",
+    "find": "if (_dataRoot.LegacyDatabasePath is not { } legacyPath)",
+    "replace": "if (_dataRoot.LegacyDatabasePath is not { } legacyPath || legacyPath.Length > 0)",
+    "filter": "FullyQualifiedName~LegacyDatabaseMigrationTests"
+  },
+  {
+    "id": "guard-dataroot-folder-spellings",
+    "file": "Clipthrough.Tests/Unit/AppDataRootGuardTests.cs",
+    "why": "The LocalApplicationData rule must catch spaced and line-broken spellings, or a bypass passes the guard.",
+    "find": "@\"\\bSpecialFolder\\s*\\.\\s*Local\" + \"ApplicationData\\\\b\"",
+    "replace": "@\"\\bSpecialFolder\\.Local\" + \"ApplicationData\\\\b\"",
+    "filter": "FullyQualifiedName~AppDataRootGuardTests"
+  },
+  {
+    "id": "dataroot-missing-value-reported",
+    "file": "Clipthrough/CommandLineOptions.cs",
+    "why": "--data-dir without a folder must be reported, not ignored in favour of the next source (no silent fallback, user decision).",
+    "find": "dataDirectory = string.Empty;",
+    "replace": "dataDirectory = null;",
+    "filter": "FullyQualifiedName~AppDataRootValidationTests"
+  },
+  {
+    "id": "dataroot-blank-env-reported",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "A blank CLIPTHROUGH_DATA_DIR must be reported as blank (no silent fallback, user decision).",
+    "find": "if (string.IsNullOrWhiteSpace(environmentValue))",
+    "replace": "if (string.IsNullOrWhiteSpace(environmentValue) && environmentValue.Length < 0)",
+    "filter": "FullyQualifiedName~AppDataRootValidationTests"
+  },
+  {
+    "id": "dataroot-invalid-chars-before-expansion",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "ExpandEnvironmentVariables stops at a NUL, so a path with one silently became a different folder unless checked before expanding.",
+    "find": "if (value.IndexOfAny(Path.GetInvalidPathChars()) >= 0 || expanded.IndexOfAny(Path.GetInvalidPathChars()) >= 0)",
+    "replace": "if (expanded.IndexOfAny(Path.GetInvalidPathChars()) >= 0)",
+    "filter": "FullyQualifiedName~AppDataRootValidationTests"
+  },
+  {
+    "id": "dataroot-write-probe-in-root",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "An unwritable data folder must be caught at startup by writing a probe file inside it (clear error, user decision).",
+    "find": "var probe = Path.Combine(dataRoot.Directory, $\".write-test-{Guid.NewGuid():N}.tmp\");",
+    "replace": "var probe = Path.Combine(Path.GetTempPath(), $\".write-test-{Guid.NewGuid():N}.tmp\");",
+    "filter": "FullyQualifiedName~AppDataRootValidationTests"
+  },
+  {
+    "id": "dataroot-startup-validates",
+    "file": "Clipthrough/Program.cs",
+    "why": "Startup must check the folder is usable and report it, rather than start and fail in whichever service writes first.",
+    "find": "            AppDataRootResolver.EnsureUsable(dataRoot);",
+    "replace": "            if (dataRoot.Directory.Length < 0) AppDataRootResolver.EnsureUsable(dataRoot);",
+    "filter": "FullyQualifiedName~AppDataRootValidationTests"
+  },
+  {
+    "id": "dataroot-velopack-root-above-current",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "Under Velopack the portable marker and data belong beside Update.exe, above current\\, which every update replaces (portable mode must survive updates).",
+    "find": "            ? parent",
+    "replace": "            ? directory",
+    "filter": "FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "dataroot-velopack-needs-manifest",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "Only a sq.version manifest beside the executable makes the parent a Velopack root, as in Velopack's own locator; a plain copy below an unrelated Update.exe is its own root.",
+    "find": "&& File.Exists(Path.Combine(directory, VelopackManifestName))",
+    "replace": "&& VelopackManifestName.Length > 0",
+    "filter": "FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "dataroot-marker-inside-current-ignored",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "A marker inside current\\ would be deleted by the next update and move the data folder back to the default, so it must not turn portable mode on.",
+    "find": "if (File.Exists(Path.Combine(applicationRoot, PortableMarkerFileName)))",
+    "replace": "if (File.Exists(Path.Combine(applicationRoot, PortableMarkerFileName)) || File.Exists(Path.Combine(executableDirectory, PortableMarkerFileName)))",
+    "filter": "FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "dataroot-relative-library-against-root",
+    "file": "Clipthrough/Models/StorageOptions.cs",
+    "why": "A relative library path resolves against the data folder, not the working directory (current\\ under Velopack, wiped by updates).",
+    "find": "Path.GetFullPath(Environment.ExpandEnvironmentVariables(DatabasePath.Trim()), dataRoot.Directory)",
+    "replace": "Path.GetFullPath(Environment.ExpandEnvironmentVariables(DatabasePath.Trim()))",
+    "filter": "FullyQualifiedName~StorageOptionsTests"
+  },
+  {
+    "id": "dataroot-portable-library-stored-relative",
+    "file": "Clipthrough/Services/Storage/StorageOptionsService.cs",
+    "why": "In portable mode storage.json records a library inside the folder relative to it, so the library is found after the folder changes drive letter or parent.",
+    "find": "DatabasePath = _dataRoot.ToStoredPath(options.DatabasePath),",
+    "replace": "DatabasePath = options.DatabasePath,",
+    "filter": "FullyQualifiedName~PortableDataRootTests"
+  },
+  {
+    "id": "dataroot-relative-only-when-portable",
+    "file": "Clipthrough/Models/AppDataRoot.cs",
+    "why": "Only portable mode stores relative paths; a folder chosen by path keeps the full path in storage.json, as before.",
+    "find": "if (Source != AppDataRootSource.Portable)",
+    "replace": "if (Source != AppDataRootSource.Portable && Source == AppDataRootSource.Portable)",
+    "filter": "FullyQualifiedName~PortableDataRootTests"
+  },
+  {
+    "id": "dataroot-outside-portable-stays-absolute",
+    "file": "Clipthrough/Models/AppDataRoot.cs",
+    "why": "A library outside the portable folder is not inside the thing that moves, so it stays absolute rather than becoming ..\\ relative.",
+    "find": "relative.StartsWith(\"..\" + Path.DirectorySeparatorChar, StringComparison.Ordinal)",
+    "replace": "relative.Length < 0",
+    "filter": "FullyQualifiedName~PortableDataRootTests"
+  },
+  {
+    "id": "dataroot-relaunch-keeps-cli-folder",
+    "file": "Clipthrough/Models/AppDataRoot.cs",
+    "why": "Velopack's restart after an update must be handed --data-dir, or the updated app comes back on the default folder.",
+    "find": "Source == AppDataRootSource.CommandLine",
+    "replace": "Source == AppDataRootSource.Portable",
+    "filter": "FullyQualifiedName~AppDataRootResolverTests|FullyQualifiedName~UpdateServiceTests"
+  },
+  {
+    "id": "dataroot-env-must-be-fully-qualified",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "A relative CLIPTHROUGH_DATA_DIR - including rooted-but-not-qualified forms like \\data and C:data - names a different folder per start directory, so it is rejected up front (coordinator decision).",
+    "find": "if (source == AppDataRootSource.EnvironmentVariable && !Path.IsPathFullyQualified(expanded))",
+    "replace": "if (source == AppDataRootSource.EnvironmentVariable && !Path.IsPathRooted(expanded))",
+    "filter": "FullyQualifiedName~AppDataRootValidationTests|FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "dataroot-env-relative-rejected",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "A relative CLIPTHROUGH_DATA_DIR must be reported, not resolved against the working directory (coordinator decision).",
+    "find": "if (source == AppDataRootSource.EnvironmentVariable && !Path.IsPathFullyQualified(expanded))",
+    "replace": "if (source == AppDataRootSource.EnvironmentVariable && !Path.IsPathFullyQualified(expanded) && expanded.Length < 0)",
+    "filter": "FullyQualifiedName~AppDataRootValidationTests|FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "dataroot-dash-value-is-missing",
+    "file": "Clipthrough/Services/System/AppDataRootResolver.cs",
+    "why": "--data-dir=-x names no folder; it must be reported as a missing value rather than create a folder called -x (coordinator decision).",
+    "find": "|| commandLine.TrimStart().StartsWith('-'))",
+    "replace": "|| commandLine.Length < 0)",
+    "filter": "FullyQualifiedName~AppDataRootValidationTests|FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "dataroot-dash-next-arg-not-consumed",
+    "file": "Clipthrough/CommandLineOptions.cs",
+    "why": "A single-dash option after --data-dir (-p, -h) is an option, not the folder; consuming it hid -h from the help check (coordinator decision).",
+    "find": "args[i + 1].StartsWith('-')))",
+    "replace": "args[i + 1].StartsWith(\"--\", StringComparison.Ordinal)))",
+    "filter": "FullyQualifiedName~AppDataRootValidationTests|FullyQualifiedName~AppDataRootResolverTests"
+  },
+  {
+    "id": "startup-entry-carries-data-dir",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "When --data-dir chose the folder, the Start with Windows entry must carry it, or sign-in opens the default folder (coordinator decision, option a).",
+    "find": "command.Append(' ').Append(argument.StartsWith('-') ? argument : QuoteArgument(argument));",
+    "replace": "command.Append(argument.Length < 0 ? QuoteArgument(argument) : string.Empty);",
+    "filter": "FullyQualifiedName~StartWithWindowsCommandTests"
+  },
+  {
+    "id": "startup-entry-quotes-folder",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "The folder in the sign-in entry must be quoted, or a folder with spaces splits into several arguments.",
+    "find": "argument.StartsWith('-') ? argument : QuoteArgument(argument)",
+    "replace": "argument.StartsWith('-') || argument.Length > 0 ? argument : QuoteArgument(argument)",
+    "filter": "FullyQualifiedName~StartWithWindowsCommandTests"
+  },
+  {
+    "id": "startup-entry-doubles-trailing-backslashes",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "A drive-root folder (D:\\) ends in a backslash that escapes the closing quote unless doubled, and then reads back as D:\".",
+    "find": "return quoted.Append('\\\\', backslashes * 2).Append('\"').ToString();",
+    "replace": "return quoted.Append('\\\\', backslashes).Append('\"').ToString();",
+    "filter": "FullyQualifiedName~StartWithWindowsCommandTests"
+  },
+  {
+    "id": "startup-entry-root-from-constructor",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "The DI-built service must take its sign-in arguments from the injected data root.",
+    "find": "_startupArguments = dataRoot.RelaunchArguments;",
+    "replace": "_startupArguments = dataRoot.Directory.Length < 0 ? dataRoot.RelaunchArguments : [];",
+    "filter": "FullyQualifiedName~StartWithWindowsCommandTests"
+  },
+  {
     "id": "daily-backup-reads-failed-before-owed",
     "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
     "why": "Finding 4b: never back up a library that failed its integrity check this session. A failing check sets HasFailedIntegrityCheck and then clears IsIntegrityCheckOwed; reading failed-then-owed lets a check that finishes between the reads look neither, and the damaged library is backed up.",
@@ -5046,5 +5302,85 @@
     "find": "            Dispatcher.UIThread.Post(() => Fit(window, onlyIfTooLarge: true), DispatcherPriority.Background);",
     "replace": "            Dispatcher.UIThread.Post(() => Fit(window, onlyIfTooLarge: start.Value.Scaling < 0), DispatcherPriority.Background);",
     "filter": "FullyQualifiedName~WindowFitHeadlessTests.Dragging|FullyQualifiedName~WindowFitHeadlessTests.Resizing"
+  },
+  {
+    "id": "startup-reconcile-off-leaves-foreign",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "An isolated --data-dir session with Start with Windows off deleted the usual install's sign-in entry at startup; off must never touch another configuration's entry (coordinator decision, option b).",
+    "find": "if (!StartupEntryCommand.IsSameConfiguration(existing, command))",
+    "replace": "if (!StartupEntryCommand.IsSameConfiguration(existing, command) && enabled)",
+    "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
+  },
+  {
+    "id": "startup-reconcile-on-leaves-foreign",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "At startup, a configuration with the setting on must not silently replace another configuration's entry; only the Settings toggle may (coordinator decision).",
+    "find": "Trace.TraceInformation($\"Start with Windows: leaving the sign-in entry of another configuration in place ({existing}).\");",
+    "replace": "if (enabled) { store.Write(command); }",
+    "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
+  },
+  {
+    "id": "startup-reconcile-on-writes-missing",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "Setting on and no entry: startup writes this configuration's entry.",
+    "find": "if (enabled)\n                {\n                    store.Write(command);",
+    "replace": "if (enabled && command.Length < 0)\n                {\n                    store.Write(command);",
+    "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
+  },
+  {
+    "id": "startup-reconcile-off-removes-own",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "Setting off and the entry is this configuration's: startup removes it.",
+    "find": "                store.Delete();\n            }\n        });",
+    "replace": "                _ = store;\n            }\n        });",
+    "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
+  },
+  {
+    "id": "startup-entry-compares-data-dir",
+    "file": "Clipthrough/Services/Platform/StartupEntry.cs",
+    "why": "The same executable with a different --data-dir (or none) is another configuration.",
+    "find": "&& SameDataDirectory(DataDirectory(storedArguments), DataDirectory(commandArguments));",
+    "replace": "&& (SameDataDirectory(DataDirectory(storedArguments), DataDirectory(commandArguments)) || storedArguments.Length > 0);",
+    "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
+  },
+  {
+    "id": "startup-entry-compares-executable",
+    "file": "Clipthrough/Services/Platform/StartupEntry.cs",
+    "why": "Another copy of Clipthrough.exe is another configuration.",
+    "find": "return SamePath(storedArguments[0], commandArguments[0])",
+    "replace": "return storedArguments[0].Length > 0",
+    "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
+  },
+  {
+    "id": "startup-entry-normalizes-paths",
+    "file": "Clipthrough/Services/Platform/StartupEntry.cs",
+    "why": "Ownership is compared on normalized, case-insensitive paths, not raw text, so this configuration's own entry spelled differently is still its own.",
+    "find": "=> string.Equals(Normalize(left), Normalize(right), StringComparison.OrdinalIgnoreCase);",
+    "replace": "=> string.Equals(Normalize(left).Length > 0 ? left : right, right, StringComparison.Ordinal);",
+    "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
+  },
+  {
+    "id": "startup-entry-reads-equals-spelling",
+    "file": "Clipthrough/Services/Platform/StartupEntry.cs",
+    "why": "--data-dir=<folder> in a stored entry names the same folder as --data-dir <folder>.",
+    "find": "else if (arguments[i].StartsWith(CommandLineOptions.DataDirectoryOption + \"=\", StringComparison.OrdinalIgnoreCase))",
+    "replace": "else if (arguments[i].StartsWith(CommandLineOptions.DataDirectoryOption + \"=\", StringComparison.OrdinalIgnoreCase) && arguments.Length < 0)",
+    "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
+  },
+  {
+    "id": "startup-first-event-reconciles",
+    "file": "Clipthrough/App.axaml.cs",
+    "why": "The first settings event is startup and must reconcile, not overwrite or delete whatever entry is there.",
+    "find": "systemInteraction?.ReconcileStartWithWindows(current.StartWithWindows);",
+    "replace": "systemInteraction?.SyncStartWithWindows(current.StartWithWindows);",
+    "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
+  },
+  {
+    "id": "startup-toggle-replaces-foreign",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "Turning Start with Windows on in Settings still replaces another configuration's entry, as before.",
+    "find": "if (!string.Equals(store.Read(), command, StringComparison.Ordinal))",
+    "replace": "if (string.IsNullOrWhiteSpace(store.Read()))",
+    "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
   }
 ]

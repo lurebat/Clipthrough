@@ -65,9 +65,19 @@ public partial class App : Application
 
     private readonly System.Collections.Generic.List<Avalonia.Input.KeyBinding> _customLocalKeyBindings = new();
 
+    /// <summary>
+    /// For the XAML designer and the headless tests, which never resolve a
+    /// service. The app itself is built with <see cref="App(AppDataRoot)"/> and
+    /// the root Program resolved.
+    /// </summary>
     public App()
+        : this(AppDataRootResolver.ResolveForCurrentProcess([]))
     {
-        Services = ConfigureServices();
+    }
+
+    public App(AppDataRoot dataRoot)
+    {
+        Services = ConfigureServices(dataRoot);
     }
 
     public IServiceProvider Services { get; }
@@ -201,9 +211,9 @@ public partial class App : Application
         return exception.InnerException is not null && IsProcessLevelFailure(exception.InnerException);
     }
 
-    private static ServiceProvider ConfigureServices()
+    private static ServiceProvider ConfigureServices(AppDataRoot dataRoot)
     {
-        return CreateServiceCollection().BuildServiceProvider();
+        return CreateServiceCollection(dataRoot).BuildServiceProvider();
     }
 
     /// <summary>
@@ -212,9 +222,12 @@ public partial class App : Application
     /// only fails when the container first resolves it - which, for a desktop app, is a crash
     /// on launch that no unit test would otherwise see.
     /// </summary>
-    internal static ServiceCollection CreateServiceCollection()
+    internal static ServiceCollection CreateServiceCollection(AppDataRoot dataRoot)
     {
         var services = new ServiceCollection();
+
+        // Every service that keeps a file takes it from here (AppDataRootGuardTests).
+        services.AddSingleton(dataRoot);
 
         // Platform-specific services
         if (OperatingSystem.IsWindows())
@@ -417,6 +430,22 @@ public partial class App : Application
         }
     }
 
+    /// <summary>
+    /// The first settings event is startup: reconcile, which leaves another
+    /// configuration's entry alone. Later ones carry a change the user made in
+    /// Settings, which writes or removes the entry as asked.
+    /// </summary>
+    internal static void ApplyStartWithWindows(ISystemInteractionService? systemInteraction, AppSettings? previous, AppSettings current)
+    {
+        if (previous is null)
+        {
+            systemInteraction?.ReconcileStartWithWindows(current.StartWithWindows);
+        }
+        else if (previous.StartWithWindows != current.StartWithWindows)
+        {
+            systemInteraction?.SyncStartWithWindows(current.StartWithWindows);
+        }
+    }
     private void OnSettingsChanged(object? sender, AppSettings e)
     {
         // The event argument is deliberately ignored. RaiseSettingsChanged
@@ -448,10 +477,8 @@ public partial class App : Application
             UpdateGlobalHotKeyRegistration();
         }
 
-        if (previous is null || previous.StartWithWindows != current.StartWithWindows)
-        {
-            _systemInteractionService?.SyncStartWithWindows(current.StartWithWindows);
-        }
+        ApplyStartWithWindows(_systemInteractionService, previous, current);
+
 
         if (previous is null || previous.ThemeMode != current.ThemeMode)
         {

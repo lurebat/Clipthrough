@@ -1,7 +1,9 @@
 using System;
 using System.IO;
+using Clipthrough.Models;
 using Clipthrough.Services;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Clipthrough.Tests.Unit;
@@ -113,6 +115,29 @@ public sealed class LegacyDatabaseMigrationTests : IDisposable
         }
 
         Assert.Equal("existing", File.ReadAllText(migratedPath));
+    }
+
+    /// <summary>
+    /// The migration end to end, through the data root: only the default root
+    /// had a pre-0.6.3 version, and its library moves to the uninstall-safe
+    /// sibling on first launch. Local application data is a temp folder here.
+    /// </summary>
+    [Fact]
+    public void DefaultRoot_CopiesTheLegacyLibraryIntoItsUninstallSafeFolder()
+    {
+        var localAppData = Path.Combine(_tempRoot, "LocalAppData");
+        var root = AppDataRoot.Default(localAppData);
+        Directory.CreateDirectory(Path.GetDirectoryName(root.LegacyDatabasePath!)!);
+        SeedDatabaseWithUncheckpointedWalFrames(root.LegacyDatabasePath!, rowCount: 3, out var reader);
+        reader.Dispose();
+        SqliteConnection.ClearAllPools();
+
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var storage = new StorageOptionsService(new FakeDataProtectionService(), root, provider);
+        SqliteConnection.ClearAllPools();
+
+        Assert.Equal(Path.Combine(localAppData, "ClipthroughData", "clipthrough.db"), storage.Current.DatabasePath);
+        Assert.True(File.Exists(storage.Current.DatabasePath), "The legacy library should have been copied to the default location.");
     }
 
     /// <summary>

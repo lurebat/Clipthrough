@@ -28,6 +28,24 @@ Clipthrough is an Avalonia desktop clipboard history app focused on rich clipboa
 - **Release polish** — Help -> About shows the current app version, image clips can use a dedicated external editor path, and session logs capture app-level warnings without known benign Avalonia compositor noise.
 - Windows publish artifact via GitHub Actions, plus a tagged-release workflow
 
+## Where Clipthrough keeps its data
+
+By default Clipthrough keeps its settings, logs and window position in `%LOCALAPPDATA%\Clipthrough`, and the clip library in `%LOCALAPPDATA%\ClipthroughData\clipthrough.db`. Three ways choose another data folder. The first one present wins:
+
+1. **The `--data-dir <folder>` command-line option**, for example `Clipthrough.exe --data-dir "D:\Clipthrough data"`. `--data-dir=<folder>` works too.
+2. **The `CLIPTHROUGH_DATA_DIR` environment variable**, set to a full path such as `D:\Clipthrough data` or `\\server\share\Clipthrough`. A relative value is refused, because the folder Clipthrough starts in differs between a shortcut, a script and sign-in. (A relative `--data-dir` is taken from the directory you start Clipthrough in.)
+3. **Portable mode**: an empty file named exactly `portable.flag` beside Clipthrough keeps all data in a `ClipthroughData` folder next to it.
+   - For the plain ZIP, put `portable.flag` beside `Clipthrough.exe`. The data then goes to `ClipthroughData` in that same folder.
+   - For the Velopack `-Portable.zip`, put `portable.flag` in the top folder, beside `Update.exe` and the `Clipthrough.exe` launcher, not inside `current\`. Each update replaces `current\`, and it would delete a marker or data kept there. A marker inside `current\` is ignored. Velopack's own `.portable` file does not turn on portable mode.
+
+With a chosen folder, everything lives inside it, the library included (`clipthrough.db`, unless you move it in Settings). In portable mode a library inside the portable folder is recorded relative to it, so it is still found after the folder moves to another drive letter or parent folder. After an update, Clipthrough restarts on the same data folder. It passes `--data-dir` to the restart when that option chose the folder.
+
+If the chosen folder can't be used, Clipthrough shows a message and does not start. This happens when no folder follows `--data-dir` (a value starting with `-`, as in `--data-dir -p`, counts as no folder), when the variable is blank or relative, when the path is invalid, or when Clipthrough can't create or write to the folder. Clipthrough never falls back to the default folder, so your clips never end up somewhere you didn't choose.
+
+**Start with Windows** starts Clipthrough on the same data folder. With the variable or the portable marker, the sign-in entry is just `Clipthrough.exe`, because both are still there at sign-in. When `--data-dir` chose the folder, the entry carries it: `"…\Clipthrough.exe" --data-dir "D:\Clipthrough data"`. There is one sign-in entry per Windows user, not one per data folder. When a session starts, it only touches a sign-in entry that is missing or its own: the same `Clipthrough.exe` and the same `--data-dir`. With the setting on, it adds a missing entry. With the setting off, it removes its own entry. It never changes another configuration's entry, so starting an isolated `--data-dir` session doesn't delete or take over your usual entry. Only turning the setting on or off in Settings replaces or removes an entry that belongs to another configuration. If you turn it on in an isolated session, sign-in then points at that folder. To point it back, turn it off in that session, or turn it off and on again in your usual session's Settings.
+
+Only one Clipthrough runs at a time, whatever its data folder. A second copy started with a different `--data-dir` exits while the first is running.
+
 ## Development
 
 ### Requirements

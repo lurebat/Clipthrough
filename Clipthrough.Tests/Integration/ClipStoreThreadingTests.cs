@@ -253,6 +253,8 @@ public sealed class ClipStoreThreadingTests
 
         public void Clear() => _threads.Clear();
 
+        public AppDataRoot DataRoot => inner.DataRoot;
+
         public StorageOptions Current
         {
             get

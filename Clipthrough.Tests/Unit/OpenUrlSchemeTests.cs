@@ -18,7 +18,7 @@ public sealed class OpenUrlSchemeTests
     [InlineData("javascript:alert(1)")]
     public async Task NonWebTargets_AreRejectedBeforeAnythingStarts(string target)
     {
-        var service = new SystemInteractionService();
+        var service = new SystemInteractionService(Clipthrough.Models.AppDataRoot.Default(System.IO.Path.GetTempPath()));
 
         await Assert.ThrowsAsync<ArgumentException>(() => service.OpenUrlAsync(target));
     }

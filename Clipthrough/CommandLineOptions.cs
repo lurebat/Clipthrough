@@ -24,11 +24,8 @@ public static class CommandLineOptions
     /// </summary>
     public static bool LogPopupTimings { get; private set; }
 
-    /// <summary>
-    /// Set when the user passed <c>--help</c> / <c>-h</c>. <see cref="Program.Main"/>
-    /// prints the usage block and exits before any other startup work runs.
-    /// </summary>
-    public static bool ShowHelp { get; private set; }
+
+    public const string DataDirectoryOption = "--data-dir";
 
     public const string UsageText =
         "Clipthrough — clipboard manager\n" +
@@ -43,8 +40,72 @@ public static class CommandLineOptions
         "                             the value leaks into the process listing.\n" +
         "      --log-popup-timings    Emit Trace lines around the popup show/hide and\n" +
         "                             refresh pipeline so freezes can be diagnosed.\n" +
-        "                             Alias: --log-timings.\n";
+        "                             Alias: --log-timings.\n" +
+        "      --data-dir <path>      Keep settings, logs and the library in <path>\n" +
+        "                             instead of %LOCALAPPDATA%\\Clipthrough. Wins over\n" +
+        "                             CLIPTHROUGH_DATA_DIR and a portable.flag marker.\n";
 
+    /// <summary>
+    /// Whether <c>--help</c>, <c>-h</c> or <c>/?</c> was passed. Read before any
+    /// other startup work, so help prints even when the data folder is unusable.
+    /// </summary>
+    public static bool IsHelpRequested(IReadOnlyList<string> args) => Scan(args).Help;
+
+    /// <summary>
+    /// The value of <c>--data-dir</c>: null when the option is absent, empty
+    /// when it is present without a folder. Separate from <see cref="Parse"/>
+    /// because it is needed before tracing starts: the log file lives in the
+    /// data folder it names.
+    /// </summary>
+    public static string? ReadDataDirectory(IReadOnlyList<string> args) => Scan(args).DataDirectory;
+
+    // The options read before tracing starts, so without Parse's side effects.
+    private static (bool Help, string? DataDirectory) Scan(IReadOnlyList<string> args)
+    {
+        var help = false;
+        string? dataDirectory = null;
+        for (var i = 0; i < args.Count; i++)
+        {
+            var arg = args[i];
+            if (string.IsNullOrEmpty(arg))
+            {
+                continue;
+            }
+
+            if (IsHelpOption(arg))
+            {
+                help = true;
+                continue;
+            }
+
+            // Consume the password's value so it is never read as an option.
+            if (TryReadValue(args, ref i, arg, "--password", "-p", out _))
+            {
+                continue;
+            }
+
+            // Present without a folder - last, or followed by anything that reads as an option ("-p") -
+            // is reported at startup rather than ignored.
+            if (string.Equals(arg, DataDirectoryOption, StringComparison.OrdinalIgnoreCase)
+                && (i + 1 >= args.Count || args[i + 1].StartsWith('-')))
+            {
+                dataDirectory = string.Empty;
+                continue;
+            }
+
+            if (TryReadValue(args, ref i, arg, DataDirectoryOption, null, out var directory))
+            {
+                dataDirectory = directory;
+            }
+        }
+
+        return (help, dataDirectory);
+    }
+
+    private static bool IsHelpOption(string arg)
+        => string.Equals(arg, "--help", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(arg, "-h", StringComparison.Ordinal)
+            || string.Equals(arg, "/?", StringComparison.Ordinal);
     public static void Parse(string[]? args)
     {
         if (args is null || args.Length == 0)
@@ -60,13 +121,6 @@ public static class CommandLineOptions
                 continue;
             }
 
-            if (string.Equals(arg, "--help", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(arg, "-h", StringComparison.Ordinal)
-                || string.Equals(arg, "/?", StringComparison.Ordinal))
-            {
-                ShowHelp = true;
-                continue;
-            }
 
             if (TryReadValue(args, ref i, arg, "--password", "-p", out var password))
             {
@@ -75,6 +129,13 @@ public static class CommandLineOptions
                     "Database password supplied via --password CLI argument. " +
                     "This is intended for development/debugging only and leaks the " +
                     "password to the process list.");
+                continue;
+            }
+
+            // Read by ReadDataDirectory before startup; consumed here so its
+            // value is never mistaken for another option.
+            if (TryReadValue(args, ref i, arg, DataDirectoryOption, null, out _))
+            {
                 continue;
             }
 

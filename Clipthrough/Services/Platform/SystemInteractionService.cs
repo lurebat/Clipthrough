@@ -30,14 +30,31 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
     private const uint CfUnicodeText = 13;
     private const uint GmemMoveable = 0x0002;
     private const uint GmemZeroinit = 0x0040;
-    private const string WindowsRunRegistryPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string WindowsRunValueName = "Clipthrough";
     private static readonly string[] HtmlFormats = ["HTML Format", "text/html", "public.html"];
     private static readonly string[] RtfFormats = ["Rich Text Format", "text/rtf", "public.rtf"];
     private WindowsGlobalHotKeyRegistration? _globalHotKeyRegistration;
     private readonly Dictionary<string, WindowsGlobalHotKeyRegistration> _namedHotKeys = new(StringComparer.Ordinal);
     private WindowsBalloonNotificationHost? _notificationHost;
     private nint _capturedPasteTarget;
+
+    // Appended to the Start with Windows command (AppDataRoot.RelaunchArguments),
+    // so a login starts Clipthrough on the data folder --data-dir chose.
+    private readonly IReadOnlyList<string> _startupArguments;
+    private readonly IStartupEntryStore? _startupEntry;
+    private readonly string? _processPath;
+
+    public SystemInteractionService(AppDataRoot dataRoot)
+        : this(dataRoot, OperatingSystem.IsWindows() ? new RunKeyStartupEntryStore() : null, Environment.ProcessPath)
+    {
+    }
+
+    /// <summary>Test seam: the Start with Windows entry and the executable it names.</summary>
+    internal SystemInteractionService(AppDataRoot dataRoot, IStartupEntryStore? startupEntry, string? processPath)
+    {
+        _startupArguments = dataRoot.RelaunchArguments;
+        _startupEntry = startupEntry;
+        _processPath = string.IsNullOrWhiteSpace(processPath) ? null : processPath;
+    }
 
     public async Task CopyTextAsync(string text)
     {
@@ -723,27 +740,87 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         }
     }
 
+    /// <summary>
+    /// The user turned Start with Windows on or off in Settings: write this
+    /// configuration's entry, or remove the entry, whoever wrote it.
+    /// </summary>
     public void SyncStartWithWindows(bool enabled)
+        => WithStartupEntry(store =>
+        {
+            if (!enabled)
+            {
+                store.Delete();
+                return;
+            }
+
+            if (_processPath is not { } processPath)
+            {
+                return;
+            }
+
+            var command = BuildStartupCommand(processPath);
+            if (!string.Equals(store.Read(), command, StringComparison.Ordinal))
+            {
+                store.Write(command);
+            }
+        });
+
+    /// <summary>
+    /// Applies this configuration's saved setting at startup. The entry is one
+    /// per Windows user, shared with every other configuration - the usual
+    /// install, an isolated --data-dir session, another copy - so only a
+    /// missing entry or this configuration's own is touched: on writes a
+    /// missing one, off removes its own, and another configuration's is left
+    /// alone either way. Only the Settings toggle replaces it.
+    /// </summary>
+    public void ReconcileStartWithWindows(bool enabled)
+        => WithStartupEntry(store =>
+        {
+            if (_processPath is not { } processPath || !OperatingSystem.IsWindows())
+            {
+                return;
+            }
+
+            var command = BuildStartupCommand(processPath);
+            var existing = store.Read();
+            if (string.IsNullOrWhiteSpace(existing))
+            {
+                if (enabled)
+                {
+                    store.Write(command);
+                }
+
+                return;
+            }
+
+            if (!StartupEntryCommand.IsSameConfiguration(existing, command))
+            {
+                Trace.TraceInformation($"Start with Windows: leaving the sign-in entry of another configuration in place ({existing}).");
+                return;
+            }
+
+            if (!enabled)
+            {
+                store.Delete();
+            }
+        });
+
+    private void WithStartupEntry(Action<IStartupEntryStore> action)
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        if (_startupEntry is null)
         {
             return;
         }
 
         try
         {
-            SyncStartWithWindowsCore(enabled);
+            action(_startupEntry);
         }
-        catch (UnauthorizedAccessException ex)
-        {
-            Trace.TraceWarning($"Start-with-Windows registration failed: {ex.Message}");
-        }
-        catch (System.Security.SecurityException ex)
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException)
         {
             Trace.TraceWarning($"Start-with-Windows registration failed: {ex.Message}");
         }
     }
-
     private static string NormalizePath(string path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -754,35 +831,44 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         return path.Trim().Trim('"');
     }
 
-    [SupportedOSPlatform("windows")]
-    private static void SyncStartWithWindowsCore(bool enabled)
+    /// <summary>
+    /// The command the Run key starts at login: the executable, then the
+    /// data-folder arguments when the command line chose the folder.
+    /// </summary>
+    internal string BuildStartupCommand(string processPath)
     {
-        using var runKey = Registry.CurrentUser.CreateSubKey(WindowsRunRegistryPath, writable: true);
-        if (runKey is null)
+        var command = new StringBuilder(QuoteCommandArgument(processPath));
+        foreach (var argument in _startupArguments)
         {
-            return;
+            command.Append(' ').Append(argument.StartsWith('-') ? argument : QuoteArgument(argument));
         }
 
-        if (!enabled)
+        return command.ToString();
+    }
+
+    /// <summary>
+    /// Quotes one argument after the program name so the started process reads
+    /// it back unchanged: backslashes are literal except before a quote, so a
+    /// run of them before the closing quote - a drive root such as D:\ - is
+    /// doubled, or it would escape the quote.
+    /// </summary>
+    private static string QuoteArgument(string value)
+    {
+        var quoted = new StringBuilder("\"");
+        var backslashes = 0;
+        foreach (var c in value)
         {
-            runKey.DeleteValue(WindowsRunValueName, throwOnMissingValue: false);
-            return;
+            if (c == '\\')
+            {
+                backslashes++;
+                continue;
+            }
+
+            quoted.Append('\\', c == '"' ? (backslashes * 2) + 1 : backslashes).Append(c);
+            backslashes = 0;
         }
 
-        var processPath = Environment.ProcessPath;
-        if (string.IsNullOrWhiteSpace(processPath))
-        {
-            return;
-        }
-
-        var command = QuoteCommandArgument(processPath);
-        var existingValue = runKey.GetValue(WindowsRunValueName) as string;
-        if (string.Equals(existingValue, command, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        runKey.SetValue(WindowsRunValueName, command, RegistryValueKind.String);
+        return quoted.Append('\\', backslashes * 2).Append('"').ToString();
     }
 
     private static string QuoteCommandArgument(string value)

@@ -27,11 +27,8 @@ public sealed class SettingsService : ISettingsService
     private AppSettings _current = AppSettings.Default;
     private bool _isInitialized;
 
-    public SettingsService(SqliteConnectionFactory connectionFactory, IDataProtectionService dataProtection)
-        : this(connectionFactory, dataProtection, Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Clipthrough",
-            "settings.json"))
+    public SettingsService(SqliteConnectionFactory connectionFactory, IDataProtectionService dataProtection, AppDataRoot dataRoot)
+        : this(connectionFactory, dataProtection, dataRoot.SettingsPath)
     {
     }
 

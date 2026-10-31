@@ -54,7 +54,7 @@ public sealed class SystemInteractionHelpersTests
     [InlineData("not a url")]
     public async Task OpenUrl_RefusesAnythingButWebAndMail_BeforeStartingAnything(string url)
     {
-        using var service = new SystemInteractionService();
+        using var service = new SystemInteractionService(Clipthrough.Models.AppDataRoot.Default(System.IO.Path.GetTempPath()));
 
         await Assert.ThrowsAsync<ArgumentException>(() => service.OpenUrlAsync(url));
     }

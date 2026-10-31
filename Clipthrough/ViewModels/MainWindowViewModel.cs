@@ -340,7 +340,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RerunAllEmbeddingsCommand = ReactiveCommand.CreateFromTask(RerunAllEmbeddingsAsync);
         RefreshSemanticCoverageCommand = ReactiveCommand.CreateFromTask(RefreshSemanticCoverageAsync);
 
-        Update = new UpdateViewModel(updateService ?? new UpdateService(settingsService), _jobIndicator, _notificationService, status => StatusText = status);
+        Update = new UpdateViewModel(updateService ?? new UpdateService(settingsService, _storageOptionsService.DataRoot), _jobIndicator, _notificationService, status => StatusText = status);
 
         _settingsService.SettingsChanged += OnSettingsChanged;
 
@@ -6123,7 +6123,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 DatabasePath = Settings.DatabasePath,
                 DatabasePassword = SettingsDatabasePassword,
                 RememberPassword = SettingsRememberDatabasePassword,
-            }.Normalize();
+            }.Normalize(_storageOptionsService.DataRoot);
         }
         catch (Exception ex)
         {
@@ -6239,7 +6239,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // working, and the change can simply be made again.
             //
             // The two files are independent - settings.json and storage.json,
-            // both in LocalApplicationData - and AppSettings carries no storage
+            // both in the data folder (AppDataRoot) - and AppSettings carries no storage
             // location or password, so neither write needs the other to have
             // happened first.
             try
@@ -7056,7 +7056,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
 
-    private static async Task<string?> PickDatabasePathAsync(IStorageProvider storageProvider, string currentPath)
+    private async Task<string?> PickDatabasePathAsync(IStorageProvider storageProvider, string currentPath)
     {
         var suggestedPath = GetSuggestedDatabasePath(currentPath);
         var suggestedDirectoryPath = Path.GetDirectoryName(suggestedPath);
@@ -7079,11 +7079,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return result?.TryGetLocalPath();
     }
 
-    private static string GetSuggestedDatabasePath(string currentPath)
+    private string GetSuggestedDatabasePath(string currentPath)
     {
         if (string.IsNullOrWhiteSpace(currentPath))
         {
-            return StorageOptions.GetDefaultDatabasePath();
+            return _storageOptionsService.DataRoot.DefaultDatabasePath;
         }
 
         try
@@ -7092,7 +7092,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
-            return StorageOptions.GetDefaultDatabasePath();
+            return _storageOptionsService.DataRoot.DefaultDatabasePath;
         }
     }
 
