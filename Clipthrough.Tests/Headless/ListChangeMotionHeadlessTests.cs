@@ -69,19 +69,46 @@ public sealed class ListChangeMotionHeadlessTests
         => harness.ClipList.GetRealizedContainers()
             .Count(c => ElementComposition.GetElementVisual(c)?.ImplicitAnimations is not null);
 
+    /// <summary>
+    /// What was armed and lifted as each change landed. Read at the change,
+    /// not afterwards: on a loaded machine the 300 ms disarm can run before a
+    /// test gets to look, which would fail the positive tests and let the
+    /// negative ones pass without having seen anything.
+    /// </summary>
+    private sealed class ArmingProbe
+    {
+        public int MaxArmed { get; private set; }
+
+        public System.Collections.Generic.HashSet<Control> Lifted { get; } = [];
+
+        public ArmingProbe(MainWindowTestHarness harness)
+        {
+            harness.ViewModel.Clips.CollectionChanged += (_, _) =>
+                Dispatcher.UIThread.Post(() => MaxArmed = Math.Max(MaxArmed, ArmedRows(harness)), DispatcherPriority.Send);
+            foreach (var row in harness.ClipList.GetRealizedContainers()) Watch(row);
+            harness.ClipList.ContainerPrepared += (_, e) => Watch(e.Container);
+        }
+
+        private void Watch(Control row) => row.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == Panel.ZIndexProperty && row.ZIndex > 0) Lifted.Add(row);
+        };
+    }
+
     [AvaloniaFact]
     public async Task ACapture_SlidesTheRowsDown_AndLiftsTheNewRowAboveThem()
     {
         using var harness = await ReadyAsync(motion: true);
+        var probe = new ArmingProbe(harness);
 
         var copied = await CaptureAsync(harness, "freshly copied");
         harness.ClipboardMonitor.Emit(copied);
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal("freshly copied", harness.ViewModel.Clips[0].Clip.Content);
-        Assert.True(ArmedRows(harness) > 1, "the neighbours were not armed to slide");
+        Assert.True(probe.MaxArmed > 1, "the neighbours were not armed to slide");
         var newRow = Assert.IsType<ListBoxItem>(harness.ClipList.ContainerFromIndex(0));
-        Assert.True(newRow.ZIndex > harness.ClipList.ContainerFromIndex(1)!.ZIndex, "the new row fades in underneath the row sliding over it");
+        Assert.Equal([newRow], probe.Lifted);
 
         await PumpUntilAsync(() => false, 500);
         Assert.Equal(0, ArmedRows(harness));
@@ -93,12 +120,13 @@ public sealed class ListChangeMotionHeadlessTests
     {
         using var harness = await ReadyAsync(motion: true);
         harness.ViewModel.SelectedClip = harness.ViewModel.Clips[2];
+        var probe = new ArmingProbe(harness);
 
         harness.ViewModel.DeleteSelectedCommand.Execute().Subscribe(_ => { }, _ => { });
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal(11, harness.ViewModel.Clips.Count);
-        Assert.True(ArmedRows(harness) > 1);
+        Assert.True(probe.MaxArmed > 1);
     }
 
     [AvaloniaFact]
@@ -111,41 +139,41 @@ public sealed class ListChangeMotionHeadlessTests
         await PumpUntilAsync(() => false, 500);
         Assert.Equal(0, ArmedRows(harness));
 
-        var armedDuringUndo = 0;
-        harness.ViewModel.Clips.CollectionChanged += (_, _) =>
-            Dispatcher.UIThread.Post(() => armedDuringUndo = Math.Max(armedDuringUndo, ArmedRows(harness)), DispatcherPriority.Send);
+        var probe = new ArmingProbe(harness);
         harness.ViewModel.Notifications.SelectMany(n => n.Actions).Last().ExecuteCommand.Execute().Subscribe(_ => { }, _ => { });
         await PumpUntilAsync(() => harness.ViewModel.Clips.Count == 12);
         Dispatcher.UIThread.RunJobs();
 
-        Assert.True(armedDuringUndo > 1, "the restored row popped back in");
+        Assert.True(probe.MaxArmed > 1, "the restored row popped back in");
     }
 
     [AvaloniaFact]
     public async Task ASearch_ReplacesTheRowsWithoutAnimating()
     {
         using var harness = await ReadyAsync(motion: true);
-        var maxArmed = 0;
-        harness.ViewModel.Clips.CollectionChanged += (_, _) => maxArmed = Math.Max(maxArmed, ArmedRows(harness));
+        var probe = new ArmingProbe(harness);
 
         harness.ViewModel.SearchText = "needle";
         await PumpUntilAsync(() => harness.ViewModel.Clips.Count == 1);
         harness.ViewModel.SearchText = string.Empty;
         await PumpUntilAsync(() => harness.ViewModel.Clips.Count == 12);
 
-        Assert.Equal(0, maxArmed);
+        Assert.Equal(0, probe.MaxArmed);
+        Assert.Empty(probe.Lifted);
     }
 
     [AvaloniaFact]
     public async Task WithoutMotion_ACaptureDoesNotAnimate()
     {
         using var harness = await ReadyAsync(motion: false);
+        var probe = new ArmingProbe(harness);
 
         harness.ClipboardMonitor.Emit(await CaptureAsync(harness, "freshly copied"));
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal("freshly copied", harness.ViewModel.Clips[0].Clip.Content);
-        Assert.Equal(0, ArmedRows(harness));
+        Assert.Equal(0, probe.MaxArmed);
+        Assert.Empty(probe.Lifted);
     }
 
     /// <summary>A capture while the popup is dismissed is already in place on the summon.</summary>
@@ -154,12 +182,14 @@ public sealed class ListChangeMotionHeadlessTests
     {
         using var harness = await ReadyAsync(motion: true);
         harness.Window.Dismiss();
+        var probe = new ArmingProbe(harness);
 
         harness.ClipboardMonitor.Emit(await CaptureAsync(harness, "freshly copied"));
         Dispatcher.UIThread.RunJobs();
 
         Assert.Equal("freshly copied", harness.ViewModel.Clips[0].Clip.Content);
-        Assert.Equal(0, ArmedRows(harness));
+        Assert.Equal(0, probe.MaxArmed);
+        Assert.Empty(probe.Lifted);
     }
 
     /// <summary>
@@ -171,25 +201,20 @@ public sealed class ListChangeMotionHeadlessTests
     public async Task TwoQuickCaptures_LeaveNoRowRaised()
     {
         using var harness = await ReadyAsync(motion: true);
-        var raised = new System.Collections.Generic.HashSet<Avalonia.Controls.Control>();
-        void Watch(Avalonia.Controls.Control row) => row.PropertyChanged += (_, e) =>
-        {
-            if (e.Property == Avalonia.Controls.Panel.ZIndexProperty && row.ZIndex > 0) raised.Add(row);
-        };
-        foreach (var row in harness.ClipList.GetRealizedContainers()) Watch(row);
-        harness.ClipList.ContainerPrepared += (_, e) => Watch(e.Container);
+        var probe = new ArmingProbe(harness);
+        var first = await CaptureAsync(harness, "first quick copy");
         var second = await CaptureAsync(harness, "second quick copy");
 
         // Back to back, so the second arrives while the first is still lifted.
-        harness.ClipboardMonitor.Emit(await CaptureAsync(harness, "first quick copy"));
+        harness.ClipboardMonitor.Emit(first);
         Dispatcher.UIThread.RunJobs();
         harness.ClipboardMonitor.Emit(second);
         Dispatcher.UIThread.RunJobs();
         Assert.Equal("second quick copy", harness.ViewModel.Clips[0].Clip.Content);
-        Assert.True(raised.Count >= 2, $"only {raised.Count} row(s) were lifted; the arrivals did not overlap");
+        Assert.True(probe.Lifted.Count >= 2, $"only {probe.Lifted.Count} row(s) were lifted");
 
         await PumpUntilAsync(() => false, 500);
 
-        Assert.All(raised, row => Assert.Equal(0, row.ZIndex));
+        Assert.All(probe.Lifted, row => Assert.Equal(0, row.ZIndex));
     }
 }

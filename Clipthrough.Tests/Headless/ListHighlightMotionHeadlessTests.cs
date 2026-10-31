@@ -146,9 +146,8 @@ public sealed class ListHighlightMotionHeadlessTests
 
         harness.Window.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, null);
         harness.Window.KeyRelease(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, null);
-        Dispatcher.UIThread.RunJobs();
-        Settle();
 
+        // At once, well inside the repeat window: only the KeyUp says it is new.
         harness.Window.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, null);
         Dispatcher.UIThread.RunJobs();
         Assert.Same(harness.ViewModel.Clips[2], harness.ViewModel.SelectedClip);
