@@ -44,9 +44,16 @@ and `UpdateDeferredContentCoreAsync`.
   and update text of 16, 505, 520 and 5000 characters. Before the fix, 520 and
   5000 came back as `"left"`; 16 and 505 already passed, which is what pins the
   threshold.
-- The capture test also asserts `typeof(content) = 'text'`, so dropping the cast
-  (a NUL-holding clip stored as a BLOB) fails it.
-- Mutants `clip-text-with-nul-bound-as-string` and `clip-text-bytes-stored-as-blob`.
+- `CaptureAsync_ReCopyingTextWithANul_KeepsItAll` and
+  `CaptureBatchAsync_ReImportingTextWithANul_KeepsItAll` cover the two update
+  statements a re-copy or re-import takes, which write content too.
+- Every one of these asserts `typeof(content) = 'text'` as well as the text: a
+  write that dropped its cast would store a BLOB that still reads back as the
+  same string, so only the type tells.
+- Mutants: `clip-text-with-nul-bound-as-string` (the binding), and one per cast
+  site - `clip-text-bytes-stored-as-blob`, `batch-import-stores-nul-text-as-blob`,
+  `recopy-stores-nul-text-as-blob`, `batch-reimport-stores-nul-text-as-blob`,
+  `deferred-update-stores-nul-text-as-blob`.
 
 Any new statement that writes user text which can hold a NUL must use the same
 pair: bind with `ClipTextParameter`, read with `CAST(... AS TEXT)`.

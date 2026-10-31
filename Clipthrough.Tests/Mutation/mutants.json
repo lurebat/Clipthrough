@@ -5398,5 +5398,37 @@
     "find": "                        CAST($content AS TEXT),\n                        $contentType,\n                        $contentFormat,\n                        $sourceApp,",
     "replace": "                        $content,\n                        $contentType,\n                        $contentFormat,\n                        $sourceApp,",
     "filter": "FullyQualifiedName~CaptureAsync_KeepsTextAfterANul"
+  },
+  {
+    "id": "deferred-update-stores-nul-text-as-blob",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "The deferred-content update must cast NUL-holding text back to TEXT; without the cast the clip is stored as a BLOB.",
+    "find": "UPDATE clips\n            SET content = CASE WHEN CAST($content AS TEXT) IS NULL OR TRIM(CAST($content AS TEXT)) = '' THEN content ELSE CAST($content AS TEXT) END,",
+    "replace": "UPDATE clips\n            SET content = CASE WHEN CAST($content AS TEXT) IS NULL OR TRIM(CAST($content AS TEXT)) = '' THEN content ELSE $content END,",
+    "filter": "FullyQualifiedName~UpdateDeferredContentAsync_KeepsTextAfterANul"
+  },
+  {
+    "id": "batch-reimport-stores-nul-text-as-blob",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "A re-imported clip rewrites its content; without the cast NUL-holding text is stored as a BLOB.",
+    "find": "UPDATE clips\n                            SET content = CASE WHEN CAST($content AS TEXT) IS NULL OR TRIM(CAST($content AS TEXT)) = '' THEN content ELSE CAST($content AS TEXT) END,",
+    "replace": "UPDATE clips\n                            SET content = CASE WHEN CAST($content AS TEXT) IS NULL OR TRIM(CAST($content AS TEXT)) = '' THEN content ELSE $content END,",
+    "filter": "FullyQualifiedName~CaptureBatchAsync_ReImportingTextWithANul"
+  },
+  {
+    "id": "recopy-stores-nul-text-as-blob",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "A re-copied clip rewrites its content; without the cast NUL-holding text is stored as a BLOB.",
+    "find": "UPDATE clips\n                        SET content = CASE WHEN CAST($content AS TEXT) IS NULL OR TRIM(CAST($content AS TEXT)) = '' THEN content ELSE CAST($content AS TEXT) END,",
+    "replace": "UPDATE clips\n                        SET content = CASE WHEN CAST($content AS TEXT) IS NULL OR TRIM(CAST($content AS TEXT)) = '' THEN content ELSE $content END,",
+    "filter": "FullyQualifiedName~CaptureAsync_ReCopyingTextWithANul"
+  },
+  {
+    "id": "batch-import-stores-nul-text-as-blob",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "The batch insert must cast NUL-holding text back to TEXT; without the cast an imported clip is stored as a BLOB.",
+    "find": "                        CAST($content AS TEXT), $contentType, $contentFormat,",
+    "replace": "                        $content, $contentType, $contentFormat,",
+    "filter": "FullyQualifiedName~CaptureBatchAsync_KeepsTextAfterANul"
   }
 ]
