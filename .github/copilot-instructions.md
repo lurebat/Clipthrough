@@ -38,6 +38,13 @@ occurrence in one pass rather than fixing only the reported case.
 - SQLite supports only **one writer at a time**. Background workers (embedding,
   OCR) compete for the write lock with UI-triggered operations. Keep write
   transactions short and avoid holding them across async awaits.
+- A pooled connection keeps the schema it last read. After DDL on another
+  connection, SQLite fails the first `DELETE FROM clips` on it with "no such
+  table" (an SQLite bug: FTS5 delete trigger plus foreign keys, fixed upstream
+  in SQLite 3.54.1). Keep the refresh while the bundled engine is older; the
+  doc says how to check.
+  `SqliteConnectionFactory` refreshes the schema on every open; keep that
+  statement. See `docs/solutions/stale-schema-delete-no-such-table.md`.
 
 ## Service initialization order
 

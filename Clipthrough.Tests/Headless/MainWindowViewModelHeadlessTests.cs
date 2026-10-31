@@ -2707,7 +2707,25 @@ public sealed partial class MainWindowViewModelHeadlessTests
         public Task<bool> MarkOcrForRerunAsync(long clipId, CancellationToken cancellationToken = default) => inner.MarkOcrForRerunAsync(clipId, cancellationToken);
         public Task<IReadOnlyList<long>> MarkAllSucceededForRerunAsync(CancellationToken cancellationToken = default) => inner.MarkAllSucceededForRerunAsync(cancellationToken);
         public Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default) => inner.GetOcrCoverageAsync(cancellationToken);
-        public Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default) => inner.ApplyMaintenanceAsync(cancellationToken);
+        private volatile bool _maintenanceShouldFail;
+        private int _maintenanceCount;
+
+        public int MaintenanceCount => Volatile.Read(ref _maintenanceCount);
+
+        public void StartFailingMaintenance() => _maintenanceShouldFail = true;
+
+        public void StopFailingMaintenance() => _maintenanceShouldFail = false;
+
+        public Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _maintenanceCount);
+            if (_maintenanceShouldFail)
+            {
+                throw new InvalidOperationException("Simulated maintenance failure.");
+            }
+
+            return inner.ApplyMaintenanceAsync(cancellationToken);
+        }
         public Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default) => inner.RebuildSensitivityMatchesAsync(cancellationToken);
         public Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default) => inner.GetClipAtOffsetAsync(offset, cancellationToken);
         public Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default) => inner.GetByIdAsync(clipId, cancellationToken);
@@ -3142,6 +3160,53 @@ public sealed partial class MainWindowViewModelHeadlessTests
                 flakyStore.SearchCount > searchesAfterOutage,
                 "The deferred-refresh subscription died: the capture after recovery never triggered a search.");
             Assert.Contains(viewModel.Clips, clip => clip.Id == afterRecovery.Id);
+        }
+        finally
+        {
+            Trace.Listeners.Remove(listener);
+        }
+    }
+
+    private const string MaintenanceLoopFailure = "Maintenance loop failed";
+
+    /// <summary>
+    /// Live check F2: one failed tick ("no such table: clips" during the background
+    /// payload move) ended the periodic maintenance for the rest of the session,
+    /// because the error reached the Interval subscription and OnError is terminal
+    /// in Rx. Retention and the size cap then ran only after captures. A failed
+    /// tick is now reported and the next one still runs.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task MaintenanceLoop_SurvivesAFailingTick()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var flakyStore = new FlakySearchClipStore(scope.ClipStoreService);
+        using var viewModel = CreateViewModel(scope, new TestClipboardMonitorService(), new TestSystemInteractionService(), new TestSessionLogService(), clipStore: flakyStore);
+        viewModel.MaintenanceInterval = TimeSpan.FromMilliseconds(50);
+
+        var traced = new ConcurrentQueue<string>();
+        var listener = new TraceCaptureListener(traced);
+        Trace.Listeners.Add(listener);
+        try
+        {
+            flakyStore.StartFailingMaintenance();
+            await viewModel.InitializeAsync();
+            await PumpAsync(
+                () => traced.Count(message => message.Contains(MaintenanceLoopFailure, StringComparison.Ordinal)) >= 2,
+                maxAttempts: 60);
+
+            // Two failed ticks, not one: the second proves a tick after a failure ran.
+            Assert.True(
+                traced.Count(message => message.Contains(MaintenanceLoopFailure, StringComparison.Ordinal)) >= 2,
+                $"Expected the loop to keep ticking through failures; saw {flakyStore.MaintenanceCount} maintenance call(s).");
+
+            flakyStore.StopFailingMaintenance();
+            var callsAtRecovery = flakyStore.MaintenanceCount;
+            await PumpAsync(() => flakyStore.MaintenanceCount >= callsAtRecovery + 2, maxAttempts: 60);
+            Assert.True(
+                flakyStore.MaintenanceCount >= callsAtRecovery + 2,
+                "The maintenance loop stopped after its failures.");
         }
         finally
         {

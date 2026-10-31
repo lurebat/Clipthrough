@@ -31,6 +31,7 @@ public sealed class DatabaseMaintenanceScope : System.IAsyncDisposable
     private readonly bool _ocrQueueWasRunning;
     private readonly bool _embeddingWorkerWasRunning;
     private System.IAsyncDisposable? _embeddingPause;
+    private System.IAsyncDisposable? _backgroundUpgradePause;
 
     private DatabaseMaintenanceScope(
         IClipboardMonitorService? monitor,
@@ -63,10 +64,16 @@ public sealed class DatabaseMaintenanceScope : System.IAsyncDisposable
     /// the UI thread only posts. The monitor now has a <c>StopAsync</c> that
     /// waits, and the sentence is true of all three.
     /// </remarks>
+    /// <param name="backgroundUpgrade">
+    /// An upgrade's background work (the <c>DatabaseInitializer</c>), which holds a
+    /// connection of its own: paused, and so closed, before the pool clear, and
+    /// resumed on disposal (F-13-1).
+    /// </param>
     public static async Task<DatabaseMaintenanceScope> EnterAsync(
         IClipboardMonitorService? monitor,
         IBackgroundOcrQueue? ocrQueue,
-        IEmbeddingWorker? embeddingWorker)
+        IEmbeddingWorker? embeddingWorker,
+        IPausableWorker? backgroundUpgrade = null)
     {
         var scope = new DatabaseMaintenanceScope(monitor, ocrQueue, embeddingWorker);
 
@@ -98,6 +105,11 @@ public sealed class DatabaseMaintenanceScope : System.IAsyncDisposable
             else if (embeddingWorker is not null)
             {
                 await embeddingWorker.StopAsync().ConfigureAwait(false);
+            }
+
+            if (backgroundUpgrade is not null)
+            {
+                scope._backgroundUpgradePause = await backgroundUpgrade.PauseAsync().ConfigureAwait(false);
             }
         }
         catch
@@ -145,6 +157,12 @@ public sealed class DatabaseMaintenanceScope : System.IAsyncDisposable
         else if (_embeddingWorkerWasRunning && _embeddingWorker is not IPausableWorker)
         {
             _embeddingWorker?.Start();
+        }
+
+        if (_backgroundUpgradePause is { } upgradePause)
+        {
+            _backgroundUpgradePause = null;
+            await upgradePause.DisposeAsync().ConfigureAwait(false);
         }
     }
 }

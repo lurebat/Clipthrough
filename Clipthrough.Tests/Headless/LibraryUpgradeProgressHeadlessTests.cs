@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Reactive.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
@@ -35,7 +36,11 @@ public sealed class LibraryUpgradeProgressHeadlessTests
 {
     private const int LegacyRows = 4;
 
-    private static void SeedLegacyRows(TemporaryDatabaseScope scope)
+    /// <param name="version">
+    /// The schema the library claims. Below 8 the move still runs before the app
+    /// opens, behind the overlay; from 8 it runs in the background (U4).
+    /// </param>
+    private static void SeedLegacyRows(TemporaryDatabaseScope scope, int version)
     {
         using var connection = scope.ConnectionFactory.CreateConnection();
         connection.Open();
@@ -56,9 +61,10 @@ public sealed class LibraryUpgradeProgressHeadlessTests
 
         using var rewind = connection.CreateCommand();
         rewind.CommandText = """
-            UPDATE app_metadata SET value = CAST(CAST(value AS INTEGER) - 1 AS TEXT) WHERE key = 'schema_version';
-            DELETE FROM app_metadata WHERE key = 'payload_move_last_id';
+            UPDATE app_metadata SET value = $v WHERE key = 'schema_version';
+            DELETE FROM app_metadata WHERE key IN ('payload_move_last_id', 'payload_move_done');
             """;
+        rewind.Parameters.AddWithValue("$v", version.ToString(System.Globalization.CultureInfo.InvariantCulture));
         rewind.ExecuteNonQuery();
     }
 
@@ -68,6 +74,11 @@ public sealed class LibraryUpgradeProgressHeadlessTests
         return match.Success ? int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) : null;
     }
 
+    private static string TodaysBackup(TemporaryDatabaseScope scope) => System.IO.Path.Combine(
+        System.IO.Path.GetDirectoryName(scope.DatabasePath)!,
+        "backups",
+        $"clipthrough-{DateTime.UtcNow.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture)}.db");
+
     [AvaloniaFact]
     public async Task TheFirstStartAfterAnUpgrade_ShowsItsProgress_AndKeepsTheWindowLive()
     {
@@ -75,7 +86,7 @@ public sealed class LibraryUpgradeProgressHeadlessTests
         scope.SettingsService.SetHasSavedSettings(true);
         scope.StorageOptionsService.SetHasSavedConfig(true);
         Task.Run(() => scope.DatabaseInitializer.InitializeAsync()).GetAwaiter().GetResult();
-        SeedLegacyRows(scope);
+        SeedLegacyRows(scope, version: 4);
 
         using var moveReached = new ManualResetEventSlim();
         using var release = new ManualResetEventSlim();
@@ -222,6 +233,352 @@ public sealed class LibraryUpgradeProgressHeadlessTests
             DatabaseInitializer.PayloadMoveBatchRows = 200;
 
             try { window?.Close(); } catch { /* test teardown */ }
+            viewModel?.Dispose();
+            for (var i = 0; i < 5; i++)
+            {
+                try { Dispatcher.UIThread.RunJobs(); } catch { /* test teardown */ }
+            }
+        }
+    }
+
+    /// <summary>
+    /// U4, owner decision (c): an upgrade from schema 8 opens at once and moves
+    /// payloads in the background. With the move held between batches, the clip
+    /// list has loaded, a capture lands, and the running-jobs line shows the move
+    /// and its progress; once released, the move finishes and the line clears.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task AnUpgradeFromSchema8_OpensAtOnce_AndShowsTheBackgroundMove()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        scope.SettingsService.SetHasSavedSettings(true);
+        scope.StorageOptionsService.SetHasSavedConfig(true);
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 1_048_576 });
+        Task.Run(() => scope.DatabaseInitializer.InitializeAsync()).GetAwaiter().GetResult();
+        SeedLegacyRows(scope, version: 8);
+
+        // As if a search-index rebuild had left merges behind: the background
+        // work drains them after the move (R1).
+        using (var connection = scope.ConnectionFactory.CreateConnection())
+        {
+            connection.Open();
+            using var pending = connection.CreateCommand();
+            pending.CommandText = "INSERT INTO app_metadata (key, value) VALUES ('fts_merge_pending', '1') ON CONFLICT(key) DO UPDATE SET value = '1';";
+            pending.ExecuteNonQuery();
+        }
+
+        using var held = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        DatabaseInitializer.BackgroundPayloadMoveBatchBudget = TimeSpan.Zero;
+        DatabaseInitializer.BetweenBackgroundPayloadBatches = _ =>
+        {
+            held.Set();
+            return Task.Run(() => release.Wait(TimeSpan.FromSeconds(30)));
+        };
+
+        // Recorded as the indicator raises them, on the reporting thread. The
+        // view model's label reads whatever is current when its posted update
+        // runs, so a 0% replaced by 25% before the dispatcher turns is never seen
+        // there.
+        var jobs = new BackgroundJobIndicator();
+        var seenJobLabels = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        jobs.Changed += (_, _) =>
+        {
+            foreach (var label in jobs.ActiveLabels)
+            {
+                seenJobLabels.Enqueue(label);
+            }
+        };
+        MainWindow? window = null;
+        MainWindowViewModel? viewModel = null;
+        try
+        {
+            var systemInteraction = new TestSystemInteractionService();
+            viewModel = new MainWindowViewModel(
+                scope.ClipStoreService,
+                new TestClipboardMonitorService(),
+                scope.SettingsService,
+                systemInteraction,
+                scope.StorageOptionsService,
+                scope.SensitivityService,
+                scope.NotificationService,
+                new TestSessionLogService(),
+                scope.ClipExportService,
+                new TestImageEditorService(),
+                scope.SearchHistoryService,
+                new TestAiTransformService(false),
+                new TestOcrService(),
+                new BackgroundOcrQueueStub(),
+                jobs,
+                scope.DatabaseInitializer);
+            window = new MainWindow(systemInteraction) { DataContext = viewModel };
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+
+            await viewModel.InitializeAsync();
+            var clock = Stopwatch.StartNew();
+            while ((viewModel.IsLoadingDatabase || !held.IsSet) && clock.Elapsed < TimeSpan.FromSeconds(20))
+            {
+                await Task.Delay(20);
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            Assert.True(held.IsSet, "The background move never started.");
+            Assert.False(viewModel.IsLoadingDatabase, "The app did not open before the move finished.");
+            Assert.False(viewModel.IsUpgradingLibrary, "The blocking upgrade overlay showed for a background move.");
+
+            clock.Restart();
+            while (viewModel.Clips.Count < LegacyRows && clock.Elapsed < TimeSpan.FromSeconds(10))
+            {
+                await Task.Delay(20);
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            Assert.Equal(LegacyRows, viewModel.Clips.Count);
+            Assert.True(viewModel.HasRunningJobs);
+            Assert.StartsWith(AppText.FormatLibraryOptimizeJob(0)[..^2], viewModel.RunningJobsLabel);
+
+            // Held after the first of four one-row batches: the bar has moved off 0, and the 0% report before it showed too.
+            Assert.Contains(seenJobLabels, l => l == AppText.FormatLibraryOptimizeJob(0));
+
+            var captured = await scope.ClipStoreService.CaptureFastAsync(new ClipCaptureRequest
+            {
+                ContentType = ContentType.Text,
+                ContentFormat = ClipContentFormat.PlainText,
+                ContentText = "copied while the library was being optimized",
+                ContentBytes = System.Text.Encoding.UTF8.GetBytes("copied while the library was being optimized"),
+            });
+            Assert.NotNull(captured);
+
+            // The startup backup waits for the background integrity check (live check F3).
+            Assert.False(System.IO.File.Exists(TodaysBackup(scope)), "The daily backup ran before the background integrity check.");
+
+            DatabaseInitializer.BetweenBackgroundPayloadBatches = null;
+            release.Set();
+            clock.Restart();
+            while (viewModel.HasRunningJobs && clock.Elapsed < TimeSpan.FromSeconds(20))
+            {
+                await Task.Delay(20);
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            Assert.False(viewModel.HasRunningJobs, "The move's job line outlived the move.");
+            using var connection = scope.ConnectionFactory.CreateConnection();
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM clips WHERE content_bytes IS NOT NULL;";
+            Assert.Equal(0L, Convert.ToInt64(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture));
+            clock.Restart();
+            long pendingMerges;
+            do
+            {
+                command.CommandText = "SELECT COUNT(*) FROM app_metadata WHERE key = 'fts_merge_pending';";
+                pendingMerges = Convert.ToInt64(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+                if (pendingMerges > 0)
+                {
+                    await Task.Delay(20);
+                }
+            }
+            while (pendingMerges > 0 && clock.Elapsed < TimeSpan.FromSeconds(10));
+            Assert.Equal(0L, pendingMerges);
+
+            // ...and is taken once the run has finished.
+            clock.Restart();
+            while (!System.IO.File.Exists(TodaysBackup(scope)) && clock.Elapsed < TimeSpan.FromSeconds(10))
+            {
+                await Task.Delay(20);
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            Assert.True(System.IO.File.Exists(TodaysBackup(scope)), "No daily backup after the background run passed its check.");
+        }
+        finally
+        {
+            release.Set();
+            DatabaseInitializer.BetweenBackgroundPayloadBatches = null;
+            DatabaseInitializer.BackgroundPayloadMoveBatchBudget = TimeSpan.FromMilliseconds(100);
+
+            try { window?.Close(); } catch { /* test teardown */ }
+            viewModel?.Dispose();
+            for (var i = 0; i < 5; i++)
+            {
+                try { Dispatcher.UIThread.RunJobs(); } catch { /* test teardown */ }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Owner decision on the integrity check (b): the background move checks the
+    /// library before rewriting it. On a corrupt library the app is open, nothing
+    /// is moved, and the failure is raised as an error notification.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task ACorruptLibrary_IsNotMovedInTheBackground_AndTheFailureIsReported()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        scope.SettingsService.SetHasSavedSettings(true);
+        scope.StorageOptionsService.SetHasSavedConfig(true);
+        Task.Run(() => scope.DatabaseInitializer.InitializeAsync()).GetAwaiter().GetResult();
+        SeedLegacyRows(scope, version: 8);
+        using (var connection = scope.ConnectionFactory.CreateConnection())
+        {
+            connection.Open();
+            using var fill = connection.CreateCommand();
+            fill.CommandText = """
+                CREATE TABLE integrity_test_filler (id INTEGER PRIMARY KEY, payload TEXT NOT NULL);
+                WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 3000)
+                INSERT INTO integrity_test_filler (payload) SELECT printf('%.400c', 'x') FROM n;
+                PRAGMA wal_checkpoint(TRUNCATE);
+                """;
+            fill.ExecuteNonQuery();
+        }
+
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        using (var file = new System.IO.FileStream(scope.DatabasePath, System.IO.FileMode.Open, System.IO.FileAccess.ReadWrite))
+        {
+            file.Seek(file.Length / 2, System.IO.SeekOrigin.Begin);
+            var garbage = new byte[256];
+            Array.Fill(garbage, (byte)0xDE);
+            file.Write(garbage);
+        }
+
+        MainWindowViewModel? viewModel = null;
+        try
+        {
+            viewModel = new MainWindowViewModel(
+                scope.ClipStoreService,
+                new TestClipboardMonitorService(),
+                scope.SettingsService,
+                new TestSystemInteractionService(),
+                scope.StorageOptionsService,
+                scope.SensitivityService,
+                scope.NotificationService,
+                new TestSessionLogService(),
+                scope.ClipExportService,
+                new TestImageEditorService(),
+                scope.SearchHistoryService,
+                new TestAiTransformService(false),
+                new TestOcrService(),
+                new BackgroundOcrQueueStub(),
+                new BackgroundJobIndicator(),
+                scope.DatabaseInitializer);
+
+            await viewModel.InitializeAsync();
+            // On the view model's list, not the service's last publish: the publish
+            // happens on the background run's thread and reaches the list through a
+            // posted UI job, which may still be queued when the service shows it.
+            var clock = Stopwatch.StartNew();
+            while (!viewModel.Notifications.Any(n => n.Title == AppText.LibraryOptimizeFailedTitle) && clock.Elapsed < TimeSpan.FromSeconds(20))
+            {
+                await Task.Delay(20);
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            Assert.False(viewModel.IsLoadingDatabase, "The app did not open.");
+            var notification = scope.NotificationService.LastNotification;
+            Assert.NotNull(notification);
+            Assert.Equal(AppText.LibraryOptimizeFailedTitle, notification.Title);
+            Assert.Equal(AppNotificationLevel.Error, notification.Level);
+            Assert.Contains("integrity check failed", notification.Message, StringComparison.OrdinalIgnoreCase);
+
+            // F-13-10: the backups it says to restore hold nothing copied this session,
+            // and a restore keeps the replaced library under a .before-restore- name.
+            Assert.Contains("not in any backup", AppText.LibraryIntegrityFailedUnbackedClips, StringComparison.Ordinal);
+            Assert.Contains(".before-restore-", AppText.LibraryIntegrityFailedUnbackedClips, StringComparison.Ordinal);
+            Assert.True(
+                notification.Message.Contains(AppText.LibraryIntegrityFailedUnbackedClips, StringComparison.Ordinal),
+                "The integrity-failure notification does not say that this session's clips are in no backup.");
+
+            // Owner decision (live check F3): this one stays until the user closes
+            // it. A non-persistent notification is removed after six seconds - long
+            // before someone looking away from the screen reads "restore a backup".
+            Assert.True(notification.IsPersistent, "The integrity-failure notification disappears on its own.");
+            var shown = Assert.Single(viewModel.Notifications, n => n.Title == AppText.LibraryOptimizeFailedTitle);
+            var close = Assert.Single(shown.Actions);
+            Assert.Equal(AppText.CloseButtonLabel, close.Label);
+            await close.ExecuteCommand.Execute().ToTask();
+            Dispatcher.UIThread.RunJobs();
+            Assert.DoesNotContain(viewModel.Notifications, n => n.Title == AppText.LibraryOptimizeFailedTitle);
+
+            using var connection = scope.ConnectionFactory.CreateConnection();
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT (SELECT COUNT(*) FROM clips WHERE content_bytes IS NOT NULL), (SELECT COUNT(*) FROM clip_payloads);";
+            using var reader = command.ExecuteReader();
+            Assert.True(reader.Read());
+            Assert.Equal(LegacyRows, reader.GetInt64(0));
+            Assert.Equal(0, reader.GetInt64(1));
+
+            // Live check F3: nothing is backed up from a library that failed its check.
+            for (var i = 0; i < 10; i++)
+            {
+                await Task.Delay(20);
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            Assert.False(System.IO.File.Exists(TodaysBackup(scope)), "A daily backup was taken from a library that failed its integrity check.");
+        }
+        finally
+        {
+            viewModel?.Dispose();
+            for (var i = 0; i < 5; i++)
+            {
+                try { Dispatcher.UIThread.RunJobs(); } catch { /* test teardown */ }
+            }
+        }
+    }
+    /// <summary>
+    /// F-13-10, the other side: a background-run failure that is not a failed
+    /// integrity check does not say to restore a backup, so it gets no note about
+    /// what the backups hold.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task ABackgroundRunFailureOtherThanTheCheck_HasNoBackupNote()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        scope.SettingsService.SetHasSavedSettings(true);
+        scope.StorageOptionsService.SetHasSavedConfig(true);
+        Task.Run(() => scope.DatabaseInitializer.InitializeAsync()).GetAwaiter().GetResult();
+        SeedLegacyRows(scope, version: 8);
+        DatabaseInitializer.AfterPayloadRowMoved = _ => throw new InvalidOperationException("injected failure in the background move");
+
+        MainWindowViewModel? viewModel = null;
+        try
+        {
+            viewModel = new MainWindowViewModel(
+                scope.ClipStoreService,
+                new TestClipboardMonitorService(),
+                scope.SettingsService,
+                new TestSystemInteractionService(),
+                scope.StorageOptionsService,
+                scope.SensitivityService,
+                scope.NotificationService,
+                new TestSessionLogService(),
+                scope.ClipExportService,
+                new TestImageEditorService(),
+                scope.SearchHistoryService,
+                new TestAiTransformService(false),
+                new TestOcrService(),
+                new BackgroundOcrQueueStub(),
+                new BackgroundJobIndicator(),
+                scope.DatabaseInitializer);
+
+            await viewModel.InitializeAsync();
+            var clock = Stopwatch.StartNew();
+            while (!viewModel.Notifications.Any(n => n.Title == AppText.LibraryOptimizeFailedTitle) && clock.Elapsed < TimeSpan.FromSeconds(20))
+            {
+                await Task.Delay(20);
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            var shown = Assert.Single(viewModel.Notifications, n => n.Title == AppText.LibraryOptimizeFailedTitle);
+            Assert.Contains("injected failure in the background move", shown.Message, StringComparison.Ordinal);
+            Assert.False(scope.DatabaseInitializer.HasFailedIntegrityCheck);
+            Assert.DoesNotContain(AppText.LibraryIntegrityFailedUnbackedClips, shown.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            DatabaseInitializer.AfterPayloadRowMoved = null;
             viewModel?.Dispose();
             for (var i = 0; i < 5; i++)
             {

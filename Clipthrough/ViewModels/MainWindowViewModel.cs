@@ -113,6 +113,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _startupErrorTitle = string.Empty;
     private string _startupErrorMessage = string.Empty;
     private bool _areBackgroundServicesStarted;
+    private readonly CancellationTokenSource _deferredPayloadMoveCancellation = new();
     private bool _isDisposed;
 
     // In-flight or completed source-app icon loads, keyed by executable path and shared
@@ -311,7 +312,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         JumpToTopCommand = ReactiveCommand.Create(() => { if (Clips.Count > 0) SelectedClip = Clips[0]; });
         OpenHelpCommand = ReactiveCommand.Create(OpenHelp);
         OpenAboutCommand = ReactiveCommand.Create(OpenAbout);
-        Maintenance = new DatabaseMaintenanceViewModel(databaseBackupService ?? new DatabaseBackupService(storageOptionsService, null, null, null, settingsService: settingsService), _storageOptionsService, _systemInteractionService, _notificationService, ReportError);
+        Maintenance = new DatabaseMaintenanceViewModel(databaseBackupService ?? new DatabaseBackupService(storageOptionsService, null, null, null, settingsService: settingsService, databaseInitializer: databaseInitializer), _storageOptionsService, _systemInteractionService, _notificationService, ReportError);
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
         SaveSettingsCommand = ReactiveCommand.CreateFromTask(SaveSettingsAsync);
         BrowseDatabasePathCommand = ReactiveCommand.CreateFromTask<Window?>(BrowseDatabasePathAsync);
@@ -2174,6 +2175,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         _isDisposed = true;
+        _deferredPayloadMoveCancellation.Cancel();
         CommitPendingDeletesOnExit();
         _clipboardMonitorService.Stop();
         _settingsService.SettingsChanged -= OnSettingsChanged;
@@ -6544,7 +6546,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private async Task StartDatabaseAsync()
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        await _databaseInitializer.InitializeAsync(new UiThreadProgress(SetLibraryUpgradeProgress));
+        await _databaseInitializer.InitializeAsync(new UiThreadProgress(SetLibraryUpgradeProgress), allowDeferredPayloadMove: true);
         Trace.TraceInformation($"[startup-timing] DatabaseInitializer @ {sw.ElapsedMilliseconds}ms");
 
         if (!_settingsService.HasSavedSettings)
@@ -6621,6 +6623,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         _areBackgroundServicesStarted = true;
+        DeferredUpgradeRun = RunDeferredPayloadMoveAsync();
         _clipboardMonitorService.Start();
         _backgroundOcrQueue.Start();
         _ = Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync());
@@ -6662,6 +6665,125 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .ObserveOn(RxSchedulers.MainThreadScheduler)
                 .Subscribe((int count) => { _ = RefreshSemanticCoverageAsync(); }));
         }
+    }
+
+    /// <summary>
+    /// The background upgrade run <see cref="StartBackgroundServices"/> started;
+    /// null until then. Exposed so tests can wait for it.
+    /// </summary>
+    internal Task? DeferredUpgradeRun { get; private set; }
+
+    /// <summary>
+    /// Finishes an upgrade's payload move in the background while the app is in
+    /// use (upgrade-start research, U4). Shown as a running job with its
+    /// progress; a library with nothing left to move returns at once.
+    /// </summary>
+    private async Task RunDeferredPayloadMoveAsync()
+    {
+        IDisposable? job = null;
+        var shownPercent = -1;
+        var gate = new object();
+        void OnProgress(LibraryUpgradeProgress progress)
+        {
+            var percent = (int)Math.Round((progress.Fraction ?? 0) * 100);
+            lock (gate)
+            {
+                // A new label per step of five, so the job line moves without
+                // raising a change for every batch.
+                if (_deferredPayloadMoveCancellation.IsCancellationRequested || (shownPercent >= 0 && percent / 5 == shownPercent / 5))
+                {
+                    return;
+                }
+
+                var previous = job;
+                job = _jobIndicator.Begin(AppText.FormatLibraryOptimizeJob(percent));
+                previous?.Dispose();
+                shownPercent = percent;
+            }
+        }
+
+        try
+        {
+            var upgraded = await Task.Run(
+                () => _databaseInitializer.RunDeferredPayloadMoveAsync(
+                    new DirectProgress(OnProgress),
+                    _deferredPayloadMoveCancellation.Token),
+                _deferredPayloadMoveCancellation.Token).ConfigureAwait(false);
+
+            // After the move, never alongside it: both are writers, and the merges
+            // a rebuild leaves are only drained when one ran (R1). Silent - it
+            // changes nothing anyone can see except how fast captures are.
+            await Task.Run(
+                () => _databaseInitializer.DrainSearchIndexMergesAsync(_deferredPayloadMoveCancellation.Token),
+                _deferredPayloadMoveCancellation.Token).ConfigureAwait(false);
+
+            // The startup backup waited for the integrity check this run has now
+            // passed (live check F3); without this the day would go unbacked-up.
+            // Expired clips first, as at startup (OD-4a). Only when the run had
+            // work: on an ordinary start nothing was held back, and the startup
+            // pass is already doing both (rubber-duck F-13-8).
+            if (upgraded)
+            {
+                try
+                {
+                    await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);
+                    await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);
+                }
+                catch (Exception backupFailure) when (backupFailure is not OperationCanceledException)
+                {
+                    Trace.TraceWarning($"Daily backup failed: {backupFailure.Message}");
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown. The batch in flight rolled back; the next start resumes.
+        }
+        catch (Exception ex)
+        {
+            // An integrity failure lands here too (the background move checks the
+            // library before rewriting it), so it is raised as a notification and
+            // not only as a status-bar line. Nothing was moved. It stays until the
+            // user closes it (owner decision after live check F3): it says to
+            // restore a backup, and a six-second toast is easily missed.
+            ReportError("Library storage optimization", ex);
+            _notificationService.Publish(new AppNotification
+            {
+                Title = AppText.LibraryOptimizeFailedTitle,
+
+                // Only after a failed integrity check, which is what says to restore a
+                // backup: the daily backup waited for the check, so nothing copied
+                // this session is in one (F-13-10).
+                Message = _databaseInitializer.HasFailedIntegrityCheck
+                    ? $"{ex.Message}\n\n{AppText.LibraryIntegrityFailedUnbackedClips}"
+                    : ex.Message,
+                Level = AppNotificationLevel.Error,
+                IsPersistent = true,
+                Actions =
+                [
+                    new AppNotificationAction
+                    {
+                        // Any action dismisses its notification; this one does nothing else.
+                        Label = AppText.CloseButtonLabel,
+                        ExecuteAsync = () => Task.CompletedTask,
+                    },
+                ],
+            });
+        }
+        finally
+        {
+            lock (gate)
+            {
+                job?.Dispose();
+                job = null;
+            }
+        }
+    }
+
+    /// <summary>Reports on the caller's thread; the job indicator marshals its own change event.</summary>
+    private sealed class DirectProgress(Action<LibraryUpgradeProgress> apply) : IProgress<LibraryUpgradeProgress>
+    {
+        public void Report(LibraryUpgradeProgress value) => apply(value);
     }
 
     /// <summary>
@@ -7064,6 +7186,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await RefreshAsync();
     }
 
+    /// <summary>How often the retention and size-cap maintenance runs on its own. Tests shorten it.</summary>
+    internal TimeSpan MaintenanceInterval { get; set; } = TimeSpan.FromMinutes(1);
+
     private void StartMaintenanceLoop()
     {
         if (_subscriptions.OfType<SerialDisposable>().Any())
@@ -7072,10 +7197,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         var maintenanceSubscription = new SerialDisposable();
-        maintenanceSubscription.Disposable = Observable.Interval(TimeSpan.FromMinutes(1), RxSchedulers.TaskpoolScheduler)
-            .SelectMany(_ => Observable.FromAsync(() => ApplyMaintenanceAndRefreshAsync(false)))
+        // A failed tick is reported and the next one still runs. Without the Catch
+        // inside the SelectMany the error reached this subscription, and OnError is
+        // terminal in Rx: live check F2 lost the periodic retention and size cap for
+        // the rest of the session after one failure.
+        maintenanceSubscription.Disposable = Observable.Interval(MaintenanceInterval, RxSchedulers.TaskpoolScheduler)
+            .SelectMany(_ => Observable.FromAsync(() => ApplyMaintenanceAndRefreshAsync(false))
+                .Select(static _ => (Exception?)null)
+                .Catch(static (Exception ex) => Observable.Return<Exception?>(ex)))
             .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => { }, ex => ReportError("Maintenance loop", ex));
+            .Subscribe(
+                failure =>
+                {
+                    if (failure is not null)
+                    {
+                        ReportError("Maintenance loop", failure);
+                    }
+                },
+                ex => ReportError("Maintenance loop", ex));
         _subscriptions.Add(maintenanceSubscription);
     }
 

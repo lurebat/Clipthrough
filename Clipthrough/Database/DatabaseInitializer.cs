@@ -10,7 +10,7 @@ using Microsoft.Data.Sqlite;
 
 namespace Clipthrough.Database;
 
-public sealed class DatabaseInitializer
+public sealed class DatabaseInitializer : Clipthrough.Services.Search.IPausableWorker
 {
     private const string Schema = """
         PRAGMA foreign_keys = ON;
@@ -171,7 +171,33 @@ public sealed class DatabaseInitializer
     /// so an index missing for any reason is restored on the next launch. The
     /// statements are all IF NOT EXISTS and cost one round trip in total.
     /// </summary>
-    private const string SortOrderIndexes = """
+    /// <summary>
+    /// Orphaned app_icons rows are found through this (U-E1).
+    /// </summary>
+    /// <remarks>
+    /// Built only once nothing is left inline. The column is new, so building the
+    /// index still reads every row of clips, and before the payload move each row
+    /// spans a page: 19.5-20.7 s cold on the 60k fixture, on the deferred upgrade
+    /// start that is meant to open at once, against 0.85 s after the move. Until
+    /// it exists, <see cref="DeleteOrphanedAppIconsAsync"/> does nothing, and the
+    /// background run builds it and then removes the orphans.
+    /// </remarks>
+    private const string AppIconHashIndex = """
+        CREATE INDEX IF NOT EXISTS idx_clips_source_app_icon_hash ON clips(source_app_icon_hash)
+            WHERE source_app_icon_hash IS NOT NULL;
+        """;
+
+    /// <summary>
+    /// The OCR scans' partial index (F-25; see <see cref="SortOrderIndexes"/>).
+    /// Separate because <see cref="MovePayloadsOutOfClipsAsync"/> drops it, and
+    /// whoever runs the move recreates it afterwards (F-13-4).
+    /// </summary>
+    private const string OcrImagesIndex = """
+        CREATE INDEX IF NOT EXISTS idx_clips_ocr_images ON clips(content_type, ocr_status)
+            WHERE content_type = 'image';
+        """;
+
+    private const string SortOrderIndexes = $"""
         -- One index per BuildOrderClause arm. Every arm leads with the pinned
         -- prefix, so an index lacking it can never satisfy the ORDER BY - which
         -- is why the two below are dropped rather than kept.
@@ -268,12 +294,9 @@ public sealed class DatabaseInitializer
         -- only uses a partial index whose condition the query implies.
         CREATE INDEX IF NOT EXISTS idx_clips_sensitivity_pending ON clips(id)
             WHERE sensitivity_scanned_at IS NULL;
-        CREATE INDEX IF NOT EXISTS idx_clips_ocr_images ON clips(content_type, ocr_status)
-            WHERE content_type = 'image';
+        {OcrImagesIndex}
 
-        -- Orphaned app_icons rows are found through this (U-E1).
-        CREATE INDEX IF NOT EXISTS idx_clips_source_app_icon_hash ON clips(source_app_icon_hash)
-            WHERE source_app_icon_hash IS NOT NULL;
+        -- idx_clips_source_app_icon_hash is not here: see AppIconHashIndex.
 
         -- Retention purges, which run after every capture. Both lifetime deletes
         -- filter on exactly this pair.
@@ -351,8 +374,36 @@ public sealed class DatabaseInitializer
     /// </remarks>
     internal const int LastSearchIndexChangeVersion = 3;
 
+    /// <summary>
+    /// The first schema version, stamped by v0.9.3 (b1dd717). The aggregation and
+    /// content-format backfills have not changed since, so every library stamped
+    /// with a version has had them; only an unstamped one (0) still needs them.
+    /// </summary>
+    private const int GateIntroducedVersion = 1;
+
+    /// <summary>
+    /// The version whose migration added byte_size and its backfill (bf05b15).
+    /// A library at or past it already has every row sized; rows written since
+    /// are sized at capture.
+    /// </summary>
+    private const int ByteSizeIntroducedVersion = 5;
+
+    /// <summary>
+    /// The version that added stored_bytes (86b97c8). From here an upgrade needs
+    /// no scanning backfill, so its payload move can wait for the background.
+    /// </summary>
+    private const int StoredBytesIntroducedVersion = 8;
+
     private readonly SqliteConnectionFactory _connectionFactory;
     private readonly ISensitivityService _sensitivityService;
+
+    // The background upgrade's pause state (F-13-1). Each running attempt is
+    // listed with the token that stops it and the task that completes once it
+    // has closed its connection.
+    private readonly object _backgroundGate = new();
+    private readonly List<(CancellationTokenSource Stop, Task Done)> _backgroundAttempts = [];
+    private int _backgroundPauseCount;
+    private TaskCompletionSource _backgroundResumed = CompletedSignal();
 
     public DatabaseInitializer(SqliteConnectionFactory connectionFactory, ISensitivityService sensitivityService)
     {
@@ -367,7 +418,17 @@ public sealed class DatabaseInitializer
     /// can show it (U-E1). Only an existing library with clips reports; a new or
     /// empty one opens too quickly to need it, and is not being upgraded.
     /// </param>
-    public async Task InitializeAsync(IProgress<LibraryUpgradeProgress>? progress, CancellationToken cancellationToken = default)
+    public Task InitializeAsync(IProgress<LibraryUpgradeProgress>? progress, CancellationToken cancellationToken = default)
+        => InitializeAsync(progress, allowDeferredPayloadMove: false, cancellationToken);
+
+    /// <param name="progress">See the overload above.</param>
+    /// <param name="allowDeferredPayloadMove">
+    /// Lets an upgrade from a recent library skip the payload move, so the app opens
+    /// at once and <see cref="RunDeferredPayloadMoveAsync"/> does the move in the
+    /// background (upgrade-start research, U4). Older libraries still move here,
+    /// because their backfills scan the table and are only cheap after the move.
+    /// </param>
+    public async Task InitializeAsync(IProgress<LibraryUpgradeProgress>? progress, bool allowDeferredPayloadMove, CancellationToken cancellationToken = default)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         await using var connection = _connectionFactory.CreateConnection();
@@ -387,10 +448,20 @@ public sealed class DatabaseInitializer
         // HasPendingStructuralWorkAsync - the check costs a full read of the
         // database file, and on an established database there is no migration for
         // it to protect.
-        if (await HasPendingStructuralWorkAsync(connection, cancellationToken))
+        // A deferred upgrade start writes nothing the check protects - new columns
+        // with defaults, triggers, the version - so the full-file read moves to the
+        // background, ahead of the payload move that does rewrite pages
+        // (RunDeferredPayloadMoveAsync). Read cold it was 71.5 s of a 73 s start on
+        // the 1 GB fixture.
+        var deferPayloadMove = allowDeferredPayloadMove && await CanDeferPayloadMoveAsync(connection, cancellationToken);
+        if (deferPayloadMove)
+        {
+            TraceStep(sw, "integrity-check deferred");
+        }
+        else if (await HasPendingStructuralWorkAsync(connection, cancellationToken))
         {
             progress?.Report(new LibraryUpgradeProgress(LibraryUpgradeStage.CheckingIntegrity));
-            await VerifyIntegrityAsync(connection, cancellationToken);
+            await VerifyIntegrityRecordingFailureAsync(connection, cancellationToken);
             TraceStep(sw, "integrity-check");
         }
 
@@ -433,14 +504,77 @@ public sealed class DatabaseInitializer
             TraceStep(sw, "ensure-lineage-columns");
             await EnsureClipEmbeddingSchemaAsync(connection, cancellationToken);
             TraceStep(sw, "ensure-embedding-schema");
-            await EnsureClipStoredBytesAsync(connection, cancellationToken);
-            TraceStep(sw, "ensure-stored-bytes");
-            await BackfillClipAggregationColumnsAsync(connection, cancellationToken);
-            TraceStep(sw, "backfill-aggregation");
-            await BackfillClipPayloadColumnsAsync(connection, cancellationToken);
-            TraceStep(sw, "backfill-payload");
-            await DeduplicateClipsByHashAsync(connection, cancellationToken);
-            TraceStep(sw, "dedupe-by-hash");
+
+            await EnsureSourceAppIconHashColumnAsync(connection, cancellationToken);
+            await EnsureClipStoredBytesColumnAsync(connection, cancellationToken);
+
+            // A library from schema 8 needs none of the scanning steps below: its
+            // backfills are behind it, its hash index exists, and its search index
+            // is current. Only the move is left, and that can run in the
+            // background while the app is in use. Anything older moves here,
+            // first: until it has, every scan below walks each row's inline
+            // payload (F-06), and after it the same scans read small rows.
+            // Everything below must therefore read payload sizes from
+            // clip_payloads, not content_bytes.
+            if (deferPayloadMove)
+            {
+                // G's UTC backfill rewrites rows too, so it waits for the background
+                // run's integrity check like the move. The marker, not the version
+                // (written below), is what tells that run it is still owed.
+                if (storedVersion < UtcTimestampsIntroducedVersion)
+                {
+                    await ExecuteNonQueryAsync(connection, "INSERT INTO app_metadata (key, value) VALUES ('utc_backfill_pending', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;", cancellationToken);
+                }
+
+                TraceStep(sw, "move-payloads deferred");
+            }
+            else
+            {
+                await MovePayloadsOutOfClipsAsync(connection, progress, background: false, cancellationToken);
+                TraceStep(sw, "move-payloads");
+
+                await RepairClipStoredBytesAsync(connection, cancellationToken);
+                TraceStep(sw, "ensure-stored-bytes");
+
+                // After the move: it scans every row's timestamps, which sit after the
+                // inline payload until the move has run (F-06).
+                if (storedVersion < UtcTimestampsIntroducedVersion)
+                {
+                    await BackfillUtcTimestampsAsync(connection, cancellationToken);
+                    TraceStep(sw, "backfill-utc-timestamps");
+                }
+            }
+
+            if (storedVersion < GateIntroducedVersion)
+            {
+                await BackfillClipAggregationColumnsAsync(connection, cancellationToken);
+                TraceStep(sw, "backfill-aggregation");
+            }
+            else
+            {
+                TraceStep(sw, "backfill-aggregation skipped");
+            }
+
+            if (storedVersion < ByteSizeIntroducedVersion)
+            {
+                await BackfillClipPayloadColumnsAsync(connection, cancellationToken);
+                TraceStep(sw, "backfill-payload");
+            }
+            else
+            {
+                TraceStep(sw, "backfill-payload skipped");
+            }
+
+            if (!await HasUniqueClipHashIndexAsync(connection, cancellationToken))
+            {
+                await DeduplicateClipsByHashAsync(connection, cancellationToken);
+                TraceStep(sw, "dedupe-by-hash");
+            }
+            else
+            {
+                TraceStep(sw, "dedupe-by-hash skipped");
+            }
+
             await EnsureUniqueClipHashIndexAsync(connection, cancellationToken);
             TraceStep(sw, "ensure-unique-hash-index");
             if (ftsSchemaRecreated || storedVersion < LastSearchIndexChangeVersion)
@@ -454,17 +588,6 @@ public sealed class DatabaseInitializer
                 TraceStep(sw, "search-index-current (rebuild skipped)");
             }
 
-            await EnsureSourceAppIconHashColumnAsync(connection, cancellationToken);
-            await MovePayloadsOutOfClipsAsync(connection, progress, cancellationToken);
-            TraceStep(sw, "move-payloads");
-
-            // After the move: it scans every row's timestamps, which sit after the
-            // inline payload until the move has run (F-06).
-            if (storedVersion < UtcTimestampsIntroducedVersion)
-            {
-                await BackfillUtcTimestampsAsync(connection, cancellationToken);
-                TraceStep(sw, "backfill-utc-timestamps");
-            }
             progress?.Report(new LibraryUpgradeProgress(LibraryUpgradeStage.Finishing));
             await WriteSchemaVersionAsync(connection, CurrentSchemaVersion, cancellationToken);
             TraceStep(sw, $"version-write ({CurrentSchemaVersion})");
@@ -499,6 +622,23 @@ public sealed class DatabaseInitializer
             await indexCommand.ExecuteNonQueryAsync(cancellationToken);
         }
         TraceStep(sw, "sort-order-indexes");
+
+        // A move the background still owes leaves this to it (AppIconHashIndex).
+        var payloadMoveDone = await IsPayloadMoveDoneAsync(connection, cancellationToken);
+        if (!allowDeferredPayloadMove || payloadMoveDone)
+        {
+            await ExecuteNonQueryAsync(connection, AppIconHashIndex, cancellationToken);
+            TraceStep(sw, "app-icon-hash-index");
+        }
+        else
+        {
+            TraceStep(sw, "app-icon-hash-index deferred");
+        }
+
+        // The same condition RunDeferredPayloadMoveAsync checks before its integrity
+        // check: until that check has run, the daily backup waits.
+        IsIntegrityCheckOwed = allowDeferredPayloadMove
+            && (!payloadMoveDone || await IsUtcBackfillPendingAsync(connection, cancellationToken));
 
         await DeleteOrphanedAppIconsAsync(connection, cancellationToken);
 
@@ -880,8 +1020,285 @@ public sealed class DatabaseInitializer
 
     internal const long PayloadMoveBatchBytes = 32L * 1024 * 1024;
 
+    /// <summary>
+    /// The background move's smaller batches. Each batch is a write transaction,
+    /// and a capture waits for it under busy_timeout (5 s); an encrypted 32 MB
+    /// batch can take seconds. The time budget bounds how long a batch reads.
+    /// </summary>
+    internal const long BackgroundPayloadMoveBatchBytes = 8L * 1024 * 1024;
+
+    internal static TimeSpan BackgroundPayloadMoveBatchBudget { get; set; } = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>Gives other writers a turn between background batches.</summary>
+    internal static TimeSpan BackgroundPayloadMovePause { get; set; } = TimeSpan.FromMilliseconds(25);
+
+    /// <summary>
+    /// Test seam: replaces the pause between background batches, so a test can
+    /// hold the move between batches - with no transaction open - and act on the
+    /// library meanwhile.
+    /// </summary>
+    internal static Func<CancellationToken, Task>? BetweenBackgroundPayloadBatches { get; set; }
+
+    /// <summary>
+    /// Moves what an upgrade left inline, in the background, while the app is in
+    /// use (upgrade-start research, U4). Returns false at once when the move has
+    /// already finished. Resumes from the last committed batch after a crash, as
+    /// the synchronous move does; reads and writes in the meantime follow the
+    /// partly-moved rules (PartlyMovedLibraryTests).
+    /// </summary>
+    /// <remarks>
+    /// Paused by <see cref="PauseAsync"/> for a whole-database operation, after
+    /// which it starts over against whatever library is live by then.
+    /// </remarks>
+    public Task<bool> RunDeferredPayloadMoveAsync(IProgress<LibraryUpgradeProgress>? progress, CancellationToken cancellationToken = default)
+        => RunPausableAsync(token => RunDeferredPayloadMoveCoreAsync(progress, token), cancellationToken);
+
+    private async Task<bool> RunDeferredPayloadMoveCoreAsync(IProgress<LibraryUpgradeProgress>? progress, CancellationToken cancellationToken)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        var moveDone = await IsPayloadMoveDoneAsync(connection, cancellationToken);
+        var backfillPending = await IsUtcBackfillPendingAsync(connection, cancellationToken);
+        if (moveDone && !backfillPending)
+        {
+            IsIntegrityCheckOwed = false;
+            return false;
+        }
+
+        // The integrity check the deferred start skipped, before anything is
+        // rewritten. Runs again on each start until the work is done, which only
+        // costs background time.
+        await VerifyIntegrityRecordingFailureAsync(connection, cancellationToken);
+        if (!moveDone)
+        {
+            await MovePayloadsOutOfClipsAsync(connection, progress, background: true, cancellationToken);
+        }
+
+        // After the move, when the timestamps it scans no longer sit behind an
+        // inline payload (F-06). The move commits its done flag with its last
+        // batch, so the backfill keeps a marker of its own: a run stopped between
+        // the two still owes the backfill, and the next run does it.
+        if (backfillPending)
+        {
+            await BackfillUtcTimestampsAsync(connection, cancellationToken);
+            await ExecuteNonQueryAsync(connection, "DELETE FROM app_metadata WHERE key = 'utc_backfill_pending';", cancellationToken);
+        }
+
+        // After the move, these read small rows and are cheap. Every row the move
+        // cleared already has its stored_bytes; this is the safety net.
+        await RepairClipStoredBytesAsync(connection, cancellationToken);
+        await ExecuteNonQueryAsync(connection, AppIconHashIndex, cancellationToken);
+
+        // The move dropped it (F-13-4). Here, not right after the move, so a run
+        // stopped in between still recreates it on the next.
+        await ExecuteNonQueryAsync(connection, OcrImagesIndex, cancellationToken);
+        await DeleteOrphanedAppIconsAsync(connection, cancellationToken);
+        return true;
+    }
+
+    /// <summary>
+    /// Whether this start is an upgrade whose only rewriting work is the payload
+    /// move, which can then wait for the background: a library from schema 8 or
+    /// later, behind the current version, whose search index and unique hash index
+    /// need nothing. Read before the schema DDL, so it touches nothing that DDL
+    /// creates. Anything older runs scanning backfills that are only cheap after
+    /// the move, and keeps the blocking path.
+    /// </summary>
+    private static async Task<bool> CanDeferPayloadMoveAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='app_metadata';";
+            if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 0)
+            {
+                return false;
+            }
+        }
+
+        var storedVersion = await ReadSchemaVersionAsync(connection, cancellationToken);
+        return storedVersion >= StoredBytesIntroducedVersion
+            && storedVersion < CurrentSchemaVersion
+            && !await FtsSchemaNeedsMigrationAsync(connection, cancellationToken)
+            && await HasUniqueClipHashIndexAsync(connection, cancellationToken);
+    }
+
+    private static async Task<bool> IsUtcBackfillPendingAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT value FROM app_metadata WHERE key = 'utc_backfill_pending';";
+        return await command.ExecuteScalarAsync(cancellationToken) is "1";
+    }
+
+    private static async Task<bool> IsPayloadMoveDoneAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT value FROM app_metadata WHERE key = 'payload_move_done';";
+        return await command.ExecuteScalarAsync(cancellationToken) is "1";
+    }
+
     /// <summary>Test seam: runs after each row is moved, inside the batch's transaction.</summary>
     internal static Action<long>? AfterPayloadRowMoved { get; set; }
+
+    /// <summary>
+    /// Test seam: runs between the UTC backfill's read and its writes, with no
+    /// transaction open, where the background backfill can meet a capture.
+    /// </summary>
+    internal static Func<CancellationToken, Task>? BeforeUtcBackfillWrites { get; set; }
+
+    /// <summary>
+    /// Whether a quick_check failed this session. The daily backup is not taken from
+    /// such a library (live check F3), so the older, good backups are kept.
+    /// </summary>
+    /// <remarks>
+    /// Volatile, like <see cref="IsIntegrityCheckOwed"/>: a failing check writes this
+    /// before it clears that, and the backup reads them in the reverse order.
+    /// </remarks>
+    public bool HasFailedIntegrityCheck
+    {
+        get => _hasFailedIntegrityCheck;
+        private set => _hasFailedIntegrityCheck = value;
+    }
+
+    private volatile bool _hasFailedIntegrityCheck;
+
+    /// <summary>
+    /// Whether this session still owes the integrity check a deferred upgrade start
+    /// skipped (it runs at the start of <see cref="RunDeferredPayloadMoveAsync"/>).
+    /// The daily backup waits for it.
+    /// </summary>
+    public bool IsIntegrityCheckOwed
+    {
+        get => _isIntegrityCheckOwed;
+        private set => _isIntegrityCheckOwed = value;
+    }
+
+    private volatile bool _isIntegrityCheckOwed;
+
+    /// <summary>
+    /// Stops the background upgrade - the deferred move and the merge drain - and
+    /// waits until it has closed its connection, for a whole-database operation
+    /// (rekey, restore, library move) that must not run beside a writer (F-13-1).
+    /// A run stopped this way is not over: it waits, and when the last pause is
+    /// released it starts again from the top - every step resumes from what it
+    /// committed - against the library that is live by then.
+    /// </summary>
+    public async Task<IAsyncDisposable> PauseAsync()
+    {
+        CancellationTokenSource[] running;
+        Task[] stopped;
+        lock (_backgroundGate)
+        {
+            if (_backgroundPauseCount++ == 0)
+            {
+                _backgroundResumed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+
+            running = _backgroundAttempts.Select(static a => a.Stop).ToArray();
+            stopped = _backgroundAttempts.Select(static a => a.Done).ToArray();
+        }
+
+        // Outside the lock: cancelling can run the attempt's unwinding inline.
+        foreach (var stop in running)
+        {
+            try
+            {
+                stop.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // That attempt finished meanwhile.
+            }
+        }
+
+        await Task.WhenAll(stopped).ConfigureAwait(false);
+        return new BackgroundPause(this);
+    }
+
+    private void ReleasePause()
+    {
+        lock (_backgroundGate)
+        {
+            if (--_backgroundPauseCount == 0)
+            {
+                _backgroundResumed.TrySetResult();
+            }
+        }
+    }
+
+    private static TaskCompletionSource CompletedSignal()
+    {
+        var signal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        signal.SetResult();
+        return signal;
+    }
+
+    /// <summary>
+    /// Runs one piece of background upgrade work so that <see cref="PauseAsync"/>
+    /// can stop it and it then starts over once the pause is released. Only the
+    /// caller's own token ends it for good.
+    /// </summary>
+    private async Task<T> RunPausableAsync<T>(Func<CancellationToken, Task<T>> body, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            Task? resumed = null;
+            CancellationTokenSource? stop = null;
+            TaskCompletionSource? done = null;
+            lock (_backgroundGate)
+            {
+                if (_backgroundPauseCount > 0)
+                {
+                    resumed = _backgroundResumed.Task;
+                }
+                else
+                {
+                    stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    _backgroundAttempts.Add((stop, done.Task));
+                }
+            }
+
+            if (resumed is not null)
+            {
+                await resumed.WaitAsync(cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            try
+            {
+                return await body(stop!.Token).ConfigureAwait(false);
+            }
+            catch (Exception) when (stop!.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                // Paused. Whatever the stop interrupted rolled back; go round and wait.
+            }
+            finally
+            {
+                lock (_backgroundGate)
+                {
+                    _backgroundAttempts.RemoveAll(a => a.Stop == stop);
+                }
+
+                stop!.Dispose();
+                done!.SetResult();
+            }
+        }
+    }
+
+    private sealed class BackgroundPause(DatabaseInitializer owner) : IAsyncDisposable
+    {
+        private int _released;
+
+        public ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0)
+            {
+                owner.ReleasePause();
+            }
+
+            return ValueTask.CompletedTask;
+        }
+    }
 
     private static async Task EnsureSourceAppIconHashColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
@@ -915,7 +1332,7 @@ public sealed class DatabaseInitializer
     /// InitializeAsync, before anything reads a clip.
     /// </para>
     /// </remarks>
-    private static async Task MovePayloadsOutOfClipsAsync(SqliteConnection connection, IProgress<LibraryUpgradeProgress>? progress, CancellationToken cancellationToken)
+    private static async Task MovePayloadsOutOfClipsAsync(SqliteConnection connection, IProgress<LibraryUpgradeProgress>? progress, bool background, CancellationToken cancellationToken)
     {
         // The older OCR index also required content_bytes IS NOT NULL, which is
         // about to be true of no row. Dropped so the index DDL recreates it.
@@ -955,13 +1372,13 @@ public sealed class DatabaseInitializer
         {
             cancellationToken.ThrowIfCancellationRequested();
             using var transaction = connection.BeginTransaction();
-            var rows = new List<(long Id, byte[]? Payload, byte[]? Icon)>();
+            var rows = new List<(long Id, byte[]? Payload, byte[]? Icon, bool HasNewerIcon)>();
             long bytes = 0;
             await using (var select = connection.CreateCommand())
             {
                 select.Transaction = transaction;
                 select.CommandText = """
-                    SELECT id, content_bytes, source_app_icon FROM clips
+                    SELECT id, content_bytes, source_app_icon, source_app_icon_hash IS NOT NULL FROM clips
                     WHERE id > $last AND (content_bytes IS NOT NULL OR source_app_icon IS NOT NULL)
                     ORDER BY id
                     LIMIT $limit;
@@ -969,23 +1386,42 @@ public sealed class DatabaseInitializer
                 select.Parameters.AddWithValue("$last", lastId);
                 select.Parameters.AddWithValue("$limit", PayloadMoveBatchRows);
                 await using var reader = await select.ExecuteReaderAsync(cancellationToken);
-                while (bytes < PayloadMoveBatchBytes && await reader.ReadAsync(cancellationToken))
+                var batchCap = background ? BackgroundPayloadMoveBatchBytes : PayloadMoveBatchBytes;
+                var batchClock = System.Diagnostics.Stopwatch.StartNew();
+                while (bytes < batchCap
+                    && (!background || rows.Count == 0 || batchClock.Elapsed < BackgroundPayloadMoveBatchBudget)
+                    && await reader.ReadAsync(cancellationToken))
                 {
                     var payload = reader.IsDBNull(1) ? null : (byte[])reader.GetValue(1);
                     var icon = reader.IsDBNull(2) ? null : (byte[])reader.GetValue(2);
-                    rows.Add((reader.GetInt64(0), payload, icon));
+                    rows.Add((reader.GetInt64(0), payload, icon, reader.GetInt64(3) != 0));
                     bytes += (payload?.LongLength ?? 0) + (icon?.LongLength ?? 0);
                 }
             }
 
             if (rows.Count == 0)
             {
+                await using (var done = connection.CreateCommand())
+                {
+                    done.Transaction = transaction;
+                    done.CommandText = """
+                        INSERT INTO app_metadata (key, value) VALUES ('payload_move_done', '1')
+                        ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+                        """;
+                    await done.ExecuteNonQueryAsync(cancellationToken);
+                }
+
                 transaction.Commit();
                 progress?.Report(new LibraryUpgradeProgress(LibraryUpgradeStage.MovingClipData, 1));
                 break;
             }
 
-            foreach (var (id, payload, icon) in rows)
+            // Newer data wins. A clip the move has not reached yet can still be
+            // written - captured again, edited, given an icon - and every write
+            // goes to the new layout, leaving the inline copy behind it stale.
+            // So the move never replaces a payload or an icon hash that is already
+            // there; it only clears the stale inline copy.
+            foreach (var (id, payload, icon, hasNewerIcon) in rows)
             {
                 if (payload is not null)
                 {
@@ -993,7 +1429,7 @@ public sealed class DatabaseInitializer
                     insert.Transaction = transaction;
                     insert.CommandText = """
                         INSERT INTO clip_payloads (clip_id, content_bytes) VALUES ($id, $bytes)
-                        ON CONFLICT(clip_id) DO UPDATE SET content_bytes = excluded.content_bytes;
+                        ON CONFLICT(clip_id) DO NOTHING;
                         """;
                     insert.Parameters.AddWithValue("$id", id);
                     insert.Parameters.AddWithValue("$bytes", payload);
@@ -1001,7 +1437,7 @@ public sealed class DatabaseInitializer
                 }
 
                 string? iconHash = null;
-                if (icon is { Length: > 0 })
+                if (icon is { Length: > 0 } && !hasNewerIcon)
                 {
                     iconHash = AppIconHash(icon);
                     await using var insertIcon = connection.CreateCommand();
@@ -1019,6 +1455,7 @@ public sealed class DatabaseInitializer
                         UPDATE clips
                         SET content_bytes = NULL,
                             source_app_icon = NULL,
+                            stored_bytes = byte_size,
                             source_app_icon_hash = COALESCE($hash, source_app_icon_hash)
                         WHERE id = $id;
                         """;
@@ -1044,6 +1481,10 @@ public sealed class DatabaseInitializer
 
             transaction.Commit();
             ReportMoved(lastId);
+            if (background)
+            {
+                await (BetweenBackgroundPayloadBatches?.Invoke(cancellationToken) ?? Task.Delay(BackgroundPayloadMovePause, cancellationToken));
+            }
         }
     }
 
@@ -1067,8 +1508,25 @@ public sealed class DatabaseInitializer
     /// Removes icons no clip refers to any more. Icons are not sensitive, but an
     /// orphan would still count against the library size cap.
     /// </summary>
+    /// <remarks>
+    /// Does nothing until <see cref="AppIconHashIndex"/> exists. Without it each icon
+    /// costs a scan of clips, and the index is only missing while a deferred payload
+    /// move is owed - when those scans walk every inline payload, under the write
+    /// lock of the maintenance that called this. The background run removes the
+    /// orphans as soon as it has built the index.
+    /// </remarks>
     internal static async Task DeleteOrphanedAppIconsAsync(SqliteConnection connection, CancellationToken cancellationToken, SqliteTransaction? transaction = null)
     {
+        await using (var probe = connection.CreateCommand())
+        {
+            probe.Transaction = transaction;
+            probe.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_clips_source_app_icon_hash';";
+            if (Convert.ToInt64(await probe.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 0)
+            {
+                return;
+            }
+        }
+
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
@@ -1106,7 +1564,32 @@ public sealed class DatabaseInitializer
     /// row costs its payload alone: stored_bytes is byte_size, and the cap adds each
     /// distinct icon once (ClipStoreService.TotalStoredBytesSql).
     /// </remarks>
-    private static async Task EnsureClipStoredBytesAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    /// <summary>
+    /// Brings stored_bytes in line with byte_size and indexes it. Both read every
+    /// row, so they run after the payload move, when rows are small.
+    /// </summary>
+    private static async Task RepairClipStoredBytesAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        // Also repairs drift, so a database written by a build whose triggers were
+        // missing converges the next time it is opened.
+        await ExecuteNonQueryAsync(connection, """
+            UPDATE clips
+            SET stored_bytes = byte_size
+            WHERE stored_bytes <> byte_size;
+            """, cancellationToken);
+
+        await ExecuteNonQueryAsync(
+            connection,
+            "CREATE INDEX IF NOT EXISTS idx_clips_stored_bytes ON clips(stored_bytes);",
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Adds stored_bytes and its triggers. Cheap: ADD COLUMN with a default does
+    /// not rewrite rows. Runs before the payload move, which sets the column on
+    /// every row it clears.
+    /// </summary>
+    private static async Task EnsureClipStoredBytesColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
         var hasColumn = false;
         await using (var command = connection.CreateCommand())
@@ -1123,19 +1606,6 @@ public sealed class DatabaseInitializer
                 cancellationToken);
         }
 
-        // Also repairs drift, so a database written by a build whose triggers were
-        // missing converges the next time it is opened.
-        await ExecuteNonQueryAsync(connection, """
-            UPDATE clips
-            SET stored_bytes = byte_size
-            WHERE stored_bytes <> byte_size;
-            """, cancellationToken);
-
-        await ExecuteNonQueryAsync(
-            connection,
-            "CREATE INDEX IF NOT EXISTS idx_clips_stored_bytes ON clips(stored_bytes);",
-            cancellationToken);
-
         // Dropped rather than IF NOT EXISTS so the definitions here stay authoritative.
         await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_stored_bytes_ai;", cancellationToken);
         await ExecuteNonQueryAsync(connection, """
@@ -1146,11 +1616,16 @@ public sealed class DatabaseInitializer
             END;
             """, cancellationToken);
 
+        // A row the move has not reached still holds its icon inline, and while no
+        // write has given it a newer one (source_app_icon_hash), that icon is live
+        // and counts with the row, as schema 8 counted it (rubber-duck F-13-7).
+        // After the move source_app_icon is NULL everywhere and this is byte_size.
         await ExecuteNonQueryAsync(connection, "DROP TRIGGER IF EXISTS clips_stored_bytes_au;", cancellationToken);
         await ExecuteNonQueryAsync(connection, """
             CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF byte_size ON clips BEGIN
                 UPDATE clips
                 SET stored_bytes = new.byte_size
+                    + CASE WHEN new.source_app_icon_hash IS NULL THEN COALESCE(LENGTH(new.source_app_icon), 0) ELSE 0 END
                 WHERE id = new.id;
             END;
             """, cancellationToken);
@@ -1166,10 +1641,14 @@ public sealed class DatabaseInitializer
     /// and expired wrong by that offset until the store boundary converted them.
     /// Idempotent: a value already at +00:00, and text with no offset at all,
     /// parses with a zero offset and is left exactly as it is.
+    /// On a deferred upgrade it runs in the background while the app captures, so
+    /// each column is rewritten only if it still holds the value read: a re-copy
+    /// in between sets captured_at and last_copied_at, already in UTC, and those
+    /// are kept (F-13-3).
     /// </remarks>
     private static async Task BackfillUtcTimestampsAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
-        var updates = new List<(long Id, string?[] Values)>();
+        var updates = new List<(long Id, string?[] Read, string?[] Values)>();
         await using (var select = connection.CreateCommand())
         {
             select.CommandText = """
@@ -1181,11 +1660,13 @@ public sealed class DatabaseInitializer
             await using var reader = await select.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
+                var read = new string?[3];
                 var values = new string?[3];
                 var changed = false;
                 for (var i = 0; i < 3; i++)
                 {
                     var raw = reader.IsDBNull(i + 1) ? null : reader.GetString(i + 1);
+                    read[i] = raw;
                     values[i] = raw;
                     if (raw is not null
                         && DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed)
@@ -1198,7 +1679,7 @@ public sealed class DatabaseInitializer
 
                 if (changed)
                 {
-                    updates.Add((reader.GetInt64(0), values));
+                    updates.Add((reader.GetInt64(0), read, values));
                 }
             }
         }
@@ -1208,20 +1689,37 @@ public sealed class DatabaseInitializer
             return;
         }
 
+        if (BeforeUtcBackfillWrites is { } beforeWrites)
+        {
+            await beforeWrites(cancellationToken);
+        }
+
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         await using var update = connection.CreateCommand();
         update.Transaction = transaction;
-        update.CommandText = "UPDATE clips SET captured_at = $c, first_copied_at = $f, last_copied_at = $l WHERE id = $id;";
+        update.CommandText = """
+            UPDATE clips
+            SET captured_at = CASE WHEN captured_at IS $readC THEN $c ELSE captured_at END,
+                first_copied_at = CASE WHEN first_copied_at IS $readF THEN $f ELSE first_copied_at END,
+                last_copied_at = CASE WHEN last_copied_at IS $readL THEN $l ELSE last_copied_at END
+            WHERE id = $id;
+            """;
         var id = update.Parameters.Add("$id", SqliteType.Integer);
         var c = update.Parameters.Add("$c", SqliteType.Text);
         var f = update.Parameters.Add("$f", SqliteType.Text);
         var l = update.Parameters.Add("$l", SqliteType.Text);
-        foreach (var (clipId, values) in updates)
+        var readC = update.Parameters.Add("$readC", SqliteType.Text);
+        var readF = update.Parameters.Add("$readF", SqliteType.Text);
+        var readL = update.Parameters.Add("$readL", SqliteType.Text);
+        foreach (var (clipId, read, values) in updates)
         {
             id.Value = clipId;
             c.Value = (object?)values[0] ?? DBNull.Value;
             f.Value = (object?)values[1] ?? DBNull.Value;
             l.Value = (object?)values[2] ?? DBNull.Value;
+            readC.Value = (object?)read[0] ?? DBNull.Value;
+            readF.Value = (object?)read[1] ?? DBNull.Value;
+            readL.Value = (object?)read[2] ?? DBNull.Value;
             await update.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -1247,7 +1745,15 @@ public sealed class DatabaseInitializer
         // the best measure available without rehydrating every payload.
         await ExecuteNonQueryAsync(
             connection,
-            "UPDATE clips SET byte_size = COALESCE(LENGTH(CAST(content AS BLOB)), LENGTH(content_bytes), 0) WHERE byte_size = 0;",
+            """
+            UPDATE clips
+            SET byte_size = COALESCE(
+                LENGTH(CAST(content AS BLOB)),
+                (SELECT LENGTH(p.content_bytes) FROM clip_payloads p WHERE p.clip_id = clips.id),
+                LENGTH(content_bytes),
+                0)
+            WHERE byte_size = 0;
+            """,
             cancellationToken);
     }
 
@@ -1403,10 +1909,85 @@ public sealed class DatabaseInitializer
         await ExecuteNonQueryAsync(connection, "CREATE UNIQUE INDEX IF NOT EXISTS idx_clips_hash_unique ON clips(hash);", cancellationToken);
     }
 
+    private static async Task<bool> HasUniqueClipHashIndexAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_clips_hash_unique';";
+        return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) > 0;
+    }
+
+    /// <summary>
+    /// Rebuilds the search index and records that it left merge work behind, for
+    /// <see cref="DrainSearchIndexMergesAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// A rebuild ends mid-merge, and FTS5 charges the outstanding merges to later
+    /// writes in proportion to what each adds: the first 1.9 MB capture after a
+    /// rebuild of the 60k fixture took 2.6 s against 0.4 s once the merges were
+    /// done (docs/plans/2026-10-28-001-fts-rebuild-and-upgrade-start-research.md).
+    /// The record is persisted so a restart before the drain finishes resumes it.
+    /// </remarks>
     private static async Task RebuildClipSearchIndexAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
         await ExecuteNonQueryAsync(connection, "INSERT INTO clips_fts(clips_fts) VALUES ('rebuild');", cancellationToken);
+        await ExecuteNonQueryAsync(connection, """
+            INSERT INTO app_metadata (key, value) VALUES ('fts_merge_pending', '1')
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+            """, cancellationToken);
         await ExecuteNonQueryAsync(connection, $"DELETE FROM app_metadata WHERE key = '{FtsRebuildPendingKey}';", cancellationToken);
+    }
+
+    /// <summary>Pages each merge step works through; a step measured 10-60 ms at this size.</summary>
+    internal const int SearchIndexMergeStepPages = 64;
+
+    internal static TimeSpan SearchIndexMergePause { get; set; } = TimeSpan.FromMilliseconds(50);
+
+    /// <summary>Test seam: replaces the pause between merge steps.</summary>
+    internal static Func<CancellationToken, Task>? BetweenSearchIndexMergeSteps { get; set; }
+
+    /// <summary>
+    /// Finishes the merges a search-index rebuild left pending, in short steps,
+    /// so no capture pays for them (research note, R1). Each step is its own
+    /// short write transaction, and steps pause so other writers get the lock.
+    /// Returns false at once when no rebuild left work; stops when a step does
+    /// nothing, which FTS5 reports as fewer than two changes.
+    /// </summary>
+    public Task<bool> DrainSearchIndexMergesAsync(CancellationToken cancellationToken = default)
+        => RunPausableAsync(DrainSearchIndexMergesCoreAsync, cancellationToken);
+
+    private async Task<bool> DrainSearchIndexMergesCoreAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using (var pending = connection.CreateCommand())
+        {
+            pending.CommandText = "SELECT value FROM app_metadata WHERE key = 'fts_merge_pending';";
+            if (await pending.ExecuteScalarAsync(cancellationToken) is not "1")
+            {
+                return false;
+            }
+        }
+
+        await using var step = connection.CreateCommand();
+        step.CommandText = $"INSERT INTO clips_fts(clips_fts, rank) VALUES ('merge', {SearchIndexMergeStepPages});";
+        await using var changes = connection.CreateCommand();
+        changes.CommandText = "SELECT total_changes();";
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var before = Convert.ToInt64(await changes.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+            await step.ExecuteNonQueryAsync(cancellationToken);
+            var after = Convert.ToInt64(await changes.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+            if (after - before < 2)
+            {
+                break;
+            }
+
+            await (BetweenSearchIndexMergeSteps?.Invoke(cancellationToken) ?? Task.Delay(SearchIndexMergePause, cancellationToken));
+        }
+
+        await ExecuteNonQueryAsync(connection, "DELETE FROM app_metadata WHERE key = 'fts_merge_pending';", cancellationToken);
+        return true;
     }
 
     /// <summary>
@@ -1558,6 +2139,28 @@ public sealed class DatabaseInitializer
     /// callers gate it on <see cref="HasPendingStructuralWorkAsync"/> instead of
     /// running it on every launch.
     /// </summary>
+    private async Task VerifyIntegrityRecordingFailureAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await VerifyIntegrityAsync(connection, cancellationToken);
+        }
+        catch (InvalidOperationException) when (!cancellationToken.IsCancellationRequested)
+        {
+            HasFailedIntegrityCheck = true;
+            throw;
+        }
+        finally
+        {
+            // Run, whatever its outcome: a failure is HasFailedIntegrityCheck's to
+            // report. A check stopped part-way (a pause, F-13-1) has not run.
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                IsIntegrityCheckOwed = false;
+            }
+        }
+    }
+
     private static async Task VerifyIntegrityAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
         var problems = new List<string>();
@@ -1575,7 +2178,7 @@ public sealed class DatabaseInitializer
                 }
             }
         }
-        catch (SqliteException ex)
+        catch (SqliteException ex) when (!cancellationToken.IsCancellationRequested)
         {
             // Damage bad enough to break the walk itself aborts the pragma instead
             // of reporting rows, so without this the user gets a bare "SQLite Error

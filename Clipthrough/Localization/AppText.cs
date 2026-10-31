@@ -256,6 +256,8 @@ public static class AppText
         [nameof(ClipCaptureFailedTitle)] = "Clip capture failed",
         [nameof(SettingsLoadFailedTitle)] = "Settings could not be read",
         [nameof(StorageLoadFailedTitle)] = "Library location could not be read",
+        [nameof(LibraryOptimizeFailedTitle)] = "Library storage was not optimized",
+        [nameof(LibraryIntegrityFailedUnbackedClips)] = "Clips copied since Clipthrough started are not in any backup. If you restore one, the current library is kept next to it with \".before-restore-\" and the date and time added to its name, and those clips are still in that file.",
         [nameof(ClipCaptureFailedEmptyPayload)] = "The clipboard payload was empty.",
         [nameof(ClipDragImportTitle)] = "Imported by drag",
         [nameof(ClipDragImportBadgeLabel)] = "Dropped",
@@ -411,6 +413,9 @@ public static class AppText
     public static string ClipAngelImportRunning => Text(nameof(ClipAngelImportRunning));
     public static string ClipAngelImportUnsupported => Text(nameof(ClipAngelImportUnsupported));
     public static string FormatClipAngelImportProgress(int processed, int total) => $"Importing ClipAngel clips... {processed}/{total}";
+    public static string FormatLibraryOptimizeJob(int percent) =>
+        $"Optimizing library storage… {Math.Clamp(percent, 0, 100)}%";
+
     public static string FormatLibraryUpgradeStage(LibraryUpgradeProgress progress)
     {
         var stage = progress.Stage switch
@@ -628,6 +633,14 @@ public static class AppText
 
     public static string SettingsLoadFailedTitle => Text(nameof(SettingsLoadFailedTitle));
     public static string StorageLoadFailedTitle => Text(nameof(StorageLoadFailedTitle));
+    public static string LibraryOptimizeFailedTitle => Text(nameof(LibraryOptimizeFailedTitle));
+
+    /// <summary>
+    /// Added to the integrity-failure notification (F-13-10): the daily backup waits
+    /// for the check, so nothing copied this session is in a backup, and a restore
+    /// keeps the replaced library as <c>&lt;library&gt;.before-restore-&lt;stamp&gt;</c>.
+    /// </summary>
+    public static string LibraryIntegrityFailedUnbackedClips => Text(nameof(LibraryIntegrityFailedUnbackedClips));
 
     public static string ClipDragImportTitle => Text(nameof(ClipDragImportTitle));
 
