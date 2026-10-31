@@ -1,14 +1,15 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.Diagnostics;
+using Avalonia.Animation.Easings;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Animation.Easings;
 using Avalonia.Rendering.Composition;
 using Avalonia.Threading;
-using Clipthrough.ViewModels;
 using Clipthrough.Services;
+using Clipthrough.ViewModels;
 
 namespace Clipthrough.Views;
 
@@ -27,14 +28,22 @@ public partial class MainWindow
     /// </summary>
     internal const string KeyRepeatClass = "key-repeat";
 
-
-    private Key? m_heldNavigationKey;
-
     /// <summary>
     /// On the clip list while it is being driven from the keyboard, for the
     /// focus ring; a pointer press takes it off.
     /// </summary>
     internal const string KeyboardNavigationClass = "keyboard-nav";
+
+    /// <summary>
+    /// The longest gap between two KeyDowns of one key that still counts as
+    /// auto-repeat. Repeats come every ~33 ms; a deliberate second press, or one
+    /// after a KeyUp that went to another window, comes later than this.
+    /// </summary>
+    private static readonly TimeSpan KeyRepeatWindow = TimeSpan.FromMilliseconds(150);
+
+    private Key? m_heldNavigationKey;
+    private long m_lastNavigationKeyDown;
+
     /// <summary>How long a single clip arriving or leaving takes to settle in (O4).</summary>
     internal static readonly TimeSpan ListChangeDuration = TimeSpan.FromMilliseconds(160);
 
@@ -46,7 +55,8 @@ public partial class MainWindow
     private static readonly TimeSpan ListChangeArmedFor = TimeSpan.FromMilliseconds(300);
 
     private long m_listChangeGeneration;
-    private Control? m_raisedRow;    private readonly List<Window> m_motionWindows = [];
+    private readonly List<Control> m_raisedRows = [];
+    private readonly List<Window> m_motionWindows = [];
     private IMotionService? m_motionService;
     private IDisposable? m_motionSubscription;
 
@@ -56,7 +66,8 @@ public partial class MainWindow
         m_motionWindows.Add(this);
         AddHandler(KeyDownEvent, TrackNavigationKeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);
         AddHandler(KeyUpEvent, TrackNavigationKeyUp, RoutingStrategies.Tunnel, handledEventsToo: true);
-        AddHandler(PointerPressedEvent, (_, _) => this.FindControl<ListBox>("ClipsListBox")?.Classes.Set(KeyboardNavigationClass, false), RoutingStrategies.Tunnel, handledEventsToo: true);        if (this.FindControl<ListBox>("ClipsListBox") is { } list)
+        AddHandler(PointerPressedEvent, OnPointerPressedForMotion, RoutingStrategies.Tunnel, handledEventsToo: true);
+        if (this.FindControl<ListBox>("ClipsListBox") is { } list)
         {
             list.Items.CollectionChanged += (_, e) => OnClipItemsChanged(list, e);
         }
@@ -78,8 +89,22 @@ public partial class MainWindow
         => key is Key.Up or Key.Down or Key.PageUp or Key.PageDown or Key.Home or Key.End;
 
     /// <summary>
-    /// A second KeyDown for the same navigation key without a KeyUp between
-    /// them is the keyboard's auto-repeat.
+    /// The pointer has taken over from the keyboard: no focus ring, and the next
+    /// selection change fades even if an arrow key's KeyUp never arrived.
+    /// </summary>
+    private void OnPointerPressedForMotion(object? sender, PointerPressedEventArgs e)
+    {
+        m_heldNavigationKey = null;
+        if (this.FindControl<ListBox>("ClipsListBox") is { } list)
+        {
+            list.Classes.Set(KeyboardNavigationClass, false);
+            list.Classes.Set(KeyRepeatClass, false);
+        }
+    }
+
+    /// <summary>
+    /// A KeyDown of the same navigation key, with no KeyUp between and within
+    /// <see cref="KeyRepeatWindow"/> of the last, is the keyboard's auto-repeat.
     /// </summary>
     private void TrackNavigationKeyDown(object? sender, KeyEventArgs e)
     {
@@ -95,8 +120,10 @@ public partial class MainWindow
         }
 
         list?.Classes.Set(KeyboardNavigationClass, true);
-        var repeating = m_heldNavigationKey == e.Key;
+        var repeating = m_heldNavigationKey == e.Key
+            && Stopwatch.GetElapsedTime(m_lastNavigationKeyDown) <= KeyRepeatWindow;
         m_heldNavigationKey = e.Key;
+        m_lastNavigationKeyDown = Stopwatch.GetTimestamp();
         list?.Classes.Set(KeyRepeatClass, repeating);
     }
 
@@ -168,7 +195,7 @@ public partial class MainWindow
         // Above its neighbours: they slide through the space it fades into, and
         // drawn on top of it they hid the first half of the fade.
         row.ZIndex = 1;
-        m_raisedRow = row;
+        m_raisedRows.Add(row);
         if (ElementComposition.GetElementVisual(row) is { } visual)
         {
             visual.ImplicitAnimations = null;
@@ -196,11 +223,14 @@ public partial class MainWindow
             }
         }
 
-        if (m_raisedRow is not null)
+        // Every row lifted since the last disarm: a second arrival within the
+        // armed window lifts another before the first comes back down.
+        foreach (var row in m_raisedRows)
         {
-            m_raisedRow.ZIndex = 0;
-            m_raisedRow = null;
+            row.ZIndex = 0;
         }
+
+        m_raisedRows.Clear();
     }
 
     private void TrackMotion(Window window)

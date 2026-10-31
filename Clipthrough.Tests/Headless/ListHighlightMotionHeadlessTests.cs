@@ -157,6 +157,50 @@ public sealed class ListHighlightMotionHeadlessTests
     }
 
     /// <summary>
+    /// A KeyUp can be lost - the key released while another window had focus.
+    /// A press that comes long after the last one is still a fresh press and
+    /// fades, rather than being taken for an auto-repeat.
+    /// </summary>
+    [AvaloniaFact]
+    public void WithMotion_APressLongAfterAnUnreleasedOne_StillFades()
+    {
+        using var harness = Create(motion: true);
+        harness.FocusClipList();
+        var selected = ColorOf(Presenter(harness, 0).Background);
+
+        harness.Window.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, null);
+        Dispatcher.UIThread.RunJobs();
+        Settle();
+
+        harness.Window.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, null);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Same(harness.ViewModel.Clips[2], harness.ViewModel.SelectedClip);
+
+        Assert.NotEqual(selected, ColorOf(Presenter(harness, 2).Background));
+    }
+
+    /// <summary>A click after holding an arrow key fades again.</summary>
+    [AvaloniaFact]
+    public void WithMotion_AClickAfterAKeyRepeat_Fades()
+    {
+        using var harness = Create(motion: true);
+        harness.FocusClipList();
+        var selected = ColorOf(Presenter(harness, 0).Background);
+        harness.Window.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, null);
+        harness.Window.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, null);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Contains(Clipthrough.Views.MainWindow.KeyRepeatClass, harness.ClipList.Classes);
+
+        var row = Presenter(harness, 5);
+        var centre = row.TranslatePoint(new Point(row.Bounds.Width / 2, row.Bounds.Height / 2), harness.Window)!.Value;
+        harness.Window.MouseDown(centre, MouseButton.Left);
+        harness.Window.MouseUp(centre, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Same(harness.ViewModel.Clips[5], harness.ViewModel.SelectedClip);
+
+        Assert.NotEqual(selected, ColorOf(Presenter(harness, 5).Background));
+    }
+    /// <summary>
     /// What makes a recycling guard unnecessary: Avalonia keeps the selected
     /// row's container realized however far the list scrolls, so a selected
     /// highlight is never handed to another row mid-fade. If an Avalonia update

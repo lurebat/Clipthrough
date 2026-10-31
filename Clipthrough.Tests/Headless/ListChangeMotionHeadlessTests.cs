@@ -161,4 +161,35 @@ public sealed class ListChangeMotionHeadlessTests
         Assert.Equal("freshly copied", harness.ViewModel.Clips[0].Clip.Content);
         Assert.Equal(0, ArmedRows(harness));
     }
+
+    /// <summary>
+    /// Two clips arriving together: both are lifted while they fade, and both
+    /// come back down - a row left raised draws over its neighbours for good,
+    /// and keeps doing so after it is recycled for another row.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task TwoQuickCaptures_LeaveNoRowRaised()
+    {
+        using var harness = await ReadyAsync(motion: true);
+        var raised = new System.Collections.Generic.HashSet<Avalonia.Controls.Control>();
+        void Watch(Avalonia.Controls.Control row) => row.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == Avalonia.Controls.Panel.ZIndexProperty && row.ZIndex > 0) raised.Add(row);
+        };
+        foreach (var row in harness.ClipList.GetRealizedContainers()) Watch(row);
+        harness.ClipList.ContainerPrepared += (_, e) => Watch(e.Container);
+        var second = await CaptureAsync(harness, "second quick copy");
+
+        // Back to back, so the second arrives while the first is still lifted.
+        harness.ClipboardMonitor.Emit(await CaptureAsync(harness, "first quick copy"));
+        Dispatcher.UIThread.RunJobs();
+        harness.ClipboardMonitor.Emit(second);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("second quick copy", harness.ViewModel.Clips[0].Clip.Content);
+        Assert.True(raised.Count >= 2, $"only {raised.Count} row(s) were lifted; the arrivals did not overlap");
+
+        await PumpUntilAsync(() => false, 500);
+
+        Assert.All(raised, row => Assert.Equal(0, row.ZIndex));
+    }
 }

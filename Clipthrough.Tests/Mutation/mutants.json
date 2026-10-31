@@ -5659,16 +5659,16 @@
     "id": "key-repeat-still-fades",
     "file": "Clipthrough/Views/MainWindow.Motion.cs",
     "why": "Holding an arrow key leaves the highlight trailing behind the selection.",
-    "find": "var repeating = m_heldNavigationKey == e.Key;",
-    "replace": "var repeating = m_heldNavigationKey == e.Key && e.Key == Key.None;",
+    "find": "var repeating = m_heldNavigationKey == e.Key\n            && Stopwatch.GetElapsedTime(m_lastNavigationKeyDown) <= KeyRepeatWindow;",
+    "replace": "var repeating = m_heldNavigationKey == e.Key\n            && Stopwatch.GetElapsedTime(m_lastNavigationKeyDown) <= KeyRepeatWindow && e.Key == Key.None;",
     "filter": "FullyQualifiedName~ListHighlightMotionHeadlessTests.WithMotion_AKeyRepeat_MovesTheHighlightInstantly"
   },
   {
     "id": "key-release-not-tracked",
     "file": "Clipthrough/Views/MainWindow.Motion.cs",
     "why": "After one held key every later press is treated as a repeat and never fades again.",
-    "find": "        m_heldNavigationKey = null;\n",
-    "replace": "",
+    "find": "        m_heldNavigationKey = null;\n        this.FindControl<ListBox>(\"ClipsListBox\")?.Classes.Set(KeyRepeatClass, false);",
+    "replace": "        this.FindControl<ListBox>(\"ClipsListBox\")?.Classes.Set(KeyRepeatClass, false);",
     "filter": "FullyQualifiedName~ListHighlightMotionHeadlessTests.WithMotion_AFreshPressAfterRelease_StillFades"
   },
   {
@@ -5755,8 +5755,8 @@
     "id": "list-slide-never-disarmed",
     "file": "Clipthrough/Views/MainWindow.Motion.cs",
     "why": "The slide stays armed, so scrolling afterwards animates recycled rows across the list.",
-    "find": "                visual.ImplicitAnimations = null;\n            }\n        }\n\n        if (m_raisedRow is not null)",
-    "replace": "                _ = visual;\n            }\n        }\n\n        if (m_raisedRow is not null)",
+    "find": "                visual.ImplicitAnimations = null;\n            }\n        }\n\n        // Every row lifted since the last disarm",
+    "replace": "                _ = visual;\n            }\n        }\n\n        // Every row lifted since the last disarm",
     "filter": "FullyQualifiedName~ListChangeMotionHeadlessTests.ACapture_SlidesTheRowsDown_AndLiftsTheNewRowAboveThem"
   },
   {
@@ -5787,8 +5787,8 @@
     "id": "focus-ring-on-click",
     "file": "Clipthrough/Views/MainWindow.Motion.cs",
     "why": "A click leaves a focus ring on the row, as if the keyboard had put it there.",
-    "find": "?.Classes.Set(KeyboardNavigationClass, false), RoutingStrategies.Tunnel",
-    "replace": "?.Classes.Set(KeyboardNavigationClass, true), RoutingStrategies.Tunnel",
+    "find": "            list.Classes.Set(KeyboardNavigationClass, false);",
+    "replace": "            list.Classes.Set(KeyboardNavigationClass, true);",
     "filter": "FullyQualifiedName~FocusAndPressHeadlessTests.AClick_SelectsWithoutARing"
   },
   {
@@ -5846,5 +5846,61 @@
     "find": "        if (IsInStandby)\n        {\n            m_systemInteractionService?.TryCloakWindow(this, releaseForeground: true);",
     "replace": "        if (IsInStandby || !IsInStandby)\n        {\n            m_systemInteractionService?.TryCloakWindow(this, releaseForeground: true);",
     "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.AnActivationWhilePresented_IsLeftAlone"
+  },
+  {
+    "id": "stale-summon-not-revalidated",
+    "file": "Clipthrough/Views/MainWindow.Presentation.cs",
+    "why": "A summon that waited uncloaks and activates the popup even after a later toggle or dismiss.",
+    "find": "            if (generation != m_presentationGeneration)\n            {\n                return StandbyLeave.Superseded;",
+    "replace": "            if (generation != m_presentationGeneration && generation == 0)\n            {\n                return StandbyLeave.Superseded;",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.AStaleSummon_DoesNotUndoALaterDismiss"
+  },
+  {
+    "id": "second-toggle-does-not-cancel",
+    "file": "Clipthrough/Views/MainWindow.Presentation.cs",
+    "why": "Alt+V pressed twice before the popup appeared leaves it shown instead of dismissed.",
+    "find": "        m_presentationGeneration++;\n        m_pendingSummonGeneration = 0;",
+    "replace": "        m_pendingSummonGeneration = 0;",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.ASecondToggleBeforeTheSummonLands_CancelsIt"
+  },
+  {
+    "id": "dismiss-does-not-supersede",
+    "file": "Clipthrough/Views/MainWindow.Presentation.cs",
+    "why": "A dismiss does not invalidate an older pending summon, which then uncloaks the new standby.",
+    "find": "        m_presentationGeneration++;\n        var reset = viewModel?.EnterStandbyAsync() ?? Task.CompletedTask;",
+    "replace": "        var reset = viewModel?.EnterStandbyAsync() ?? Task.CompletedTask;",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.AStaleSummon_DoesNotUndoALaterDismiss"
+  },
+  {
+    "id": "close-does-not-drop-the-summon",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "A summon pending when the window closes uncloaks a closed window.",
+    "find": "        Closed += (_, _) => CancelPendingSummon();\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.ASummonPendingWhenTheWindowCloses_IsDropped"
+  },
+  {
+    "id": "overlapping-arrivals-leave-a-row-raised",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "A second arrival within the armed window leaves the first row raised for good.",
+    "find": "        m_raisedRows.Add(row);",
+    "replace": "        m_raisedRows.Clear();\n        m_raisedRows.Add(row);",
+    "filter": "FullyQualifiedName~ListChangeMotionHeadlessTests.TwoQuickCaptures_LeaveNoRowRaised"
+  },
+  {
+    "id": "key-repeat-without-time-window",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "A press long after one whose KeyUp was lost is taken for a repeat and does not fade.",
+    "find": "&& Stopwatch.GetElapsedTime(m_lastNavigationKeyDown) <= KeyRepeatWindow;",
+    "replace": "&& Stopwatch.GetElapsedTime(m_lastNavigationKeyDown) >= TimeSpan.Zero && KeyRepeatWindow > TimeSpan.Zero;",
+    "filter": "FullyQualifiedName~ListHighlightMotionHeadlessTests.WithMotion_APressLongAfterAnUnreleasedOne_StillFades"
+  },
+  {
+    "id": "pointer-leaves-key-repeat-on",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "After holding an arrow key, clicks stop fading until the next key.",
+    "find": "            list.Classes.Set(KeyRepeatClass, false);\n        }\n    }",
+    "replace": "        }\n    }",
+    "filter": "FullyQualifiedName~ListHighlightMotionHeadlessTests.WithMotion_AClickAfterAKeyRepeat_Fades"
   }
 ]
