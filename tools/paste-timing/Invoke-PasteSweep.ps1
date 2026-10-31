@@ -174,9 +174,15 @@ function Close-Target([string]$name, [IntPtr]$hwnd) {
 }
 
 # ---- Clipthrough --------------------------------------------------------------
+function Get-ClipthroughArguments([string]$dataDir) {
+    # Quoted: Start-Process quotes nothing, and a folder with a space would
+    # otherwise point Clipthrough at a different (partial) path.
+    return "--data-dir `"$($dataDir.TrimEnd('\'))`" --log-popup-timings"
+}
+
 function Start-Clipthrough([int]$settle) {
     $env:CLIPTHROUGH_PASTE_SETTLE_MS = "$settle"
-    $p = Start-Process -FilePath $ClipthroughExe -ArgumentList '--data-dir', $DataDir, '--log-popup-timings' -PassThru
+    $p = Start-Process -FilePath $ClipthroughExe -ArgumentList (Get-ClipthroughArguments $DataDir) -PassThru
     Remove-Item Env:\CLIPTHROUGH_PASTE_SETTLE_MS
     Wait-Until { $p.Refresh(); $p.MainWindowHandle -ne 0 } 30000 | Out-Null
     if (-not (Test-Path (Join-Path $DataDir 'settings.json'))) {

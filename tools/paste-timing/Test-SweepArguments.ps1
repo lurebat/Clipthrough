@@ -12,8 +12,8 @@ public static string[] Split(string cmd) {
 "@
 $script = Join-Path $PSScriptRoot 'Invoke-PasteSweep.ps1'
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($script, [ref]$null, [ref]$null)
-$fn = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -in 'Get-EdgeArguments', 'Get-TerminalArguments' }, $true)
-if ($fn.Count -ne 2) { throw "Get-EdgeArguments / Get-TerminalArguments not found in $script" }
+$fn = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -in 'Get-EdgeArguments', 'Get-TerminalArguments', 'Get-ClipthroughArguments' }, $true)
+if ($fn.Count -ne 3) { throw "Get-EdgeArguments / Get-TerminalArguments / Get-ClipthroughArguments not found in $script" }
 foreach ($f in $fn) { Invoke-Expression $f.Extent.Text }
 $failures = 0
 $edgeArgv = [PasteSweepCheck.Argv]::Split((Get-EdgeArguments))
@@ -31,4 +31,8 @@ foreach ($title in 'PasteSweepTerm', 'PasteSweepElevated') {
         else { Write-Host "ok   Terminal ($title): one command, reader intact" }
     }
 }
+$spaced = 'C:\scratch\paste sweep'
+$clipArgv = [PasteSweepCheck.Argv]::Split((Get-ClipthroughArguments $spaced))
+$at = [array]::IndexOf($clipArgv, '--data-dir')
+if ($at -lt 0 -or $clipArgv[$at + 1] -ne $spaced) { Write-Host "FAIL Clipthrough: --data-dir arrives as: $($clipArgv -join ' | ')" -ForegroundColor Red; $failures++ } else { Write-Host 'ok   Clipthrough: a data folder with spaces arrives as one argument' }
 exit $failures
