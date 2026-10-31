@@ -61,6 +61,19 @@ public interface ISystemInteractionService : IDisposable
     /// <summary>Reverses <see cref="TryCloakWindow"/>.</summary>
     void UncloakWindow(Window window);
 
+    /// <summary>
+    /// Whether the OS wants UI animations: Windows' Animation effects switch
+    /// (SPI_GETCLIENTAREAANIMATION). True where there is no such signal.
+    /// </summary>
+    bool AreOsAnimationsEnabled();
+
+    /// <summary>
+    /// Calls <paramref name="onChanged"/> whenever the OS reports a settings
+    /// change on <paramref name="window"/>'s message loop, so the answer above
+    /// can be re-read. Dispose to stop.
+    /// </summary>
+    IDisposable WatchOsAnimationSetting(Window window, Action onChanged);
+
     void SimulatePasteKeystroke();
 
     void ShowNotification(AppNotification notification);

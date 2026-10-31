@@ -616,6 +616,32 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
 
     public bool IsTargetWindowElevated() => false;
 
+    /// <summary>What the OS reports for Animation effects.</summary>
+    public bool OsAnimationsEnabled { get; set; } = true;
+
+    public bool AreOsAnimationsEnabled() => OsAnimationsEnabled;
+
+    /// <summary>How many times something started watching the OS setting.</summary>
+    public int OsAnimationWatchCount { get; private set; }
+
+    private readonly List<Action> _osAnimationWatchers = [];
+
+    public IDisposable WatchOsAnimationSetting(Window window, Action onChanged)
+    {
+        OsAnimationWatchCount++;
+        _osAnimationWatchers.Add(onChanged);
+        return System.Reactive.Disposables.Disposable.Create(() => _osAnimationWatchers.Remove(onChanged));
+    }
+
+    /// <summary>Delivers a WM_SETTINGCHANGE to every watcher.</summary>
+    public void RaiseOsAnimationSettingChanged()
+    {
+        foreach (var watcher in _osAnimationWatchers.ToArray())
+        {
+            watcher();
+        }
+    }
+
     /// <summary>Every Start with Windows call, in order: ("sync" | "reconcile", enabled).</summary>
     public List<(string Kind, bool Enabled)> StartWithWindowsCalls { get; } = [];
 

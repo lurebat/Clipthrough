@@ -128,6 +128,8 @@ public sealed class PasteTimingTests
         public void RestoreCapturedForeground() => throw new NotSupportedException();
         public bool TryCloakWindow(Avalonia.Controls.Window window, bool releaseForeground) => throw new NotSupportedException();
         public void UncloakWindow(Avalonia.Controls.Window window) => throw new NotSupportedException();
+        public bool AreOsAnimationsEnabled() => throw new NotSupportedException();
+        public IDisposable WatchOsAnimationSetting(Avalonia.Controls.Window window, Action onChanged) => throw new NotSupportedException();
         public void SimulatePasteKeystroke() => throw new NotSupportedException();
         public void ShowNotification(Models.AppNotification notification) => throw new NotSupportedException();
         public bool TryRegisterGlobalHotKey(Avalonia.Controls.Window window, Models.HotkeyGesture hotkey, Action callback) => throw new NotSupportedException();

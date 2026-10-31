@@ -2202,6 +2202,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
 
     public string SettingsThemeModeLabel => AppText.SettingsThemeModeLabel;
+    public string SettingsMotionLabel => AppText.SettingsMotionLabel;
+    public string SettingsMotionHint => AppText.SettingsMotionHint;
 
     public string SettingsRegexBacktrackingLabel => AppText.SettingsRegexBacktrackingLabel;
 
@@ -6289,6 +6291,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             MinimizeToTray = Settings.MinimizeToTray,
             StartWithWindows = Settings.StartWithWindows,
             ThemeMode = Settings.ThemeMode,
+            Motion = Settings.Motion,
             EnableNormalClipLifetime = Settings.EnableNormalClipLifetime,
             NormalClipLifetimeDays = normalClipLifetimeDays,
             EnableSensitiveClipLifetime = Settings.EnableSensitiveClipLifetime,
@@ -6428,6 +6431,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.MinimizeToTray = settings.MinimizeToTray;
         Settings.StartWithWindows = settings.StartWithWindows;
         Settings.ThemeMode = settings.ThemeMode;
+        Settings.Motion = settings.Motion;
         Settings.EnableNormalClipLifetime = settings.EnableNormalClipLifetime;
         Settings.NormalClipLifetimeDays = settings.NormalClipLifetimeDays.ToString(CultureInfo.InvariantCulture);
         Settings.EnableSensitiveClipLifetime = settings.EnableSensitiveClipLifetime;

@@ -5451,8 +5451,8 @@
     "id": "owned-window-opens-without-the-popup",
     "file": "Clipthrough/Views/MainWindow.axaml.cs",
     "why": "Opening Settings while the popup is cloaked shows Settings alone: a cloaked popup is still IsVisible.",
-    "find": "                LeaveStandbyNow();\n                m_settingsWindow.Show(this);",
-    "replace": "                m_settingsWindow.Show(this);",
+    "find": "                LeaveStandbyNow();\n                TrackMotion(m_settingsWindow);",
+    "replace": "                TrackMotion(m_settingsWindow);",
     "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.OpeningAnOwnedWindowFromStandby_SummonsThePopup"
   },
   {
@@ -5558,5 +5558,77 @@
     "find": "IsVisible=\"{Binding ShowBusyIndicator}\"",
     "replace": "IsVisible=\"{Binding IsBusyOrCapturing}\"",
     "filter": "FullyQualifiedName~SearchResponsivenessHeadlessTests.AFastRefresh_NeverShowsTheBusyBar"
+  },
+  {
+    "id": "motion-system-ignores-the-os",
+    "file": "Clipthrough/Services/System/MotionService.cs",
+    "why": "System animates even when Windows has Animation effects off (and over Remote Desktop).",
+    "find": "_ => osAnimationsEnabled,",
+    "replace": "_ => osAnimationsEnabled || !osAnimationsEnabled,",
+    "filter": "FullyQualifiedName~MotionServiceTests.Policy"
+  },
+  {
+    "id": "motion-default-is-on",
+    "file": "Clipthrough/Models/AppSettings.cs",
+    "why": "The default stops following Windows (user decision: default System).",
+    "find": "public MotionPreference Motion { get; init; } = MotionPreference.System;",
+    "replace": "public MotionPreference Motion { get; init; } = MotionPreference.On;",
+    "filter": "FullyQualifiedName~MotionServiceTests.TheDefaultIsSystem"
+  },
+  {
+    "id": "motion-unknown-value-kept",
+    "file": "Clipthrough/Models/AppSettings.cs",
+    "why": "A settings file with an unknown Motion value leaves the policy undefined.",
+    "find": "Motion = System.Enum.IsDefined(Motion) ? Motion : MotionPreference.System,",
+    "replace": "Motion = Motion,",
+    "filter": "FullyQualifiedName~MotionServiceTests.AnUnknownStoredValue_NormalizesToSystem"
+  },
+  {
+    "id": "motion-os-change-not-watched",
+    "file": "Clipthrough/Services/System/MotionService.cs",
+    "why": "Turning Animation effects on or off in Windows is ignored until restart.",
+    "find": "_osWatch ??= _systemInteraction.WatchOsAnimationSetting(window, Update);",
+    "replace": "_osWatch ??= _systemInteraction.WatchOsAnimationSetting(window, () => { });",
+    "filter": "FullyQualifiedName~MotionServiceTests.System_FollowsTheOsSettingAsItChanges"
+  },
+  {
+    "id": "motion-setting-change-ignored",
+    "file": "Clipthrough/Services/System/MotionService.cs",
+    "why": "Changing Animations in Settings does nothing until restart.",
+    "find": "private void OnSettingsChanged(object? sender, AppSettings e) => Update();",
+    "replace": "private void OnSettingsChanged(object? sender, AppSettings e) => _ = e;",
+    "filter": "FullyQualifiedName~MotionServiceTests.ChangingTheSetting_TakesEffectAtOnce"
+  },
+  {
+    "id": "motion-not-saved",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "The Animations choice in Settings is not written back.",
+    "find": "            Motion = Settings.Motion,\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~MotionPolicyHeadlessTests.TheSettingsDialog_LoadsAndSavesTheMotionPreference"
+  },
+  {
+    "id": "motion-not-loaded",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Settings opens showing the default instead of the saved Animations choice, and saving then overwrites it.",
+    "find": "        Settings.Motion = settings.Motion;\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~MotionPolicyHeadlessTests.TheSettingsDialog_LoadsAndSavesTheMotionPreference"
+  },
+  {
+    "id": "motion-class-skips-owned-windows",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "The Settings window ignores the motion policy.",
+    "find": "                TrackMotion(m_settingsWindow);\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~MotionPolicyHeadlessTests.AnOwnedWindowOpenedLater_FollowsThePolicyToo"
+  },
+  {
+    "id": "motion-class-never-removed",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "Turning motion off leaves the windows animating.",
+    "find": "window.Classes.Set(MotionClass, enabled);",
+    "replace": "window.Classes.Set(MotionClass, enabled || !enabled);",
+    "filter": "FullyQualifiedName~MotionPolicyHeadlessTests.TurningMotionOff_TakesTheClassOffAtOnce"
   }
 ]

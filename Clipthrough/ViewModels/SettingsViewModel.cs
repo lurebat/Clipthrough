@@ -128,6 +128,15 @@ public sealed class SettingsViewModel : ViewModelBase
 
     public ThemeMode[] ThemeModeOptions { get; } = Enum.GetValues<ThemeMode>();
 
+    private MotionPreference _motion = AppSettings.Default.Motion;
+    public MotionPreference Motion
+    {
+        get => _motion;
+        set => this.RaiseAndSetIfChanged(ref _motion, value);
+    }
+
+    public MotionPreference[] MotionOptions { get; } = Enum.GetValues<MotionPreference>();
+
     private RegexSearchEngine _regexSearchEngine = AppSettings.Default.RegexSearchEngine;
     public RegexSearchEngine RegexSearchEngine
     {

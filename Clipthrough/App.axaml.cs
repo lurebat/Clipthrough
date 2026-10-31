@@ -96,7 +96,7 @@ public partial class App : Application
             _updateService = Services.GetRequiredService<IUpdateService>();
             _aiTransformService = Services.GetRequiredService<IAiTransformService>();
 
-            _mainWindow = desktop.MainWindow = new MainWindow(_systemInteractionService, Services.GetRequiredService<IWindowPlacementStore>())
+            _mainWindow = desktop.MainWindow = new MainWindow(_systemInteractionService, Services.GetRequiredService<IWindowPlacementStore>(), Services.GetRequiredService<IMotionService>())
             {
                 DataContext = mainWindowViewModel,
             };
@@ -240,6 +240,7 @@ public partial class App : Application
         services.AddSingleton<IWindowPlacementStore, WindowPlacementStore>();
         services.AddSingleton<ISessionLogService>(_ => SessionLogService.Instance);
         services.AddSingleton<ISystemInteractionService, SystemInteractionService>();
+        services.AddSingleton<IMotionService, MotionService>();
         services.AddSingleton<DatabaseInitializer>();
         services.AddSingleton<IClipExportService, ClipExportService>();
         services.AddSingleton<ISearchHistoryService, SearchHistoryService>();

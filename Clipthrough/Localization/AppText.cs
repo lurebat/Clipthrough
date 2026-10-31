@@ -126,6 +126,8 @@ public static class AppText
         [nameof(CompareNeedsDiffToolStatus)] = "Set an external diff tool path in Settings to compare clips.",
         [nameof(CompareOpenedStatus)] = "Opened diff tool for comparison.",
         [nameof(SettingsThemeModeLabel)] = "Theme",
+        [nameof(SettingsMotionLabel)] = "Animations",
+        [nameof(SettingsMotionHint)] = "System follows Windows' Animation effects setting (off over Remote Desktop).",
         [nameof(ExportSensitiveConfirmTitle)] = "Export a sensitive clip?",
         [nameof(ExportSensitiveConfirmBody)] = "Export writes this clip as an unencrypted file in Documents\\Clipthrough Exports, which is often synced to OneDrive. The file stays after the clip expires or is deleted from Clipthrough.\n\nExport it anyway?",
         [nameof(ExportSensitiveConfirmAccept)] = "Export",
@@ -499,6 +501,8 @@ public static class AppText
     public static string CompareNeedsDiffToolStatus => Text(nameof(CompareNeedsDiffToolStatus));
     public static string CompareOpenedStatus => Text(nameof(CompareOpenedStatus));
     public static string SettingsThemeModeLabel => Text(nameof(SettingsThemeModeLabel));
+    public static string SettingsMotionLabel => Text(nameof(SettingsMotionLabel));
+    public static string SettingsMotionHint => Text(nameof(SettingsMotionHint));
     public static string ExportSensitiveConfirmTitle => Text(nameof(ExportSensitiveConfirmTitle));
     public static string ExportSensitiveConfirmBody => Text(nameof(ExportSensitiveConfirmBody));
     public static string ExportSensitiveConfirmAccept => Text(nameof(ExportSensitiveConfirmAccept));

@@ -561,6 +561,48 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         return true;
     }
 
+    public bool AreOsAnimationsEnabled()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return true;
+        }
+
+        var enabled = 1;
+        return !SystemParametersInfo(SPI_GETCLIENTAREAANIMATION, 0, ref enabled, 0) || enabled != 0;
+    }
+
+    public IDisposable WatchOsAnimationSetting(Window window, Action onChanged)
+    {
+        ArgumentNullException.ThrowIfNull(onChanged);
+        if (!OperatingSystem.IsWindows())
+        {
+            return System.Reactive.Disposables.Disposable.Empty;
+        }
+
+        // Re-read on any WM_SETTINGCHANGE rather than only SPI_SETCLIENTAREAANIMATION:
+        // the read is one cheap call, and a broadcast that names a different
+        // section must not leave the answer stale.
+        Win32Properties.CustomWndProcHookCallback hook = (nint hwnd, uint msg, nint wParam, nint lParam, ref bool handled) =>
+        {
+            if (msg == WM_SETTINGCHANGE)
+            {
+                onChanged();
+            }
+
+            return IntPtr.Zero;
+        };
+        Win32Properties.AddWndProcHookCallback(window, hook);
+        return System.Reactive.Disposables.Disposable.Create(() => Win32Properties.RemoveWndProcHookCallback(window, hook));
+    }
+
+    private const uint SPI_GETCLIENTAREAANIMATION = 0x1042;
+    private const uint WM_SETTINGCHANGE = 0x001A;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SystemParametersInfo(uint action, uint param, ref int value, uint winIni);
+
     private const int DWMWA_CLOAK = 13;
     private const int SW_HIDE = 0;
     private const int SW_SHOWNA = 8;

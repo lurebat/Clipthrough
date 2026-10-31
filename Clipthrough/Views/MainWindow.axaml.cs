@@ -47,10 +47,11 @@ public partial class MainWindow : Window
 
     public MainWindow() : this(null) { }
 
-    public MainWindow(ISystemInteractionService? systemInteractionService, IWindowPlacementStore? placementStore = null)
+    public MainWindow(ISystemInteractionService? systemInteractionService, IWindowPlacementStore? placementStore = null, IMotionService? motionService = null)
     {
         m_systemInteractionService = systemInteractionService;
         InitializeComponent();
+        InitializeMotion(motionService);
         RequestWorkspaceBreakpoint(WorkspaceBreakpoints.Classify(ClientSize));
         InitializePlacement(placementStore);
         Opened += OnOpened;
@@ -1814,6 +1815,7 @@ public partial class MainWindow : Window
                 m_settingsWindow.Closing += OnSettingsWindowClosing;
                 // A cloaked popup is still 'visible'; an owned window must not open alone.
                 LeaveStandbyNow();
+                TrackMotion(m_settingsWindow);
                 m_settingsWindow.Show(this);
             }
             else
@@ -1858,6 +1860,7 @@ public partial class MainWindow : Window
                 m_aiPromptWindow.Closing += OnAiPromptWindowClosing;
                 // A cloaked popup is still 'visible'; an owned window must not open alone.
                 LeaveStandbyNow();
+                TrackMotion(m_aiPromptWindow);
                 m_aiPromptWindow.Show(this);
             }
             else
@@ -1913,6 +1916,7 @@ public partial class MainWindow : Window
                 m_sessionLogsWindow.Closing += OnSessionLogsWindowClosing;
                 // A cloaked popup is still 'visible'; an owned window must not open alone.
                 LeaveStandbyNow();
+                TrackMotion(m_sessionLogsWindow);
                 m_sessionLogsWindow.Show(this);
             }
             else

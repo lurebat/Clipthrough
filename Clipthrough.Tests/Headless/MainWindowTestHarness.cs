@@ -78,7 +78,8 @@ internal sealed class MainWindowTestHarness : IDisposable
     public static MainWindowTestHarness Create(
         Func<AppSettings, AppSettings>? configureSettings = null,
         bool aiConfigured = false,
-        IWindowPlacementStore? placementStore = null)
+        IWindowPlacementStore? placementStore = null,
+        Func<ISettingsService, IMotionService>? motionFactory = null)
     {
         var scope = new TemporaryDatabaseScope();
 
@@ -117,7 +118,8 @@ internal sealed class MainWindowTestHarness : IDisposable
             new BackgroundJobIndicator(),
             scope.DatabaseInitializer);
 
-        var window = new MainWindow(systemInteraction, placementStore) { DataContext = viewModel };
+        var motion = motionFactory?.Invoke(scope.SettingsService);
+        var window = new MainWindow(systemInteraction, placementStore, motion) { DataContext = viewModel };
         window.Show();
         Dispatcher.UIThread.RunJobs();
 
