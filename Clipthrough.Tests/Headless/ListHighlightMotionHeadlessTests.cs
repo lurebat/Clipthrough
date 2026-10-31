@@ -124,11 +124,10 @@ public sealed class ListHighlightMotionHeadlessTests
         harness.FocusClipList();
         var selected = ColorOf(Presenter(harness, 0).Background);
 
+        // Held: the second KeyDown, straight after the first with no KeyUp, is the
+        // keyboard's auto-repeat. Back to back, as real repeats are ~33 ms apart -
+        // anything between them here could outlast the 150 ms repeat window.
         harness.Window.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, null);
-        Dispatcher.UIThread.RunJobs();
-        Assert.Same(harness.ViewModel.Clips[1], harness.ViewModel.SelectedClip);
-
-        // Still held: the next KeyDown is the keyboard's auto-repeat.
         harness.Window.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.ArrowDown, null);
         Dispatcher.UIThread.RunJobs();
         Assert.Same(harness.ViewModel.Clips[2], harness.ViewModel.SelectedClip);
