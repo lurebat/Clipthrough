@@ -13,6 +13,87 @@ namespace Clipthrough.Tests.Integration;
 public sealed class ClipStoreServiceTests
 {
     /// <summary>
+    /// Text holding U+0000 (Base64 Decode can produce one; so can a paste from a
+    /// binary-ish source). SQLitePCLRaw binds a string of up to 512 UTF-8 bytes
+    /// with its length but a longer one as NUL-terminated, so the store kept
+    /// only the text before the NUL once a clip passed that size - silently, on
+    /// the one copy the user has.
+    /// </summary>
+    public static TheoryData<int> TextLengthsAroundTheBindingThreshold() => new() { 16, 505, 520, 5000 };
+
+    private static string TextWithANul(int length)
+    {
+        var text = new StringBuilder("left\0");
+        while (text.Length < length)
+        {
+            text.Append("right-hand side kept ");
+        }
+
+        return text.ToString(0, length);
+    }
+
+    private static ClipCaptureRequest TextRequest(string text) => new()
+    {
+        ContentType = ContentType.Text,
+        ContentFormat = ClipContentFormat.PlainText,
+        ContentText = text,
+        ContentBytes = Encoding.UTF8.GetBytes(text),
+    };
+
+    [Theory]
+    [MemberData(nameof(TextLengthsAroundTheBindingThreshold))]
+    public async Task CaptureAsync_KeepsTextAfterANul_AtEveryLength(int length)
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        var text = TextWithANul(length);
+
+        var clip = await scope.ClipStoreService.CaptureAsync(TextRequest(text));
+
+        var stored = await scope.ClipStoreService.GetByIdAsync(clip!.Id);
+        Assert.Equal(text.Length, stored!.Content.Length);
+        Assert.Equal(text, stored.Content);
+
+        // Stored as TEXT, like every other clip: bound as bytes, it must not land as a BLOB.
+        await using var connection = scope.ConnectionFactory.CreateConnection();
+        await connection.OpenAsync();
+        await using var type = connection.CreateCommand();
+        type.CommandText = "SELECT typeof(content) FROM clips WHERE id = $id;";
+        type.Parameters.AddWithValue("$id", clip.Id);
+        Assert.Equal("text", await type.ExecuteScalarAsync());
+    }
+
+    [Theory]
+    [MemberData(nameof(TextLengthsAroundTheBindingThreshold))]
+    public async Task CaptureBatchAsync_KeepsTextAfterANul_AtEveryLength(int length)
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        var text = TextWithANul(length);
+
+        Assert.Equal(1, (await scope.ClipStoreService.CaptureBatchAsync([TextRequest(text)])).Imported);
+
+        var id = Assert.Single((await scope.ClipStoreService.SearchAsync(new ClipSearchFilters())).Items).Id;
+        var stored = await scope.ClipStoreService.GetByIdAsync(id);
+        Assert.Equal(text, stored!.Content);
+    }
+
+    [Theory]
+    [MemberData(nameof(TextLengthsAroundTheBindingThreshold))]
+    public async Task UpdateDeferredContentAsync_KeepsTextAfterANul_AtEveryLength(int length)
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        var clip = await scope.ClipStoreService.CaptureAsync(TextRequest("placeholder before the deferred content"));
+        var text = TextWithANul(length);
+
+        await scope.ClipStoreService.UpdateDeferredContentAsync(clip!.Id, TextRequest(text));
+
+        var stored = await scope.ClipStoreService.GetByIdAsync(clip.Id);
+        Assert.Equal(text, stored!.Content);
+    }
+
+    /// <summary>
     /// Synthetic, obviously-fake credential text. It is not a real secret; it
     /// exists only because it matches the built-in "Passwords" rule
     /// ((?i)(password|passwd|pwd)['":\s=]+\S{6,}), which is what these tests

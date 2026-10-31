@@ -5502,5 +5502,21 @@
     "find": "await systemInteraction.WaitForPasteTargetAsync(budget, cancellationToken).ConfigureAwait(true);",
     "replace": "await systemInteraction.WaitForPasteTargetAsync(budget, cancellationToken).ConfigureAwait(true);\n        await Task.Delay(budget - SettleAfterForeground, cancellationToken).ConfigureAwait(true);",
     "filter": "FullyQualifiedName~PasteTimingTests.BeforePaste_TargetForwardAtOnce_IsMuchShorterThanTheOldSleep"
+  },
+  {
+    "id": "clip-text-with-nul-bound-as-string",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "SQLitePCLRaw binds a string longer than 512 UTF-8 bytes as NUL-terminated, so a clip holding U+0000 past that size kept only the text before the NUL. Binding NUL-containing text as its UTF-8 bytes keeps all of it.",
+    "find": "        return text.Contains('\\0', StringComparison.Ordinal) ? Encoding.UTF8.GetBytes(text) : text;",
+    "replace": "        return text.Contains('\\0', StringComparison.Ordinal) && text.Length < 0 ? Encoding.UTF8.GetBytes(text) : text;",
+    "filter": "FullyQualifiedName~KeepsTextAfterANul"
+  },
+  {
+    "id": "clip-text-bytes-stored-as-blob",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Text bound as UTF-8 bytes must be cast back to TEXT; without the cast a NUL-containing clip is stored as a BLOB, unlike every other clip.",
+    "find": "                        CAST($content AS TEXT),\n                        $contentType,\n                        $contentFormat,\n                        $sourceApp,",
+    "replace": "                        $content,\n                        $contentType,\n                        $contentFormat,\n                        $sourceApp,",
+    "filter": "FullyQualifiedName~CaptureAsync_KeepsTextAfterANul"
   }
 ]
