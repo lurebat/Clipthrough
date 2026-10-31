@@ -98,6 +98,9 @@ Measured at 20k clips, Alphabetical went 118 ms (no new indexes) -> 206 ms
 (three of the four) -> 0.2 ms (all four).
 
 - `idx_clips_default_order` — `(pinned_at IS NULL, pinned_at DESC, COALESCE(last_copied_at, captured_at) DESC, id DESC)`. **The primary list-view ordering**; serves `MostRecent` and `BestMatching`.
+- `idx_clips_sensitivity_pending` — `(id) WHERE sensitivity_scanned_at IS NULL`. Startup sensitivity recovery (`ClipStoreService.PendingSensitivitySql`) reads only unscanned rows (F-25).
+- `idx_clips_ocr_images` — `(content_type, ocr_status) WHERE content_type = 'image' AND content_bytes IS NOT NULL`. OCR coverage (`OcrCoverageSql`) reads image rows only, and `ocr_status` from the index rather than after the payload (F-25). The partial `WHERE` must stay identical to the query's terms or SQLite will not use it.
+- `idx_clips_type_default_order` — `(content_type, pinned_at IS NULL, pinned_at DESC, COALESCE(last_copied_at, captured_at) DESC, id DESC)`. Serves the type dropdown with `MostRecent` and nothing typed (F-09). With a type filter the other sorts also start here and sort the remainder; benchmark them (PerfProbes P1) rather than assume.
 - `idx_clips_oldest_order` — same, ASC. Serves `OldestFirst`.
 - `idx_clips_paste_order` — `(..., paste_count DESC, id DESC)`. Serves `MostPasted`.
 - `idx_clips_size_order` — `(..., byte_size DESC, id DESC)`. Serves `LargestFirst`.
@@ -138,6 +141,10 @@ Triggers `clips_ai`, `clips_ad`, `clips_au` keep FTS in sync on `INSERT` /
 columns and is dropped and recreated unconditionally, because
 `CREATE TRIGGER IF NOT EXISTS` would silently preserve an older unscoped
 trigger that re-tokenises the whole clip on every metadata-only write.
+Its `WHEN old.x IS NOT new.x OR ...` clause also skips an update that assigns
+the same values back (a re-copy, the deferred HTML/RTF update), which otherwise
+re-tokenised an identical clip under the write lock. A new searchable column
+belongs in that clause too.
 
 If you add a column you want searchable, you must:
 

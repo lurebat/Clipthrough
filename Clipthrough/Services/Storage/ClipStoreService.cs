@@ -61,10 +61,20 @@ public sealed class ClipStoreService : IClipStoreService
     /// every row. Column count and ordinal positions match <see cref="ClipSelectColumns"/>:
     /// index 2 is always <c>NULL</c> (ContentBytes), index 7 is a 0/1 presence flag
     /// (SourceAppIconAvailable). Use with <see cref="ReadClipMeta"/>.  (U12)
+    ///
+    /// The text is bounded too (F-10): index 1 holds at most the first 4096
+    /// characters (<see cref="ClipEntry.ListContentLength"/>) and index 30 says whether
+    /// there was more. A row shows a title and a snippet; carrying a 2 MB log into every
+    /// list page cost the UI that string and its UTF-16 copy per row. An entry read this
+    /// way throws on <see cref="ClipEntry.Content"/> until it is hydrated.
+    ///
+    /// substr() and length() both stop at the first NUL in a TEXT value, so a clip
+    /// containing one is always flagged: its row holds only the text before the NUL,
+    /// however short the clip.
     /// </summary>
     private const string ClipListSelectColumns = """
             c.id,
-            c.content,
+            substr(c.content, 1, 4096),
             NULL,
             c.content_type,
             c.content_format,
@@ -92,19 +102,27 @@ public sealed class ClipStoreService : IClipStoreService
             c.ocr_error,
             c.source_clip_id,
             c.transform_kind,
-            c.import_kind
+            c.import_kind,
+            (COALESCE(length(c.content), 0) > 4096 OR COALESCE(instr(c.content, char(0)), 0) > 0)
         """;
 
     /// <summary>
-    /// Ordinals of the five columns the search covers. They are deliberately identical in
-    /// <see cref="ClipSelectColumns"/> and <see cref="ClipListSelectColumns"/>. A scan
+    /// The list columns plus the full text, for the in-memory search scan: a match is
+    /// decided on the whole clip, never on the prefix a row carries (F-10).
+    /// </summary>
+    private const string ClipScanSelectColumns = ClipListSelectColumns + ", c.content";
+
+    /// <summary>
+    /// Ordinals of the five columns the search covers, in <see cref="ClipScanSelectColumns"/>:
+    /// the four metadata ordinals match <see cref="ClipSelectColumns"/>, and content is the
+    /// full text appended at the end rather than the bounded index 1. A scan
     /// reads only these to decide whether a row matches and materializes the rest of the
     /// entry only if it does: building a thirty-column <see cref="ClipEntry"/> - five
     /// timestamp parses included - for a row about to be discarded was roughly 70% of the
     /// cost of a non-FTS search.
     /// Guarded by ClipListSelectColumns_ExposeTheSearchedColumnsAtTheExpectedOrdinals.
     /// </summary>
-    private const int SearchOrdinalContent = 1;
+    private const int SearchOrdinalContent = 31; // the full text, ClipScanSelectColumns only
     private const int SearchOrdinalSourceApp = 5;
     private const int SearchOrdinalSourceWindowTitle = 17;
     private const int SearchOrdinalSourceUrl = 18;
@@ -343,7 +361,7 @@ public sealed class ClipStoreService : IClipStoreService
         {
             await connection.OpenAsync(cancellationToken);
             await using var command = connection.CreateCommand();
-            command.CommandText = "SELECT id FROM clips WHERE sensitivity_scanned_at IS NULL ORDER BY id;";
+            command.CommandText = PendingSensitivitySql;
 
             pending = [];
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -822,6 +840,20 @@ public sealed class ClipStoreService : IClipStoreService
         return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    internal const string PendingSensitivitySql = "SELECT id FROM clips WHERE sensitivity_scanned_at IS NULL ORDER BY id;";
+
+    internal const string OcrCoverageSql = """
+        SELECT
+            COUNT(*) AS eligible_total,
+            COALESCE(SUM(CASE WHEN ocr_status = 'succeeded' THEN 1 ELSE 0 END), 0) AS succeeded_count,
+            COALESCE(SUM(CASE WHEN ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'rerun' THEN 1 ELSE 0 END), 0) AS pending_count,
+            COALESCE(SUM(CASE WHEN ocr_status = 'running' THEN 1 ELSE 0 END), 0) AS running_count,
+            COALESCE(SUM(CASE WHEN ocr_status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_count
+        FROM clips
+        WHERE content_type = 'image'
+          AND content_bytes IS NOT NULL;
+        """;
+
     public Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default)
         => RunOffCallerAsync(ct => GetOcrCoverageCoreAsync(ct), cancellationToken);
 
@@ -831,17 +863,8 @@ public sealed class ClipStoreService : IClipStoreService
         await connection.OpenAsync(cancellationToken);
 
         await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT
-                COUNT(*) AS eligible_total,
-                COALESCE(SUM(CASE WHEN ocr_status = 'succeeded' THEN 1 ELSE 0 END), 0) AS succeeded_count,
-                COALESCE(SUM(CASE WHEN ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'rerun' THEN 1 ELSE 0 END), 0) AS pending_count,
-                COALESCE(SUM(CASE WHEN ocr_status = 'running' THEN 1 ELSE 0 END), 0) AS running_count,
-                COALESCE(SUM(CASE WHEN ocr_status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_count
-            FROM clips
-            WHERE content_type = 'image'
-              AND content_bytes IS NOT NULL;
-            """;
+        command.CommandText = OcrCoverageSql;
+
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))
@@ -1083,25 +1106,47 @@ public sealed class ClipStoreService : IClipStoreService
             await deleteMatchesCommand.ExecuteNonQueryAsync(cancellationToken);
         }
 
+        // Write only the rows whose verdict changes (F-24). The blanket
+        // "SET is_sensitive = sensitivity_is_manual" rewrote every clip - its
+        // whole record, payload included - on every rule save: 15 s and 277 MB
+        // of write lock at 60k clips, to change a handful of flags at most.
+        await using (var matchedTable = connection.CreateCommand())
+        {
+            matchedTable.Transaction = transaction;
+            matchedTable.CommandText = "CREATE TEMP TABLE IF NOT EXISTS rebuild_matched (id INTEGER PRIMARY KEY); DELETE FROM temp.rebuild_matched;";
+            await matchedTable.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var insertMatched = connection.CreateCommand())
+        {
+            insertMatched.Transaction = transaction;
+            insertMatched.CommandText = "INSERT INTO temp.rebuild_matched (id) VALUES ($id);";
+            var matchedId = insertMatched.Parameters.Add("$id", SqliteType.Integer);
+            foreach (var (clipId, _) in matched)
+            {
+                matchedId.Value = clipId;
+                await insertMatched.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
+
         await using (var resetSensitiveCommand = connection.CreateCommand())
         {
             resetSensitiveCommand.Transaction = transaction;
-            resetSensitiveCommand.CommandText = "UPDATE clips SET is_sensitive = sensitivity_is_manual;";
+            resetSensitiveCommand.CommandText = """
+                UPDATE clips SET is_sensitive = sensitivity_is_manual
+                WHERE is_sensitive IS NOT sensitivity_is_manual
+                  AND id NOT IN (SELECT id FROM temp.rebuild_matched);
+                UPDATE clips SET is_sensitive = 1
+                WHERE is_sensitive IS NOT 1
+                  AND id IN (SELECT id FROM temp.rebuild_matched);
+                DROP TABLE temp.rebuild_matched;
+                """;
             await resetSensitiveCommand.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        await using (var updateCommand = connection.CreateCommand())
+        foreach (var (clipId, matches) in matched)
         {
-            updateCommand.Transaction = transaction;
-            updateCommand.CommandText = "UPDATE clips SET is_sensitive = 1 WHERE id = $id;";
-            var updateId = updateCommand.Parameters.Add("$id", SqliteType.Integer);
-
-            foreach (var (clipId, matches) in matched)
-            {
-                updateId.Value = clipId;
-                await updateCommand.ExecuteNonQueryAsync(cancellationToken);
-                await AddSensitivityMatchesAsync(connection, transaction, clipId, matches, cancellationToken);
-            }
+            await AddSensitivityMatchesAsync(connection, transaction, clipId, matches, cancellationToken);
         }
 
         // Reconcile embedding state with the sensitivity verdicts we just rewrote.
@@ -1115,7 +1160,7 @@ public sealed class ClipStoreService : IClipStoreService
             reconcile.Transaction = transaction;
             reconcile.CommandText = """
                 DELETE FROM clip_embeddings WHERE clip_id IN (SELECT id FROM clips WHERE is_sensitive = 1);
-                UPDATE clips SET embedding_status = 'excluded' WHERE is_sensitive = 1;
+                UPDATE clips SET embedding_status = 'excluded' WHERE is_sensitive = 1 AND embedding_status IS NOT 'excluded';
                 UPDATE clips SET embedding_status = NULL, embedding_attempts = 0 WHERE is_sensitive = 0 AND embedding_status = 'excluded';
                 """;
             await reconcile.ExecuteNonQueryAsync(cancellationToken);
@@ -1493,6 +1538,99 @@ public sealed class ClipStoreService : IClipStoreService
         return await GetClipByIdAsync(connection, clipId, cancellationToken);
     }
 
+    /// <summary>
+    /// An FTS expression whose matches are a superset of what the in-memory
+    /// matcher accepts, or null when there is none (F-07).
+    /// </summary>
+    /// <remarks>
+    /// The trigram index folds case and matches any substring of the five
+    /// indexed columns, so a row that matches a case-sensitive, whole-word or
+    /// wildcard search necessarily contains each term (or, for a wildcard, each
+    /// literal run between <c>*</c> and <c>?</c>) case-insensitively somewhere in
+    /// those columns. Requiring all of them in FTS therefore never drops a match;
+    /// the exact matcher still runs on every candidate.
+    ///
+    /// Every term has to be three code points or longer: the index holds no
+    /// shorter trigram, so a shorter term would match nothing and drop real
+    /// matches. Regex is never prefiltered - a pattern has no reliable literal
+    /// terms - and its cost is bounded by the regex engine choice instead.
+    ///
+    /// "Case-insensitively" means the index's folding, which is narrower than a
+    /// .NET regex's IgnoreCase. A case-insensitive search therefore requires only
+    /// the runs of each term between characters the two treat differently (see
+    /// <see cref="FoldsLikeTheTrigramIndex"/>), and those runs that are still
+    /// three code points long.
+    /// </remarks>
+    internal static string? BuildPrefilterExpression(ClipSearchFilters filters)
+    {
+        if (filters.UseRegex || string.IsNullOrWhiteSpace(filters.SearchText))
+        {
+            return null;
+        }
+
+        var terms = filters.UseWildcard
+            ? filters.SearchText.Split(['*', '?'], StringSplitOptions.RemoveEmptyEntries)
+            : filters.SearchText.Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (terms.Length == 0 || terms.Any(static t => TrigramIndexableLength(t) < 3))
+        {
+            return null;
+        }
+
+        if (!filters.CaseSensitive)
+        {
+            terms = [.. terms.SelectMany(SplitAtFoldMismatches).Where(static t => TrigramIndexableLength(t) >= 3)];
+            if (terms.Length == 0)
+            {
+                return null;
+            }
+        }
+
+        return string.Join(" AND ", terms.Select(static t => "\"" + t.Replace("\"", "\"\"", StringComparison.Ordinal) + "\""));
+    }
+
+    private static IEnumerable<string> SplitAtFoldMismatches(string term)
+    {
+        var start = 0;
+        for (var i = 0; i <= term.Length; i++)
+        {
+            if (i == term.Length || !FoldsLikeTheTrigramIndex(term[i]))
+            {
+                if (i > start)
+                {
+                    yield return term[start..i];
+                }
+
+                start = i + 1;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether every character a case-insensitive .NET regex treats as equal to
+    /// <paramref name="c"/> is also folded together with it by the trigram index,
+    /// so requiring <paramref name="c"/> in FTS cannot drop a regex match (F-07-3).
+    /// The regex equivalences are wider: I and i also match U+0130 in every
+    /// culture and I matches U+0131 in Turkish, and letters newer than SQLite's
+    /// folding table do not fold at all. So only ASCII other than I and i, and
+    /// characters with no case mapping, are kept. The prefilter splits a term at
+    /// anything else and requires only the runs between - a looser filter, never
+    /// a different match. ThePrefilterSafeCharacters_FoldLikeTheRegex checks this
+    /// against the real index and regex for every BMP character.
+    /// </summary>
+    private static bool FoldsLikeTheTrigramIndex(char c)
+    {
+        if (c < 0x80)
+        {
+            return c is not ('I' or 'i');
+        }
+
+        var culture = CultureInfo.CurrentCulture;
+        return !char.IsSurrogate(c)
+            && char.ToUpperInvariant(c) == c
+            && char.ToLowerInvariant(c) == c
+            && char.ToUpper(c, culture) == c
+            && char.ToLower(c, culture) == c;
+    }
     private async Task<ClipSearchResult> SearchInMemoryAsync(SqliteConnection connection, ClipSearchFilters filters, CancellationToken cancellationToken)
     {
         // Build the matcher set for this search ONCE here — not per row. (U13)
@@ -1502,6 +1640,12 @@ public sealed class ClipStoreService : IClipStoreService
 
         var items = new List<ClipEntry>(filters.Limit);
         var whereClauses = BuildWhereClauses(filters, hasSearch: false);
+        var prefilter = BuildPrefilterExpression(filters);
+        if (prefilter is not null)
+        {
+            whereClauses.Add("c.id IN (SELECT rowid FROM clips_fts WHERE clips_fts MATCH $prefilter)");
+        }
+
         var whereClause = whereClauses.Count > 0 ? $"WHERE {string.Join(" AND ", whereClauses)}" : string.Empty;
         var totalMatchingCount = 0;
         // Stop counting at Offset+Limit+1 so we know there are more without a full table scan. (U15)
@@ -1517,12 +1661,16 @@ public sealed class ClipStoreService : IClipStoreService
                 // silently stopped working the moment the user ticked Regex or Case
                 // (which is what diverts us here in the first place).
                 queryCommand.CommandText = $"""
-                    SELECT {ClipListSelectColumns}
+                    SELECT {ClipScanSelectColumns}
                     FROM clips c
                     {whereClause}
                     {BuildOrderClause(filters.SortOption)};
                     """;
                 AddSearchParameters(queryCommand, filters, hasSearch: false);
+                if (prefilter is not null)
+                {
+                    queryCommand.Parameters.AddWithValue("$prefilter", prefilter);
+                }
 
                 await using var reader = await queryCommand.ExecuteReaderAsync(cancellationToken);
                 while (await reader.ReadAsync(cancellationToken))
@@ -1797,13 +1945,15 @@ public sealed class ClipStoreService : IClipStoreService
     }
 
     /// <summary>
-    /// Above this many matches, walking the ordered index beats sorting the matches.
-    /// The crossover is where the two per-row costs meet: an index-only membership
-    /// probe is ~0.3 us against ~15 us to fetch a clips row (they carry content and
-    /// the source-app icon inline) and sort it, so a few thousand matches is the
-    /// point at which sorting them all costs more than reading the whole index.
+    /// At or above this many matches, walking the ordered index beats sorting the
+    /// matches. It was 2000, tuned on rows with no payload; on the U-D0 library,
+    /// whose rows carry their content, bytes and icon inline, fetching and sorting
+    /// a match costs far more than the ~15 us that tuning assumed. Measured there
+    /// at 60k clips (F-08): 516 matches sorted 570-649 ms vs 126 ms walking the
+    /// index; ~1,500 matches 705-752 ms vs 53 ms. 200 follows the audit's
+    /// 100-200 estimate; PerfProbes P1 re-measures it.
     /// </summary>
-    private const int BroadSearchMatchThreshold = 2000;
+    private const int BroadSearchMatchThreshold = 200;
 
     /// <summary>
     /// Builds the SQL WHERE clauses for a filter set. The structural subset
@@ -2115,6 +2265,7 @@ public sealed class ClipStoreService : IClipStoreService
             SourceClipId = reader.IsDBNull(27) ? null : reader.GetInt64(27),
             TransformKind = reader.IsDBNull(28) ? null : reader.GetString(28),
             ImportKind = reader.IsDBNull(29) ? null : reader.GetString(29),
+            IsContentTruncated = reader.GetInt64(30) == 1,
         };
     }
 
@@ -2618,6 +2769,21 @@ public sealed class ClipStoreService : IClipStoreService
     // A RerunAll resets the counter to give every clip a fresh set of attempts.
     private const int MaxEmbeddingAttempts = 3;
 
+    // INDEXED BY: without stored statistics the planner prefers
+    // idx_clips_retention (is_sensitive = 0, true of nearly every row) plus a
+    // temp B-tree, which visits the whole table - 2.3 s per claim at 60k clips,
+    // 17 s encrypted, even with nothing to claim (F-05). The backlog index
+    // reaches only the rows that still need a vector.
+    internal const string EmbeddingClaimSql = $"""
+        SELECT id, ({EmbeddingTextExpression}) AS etext
+        FROM clips INDEXED BY idx_clips_embedding_backlog
+        WHERE (embedding_status IS NULL OR embedding_status IN ('pending','rerun')
+               OR (embedding_status = 'failed' AND embedding_attempts < $maxAttempts))
+          AND {EmbeddingEligibilityClause}
+        ORDER BY COALESCE(last_copied_at, captured_at) DESC
+        LIMIT $limit;
+        """;
+
     public Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default)
         => RunOffCallerAsync(ct => ClaimPendingEmbeddingsCoreAsync(batchSize, ct), cancellationToken);
 
@@ -2628,22 +2794,15 @@ public sealed class ClipStoreService : IClipStoreService
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        var candidates = new List<ClipEmbeddingCandidate>(batchSize);
 
-        var results = new List<ClipEmbeddingCandidate>(batchSize);
-
+        // Read outside any write transaction. The claim runs on every capture
+        // and every idle tick; under BEGIN IMMEDIATE its SELECT held the write
+        // lock for its whole duration and each capture queued behind it (F-05).
         await using (var selectCommand = connection.CreateCommand())
         {
-            selectCommand.Transaction = transaction;
-            selectCommand.CommandText = $"""
-                SELECT id, ({EmbeddingTextExpression}) AS etext
-                FROM clips
-                WHERE (embedding_status IS NULL OR embedding_status IN ('pending','rerun')
-                       OR (embedding_status = 'failed' AND embedding_attempts < $maxAttempts))
-                  AND {EmbeddingEligibilityClause}
-                ORDER BY COALESCE(last_copied_at, captured_at) DESC
-                LIMIT $limit;
-                """;
+            selectCommand.CommandText = EmbeddingClaimSql;
+
             selectCommand.Parameters.AddWithValue("$limit", batchSize);
             selectCommand.Parameters.AddWithValue("$maxAttempts", MaxEmbeddingAttempts);
 
@@ -2654,28 +2813,49 @@ public sealed class ClipStoreService : IClipStoreService
                 var text = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
                 if (!string.IsNullOrWhiteSpace(text))
                 {
-                    results.Add(new ClipEmbeddingCandidate(id, text));
+                    candidates.Add(new ClipEmbeddingCandidate(id, text));
                 }
             }
         }
 
-        if (results.Count > 0)
+        if (candidates.Count == 0)
         {
-            await using var claim = connection.CreateCommand();
-            claim.Transaction = transaction;
-            var paramNames = new List<string>(results.Count);
-            for (var i = 0; i < results.Count; i++)
+            return candidates;
+        }
+
+        // The write is short and re-checks the backlog state: a row that was
+        // claimed, deleted, marked sensitive or embedded between the read and
+        // here is not flipped, and is not handed to the worker.
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await using var claim = connection.CreateCommand();
+        claim.Transaction = transaction;
+        var paramNames = new List<string>(candidates.Count);
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            var p = "$id" + i;
+            paramNames.Add(p);
+            claim.Parameters.AddWithValue(p, candidates[i].ClipId);
+        }
+        claim.Parameters.AddWithValue("$maxAttempts", MaxEmbeddingAttempts);
+        claim.CommandText = $"""
+            UPDATE clips SET embedding_status = 'processing'
+            WHERE id IN ({string.Join(",", paramNames)})
+              AND is_sensitive = 0
+              AND (embedding_status IS NULL OR embedding_status IN ('pending','rerun')
+                   OR (embedding_status = 'failed' AND embedding_attempts < $maxAttempts))
+            RETURNING id;
+            """;
+        var claimedIds = new HashSet<long>();
+        await using (var reader = await claim.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
             {
-                var p = "$id" + i;
-                paramNames.Add(p);
-                claim.Parameters.AddWithValue(p, results[i].ClipId);
+                claimedIds.Add(reader.GetInt64(0));
             }
-            claim.CommandText = $"UPDATE clips SET embedding_status = 'processing' WHERE id IN ({string.Join(",", paramNames)});";
-            await claim.ExecuteNonQueryAsync(cancellationToken);
         }
 
         await transaction.CommitAsync(cancellationToken);
-        return results;
+        return candidates.Where(c => claimedIds.Contains(c.ClipId)).ToList();
     }
 
     /// <inheritdoc />
@@ -2801,6 +2981,12 @@ public sealed class ClipStoreService : IClipStoreService
         return rows > 0;
     }
 
+    /// <summary>Clips per rerun-all transaction (F-24). Settable for tests.</summary>
+    internal int RerunBatchSize { get; set; } = 2000;
+
+    /// <summary>Test hook: runs after each rerun-all batch commits, while the write lock is free.</summary>
+    internal Func<Task>? AfterRerunBatchCommitted { get; set; }
+
     public Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default)
         => RunOffCallerAsync(ct => MarkAllEmbeddingsForRerunCoreAsync(ct), cancellationToken);
 
@@ -2809,33 +2995,66 @@ public sealed class ClipStoreService : IClipStoreService
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
-
-        await using (var purge = connection.CreateCommand())
+        long minId;
+        long maxId;
+        await using (var bounds = connection.CreateCommand())
         {
-            purge.Transaction = transaction;
-            purge.CommandText = "DELETE FROM clip_embeddings;";
-            await purge.ExecuteNonQueryAsync(cancellationToken);
+            bounds.CommandText = "SELECT COALESCE(MIN(id), 0), COALESCE(MAX(id), -1) FROM clips;";
+            await using var reader = await bounds.ExecuteReaderAsync(cancellationToken);
+            await reader.ReadAsync(cancellationToken);
+            minId = reader.GetInt64(0);
+            maxId = reader.GetInt64(1);
         }
 
+        // One short transaction per id range rather than one over the library
+        // (F-24): that held the write lock for 74 s at 60k clips, and a capture
+        // issued meanwhile failed after busy_timeout and was lost. Clips captured
+        // after the bounds were read are new and unembedded anyway. A rerun cut
+        // short leaves the earlier ranges marked, which re-running completes.
+        var batchSize = Math.Max(1, RerunBatchSize);
         var ids = new List<long>();
-        await using (var update = connection.CreateCommand())
+        for (var low = minId; low <= maxId; low += batchSize)
         {
-            update.Transaction = transaction;
-            update.CommandText = $"""
-                UPDATE clips
-                SET embedding_status = 'rerun', embedding_attempts = 0
-                WHERE {EmbeddingEligibilityClause}
-                RETURNING id;
-                """;
-            await using var reader = await update.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
+            var high = low + batchSize - 1;
+            await using (var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken))
             {
-                ids.Add(reader.GetInt64(0));
+                await using (var purge = connection.CreateCommand())
+                {
+                    purge.Transaction = transaction;
+                    purge.CommandText = "DELETE FROM clip_embeddings WHERE clip_id BETWEEN $low AND $high;";
+                    purge.Parameters.AddWithValue("$low", low);
+                    purge.Parameters.AddWithValue("$high", high);
+                    await purge.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                await using (var update = connection.CreateCommand())
+                {
+                    update.Transaction = transaction;
+                    update.CommandText = $"""
+                        UPDATE clips
+                        SET embedding_status = 'rerun', embedding_attempts = 0
+                        WHERE id BETWEEN $low AND $high
+                          AND {EmbeddingEligibilityClause}
+                        RETURNING id;
+                        """;
+                    update.Parameters.AddWithValue("$low", low);
+                    update.Parameters.AddWithValue("$high", high);
+                    await using var reader = await update.ExecuteReaderAsync(cancellationToken);
+                    while (await reader.ReadAsync(cancellationToken))
+                    {
+                        ids.Add(reader.GetInt64(0));
+                    }
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            if (AfterRerunBatchCommitted is { } afterBatch)
+            {
+                await afterBatch().ConfigureAwait(false);
             }
         }
 
-        await transaction.CommitAsync(cancellationToken);
         return ids;
     }
 

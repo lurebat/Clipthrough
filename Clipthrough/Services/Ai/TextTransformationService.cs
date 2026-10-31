@@ -56,7 +56,9 @@ public static partial class TextTransformationService
     /// </summary>
     public static bool CanTransform(Models.ClipEntry clip)
         => clip.ContentType is Models.ContentType.Text or Models.ContentType.RichText or Models.ContentType.Files
-            && !string.IsNullOrEmpty(clip.Content);
+            // ContentPrefix, not Content: this is asked of list rows, whose Content throws
+            // once a clip is longer than the bound (U-D5). Emptiness is all it needs.
+            && !string.IsNullOrEmpty(clip.ContentPrefix);
 
     /// <summary>
     /// Applies <paramref name="transformation"/> to <paramref name="input"/>.
