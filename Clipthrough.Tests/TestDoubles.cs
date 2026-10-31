@@ -117,15 +117,25 @@ internal sealed class TestSettingsService : ISettingsService
 
     public event EventHandler<AppSettings>? SettingsChanged;
 
-    public Task InitializeAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Makes <see cref="InitializeAsync"/> take this long. With no saved settings
+    /// the view model loads them inside its background database start, so this
+    /// holds the database "not ready" for a known time (F-30).
+    /// </summary>
+    public TimeSpan InitializeDelay { get; set; }
+
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
+        if (InitializeDelay > TimeSpan.Zero)
+        {
+            await Task.Delay(InitializeDelay, cancellationToken);
+        }
+
         if (_initializeCurrent is not null)
         {
             Current = _initializeCurrent;
             SettingsChanged?.Invoke(this, Current);
         }
-
-        return Task.CompletedTask;
     }
 
     public Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)

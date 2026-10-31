@@ -1480,14 +1480,6 @@
     "filter": "FullyQualifiedName~ClipStoredBytesTests"
   },
   {
-    "id": "stored-bytes-trigger-misses-a-size-change",
-    "file": "Clipthrough/Database/DatabaseInitializer.cs",
-    "why": "Since U-E1 a row costs its payload alone, so the UPDATE trigger's job is byte_size changes (a re-copy, deferred content); without it the stored total keeps the old size. The late icon is counted in app_icons instead (size-cap-ignores-stored-icons).",
-    "find": "        CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF byte_size ON clips BEGIN\n",
-    "replace": "        CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF hash ON clips BEGIN\n",
-    "filter": "FullyQualifiedName~ClipStoredBytesTests"
-  },
-  {
     "id": "stored-bytes-not-maintained-on-insert",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "Without the insert trigger every new clip is totalled as zero bytes, so the library size cap never fires.",
@@ -2656,6 +2648,94 @@
     "filter": "FullyQualifiedName~WhitespaceToJsonArray"
   },
   {
+    "id": "headless-startup-does-not-wait-for-the-database",
+    "file": "Clipthrough.Tests/Headless/HeadlessStartup.cs",
+    "why": "F-30. Tests that act before the background database start lands race it: a 1.5 s delay before _isDatabaseReady failed 11 of 65 view-model tests. Inverse check, run when this landed: with that delay injected into MainWindowViewModel and this helper intact, all 66 MainWindowViewModelHeadlessTests passed.",
+    "find": "        while (viewModel.IsLoadingDatabase || viewModel.DatabaseStartupTask is { IsCompleted: false })\n",
+    "replace": "        while ((viewModel.IsLoadingDatabase || viewModel.DatabaseStartupTask is { IsCompleted: false }) && deadline < DateTime.MinValue)\n",
+    "filter": "FullyQualifiedName~TheStartupHelper_ReturnsOnlyOnceTheDatabaseIsOpen_EvenWhenOpeningIsSlow"
+  },
+  {
+    "id": "copilot-token-written-unprotected",
+    "file": "Clipthrough/Services/Ai/CopilotAuthService.cs",
+    "why": "F-31. The GitHub token behind Copilot must reach disk only through DPAPI; survived all 721 tests in the audit because nothing could construct the persisting service safely.",
+    "find": "            AtomicFile.WriteAllBytes(_tokenPath, protectedBytes);\n",
+    "replace": "            AtomicFile.WriteAllBytes(_tokenPath, protectedBytes.Length >= 0 ? raw : protectedBytes);\n",
+    "filter": "FullyQualifiedName~CopilotAuthServicePersistenceTests"
+  },
+  {
+    "id": "copilot-signout-leaves-token",
+    "file": "Clipthrough/Services/Ai/CopilotAuthService.cs",
+    "why": "F-31. Signing out must delete the persisted token, or the next launch signs straight back in.",
+    "find": "                if (File.Exists(_tokenPath)) File.Delete(_tokenPath);\n",
+    "replace": "                if (File.Exists(_tokenPath) && _tokenPath.Length < 0) File.Delete(_tokenPath);\n",
+    "filter": "FullyQualifiedName~CopilotAuthServicePersistenceTests"
+  },
+  {
+    "id": "copilot-token-sent-to-custom-base-url",
+    "file": "Clipthrough/Services/Ai/AiTransformService.cs",
+    "why": "F-32. The Copilot session token must only ever go to api.githubcopilot.com; sending it to the user-configured OpenAI base URL leaks it to any host the settings name.",
+    "find": "            return (CopilotBaseUrl, token, model, imageModel, true);\n",
+    "replace": "            return (CopilotBaseUrl.Length > 0 ? ResolveOpenAiConfig().BaseUrl : CopilotBaseUrl, token, model, imageModel, true);\n",
+    "filter": "FullyQualifiedName~AiTransformServiceTests"
+  },
+  {
+    "id": "export-sanitizer-disabled",
+    "file": "Clipthrough/Services/Capture/ClipExportService.cs",
+    "why": "F-33. The export folder and file names come from the clip's first line; without the sanitiser a line like ..\\..\\x chooses where the files are written.",
+    "find": "            builder.Append(Array.IndexOf(invalidChars, character) >= 0 ? '_' : character);\n",
+    "replace": "            builder.Append(Array.IndexOf(invalidChars, character) < -1 ? '_' : character);\n",
+    "filter": "FullyQualifiedName~ClipExportContainmentTests"
+  },
+  {
+    "id": "clipangel-blob-cap-removed",
+    "file": "Clipthrough/Services/Storage/ClipAngelImportService.cs",
+    "why": "F-34. Closed finding #19 capped each imported blob at 32 MB so a hostile or malformed ClipAngel file cannot exhaust memory; raising the cap a thousandfold survived all 721 tests in the audit.",
+    "find": "CASE WHEN typeof(Binary) = 'blob' AND LENGTH(Binary) > {MaxImportBlobSizeBytes}",
+    "replace": "CASE WHEN typeof(Binary) = 'blob' AND LENGTH(Binary) > {MaxImportBlobSizeBytes * 1000}",
+    "filter": "FullyQualifiedName~ClipAngelImportServiceTests.APlainDatabase_ImportsEachKindOfRow_AndDropsTheOverCapBlob"
+  },
+  {
+    "id": "clipangel-decrypted-copy-left-in-temp",
+    "file": "Clipthrough/Services/Storage/ClipAngelImportService.cs",
+    "why": "F-34 (found by its tests). A pooled connection keeps the decrypted copy open, TryDelete fails silently, and a plaintext copy of the ClipAngel history stays in %TEMP%.",
+    "find": "var conn = Clipthrough.Database.SqliteConnectionFactory.Create(path, password: null, SqliteOpenMode.ReadOnly, pooling: false);",
+    "replace": "var conn = Clipthrough.Database.SqliteConnectionFactory.Create(path, password: null, SqliteOpenMode.ReadOnly, pooling: true);",
+    "filter": "FullyQualifiedName~ClipAngelImportServiceTests"
+  },
+  {
+    "id": "openurl-accepts-file-scheme",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "F-44. OpenUrlAsync must ShellExecute only web and mail URLs; a file: or UNC URL would launch local programs or leak NetNTLM over SMB.",
+    "find": "            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeMailto))\n",
+    "replace": "            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeMailto && uri.Scheme != Uri.UriSchemeFile))\n",
+    "filter": "FullyQualifiedName~SystemInteractionHelpersTests"
+  },
+  {
+    "id": "command-template-ignores-placeholders",
+    "file": "Clipthrough/Services/Platform/SystemInteractionService.cs",
+    "why": "F-44. A diff/editor template's {left}/{right} must become the files to open; ignoring them launches the tool on the literal placeholders.",
+    "find": "                    t = t.Replace(token, value, StringComparison.Ordinal);\n",
+    "replace": "                    t = value.Length < 0 ? t.Replace(token, value, StringComparison.Ordinal) : t;\n",
+    "filter": "FullyQualifiedName~SystemInteractionHelpersTests"
+  },
+  {
+    "id": "search-history-unbounded",
+    "file": "Clipthrough/Services/Search/SearchHistoryService.cs",
+    "why": "F-45. Search history is capped at the newest 50 queries; the existing tests saved at most three, so removing the cap survived every test.",
+    "find": "        pruneCommand.Parameters.AddWithValue(\"$limit\", MaxHistoryEntries);\n",
+    "replace": "        pruneCommand.Parameters.AddWithValue(\"$limit\", MaxHistoryEntries * 1000);\n",
+    "filter": "FullyQualifiedName~SearchHistoryCapTests"
+  },
+  {
+    "id": "stored-bytes-trigger-misses-a-size-change",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Since U-E1 a row costs its payload alone, so the UPDATE trigger's job is byte_size changes (a re-copy, deferred content); without it the stored total keeps the old size. The late icon is counted in app_icons instead (size-cap-ignores-stored-icons).",
+    "find": "        CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF byte_size ON clips BEGIN\n",
+    "replace": "        CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF hash ON clips BEGIN\n",
+    "filter": "FullyQualifiedName~ClipStoredBytesTests"
+  },
+  {
     "id": "embedding-claim-plan-not-pinned",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "F-05. Without INDEXED BY the planner takes idx_clips_retention plus a temp B-tree and visits every row: 2.3 s per claim at 60k, 17 s encrypted.",
@@ -3816,22 +3896,6 @@
     "filter": "FullyQualifiedName~DragDropImageEncodingTests"
   },
   {
-    "id": "clipangel-blob-cap-removed",
-    "file": "Clipthrough/Services/Storage/ClipAngelImportService.cs",
-    "why": "F-34. Closed finding #19 capped each imported blob at 32 MB so a hostile or malformed ClipAngel file cannot exhaust memory; raising the cap a thousandfold survived all 721 tests in the audit.",
-    "find": "CASE WHEN typeof(Binary) = 'blob' AND LENGTH(Binary) > {MaxImportBlobSizeBytes}",
-    "replace": "CASE WHEN typeof(Binary) = 'blob' AND LENGTH(Binary) > {MaxImportBlobSizeBytes * 1000}",
-    "filter": "FullyQualifiedName~ClipAngelImportServiceTests.APlainDatabase_ImportsEachKindOfRow_AndDropsTheOverCapBlob"
-  },
-  {
-    "id": "clipangel-decrypted-copy-left-in-temp",
-    "file": "Clipthrough/Services/Storage/ClipAngelImportService.cs",
-    "why": "F-34 (found by its tests). A pooled connection keeps the decrypted copy open, TryDelete fails silently, and a plaintext copy of the ClipAngel history stays in %TEMP%.",
-    "find": "var conn = Clipthrough.Database.SqliteConnectionFactory.Create(path, password: null, SqliteOpenMode.ReadOnly, pooling: false);",
-    "replace": "var conn = Clipthrough.Database.SqliteConnectionFactory.Create(path, password: null, SqliteOpenMode.ReadOnly, pooling: true);",
-    "filter": "FullyQualifiedName~ClipAngelImportServiceTests"
-  },
-  {
     "id": "clipangel-import-builds-its-own-connection",
     "file": "Clipthrough/Services/Storage/ClipAngelImportService.cs",
     "why": "Guard R7 across C and G/U-C9. Phase C's ClipAngel validation opened its own connection and set busy_timeout itself; once G and U-C9 made the factory the only place a connection is built, that copy bypassed it. The source scan must catch it coming back.",
@@ -4288,6 +4352,46 @@
     "filter": "FullyQualifiedName~ACorruptLibrary_IsNotMovedInTheBackground"
   },
   {
+    "id": "headless-gate-ignores-dotnet-exit-code",
+    "file": ".github/scripts/Invoke-HeadlessTests.ps1",
+    "why": "Rubber-duck F-08-1: dotnet test exiting non-zero with no failed test recorded (a crashed test host) must fail the gate, not read as all passed.",
+    "find": "$exitCode -ne 0 -and $run.Failures.Count -eq 0",
+    "replace": "$exitCode -ne $exitCode -and $run.Failures.Count -eq 0",
+    "filter": "FullyQualifiedName~CiHeadlessGateScriptTests"
+  },
+  {
+    "id": "headless-gate-accepts-zero-tests",
+    "file": ".github/scripts/Invoke-HeadlessTests.ps1",
+    "why": "Rubber-duck F-08-1: a run that executed no test (a filter matching nothing) must fail the gate.",
+    "find": "} elseif ($run.Executed -eq 0) {",
+    "replace": "} elseif ($run.Executed -lt 0) {",
+    "filter": "FullyQualifiedName~CiHeadlessGateScriptTests"
+  },
+  {
+    "id": "headless-gate-ignores-run-level-error",
+    "file": ".github/scripts/Invoke-HeadlessTests.ps1",
+    "why": "Rubber-duck F-08-1: a run-level error in the TRX (xUnit \"Catastrophic failure\") means the run did not complete; a cleanup failure in such a run must not be retried into green.",
+    "find": "} elseif ($run.RunErrors.Count -gt 0) {",
+    "replace": "} elseif ($run.RunErrors.Count -lt 0) {",
+    "filter": "FullyQualifiedName~CiHeadlessGateScriptTests"
+  },
+  {
+    "id": "headless-gate-reads-stale-trx",
+    "file": ".github/scripts/Invoke-HeadlessTests.ps1",
+    "why": "Rubber-duck F-08-1: the TRX name is fixed, so one left by an earlier invocation must be deleted before the run or it stands in for a run that wrote none.",
+    "find": "    if (Test-Path -LiteralPath $trxPath) { Remove-Item",
+    "replace": "    if ($trxPath.Length -lt 0) { Remove-Item",
+    "filter": "FullyQualifiedName~CiHeadlessGateScriptTests"
+  },
+  {
+    "id": "headless-gate-retry-skips-completeness",
+    "file": ".github/scripts/Invoke-HeadlessTests.ps1",
+    "why": "Rubber-duck F-08-1: the cleanup-failure retry must pass every test it re-ran for; one it never ran must not clear the gate.",
+    "find": "Where-Object { $_ -notin $rerunPassed }",
+    "replace": "Where-Object { $_ -notin $rerunPassed -and $_.Length -lt 0 }",
+    "filter": "FullyQualifiedName~CiHeadlessGateScriptTests"
+  },
+  {
     "id": "maintenance-scope-skips-background-upgrade",
     "file": "Clipthrough/Services/Storage/DatabaseMaintenanceScope.cs",
     "why": "Rubber-duck F-13-1: the background upgrade holds its own connection, so a rekey/restore/move entered while it ran renamed or rewrote a file under a live writer. The scope must pause it before the pool clear.",
@@ -4502,6 +4606,22 @@
     "find": "            .Select(s => (Screen: s, Overlap: OverlapArea(frame, s.WorkingArea)))",
     "replace": "            .Select(s => (Screen: s, Overlap: OverlapArea(new PixelRect(remembered.Position, OuterPixels(remembered.ClientSize, frameExtra, s.Scaling)), s.WorkingArea)))",
     "filter": "FullyQualifiedName~WindowGeometryTests.ARememberedWindowMostlyOnA100PercentScreen"
+  },
+  {
+    "id": "headless-gate-cleanup-marker-anywhere",
+    "file": ".github/scripts/Invoke-HeadlessTests.ps1",
+    "why": "Rubber-duck F-08-2: only a message that opens with the cleanup marker is a cleanup failure; an assertion that quotes the marker is a real failure and must not be retried.",
+    "find": "$message.StartsWith($cleanupMarker, [StringComparison]::Ordinal)",
+    "replace": "$message.Contains($cleanupMarker, [StringComparison]::Ordinal)",
+    "filter": "FullyQualifiedName~CiHeadlessGateScriptTests"
+  },
+  {
+    "id": "loaded-viewmodel-helper-polls-one-second",
+    "file": "Clipthrough.Tests/Headless/MainWindowViewModelHeadlessTests.PendingDeletes.cs",
+    "why": "Rubber-duck F-08-3: CreateLoadedViewModelAsync must wait for the database start itself, not poll the clip count for about a second, or a slow startup fails its callers with a genuine assertion.",
+    "find": "        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);\n\n        Assert.Equal(expectedClips, viewModel.Clips.Count);",
+    "replace": "        await viewModel.InitializeAsync();\n        for (var attempt = 0; attempt < 40 && viewModel.Clips.Count < expectedClips; attempt++)\n        {\n            await Task.Delay(25);\n            Dispatcher.UIThread.RunJobs();\n        }\n\n        Assert.Equal(expectedClips, viewModel.Clips.Count);",
+    "filter": "FullyQualifiedName~TheLoadedViewModelHelper_WaitsForASlowStartup"
   },
   {
     "id": "background-move-leaves-ocr-index-dropped",

@@ -46,6 +46,12 @@ public sealed class ClipExportService : IClipExportService, IDisposable
     {
     }
 
+    /// <summary>Exports under <paramref name="exportRoot"/>; lets tests check containment (F-33).</summary>
+    internal ClipExportService(string exportRoot)
+        : this(exportRoot, Path.GetTempPath())
+    {
+    }
+
     /// <summary>Test seam: where exports and tool copies are written.</summary>
     internal ClipExportService(string exportRoot, string sessionTempParent)
     {
