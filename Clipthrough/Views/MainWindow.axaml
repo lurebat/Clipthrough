@@ -1423,7 +1423,8 @@
             <ItemsControl ItemsSource="{Binding Notifications}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:AppNotificationViewModel">
-                        <Border Background="{Binding Background}"
+                        <Border Classes="toast"
+                                Background="{Binding Background}"
                                 BorderBrush="{Binding BorderBrush}"
                                 BorderThickness="1"
                                 CornerRadius="10"

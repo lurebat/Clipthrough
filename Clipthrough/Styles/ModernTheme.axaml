@@ -532,7 +532,28 @@
         <Setter Property="Transitions" Value="{x:Null}" />
     </Style>
 
-    <Style Selector="ListBox.file-list">        <Setter Property="Background" Value="Transparent" />
+    <!--
+      Motion (O5): a new toast rises 16 px and fades in over 167 ms, decelerating -
+      Fluent's "direct entrance". Only under the motion class. There is no exit
+      fade: that needs the toast held in the list after it is dismissed, which
+      ties the notification queue's timing to the motion policy.
+    -->
+    <Style Selector=":is(Window).motion Border.toast">
+        <Style.Animations>
+            <Animation Duration="0:0:0.167" Easing="CubicEaseOut" FillMode="Forward">
+                <KeyFrame Cue="0%">
+                    <Setter Property="Opacity" Value="0" />
+                    <Setter Property="TranslateTransform.Y" Value="16" />
+                </KeyFrame>
+                <KeyFrame Cue="100%">
+                    <Setter Property="Opacity" Value="1" />
+                    <Setter Property="TranslateTransform.Y" Value="0" />
+                </KeyFrame>
+            </Animation>
+        </Style.Animations>
+    </Style>
+    <Style Selector="ListBox.file-list">
+        <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
     </Style>
 

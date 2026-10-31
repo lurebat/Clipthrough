@@ -5670,5 +5670,29 @@
     "find": "        m_heldNavigationKey = null;\n",
     "replace": "",
     "filter": "FullyQualifiedName~ListHighlightMotionHeadlessTests.WithMotion_AFreshPressAfterRelease_StillFades"
+  },
+  {
+    "id": "toast-entrance-ignores-motion",
+    "file": "Clipthrough/Styles/ModernTheme.axaml",
+    "why": "Toasts animate in even with Animations off.",
+    "find": "<Style Selector=\":is(Window).motion Border.toast\">",
+    "replace": "<Style Selector=\"Border.toast\">",
+    "filter": "FullyQualifiedName~ToastMotionHeadlessTests.WithoutMotion_ANewToastSimplyAppears"
+  },
+  {
+    "id": "toast-does-not-fade",
+    "file": "Clipthrough/Styles/ModernTheme.axaml",
+    "why": "A new toast pops to full opacity instead of fading in.",
+    "find": "                <KeyFrame Cue=\"0%\">\n                    <Setter Property=\"Opacity\" Value=\"0\" />\n                    <Setter Property=\"TranslateTransform.Y\" Value=\"16\" />",
+    "replace": "                <KeyFrame Cue=\"0%\">\n                    <Setter Property=\"Opacity\" Value=\"1\" />\n                    <Setter Property=\"TranslateTransform.Y\" Value=\"16\" />",
+    "filter": "FullyQualifiedName~ToastMotionHeadlessTests.WithMotion_ANewToastRisesAndFadesIn"
+  },
+  {
+    "id": "toast-does-not-rise",
+    "file": "Clipthrough/Styles/ModernTheme.axaml",
+    "why": "A new toast fades in place instead of rising into it.",
+    "find": "                    <Setter Property=\"Opacity\" Value=\"0\" />\n                    <Setter Property=\"TranslateTransform.Y\" Value=\"16\" />",
+    "replace": "                    <Setter Property=\"Opacity\" Value=\"0\" />\n                    <Setter Property=\"TranslateTransform.Y\" Value=\"0\" />",
+    "filter": "FullyQualifiedName~ToastMotionHeadlessTests.WithMotion_ANewToastRisesAndFadesIn"
   }
 ]
