@@ -33,6 +33,21 @@ namespace Clipthrough.ViewModels;
 public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
     private const int PageSize = 200;
+
+    /// <summary>
+    /// How long after the last keystroke or filter change the list re-queries.
+    /// Measured at 60k clips, the query itself is 135-750 ms, so the throttle
+    /// was the smaller part of the wait; 150 ms still coalesces ordinary typing
+    /// into one query, while 80 ms re-queried three to seven times per word and
+    /// made the list jump while typing (docs/plans/2026-10-30-clipthrough-feel-options.md, O10).
+    /// </summary>
+    internal static readonly TimeSpan SearchThrottle = TimeSpan.FromMilliseconds(150);
+
+    /// <summary>
+    /// How long work must have been running before the busy bar appears, so a
+    /// refresh that finishes sooner never blinks it on.
+    /// </summary>
+    internal static readonly TimeSpan BusyIndicatorDelay = TimeSpan.FromMilliseconds(200);
     private static readonly IBrush s_defaultDetailBorderBrush = new SolidColorBrush(Color.Parse("#243247"));
     private static readonly IBrush s_defaultDetailAccentBrush = new SolidColorBrush(Color.Parse("#64748B"));
     private static readonly IBrush s_warningBadgeBackgroundBrush = new SolidColorBrush(Color.Parse("#3A2807"));
@@ -400,7 +415,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         x => x.UseSemanticClipSearch)
                     .Select(static _ => Unit.Default))
                 .Skip(1)
-                .Throttle(TimeSpan.FromMilliseconds(300), RxSchedulers.MainThreadScheduler)
+                .Throttle(SearchThrottle, RxSchedulers.MainThreadScheduler)
                 // Straight into the refresh queue, not through RefreshCommand: a
                 // ReactiveCommand cannot execute while it is already executing, so
                 // a query change during a running refresh was dropped rather than
@@ -495,6 +510,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .ObserveOn(RxSchedulers.MainThreadScheduler)
                 .Subscribe(busy => IsCapturing = busy,
                     ex => Trace.TraceError($"Capture-busy subscription failed: {ex}")));
+
+        // The busy bar follows IsBusyOrCapturing, but only once it has held for
+        // BusyIndicatorDelay: most refreshes finish well inside that, and a bar
+        // that blinks on for each of them reads as flicker, not progress.
+        _subscriptions.Add(
+            this.WhenAnyValue(x => x.IsBusyOrCapturing)
+                .Select(busy => busy
+                    ? Observable.Timer(BusyIndicatorDelay, RxSchedulers.MainThreadScheduler).Select(static _ => true)
+                    : Observable.Return(false))
+                .Switch()
+                .DistinctUntilChanged()
+                .Subscribe(show => ShowBusyIndicator = show,
+                    ex => Trace.TraceError($"Busy-indicator subscription failed: {ex}")));
 
         _subscriptions.Add(
             Observable.Interval(TimeSpan.FromSeconds(10), RxSchedulers.MainThreadScheduler)
@@ -1040,6 +1068,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public bool IsBusyOrCapturing => IsBusy || IsCapturing;
+
+    /// <summary>Whether the busy bar is shown: busy for at least <see cref="BusyIndicatorDelay"/>.</summary>
+    public bool ShowBusyIndicator
+    {
+        get => _showBusyIndicator;
+        private set => this.RaiseAndSetIfChanged(ref _showBusyIndicator, value);
+    }
+
+    private bool _showBusyIndicator;
 
     public string StatusText
     {

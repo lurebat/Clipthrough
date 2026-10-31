@@ -5518,5 +5518,45 @@
     "find": "                        CAST($content AS TEXT),\n                        $contentType,\n                        $contentFormat,\n                        $sourceApp,",
     "replace": "                        $content,\n                        $contentType,\n                        $contentFormat,\n                        $sourceApp,",
     "filter": "FullyQualifiedName~CaptureAsync_KeepsTextAfterANul"
+  },
+  {
+    "id": "search-throttle-back-to-300",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Results wait out the old 300 ms throttle before the query even starts.",
+    "find": "internal static readonly TimeSpan SearchThrottle = TimeSpan.FromMilliseconds(150);",
+    "replace": "internal static readonly TimeSpan SearchThrottle = TimeSpan.FromMilliseconds(300);",
+    "filter": "FullyQualifiedName~SearchResponsivenessHeadlessTests.ResultsLandAfterTheThrottle_AndBeforeTheOldOne"
+  },
+  {
+    "id": "search-throttle-too-short",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Every keystroke re-queries the library and the list jumps while typing.",
+    "find": "internal static readonly TimeSpan SearchThrottle = TimeSpan.FromMilliseconds(150);",
+    "replace": "internal static readonly TimeSpan SearchThrottle = TimeSpan.FromMilliseconds(10);",
+    "filter": "FullyQualifiedName~SearchResponsivenessHeadlessTests.ResultsLandAfterTheThrottle_AndBeforeTheOldOne"
+  },
+  {
+    "id": "busy-bar-not-delayed",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "The busy bar blinks on for every quick refresh.",
+    "find": "internal static readonly TimeSpan BusyIndicatorDelay = TimeSpan.FromMilliseconds(200);",
+    "replace": "internal static readonly TimeSpan BusyIndicatorDelay = TimeSpan.FromMilliseconds(0);",
+    "filter": "FullyQualifiedName~SearchResponsivenessHeadlessTests.AFastRefresh_NeverShowsTheBusyBar"
+  },
+  {
+    "id": "busy-bar-never-hides",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "The busy bar stays up after the work has finished.",
+    "find": ": Observable.Return(false))\n                .Switch()\n                .DistinctUntilChanged()\n                .Subscribe(show => ShowBusyIndicator = show,",
+    "replace": ": Observable.Never<bool>())\n                .Switch()\n                .DistinctUntilChanged()\n                .Subscribe(show => ShowBusyIndicator = show,",
+    "filter": "FullyQualifiedName~SearchResponsivenessHeadlessTests.SlowWork_ShowsTheBusyBar_AndItGoesWhenTheWorkDoes"
+  },
+  {
+    "id": "busy-bar-bound-to-raw-busy",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "why": "The bar on screen follows the undelayed busy flag and blinks on for every refresh.",
+    "find": "IsVisible=\"{Binding ShowBusyIndicator}\"",
+    "replace": "IsVisible=\"{Binding IsBusyOrCapturing}\"",
+    "filter": "FullyQualifiedName~SearchResponsivenessHeadlessTests.AFastRefresh_NeverShowsTheBusyBar"
   }
 ]

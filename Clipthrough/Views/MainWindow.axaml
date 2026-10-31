@@ -710,11 +710,15 @@
                         </ListBox>
                     </Grid>
 
+                    <!-- Delayed (MainWindowViewModel.BusyIndicatorDelay) and thin: it marks
+                         slow work without blinking on for every quick refresh. -->
                     <ProgressBar Grid.Row="2"
+                                 Classes="busy-indicator"
                                  IsIndeterminate="True"
-                                 IsVisible="{Binding IsBusyOrCapturing}"
-                                 Height="4"
-                                 Margin="0,-4,0,0"
+                                 IsVisible="{Binding ShowBusyIndicator}"
+                                 Height="2"
+                                 MinHeight="2"
+                                 Margin="0,-2,0,0"
                                  VerticalAlignment="Bottom" />
 
                     <Border Grid.Row="3"
