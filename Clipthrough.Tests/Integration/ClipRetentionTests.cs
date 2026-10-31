@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Clipthrough.Models;
@@ -127,17 +128,22 @@ public sealed class ClipRetentionTests
         var oldest = await CaptureAsync(scope, "oldest");
         var newest = await CaptureAsync(scope, "newest");
 
-        // Content alone fits the 1 MB cap twice over. The icons are what push the
-        // pair past it, so nothing is evicted unless they are counted.
+        // Content alone fits the 1 MB cap. The icon is what pushes the pair past it,
+        // so nothing is evicted unless it is counted - and since U-E1 both clips
+        // share one stored copy, so it counts once (2 x 400 KB + 300 KB > 1 MB).
         Execute(scope, "UPDATE clips SET byte_size = 400000;");
-        Execute(scope, $"UPDATE clips SET source_app_icon = zeroblob({300_000});");
+        var icon = new byte[300_000];
+        new Random(3).NextBytes(icon);
+        await scope.ClipStoreService.UpdateSourceAppIconAsync(oldest.Id, icon);
+        await scope.ClipStoreService.UpdateSourceAppIconAsync(newest.Id, icon);
 
         var result = await scope.ClipStoreService.ApplyMaintenanceAsync();
 
         Assert.Null(await scope.ClipStoreService.GetByIdAsync(oldest.Id));
         Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(newest.Id));
 
-        // And the size it reports is the size it evicted against.
+        // And the size it reports is the size it evicted against: the survivor's
+        // payload and the icon it still uses, once.
         Assert.Equal(400_000 + 300_000, result.TotalStoredBytes);
     }
 
@@ -184,6 +190,163 @@ public sealed class ClipRetentionTests
         Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(pinned.Id));
         Assert.Null(await scope.ClipStoreService.GetByIdAsync(older.Id));
         Assert.Null(await scope.ClipStoreService.GetByIdAsync(newer.Id));
+    }
+
+    /// <summary>
+    /// Since U-E1 the size total counts each distinct icon once, so evicting the
+    /// last clip that uses an icon frees the icon as well, and the orphan sweep
+    /// deletes it. The walk that decides how many clips to evict subtracted only
+    /// each row's stored_bytes, so it kept going after the library already fit:
+    /// here, evicting the oldest clip and its 4 KB icon is enough, but the walk
+    /// saw only 100 bytes come off and took a 524 KB clip as well. (Rubber-duck
+    /// F-11-1)
+    /// </summary>
+    [Fact]
+    public async Task Maintenance_LibrarySizeCap_CountsTheIconAnEvictionFrees()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings
+        {
+            MaxClipSizeBytes = 4096,
+            EnableMaxLibrarySize = true,
+            MaxLibrarySizeMegabytes = 1,
+        });
+
+        var oldest = await CaptureAsync(scope, "oldest, with an icon of its own");
+        var middle = await CaptureAsync(scope, "middle");
+        var newest = await CaptureAsync(scope, "newest");
+
+        // 100 + 4096 + 2 x 524,000 = 1,052,196: over the 1,048,576 cap by 3,620,
+        // which the oldest clip's payload alone (100) does not cover and its
+        // payload plus its icon (4,196) does.
+        Execute(scope, $"UPDATE clips SET byte_size = 100 WHERE id = {oldest.Id};");
+        Execute(scope, $"UPDATE clips SET byte_size = 524000 WHERE id IN ({middle.Id}, {newest.Id});");
+        await scope.ClipStoreService.UpdateSourceAppIconAsync(oldest.Id, Enumerable.Repeat((byte)7, 4096).ToArray());
+
+        var result = await scope.ClipStoreService.ApplyMaintenanceAsync();
+
+        Assert.Null(await scope.ClipStoreService.GetByIdAsync(oldest.Id));
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(middle.Id));
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(newest.Id));
+        Assert.Equal(1, result.PurgedClipCount);
+        Assert.Equal(2 * 524_000, result.TotalStoredBytes);
+        // Freed by the eviction itself, so only the sweep after it can remove it.
+        Assert.Equal(0, Scalar(scope, "SELECT COUNT(*) FROM app_icons;"));
+    }
+
+    /// <summary>
+    /// The same over-eviction from the other side: an earlier purge in the same
+    /// maintenance pass - here the entry-count cap - orphans an icon, and the
+    /// orphan sweep used to run only after the size cap had read its total. The
+    /// orphan's bytes counted against the cap, and two clips the library had room
+    /// for were evicted to pay for an icon about to be deleted anyway.
+    /// (Rubber-duck F-11-1)
+    /// </summary>
+    [Fact]
+    public async Task Maintenance_LibrarySizeCap_DoesNotCountAnIconAnEarlierPurgeOrphaned()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings
+        {
+            MaxClipSizeBytes = 4096,
+            EnableMaxEntryCount = true,
+            MaxEntryCount = 3,
+            EnableMaxLibrarySize = true,
+            MaxLibrarySizeMegabytes = 1,
+        });
+
+        var overCount = await CaptureAsync(scope, "evicted by the entry count, with an icon of its own");
+        var small = await CaptureAsync(scope, "small");
+        var middle = await CaptureAsync(scope, "middle");
+        var newest = await CaptureAsync(scope, "newest");
+
+        // Once the count cap has taken the first clip, what is left is
+        // 100 + 2 x 524,000 = 1,048,100, under the 1,048,576 cap - unless the
+        // first clip's 4 KB icon is still counted.
+        Execute(scope, $"UPDATE clips SET byte_size = 100 WHERE id IN ({overCount.Id}, {small.Id});");
+        Execute(scope, $"UPDATE clips SET byte_size = 524000 WHERE id IN ({middle.Id}, {newest.Id});");
+        await scope.ClipStoreService.UpdateSourceAppIconAsync(overCount.Id, Enumerable.Repeat((byte)7, 4096).ToArray());
+
+        var result = await scope.ClipStoreService.ApplyMaintenanceAsync();
+
+        Assert.Null(await scope.ClipStoreService.GetByIdAsync(overCount.Id));
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(small.Id));
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(middle.Id));
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(newest.Id));
+        Assert.Equal(1, result.PurgedClipCount);
+        Assert.Equal(100 + (2 * 524_000), result.TotalStoredBytes);
+    }
+
+    /// <summary>
+    /// The size a purge reports leaves out an icon nothing referred to before the
+    /// pass began - re-copying a clip from another app leaves one - because the
+    /// sweep removes it before the size cap reads its total.
+    /// </summary>
+    [Fact]
+    public async Task Maintenance_LibrarySizeCap_ReportsTheSizeLeftAfterTheOrphanSweep()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings
+        {
+            MaxClipSizeBytes = 4096,
+            EnableMaxLibrarySize = true,
+            MaxLibrarySizeMegabytes = 1,
+        });
+
+        var oldest = await CaptureAsync(scope, "oldest");
+        var newest = await CaptureAsync(scope, "newest");
+        Execute(scope, "UPDATE clips SET byte_size = 600000;");
+        Execute(scope, "INSERT INTO app_icons (hash, png) VALUES ('orphan', zeroblob(4096));");
+
+        var result = await scope.ClipStoreService.ApplyMaintenanceAsync();
+
+        Assert.Null(await scope.ClipStoreService.GetByIdAsync(oldest.Id));
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(newest.Id));
+        Assert.Equal(0, Scalar(scope, "SELECT COUNT(*) FROM app_icons;"));
+        Assert.Equal(600_000, result.TotalStoredBytes);
+    }
+
+    /// <summary>
+    /// Re-copying a clip from a different app replaces its icon hash and leaves
+    /// the old icon in app_icons with nothing referring to it. The orphan sweep ran
+    /// only after a pass had deleted clips, so that icon kept counting toward the
+    /// size cap - here it tips a library that fits over the cap and evicts a clip -
+    /// and toward the reported total, cap or no cap, until some deletion or a
+    /// restart swept it. (Rubber-duck F-11-3)
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Maintenance_DoesNotCountTheIconAReCopyReplaced(bool capSize)
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings
+        {
+            MaxClipSizeBytes = 4096,
+            EnableMaxEntryCount = false,
+            EnableMaxLibrarySize = capSize,
+            MaxLibrarySizeMegabytes = 1,
+        });
+
+        var older = await CaptureAsync(scope, "older");
+        var recopied = await CaptureAsync(scope, "copied from two apps", Enumerable.Repeat((byte)1, 4096).ToArray());
+        Assert.Equal(recopied.Id, (await CaptureAsync(scope, "copied from two apps", Enumerable.Repeat((byte)2, 300).ToArray())).Id);
+
+        // 2 x 524,000 + the current 300-byte icon = 1,048,300, under the
+        // 1,048,576 cap; the replaced 4 KB icon would take it over.
+        Execute(scope, "UPDATE clips SET byte_size = 524000;");
+
+        var result = await scope.ClipStoreService.ApplyMaintenanceAsync();
+
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(older.Id));
+        Assert.NotNull(await scope.ClipStoreService.GetByIdAsync(recopied.Id));
+        Assert.Equal(0, result.PurgedClipCount);
+        Assert.Equal(1, Scalar(scope, "SELECT COUNT(*) FROM app_icons;"));
+        Assert.Equal((2 * 524_000) + 300, result.TotalStoredBytes);
     }
 
     /// <summary>
@@ -263,16 +426,23 @@ public sealed class ClipRetentionTests
             MaxLibrarySizeMegabytes = maxMegabytes,
         });
 
+        // Each clip has an icon of its own, so a purge also leaves icons behind for
+        // the orphan sweep (U-E1), and the reported total has to be read after it.
+        // Without icons the row walk and the database agree whatever is read when.
         for (var i = 0; i < 6; i++)
         {
-            await CaptureAsync(scope, new string((char)('a' + i), clipBytes));
+            var clip = await CaptureAsync(scope, new string((char)('a' + i), clipBytes));
+            await scope.ClipStoreService.UpdateSourceAppIconAsync(clip.Id, Enumerable.Repeat((byte)(i + 1), 1000).ToArray());
         }
 
         var result = await scope.ClipStoreService.ApplyMaintenanceAsync();
 
         Assert.Equal(expectedPurgedCount, result.PurgedClipCount);
         Assert.Equal(Scalar(scope, "SELECT COUNT(*) FROM clips;"), result.TotalClipCount);
-        Assert.Equal(Scalar(scope, "SELECT COALESCE(SUM(byte_size), 0) FROM clips;"), result.TotalStoredBytes);
+        Assert.Equal(6 - expectedPurgedCount, Scalar(scope, "SELECT COUNT(*) FROM app_icons;"));
+        Assert.Equal(
+            Scalar(scope, "SELECT COALESCE((SELECT SUM(stored_bytes) FROM clips), 0) + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons), 0);"),
+            result.TotalStoredBytes);
     }
 
     /// <summary>
@@ -360,7 +530,7 @@ public sealed class ClipRetentionTests
         return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
-    private static async Task<ClipEntry> CaptureAsync(TemporaryDatabaseScope scope, string text)
+    private static async Task<ClipEntry> CaptureAsync(TemporaryDatabaseScope scope, string text, byte[]? icon = null)
     {
         var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
         {
@@ -368,6 +538,7 @@ public sealed class ClipRetentionTests
             ContentFormat = ClipContentFormat.PlainText,
             ContentText = text,
             ContentBytes = Encoding.UTF8.GetBytes(text),
+            SourceAppIconBytes = icon,
             SkipPostInsertMaintenance = true,
         });
 

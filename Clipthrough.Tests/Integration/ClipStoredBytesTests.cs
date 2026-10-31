@@ -9,8 +9,9 @@ using Xunit;
 namespace Clipthrough.Tests.Integration;
 
 /// <summary>
-/// The library size cap has to total what a row really costs on disk - payload plus
-/// the source-app icon stored inline beside it. Spelled as an expression that total
+/// The library size cap has to total what the library really costs on disk: every
+/// row's payload, plus each distinct source-app icon once (U-E1 moved icons out of
+/// the row into app_icons; they used to be stored, and counted, per clip). Spelled as an expression that total
 /// is unindexable and reads the entire library off disk on every capture (445 ms at
 /// 60k clips); materialised into <c>stored_bytes</c> it is a covering-index scan
 /// (2.3 ms). These tests defend both halves: that the column stays exact through
@@ -28,7 +29,7 @@ public class ClipStoredBytesTests
     }
 
     private static async Task<long> DriftedRowsAsync(TemporaryDatabaseScope scope)
-        => await ScalarAsync(scope, "SELECT COUNT(*) FROM clips WHERE stored_bytes <> byte_size + COALESCE(LENGTH(source_app_icon), 0);");
+        => await ScalarAsync(scope, "SELECT COUNT(*) FROM clips WHERE stored_bytes <> byte_size;");
 
     /// <summary>
     /// The plan assertion below has to exercise the expression the service really sums,
@@ -78,6 +79,7 @@ public class ClipStoredBytesTests
         Assert.Equal(0, await DriftedRowsAsync(scope));
 
         var beforeIcon = await ScalarAsync(scope, "SELECT stored_bytes FROM clips;");
+        Assert.Equal(beforeIcon, (await scope.ClipStoreService.ApplyMaintenanceAsync()).TotalStoredBytes);
 
         // The source-app icon is resolved by a background lookup and written well
         // after the clip lands. A total captured at insert time would miss it.
@@ -85,10 +87,46 @@ public class ClipStoredBytesTests
         new Random(7).NextBytes(icon);
         await scope.ClipStoreService.UpdateSourceAppIconAsync(clip!.Id, icon);
 
+        // The row's own cost is its payload; the icon is counted once, in app_icons.
         Assert.Equal(0, await DriftedRowsAsync(scope));
-        Assert.Equal(beforeIcon + 4096, await ScalarAsync(scope, "SELECT stored_bytes FROM clips;"));
+        Assert.Equal(beforeIcon, await ScalarAsync(scope, "SELECT stored_bytes FROM clips;"));
+        Assert.Equal(beforeIcon + 4096, (await scope.ClipStoreService.ApplyMaintenanceAsync()).TotalStoredBytes);
     }
 
+    /// <summary>
+    /// The deferred HTML or RTF of a rich clip arrives after the clip and replaces
+    /// its payload with one of a different size. Since U-E1 that is the UPDATE
+    /// trigger's job - the icon no longer touches stored_bytes.
+    /// </summary>
+    [Fact]
+    public async Task StoredBytes_FollowsAPayloadThatChangesSize()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 1_048_576 });
+
+        var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
+        {
+            ContentType = ContentType.Text,
+            ContentFormat = ClipContentFormat.PlainText,
+            ContentText = "hello",
+            ContentBytes = Encoding.UTF8.GetBytes("hello"),
+            SourceApp = "Editor",
+            SkipPostInsertMaintenance = true,
+        });
+
+        var html = Encoding.UTF8.GetBytes("<html><body><b>hello</b> and a good deal more markup</body></html>");
+        await scope.ClipStoreService.UpdateDeferredContentAsync(clip!.Id, new ClipCaptureRequest
+        {
+            ContentType = ContentType.RichText,
+            ContentFormat = ClipContentFormat.Html,
+            ContentText = "hello",
+            ContentBytes = html,
+        });
+
+        Assert.Equal(0, await DriftedRowsAsync(scope));
+        Assert.Equal(html.Length, await ScalarAsync(scope, "SELECT stored_bytes FROM clips;"));
+    }
     [Fact]
     public async Task StoredBytes_IsExactAfterRecapturingTheSameContent()
     {

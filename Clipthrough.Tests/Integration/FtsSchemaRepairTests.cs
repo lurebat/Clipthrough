@@ -181,6 +181,82 @@ public sealed class FtsSchemaRepairTests
         Assert.Contains(steps, step => step.Contains("rebuild-search-index", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// A launch killed after the repair dropped the old table, but before the
+    /// rebuild committed, must be finished by the next launch. By then the
+    /// recreated table already has the current definition, so the repair check
+    /// no longer fires; on a library whose version is behind but past
+    /// LastSearchIndexChangeVersion the version gate does not rebuild either, and
+    /// at the current version nothing did. Either way every stored clip silently
+    /// dropped out of keyword search for good. (Rubber-duck F-11-2)
+    /// </summary>
+    /// <remarks>
+    /// The rebuild is one autocommit statement, so a kill part-way through it
+    /// rolls back to the same empty table as a kill just before it. Throwing from
+    /// the RebuildingSearchIndex progress report, which comes right before the
+    /// statement, reproduces that state deterministically.
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ARepairInterruptedBeforeTheRebuild_IsFinishedByTheNextLaunch(bool versionBehind)
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        await CaptureAsync(scope, "quarterly revenue projection");
+        await CaptureAsync(scope, "annual revenue headcount plan");
+
+        var current = StoredSchemaVersion(scope);
+        MakeFtsSchemaLegacy(scope);
+        if (versionBehind)
+        {
+            SetStoredSchemaVersion(scope, current - 1);
+        }
+
+        await Assert.ThrowsAsync<SimulatedCrashException>(() =>
+            scope.DatabaseInitializer.InitializeAsync(new CrashAtStage(LibraryUpgradeStage.RebuildingSearchIndex)));
+
+        // The state the kill left: the table recreated with the current
+        // definition, and empty.
+        Assert.Equal(0, FtsMatchCount(scope, "revenue"));
+
+        var steps = await CaptureInitializationStepsAsync(scope);
+
+        Assert.Equal(2, FtsMatchCount(scope, "revenue"));
+        Assert.Equal(current, StoredSchemaVersion(scope));
+        // The rebuild rewrites pages, so it buys the integrity check like any
+        // other structural work.
+        Assert.Contains(steps, step => step.Contains("integrity-check", StringComparison.Ordinal));
+
+        // Finished means finished: the launch after that is an ordinary one.
+        var nextSteps = await CaptureInitializationStepsAsync(scope);
+        Assert.DoesNotContain(nextSteps, step => step.Contains("rebuild-search-index", StringComparison.Ordinal));
+        Assert.Contains(nextSteps, step => step.Contains("schema-up-to-date", StringComparison.Ordinal));
+    }
+
+    private static void SetStoredSchemaVersion(TemporaryDatabaseScope scope, long version)
+    {
+        using var connection = scope.ConnectionFactory.CreateConnection();
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE app_metadata SET value = $version WHERE key = 'schema_version';";
+        command.Parameters.AddWithValue("$version", version.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal(1, command.ExecuteNonQuery());
+    }
+
+    private sealed class SimulatedCrashException : Exception;
+
+    private sealed class CrashAtStage(LibraryUpgradeStage stage) : IProgress<LibraryUpgradeProgress>
+    {
+        public void Report(LibraryUpgradeProgress value)
+        {
+            if (value.Stage == stage)
+            {
+                throw new SimulatedCrashException();
+            }
+        }
+    }
+
     private static async Task<string[]> CaptureInitializationStepsAsync(TemporaryDatabaseScope scope)
     {
         var sink = new ConcurrentQueue<string>();

@@ -1011,8 +1011,8 @@
     "id": "icon-read-selects-the-wrong-column",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "The narrow icon read exists to return the icon blob and nothing else; selecting another column would hand callers the wrong bytes while still looking like a cheap single-column read.",
-    "find": "        command.CommandText = \"SELECT source_app_icon FROM clips WHERE id = $id LIMIT 1;\";",
-    "replace": "        command.CommandText = \"SELECT content_bytes FROM clips WHERE id = $id LIMIT 1;\";",
+    "find": "        command.CommandText = \"SELECT i.png FROM clips c JOIN app_icons i ON i.hash = c.source_app_icon_hash WHERE c.id = $id LIMIT 1;\";",
+    "replace": "        command.CommandText = \"SELECT p.content_bytes FROM clips c JOIN clip_payloads p ON p.clip_id = c.id WHERE c.id = $id LIMIT 1;\";",
     "filter": "GetSourceAppIconAsync_ReturnsTheIconWithoutTheRestOfTheRow"
   },
   {
@@ -1280,14 +1280,6 @@
     "filter": "Maintenance_ReportsTheSameTotalsTheDatabaseWould"
   },
   {
-    "id": "maintenance-size-total-is-taken-before-the-purge",
-    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
-    "why": "Keeps the pre-purge library size, so the storage figure never drops after a size-cap eviction and the user sees a library permanently at its ceiling.",
-    "find": "                finalStoredBytes = remainingBytes;\n                finalClipCount -= deleted.Count;",
-    "replace": "                finalClipCount -= deleted.Count;",
-    "filter": "Maintenance_ReportsTheSameTotalsTheDatabaseWould"
-  },
-  {
     "id": "size-purge-names-every-evicted-clip",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "Goes back to listing every doomed clip as its own SQL parameter. Correct for small purges and fatal past SQLITE_MAX_VARIABLE_NUMBER, which is exactly the purge a user gets after lowering the size cap on a large library.",
@@ -1416,22 +1408,6 @@
     "filter": "FullyQualifiedName~DatabasePasswordVerificationTests"
   },
   {
-    "id": "library-size-ignores-the-icons-it-stores",
-    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
-    "why": "Counting only byte_size under-counted the library by 12.5x, so the size cap bounded nothing near its setting.",
-    "find": "    private const string StoredRowBytes = \"stored_bytes\";",
-    "replace": "    private const string StoredRowBytes = \"byte_size\";",
-    "filter": "FullyQualifiedName~ClipRetentionTests"
-  },
-  {
-    "id": "size-purge-measures-rows-differently-to-the-total",
-    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
-    "why": "The eviction loop must measure rows the same way the total does, or it evicts the wrong number.",
-    "find": "                SELECT {StoredRowBytes}\n                FROM clips",
-    "replace": "                SELECT byte_size\n                FROM clips",
-    "filter": "FullyQualifiedName~ClipRetentionTests"
-  },
-  {
     "id": "file-availability-probed-from-the-getter",
     "file": "Clipthrough/ViewModels/ClipFileItemViewModel.cs",
     "why": "A getter probing the filesystem is re-run by every binding pass on the UI thread; an unreachable UNC path blocks it for 51 seconds.",
@@ -1499,23 +1475,23 @@
     "id": "schema-version-not-bumped-for-index-change",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "The migration gate skips every Ensure* helper when the stored version already matches, so a schema change that does not bump the version never reaches an installed database.",
-    "find": "    private const int CurrentSchemaVersion = 9;",
+    "find": "    private const int CurrentSchemaVersion = 10;",
     "replace": "    private const int CurrentSchemaVersion = 7;",
     "filter": "FullyQualifiedName~ClipStoredBytesTests"
   },
   {
-    "id": "stored-bytes-trigger-ignores-the-late-icon",
+    "id": "stored-bytes-trigger-misses-a-size-change",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
-    "why": "The source-app icon is written by a background lookup after the clip lands; without the UPDATE trigger the stored total silently omits every icon.",
-    "find": "            CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF byte_size, source_app_icon ON clips BEGIN",
-    "replace": "            CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF byte_size ON clips BEGIN",
+    "why": "Since U-E1 a row costs its payload alone, so the UPDATE trigger's job is byte_size changes (a re-copy, deferred content); without it the stored total keeps the old size. The late icon is counted in app_icons instead (size-cap-ignores-stored-icons).",
+    "find": "        CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF byte_size ON clips BEGIN\n",
+    "replace": "        CREATE TRIGGER clips_stored_bytes_au AFTER UPDATE OF hash ON clips BEGIN\n",
     "filter": "FullyQualifiedName~ClipStoredBytesTests"
   },
   {
     "id": "stored-bytes-not-maintained-on-insert",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "Without the insert trigger every new clip is totalled as zero bytes, so the library size cap never fires.",
-    "find": "                SET stored_bytes = new.byte_size + COALESCE(LENGTH(new.source_app_icon), 0)\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        await ExecuteNonQueryAsync(connection, \"DROP TRIGGER IF EXISTS clips_stored_bytes_au;\", cancellationToken);",
+    "find": "                SET stored_bytes = new.byte_size\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        await ExecuteNonQueryAsync(connection, \"DROP TRIGGER IF EXISTS clips_stored_bytes_au;\", cancellationToken);",
     "replace": "                SET stored_bytes = 0\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        await ExecuteNonQueryAsync(connection, \"DROP TRIGGER IF EXISTS clips_stored_bytes_au;\", cancellationToken);",
     "filter": "FullyQualifiedName~ClipStoredBytesTests"
   },
@@ -1531,7 +1507,7 @@
     "id": "stored-bytes-is-never-backfilled",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "An upgraded database would keep zeros for every existing clip, so the cap would think the library was empty.",
-    "find": "            UPDATE clips\n            SET stored_bytes = byte_size + COALESCE(LENGTH(source_app_icon), 0)\n            WHERE stored_bytes <> byte_size + COALESCE(LENGTH(source_app_icon), 0);",
+    "find": "            UPDATE clips\n            SET stored_bytes = byte_size\n            WHERE stored_bytes <> byte_size;",
     "replace": "            SELECT 1;",
     "filter": "FullyQualifiedName~ClipStoredBytesTests"
   },
@@ -2787,8 +2763,8 @@
     "id": "no-ocr-coverage-index",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "F-25. Without it OCR coverage reads ocr_status from each image row, after the payload: 1.9 s at 60k, 9.9 s encrypted.",
-    "find": "            WHERE content_type = 'image' AND content_bytes IS NOT NULL;\n",
-    "replace": "            WHERE content_type = 'files' AND content_bytes IS NOT NULL;\n",
+    "find": "            WHERE content_type = 'image';\n\n        -- Orphaned app_icons",
+    "replace": "            WHERE content_type = 'files';\n\n        -- Orphaned app_icons",
     "filter": "FullyQualifiedName~StartupScanIndexTests.OcrCoverage_IsAnsweredFromTheImageIndex"
   },
   {
@@ -2848,14 +2824,6 @@
     "filter": "FullyQualifiedName~BoundedListTextTests.ALongClipsListRow"
   },
   {
-    "id": "can-transform-reads-truncated-content",
-    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
-    "why": "Phase B's transform gate meets Phase D's bounded list rows. Reading Content on a row longer than the bound throws, so the Transform menus, toolbar and row context menu fail for every long clip.",
-    "find": "            && !string.IsNullOrEmpty(clip.ContentPrefix);",
-    "replace": "            && !string.IsNullOrEmpty(clip.Content);",
-    "filter": "FullyQualifiedName~BoundedListTextTests"
-  },
-  {
     "id": "plain-text-copy-skips-hydration",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "F-10. Copy as plain text read Clip.Content straight off the list row.",
@@ -2896,12 +2864,148 @@
     "filter": "FullyQualifiedName~SelectingALongListRow_ShowsThePrefixFirst"
   },
   {
-    "id": "editability-follows-the-row-not-the-editor",
+    "id": "hydration-skips-the-payload-join",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U-E1 plan mutant. A full read that takes content_bytes from the clips row gets NULL for every clip since the move: images and rich text lose their payload.",
+    "find": "            (SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id),\n",
+    "replace": "            c.content_bytes,\n",
+    "filter": "FullyQualifiedName~PayloadLayoutTests"
+  },
+  {
+    "id": "icon-read-skips-app-icons",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U-E1 / F-39. Icons live in app_icons; reading the old inline column shows every clip without its app icon.",
+    "find": "            (SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash),\n",
+    "replace": "            c.source_app_icon,\n",
+    "filter": "FullyQualifiedName~PayloadLayoutTests"
+  },
+  {
+    "id": "icons-not-deduplicated",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "F-39. The same icon PNG was stored again for every clip from that app; keying it by anything but its content stores it per clip again.",
+    "find": "    internal static string AppIconHash(byte[] png) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(png));",
+    "replace": "    internal static string AppIconHash(byte[] png) => png.Length >= 0 ? Guid.NewGuid().ToString(\"N\") : string.Empty;",
+    "filter": "FullyQualifiedName~PayloadLayoutTests.IdenticalIcons_AreStoredOnce"
+  },
+  {
+    "id": "payload-outlives-its-clip",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U-E1. Without the trigger a clip deleted on a connection with foreign keys off leaves its payload - a sensitive clip's included - in the file with nothing pointing at it.",
+    "find": "        CREATE TRIGGER IF NOT EXISTS clips_payload_ad AFTER DELETE ON clips BEGIN\n            DELETE FROM clip_payloads WHERE clip_id = old.id;\n        END;\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~PayloadLayoutTests.ADeletedClip_TakesItsPayloadWithIt"
+  },
+  {
+    "id": "payload-move-leaves-the-old-columns",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "F-06. Copying without NULLing the inline columns keeps every metadata read walking the blob, and doubles the file.",
+    "find": "                        SET content_bytes = NULL,\n                            source_app_icon = NULL,\n                            source_app_icon_hash",
+    "replace": "                        SET source_app_icon_hash",
+    "filter": "FullyQualifiedName~PayloadLayoutTests.AnExistingLibrary_IsMoved"
+  },
+  {
+    "id": "payload-move-in-one-transaction",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U-E1. One transaction over a 1 GB library holds the write lock for the whole move and a crash loses all of it; batches commit as they go.",
+    "find": "                    LIMIT $limit;\n",
+    "replace": "                    LIMIT -1 + ($limit * 0);\n",
+    "filter": "FullyQualifiedName~PayloadLayoutTests.AMoveInterruptedMidBatch"
+  },
+  {
+    "id": "payload-layout-shares-schema-nine",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Phase G's UTC backfill and Phase E's payload layout were both written as schema 9. A library G stamped 9 still has inline payloads; if the layout also called itself 9, that library would read as already moved and keep every payload in the clips row.",
+    "find": "    private const int CurrentSchemaVersion = 10;",
+    "replace": "    private const int CurrentSchemaVersion = 9;",
+    "filter": "FullyQualifiedName~PayloadLayoutTests.ALibraryStampedNineByTheUtcBackfill_IsStillMoved"
+  },
+  {
+    "id": "orphaned-icons-kept-after-eviction",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "F-39. An icon whose last clip was evicted would keep counting against the size cap until the next start.",
+    "find": "            // A removed clip may have been the last user of its icon (U-E1).\n            await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);\n",
+    "replace": "            // A removed clip may have been the last user of its icon (U-E1).\n            await Task.CompletedTask;\n",
+    "filter": "FullyQualifiedName~PayloadLayoutTests.AnIconWhoseLastClipIsEvicted|FullyQualifiedName~ClipRetentionTests.Maintenance_LibrarySizeCap_CountsTheIconAnEvictionFrees"
+  },
+  {
+    "id": "size-cap-ignores-stored-icons",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "The cap must bound what is on disk (the 12.5x under-count fixed earlier); since U-E1 icons are counted once, from app_icons.",
+    "find": " + \") FROM clips), 0) + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons), 0);\";",
+    "replace": " + \") FROM clips), 0) + 0;\";",
+    "filter": "FullyQualifiedName~Maintenance_LibrarySizeCap_CountsTheSourceAppIconsItStores"
+  },
+  {
+    "id": "fts-rebuilt-on-every-version-bump",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U-E1, owner decision (B). The full FTS rebuild was 17.2 s of a 28.5 s first start on 420 MB and ran on every version bump, although no bump after version 3 changed what the index holds.",
+    "find": "            if (ftsSchemaRecreated || storedVersion < LastSearchIndexChangeVersion)",
+    "replace": "            if (ftsSchemaRecreated || storedVersion < LastSearchIndexChangeVersion || storedVersion >= 0)",
+    "filter": "FullyQualifiedName~FtsRebuildGateTests.AVersionBumpThatChangesNoIndexedContent"
+  },
+  {
+    "id": "fts-not-rebuilt-for-a-library-older-than-the-index-change",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "A library stored before version 3 holds an index of the old shape; skipping its rebuild leaves its clips unfindable by keyword.",
+    "find": "            if (ftsSchemaRecreated || storedVersion < LastSearchIndexChangeVersion)",
+    "replace": "            if (ftsSchemaRecreated || storedVersion < LastSearchIndexChangeVersion - 1000)",
+    "filter": "FullyQualifiedName~FtsRebuildGateTests.ALibraryOlderThanTheLastSearchIndexChange"
+  },
+  {
+    "id": "fts-not-rebuilt-when-recreated-during-a-bump",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "A bump that also repairs an old FTS schema recreates the table empty; without the rebuild every stored clip stops being findable by keyword.",
+    "find": "            if (ftsSchemaRecreated || storedVersion < LastSearchIndexChangeVersion)",
+    "replace": "            if (storedVersion < LastSearchIndexChangeVersion)",
+    "filter": "FullyQualifiedName~FtsRebuildGateTests.AnFtsSchemaRecreatedDuringAVersionBump"
+  },
+  {
+    "id": "upgrade-move-reports-no-progress",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U-E1 (C). The payload move is the long stage of the first start after an upgrade; without its reports the overlay sits on an indeterminate bar for the whole move.",
+    "find": "        void ReportMoved(long reachedId) => progress?.Report(new LibraryUpgradeProgress(",
+    "replace": "        void ReportMoved(long reachedId) => (reachedId < long.MinValue + 1 ? progress : null)?.Report(new LibraryUpgradeProgress(",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests"
+  },
+  {
+    "id": "upgrade-reported-for-a-new-library",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U-E1 (C). A new or empty library is not being upgraded; reporting for it titles the first-run overlay \"Upgrading\".",
+    "find": "        if (progress is not null && !await HasStoredClipsAsync(connection, cancellationToken))",
+    "replace": "        if (progress is not null && Environment.ProcessorCount < 0 && !await HasStoredClipsAsync(connection, cancellationToken))",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressTests.ANewLibrary"
+  },
+  {
+    "id": "upgrade-progress-applied-on-the-worker-thread",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
-    "why": "Hydration completes the row a dispatcher turn before the selection re-presents it. If editability follows the row, the editor is editable while it still holds the 4096-character prefix, and an edit committed in that gap is captured as a new clip holding the prefix plus the edit.",
-    "find": "        _presentedClipIsComplete = SelectedClip is { Clip.IsContentTruncated: false };",
-    "replace": "        _presentedClipIsComplete = SelectedClip is not null || _presentedClipIsComplete;",
-    "filter": "FullyQualifiedName~BetweenHydrationAndThePreview_TheEditorStaysReadOnly"
+    "why": "U-E1 (C). The initializer reports from a worker thread; raising the overlay properties there touches Avalonia from the wrong thread. Since Avalonia 12.1.4 a binding marshals an off-thread PropertyChanged itself, so the test asserts the raising thread directly.",
+    "find": "        public void Report(LibraryUpgradeProgress value) => Avalonia.Threading.Dispatcher.UIThread.Post(() => apply(value));",
+    "replace": "        public void Report(LibraryUpgradeProgress value) => apply(value);",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests"
+  },
+  {
+    "id": "upgrade-state-outlives-the-load",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "U-E1 (C). The upgrade state must end with the load, or the next load (after unlocking or moving the library) shows a stale upgrade.",
+    "find": "                IsLoadingDatabase = false;\n                SetLibraryUpgradeProgress(null);\n                IsWelcomeOpen = false;",
+    "replace": "                IsLoadingDatabase = false;\n                IsWelcomeOpen = false;",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests"
+  },
+  {
+    "id": "upgrade-runs-on-the-ui-thread",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "U-E1 (C). The owner asked that the app stay responsive during the first start after an upgrade; run on the UI thread, the window freezes for the whole upgrade.",
+    "find": "            await Task.Run(async () => await StartDatabaseAsync().ConfigureAwait(false)).ConfigureAwait(false);",
+    "replace": "            await StartDatabaseAsync();",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests"
+  },
+  {
+    "id": "can-transform-reads-truncated-content",
+    "file": "Clipthrough/Services/Ai/TextTransformationService.cs",
+    "why": "Phase B's transform gate meets Phase D's bounded list rows. Reading Content on a row longer than the bound throws, so the Transform menus, toolbar and row context menu fail for every long clip.",
+    "find": "            && !string.IsNullOrEmpty(clip.ContentPrefix);",
+    "replace": "            && !string.IsNullOrEmpty(clip.Content);",
+    "filter": "FullyQualifiedName~BoundedListTextTests"
   },
   {
     "id": "transform-html-decided-by-one-transform",
@@ -3824,12 +3928,68 @@
     "filter": "FullyQualifiedName~WindowPlacementStoreTests"
   },
   {
+    "id": "editability-follows-the-row-not-the-editor",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Hydration completes the row a dispatcher turn before the selection re-presents it. If editability follows the row, the editor is editable while it still holds the 4096-character prefix, and an edit committed in that gap is captured as a new clip holding the prefix plus the edit.",
+    "find": "        _presentedClipIsComplete = SelectedClip is { Clip.IsContentTruncated: false };",
+    "replace": "        _presentedClipIsComplete = SelectedClip is not null || _presentedClipIsComplete;",
+    "filter": "FullyQualifiedName~BetweenHydrationAndThePreview_TheEditorStaysReadOnly"
+  },
+  {
     "id": "undecodable-thumbnail-throws",
     "file": "Clipthrough/Presentation/ClipBitmapFactory.cs",
     "why": "Live check G1: Avalonia.Skia scaled decode throws NullReferenceException for data no codec recognises; uncaught, the row thumbnail task faulted unobserved.",
     "find": "        catch (NullReferenceException ex) when (decodeWidth is > 0)",
     "replace": "        catch (NullReferenceException ex) when (decodeWidth is < 0)",
     "filter": "FullyQualifiedName~ClipBitmapFactoryHeadlessTests"
+  },
+  {
+    "id": "fts-interrupted-repair-pending-not-read",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-11-2. A launch killed between the FTS repair's drop and the end of its rebuild leaves the recreated table empty with a current definition; if the pending marker is not consulted, the next launch skips the rebuild and every stored clip drops out of keyword search for good.",
+    "find": "        ftsSchemaRecreated |= await IsFtsRebuildPendingAsync(connection, cancellationToken);",
+    "replace": "        ftsSchemaRecreated |= FtsRebuildPendingKey.Length < 0 && await IsFtsRebuildPendingAsync(connection, cancellationToken);",
+    "filter": "FullyQualifiedName~FtsSchemaRepairTests.ARepairInterruptedBeforeTheRebuild"
+  },
+  {
+    "id": "fts-interrupted-repair-pending-not-recorded",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-11-2. The marker has to be written before the drop; without it nothing tells the next launch that the recreated table is still empty.",
+    "find": "            INSERT INTO app_metadata (key, value) VALUES ('{FtsRebuildPendingKey}', '1')",
+    "replace": "            INSERT INTO app_metadata (key, value) VALUES ('{FtsRebuildPendingKey}-mutant', '1')",
+    "filter": "FullyQualifiedName~FtsSchemaRepairTests.ARepairInterruptedBeforeTheRebuild"
+  },
+  {
+    "id": "fts-interrupted-repair-pending-never-cleared",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-11-2. A marker that survives the rebuild makes every later launch rebuild the whole index and pay a full-file quick_check.",
+    "find": "        await ExecuteNonQueryAsync(connection, $\"DELETE FROM app_metadata WHERE key = '{FtsRebuildPendingKey}';\", cancellationToken);",
+    "replace": "        await ExecuteNonQueryAsync(connection, $\"DELETE FROM app_metadata WHERE key = '{FtsRebuildPendingKey}' AND 0;\", cancellationToken);",
+    "filter": "FullyQualifiedName~FtsSchemaRepairTests.ARepairInterruptedBeforeTheRebuild"
+  },
+  {
+    "id": "fts-interrupted-repair-skips-integrity-check",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-11-2. The resumed rebuild rewrites pages, so the integrity gate has to see the same pending work the initializer is about to do.",
+    "find": "            || await IsFtsRebuildPendingAsync(connection, cancellationToken))",
+    "replace": "            || (FtsRebuildPendingKey.Length < 0 && await IsFtsRebuildPendingAsync(connection, cancellationToken)))",
+    "filter": "FullyQualifiedName~FtsSchemaRepairTests.ARepairInterruptedBeforeTheRebuild"
+  },
+  {
+    "id": "size-cap-counts-icons-orphaned-earlier-in-the-pass",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-11-1. An icon orphaned by the lifetime or count purge earlier in the same maintenance pass is still in app_icons when the size cap reads its total, so the cap evicts clips the library has room for to pay for an icon the closing sweep deletes anyway.",
+    "find": "        await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);\n\n        if (settings.EnableMaxLibrarySize)",
+    "replace": "        if (removedClipIds.Count < 0)\n        {\n            await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);\n        }\n\n        if (settings.EnableMaxLibrarySize)",
+    "filter": "FullyQualifiedName~ClipRetentionTests.Maintenance_LibrarySizeCap_DoesNotCountAnIconAnEarlierPurgeOrphaned"
+  },
+  {
+    "id": "size-cap-walk-ignores-freed-icons",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-11-1. Evicting the last clip that uses an icon frees the icon too, which the size total counts once; a walk that subtracts only stored_bytes keeps evicting after the library already fits, permanently removing a clip.",
+    "find": "                    if (icon.Remaining == 0)",
+    "replace": "                    if (icon.Remaining == 0 && hash.Length < 0)",
+    "filter": "FullyQualifiedName~ClipRetentionTests.Maintenance_LibrarySizeCap_CountsTheIconAnEvictionFrees"
   },
   {
     "id": "f06-1-export-rereads-selection",
@@ -3966,6 +4126,14 @@
     "find": "            .Select(s => (Screen: s, Overlap: OverlapArea(frame, s.WorkingArea)))",
     "replace": "            .Select(s => (Screen: s, Overlap: OverlapArea(new PixelRect(remembered.Position, OuterPixels(remembered.ClientSize, frameExtra, s.Scaling)), s.WorkingArea)))",
     "filter": "FullyQualifiedName~WindowGeometryTests.ARememberedWindowMostlyOnA100PercentScreen"
+  },
+  {
+    "id": "maintenance-keeps-icons-a-recopy-orphaned",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-11-3. Re-copying a clip from a different app replaces its icon hash and orphans the old icon. Sweeping only after a pass deleted clips left that icon counting toward the size cap (evicting clips the library had room for) and the reported total, until some deletion or a restart.",
+    "find": "        await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);\n\n        if (settings.EnableMaxLibrarySize)",
+    "replace": "        if (removedClipIds.Count > 0)\n        {\n            await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);\n        }\n\n        if (settings.EnableMaxLibrarySize)",
+    "filter": "FullyQualifiedName~ClipRetentionTests.Maintenance_DoesNotCountTheIconAReCopyReplaced"
   },
   {
     "id": "f07-3-prefilter-requires-whole-terms-case-insensitively",
