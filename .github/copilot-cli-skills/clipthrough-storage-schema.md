@@ -28,12 +28,12 @@ Use this when adding columns, indexes, queries, or full-text-search behavior. It
 | --------------------- | ------- | -------------------------------------------------------------- |
 | `id`                  | INTEGER | PK AUTOINCREMENT.                                              |
 | `content`             | TEXT    | UTF-8 text representation (also for OCR/AI inputs).            |
-| `content_bytes`       | BLOB    | Raw payload for images/files.                                  |
+| `content_bytes`       | BLOB    | Always NULL since U-E1: the payload is in `clip_payloads`. Kept because SQLite cannot reorder or cheaply drop it. |
 | `content_type`        | TEXT    | `Text` / `RichText` / `Image` / `Files`.                       |
 | `content_format`      | TEXT    | `text` / `html` / `rtf` / `image-png` / etc. Default `text`.   |
 | `source_app`          | TEXT    | Friendly app name.                                             |
 | `source_app_path`     | TEXT    | Resolved exe path (Windows).                                   |
-| `source_app_icon`     | BLOB    | PNG bytes for the app icon.                                    |
+| `source_app_icon`     | BLOB    | Always NULL since U-E1: icons are in `app_icons`.            |
 | `hash`                | TEXT    | NOT NULL — content hash used for dedup / paste tracking.       |
 | `is_favorite`         | INTEGER | 0/1.                                                           |
 | `is_sensitive`        | INTEGER | 0/1, set by sensitivity-rule matches or by hand.                       |
@@ -62,6 +62,7 @@ Use this when adding columns, indexes, queries, or full-text-search behavior. It
 | `embedding_status`    | TEXT    | NULL (not yet queued), `pending`, `processing`, `succeeded`, `failed`, `rerun`, `excluded` (sensitive; never embedded). |
 | `embedding_attempts`  | INTEGER | Failed embedding attempts; the worker gives up at `MaxEmbeddingAttempts`. Reset when a clip leaves `excluded`. |
 | `sensitivity_is_manual` | INTEGER | 0/1. The user marked or unmarked the clip by hand, so a rule change must not re-derive `is_sensitive`. |
+| `source_app_icon_hash` | TEXT   | SHA-256 (hex) of the icon PNG, the key into `app_icons`. NULL when there is no icon. |
 
 ### Indexes
 
@@ -99,7 +100,7 @@ Measured at 20k clips, Alphabetical went 118 ms (no new indexes) -> 206 ms
 
 - `idx_clips_default_order` — `(pinned_at IS NULL, pinned_at DESC, COALESCE(last_copied_at, captured_at) DESC, id DESC)`. **The primary list-view ordering**; serves `MostRecent` and `BestMatching`.
 - `idx_clips_sensitivity_pending` — `(id) WHERE sensitivity_scanned_at IS NULL`. Startup sensitivity recovery (`ClipStoreService.PendingSensitivitySql`) reads only unscanned rows (F-25).
-- `idx_clips_ocr_images` — `(content_type, ocr_status) WHERE content_type = 'image' AND content_bytes IS NOT NULL`. OCR coverage (`OcrCoverageSql`) reads image rows only, and `ocr_status` from the index rather than after the payload (F-25). The partial `WHERE` must stay identical to the query's terms or SQLite will not use it.
+- `idx_clips_ocr_images` — `(content_type, ocr_status) WHERE content_type = 'image'`; the queries check for a payload with an `EXISTS` on `clip_payloads`' primary key (U-E1). OCR coverage (`OcrCoverageSql`) reads image rows only, and `ocr_status` from the index rather than after the payload (F-25). The partial `WHERE` must stay identical to the query's terms or SQLite will not use it.
 - `idx_clips_type_default_order` — `(content_type, pinned_at IS NULL, pinned_at DESC, COALESCE(last_copied_at, captured_at) DESC, id DESC)`. Serves the type dropdown with `MostRecent` and nothing typed (F-09). With a type filter the other sorts also start here and sort the remainder; benchmark them (PerfProbes P1) rather than assume.
 - `idx_clips_oldest_order` — same, ASC. Serves `OldestFirst`.
 - `idx_clips_paste_order` — `(..., paste_count DESC, id DESC)`. Serves `MostPasted`.
@@ -150,7 +151,16 @@ If you add a column you want searchable, you must:
 
 1. Add it to the FTS5 column list.
 2. Update all three triggers.
-3. Rebuild FTS for existing rows (`INSERT INTO clips_fts(clips_fts) VALUES('rebuild');`) inside a forward migration.
+3. Rebuild FTS for existing rows: raise `DatabaseInitializer.LastSearchIndexChangeVersion` to the new `CurrentSchemaVersion`, so the version-gated `'rebuild'` runs once for every library stored before it.
+
+### `clip_payloads` and `app_icons` (U-E1)
+
+- `clip_payloads(clip_id INTEGER PRIMARY KEY REFERENCES clips(id) ON DELETE CASCADE, content_bytes BLOB)` — the raw payload, out of the `clips` row so metadata reads never walk a blob's overflow chain (F-06). Read through a correlated subquery in `ClipSelectColumns`; written by `ClipStoreService.WritePayloadAsync` in the same transaction as the row. Trigger `clips_payload_ad` also deletes it, so a payload cannot outlive its clip on a connection with foreign keys off.
+- `app_icons(hash TEXT PRIMARY KEY, png BLOB NOT NULL)` — one row per distinct icon (F-39). Orphans are deleted at startup, and by every maintenance pass before the size cap reads its total (an earlier purge in the pass, or a re-copy from another app that replaced a clip's icon, leaves them) and again after its evictions. The size cap counts each icon once, so its eviction walk subtracts an icon when it evicts the last clip using it.
+- `idx_clips_source_app_icon_hash` — partial, non-null only; finds orphaned icons.
+- The size cap counts each row's `stored_bytes` (now just `byte_size`) plus every distinct icon once: `TotalStoredBytesSql`.
+- Existing libraries move in `DatabaseInitializer.MovePayloadsOutOfClipsAsync`: id-ordered batches, one transaction each, progress in `app_metadata.payload_move_last_id`, resumable after a crash.
+- The first start after an upgrade reports its stages through `InitializeAsync(IProgress<LibraryUpgradeProgress>)`, and the move reports a fraction per batch (by id, since the rowid's MIN and MAX are free). The loading overlay shows them. Only a library that already has clips reports. A new long-running migration step should report a stage too.
 
 ### Other tables
 
@@ -184,7 +194,7 @@ if (!existingColumns.Contains("my_new_col"))
 
 For a new index or trigger, just emit `CREATE … IF NOT EXISTS …`. SQLite ALTER cannot drop columns; if you need to remove one, accept that it lingers or write a `CREATE TABLE clips_new (…) → INSERT SELECT → DROP → RENAME` block.
 
-When you change FTS columns or triggers, **always** run a `'rebuild'` once after the migration so existing rows reflect the new shape.
+When you change FTS columns, the tokenizer, or rewrite indexed text with the triggers bypassed, raise `LastSearchIndexChangeVersion` to the new `CurrentSchemaVersion` so the `'rebuild'` runs once after the migration and existing rows reflect the new shape. Any other version bump skips the rebuild: it was 17.2 s of a 28.5 s first start on a 420 MB library, and the triggers already keep the index current. `FtsRebuildGateTests` covers both sides.
 
 ### The FTS repair path is not the version-gated path
 
@@ -193,6 +203,13 @@ When you change FTS columns or triggers, **always** run a `'rebuild'` once after
 count, wrong tokenizer). The schema DDL then recreates it **empty**. So a repair
 has to repopulate the index itself — it returns `bool` for exactly that reason,
 and the caller rebuilds on `true` regardless of `schema_version`.
+
+A launch killed between the drop and the end of the rebuild leaves a table whose
+definition is already current, so the next launch's repair check no longer
+fires. The repair therefore records `app_metadata.fts_rebuild_pending` before it
+drops anything, the next launch rebuilds (and runs the integrity check) while
+that key exists, and `RebuildClipSearchIndexAsync` deletes it once the rebuild
+has committed.
 
 This matters because "FTS needs repair" and "schema version is behind" are
 independent. `HasPendingStructuralWorkAsync` already relies on that: its last

@@ -1727,20 +1727,42 @@
             </ScrollViewer>
         </Border>
 
-        <!-- Loading Database Overlay -->
+        <!-- Loading Database Overlay. On the first start after an upgrade it
+             shows the stage and, where the stage knows it, how far it has got. -->
         <Border IsVisible="{Binding IsLoadingDatabase}"
                 Margin="10"
                 Classes="hero-surface"
                 Padding="28">
             <StackPanel HorizontalAlignment="Center"
                         VerticalAlignment="Center"
+                        MaxWidth="480"
                         Spacing="16">
                 <TextBlock Classes="hero-title"
                            HorizontalAlignment="Center"
+                           IsVisible="{Binding !IsUpgradingLibrary}"
                            Text="Loading Clipboard Library" />
-                <ProgressBar IsIndeterminate="True"
+                <TextBlock Name="LibraryUpgradeTitleTextBlock"
+                           Classes="hero-title"
+                           HorizontalAlignment="Center"
+                           IsVisible="{Binding IsUpgradingLibrary}"
+                           Text="{Binding LibraryUpgradeTitle}" />
+                <ProgressBar Name="LibraryUpgradeProgressBar"
+                             IsIndeterminate="{Binding IsLibraryUpgradeProgressIndeterminate}"
+                             Minimum="0"
+                             Maximum="100"
+                             Value="{Binding LibraryUpgradeProgressValue}"
                              Width="240"
                              HorizontalAlignment="Center" />
+                <TextBlock Name="LibraryUpgradeStageTextBlock"
+                           HorizontalAlignment="Center"
+                           IsVisible="{Binding IsUpgradingLibrary}"
+                           Text="{Binding LibraryUpgradeStageText}" />
+                <TextBlock Classes="body-muted"
+                           HorizontalAlignment="Center"
+                           TextAlignment="Center"
+                           IsVisible="{Binding IsUpgradingLibrary}"
+                           Text="{Binding LibraryUpgradeNote}"
+                           TextWrapping="Wrap" />
                 <TextBlock Classes="body-muted"
                            HorizontalAlignment="Center"
                            Text="{Binding StatusText}"
