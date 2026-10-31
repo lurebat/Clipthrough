@@ -8,6 +8,21 @@ using Clipthrough.ViewModels;
 
 namespace Clipthrough.Views;
 
+/// <summary>How a summon out of standby ended.</summary>
+public enum StandbyLeave
+{
+    /// <summary>The popup was not in standby; show it the ordinary way.</summary>
+    NotInStandby,
+
+    /// <summary>The popup is uncloaked; activate it.</summary>
+    Left,
+
+    /// <summary>
+    /// Something else happened while the summon waited - a second toggle, a
+    /// dismiss, another summon. The popup is left as that made it; do nothing.
+    /// </summary>
+    Superseded,
+}
 /// <summary>
 /// Dismissing and summoning the popup.
 /// </summary>
@@ -33,6 +48,23 @@ public partial class MainWindow
     private Task m_standbyReset = Task.CompletedTask;
     private double m_standbyScaling;
 
+    // Bumped by every change of presentation, so a summon that awaited can tell
+    // whether it is still the latest request before it uncloaks anything.
+    private long m_presentationGeneration;
+    private long m_pendingSummonGeneration;
+
+    /// <summary>Whether a summon is waiting for the dismiss-time reset to land.</summary>
+    internal bool IsSummonPending => m_pendingSummonGeneration != 0;
+
+    /// <summary>
+    /// Drops a pending summon, leaving the popup in standby: a second Alt+V before
+    /// the first has shown anything, which would have hidden a popup that had.
+    /// </summary>
+    internal void CancelPendingSummon()
+    {
+        m_presentationGeneration++;
+        m_pendingSummonGeneration = 0;
+    }
     /// <summary>Whether the popup is dismissed into standby (cloaked, still rendering).</summary>
     public bool IsInStandby { get; private set; }
 
@@ -65,6 +97,7 @@ public partial class MainWindow
     {
         // The reset runs first, so whatever of it is synchronous - the selection
         // back on the newest clip - is in place before the window leaves.
+        m_presentationGeneration++;
         var reset = viewModel?.EnterStandbyAsync() ?? Task.CompletedTask;
         ScrollSelectedClipIntoView();
 
@@ -112,31 +145,47 @@ public partial class MainWindow
 
     /// <summary>
     /// Brings the popup out of standby, holding it cloaked until the dismiss-time
-    /// reset has landed (at most <see cref="StandbyResetWait"/>). Returns false
-    /// when it was not in standby - the caller shows it the ordinary way.
-    /// Activation is the caller's.
+    /// reset has landed (at most <see cref="StandbyResetWait"/>). Activation is
+    /// the caller's, and only on <see cref="StandbyLeave.Left"/>.
     /// </summary>
-    internal async Task<bool> TryLeaveStandbyAsync()
+    internal async Task<StandbyLeave> TryLeaveStandbyAsync()
     {
         if (!IsInStandby)
         {
-            return false;
+            return StandbyLeave.NotInStandby;
         }
 
-        if (!m_standbyReset.IsCompleted)
+        var generation = ++m_presentationGeneration;
+        m_pendingSummonGeneration = generation;
+        try
         {
-            await Task.WhenAny(m_standbyReset, Task.Delay(StandbyResetWait));
-        }
+            if (!m_standbyReset.IsCompleted)
+            {
+                await Task.WhenAny(m_standbyReset, Task.Delay(StandbyResetWait));
+            }
 
-        // Placed onto a screen with another scaling: the layout for it has not
-        // been drawn yet, and uncloaking now would show the old one stretched.
-        if (IsInStandby && !RenderScaling.Equals(m_standbyScaling))
+            // Placed onto a screen with another scaling: the layout for it has not
+            // been drawn yet, and uncloaking now would show the old one stretched.
+            if (generation == m_presentationGeneration && !RenderScaling.Equals(m_standbyScaling))
+            {
+                await NextFrameAsync(StandbyResetWait);
+            }
+
+            if (generation != m_presentationGeneration)
+            {
+                return StandbyLeave.Superseded;
+            }
+
+            LeaveStandbyNow();
+            return StandbyLeave.Left;
+        }
+        finally
         {
-            await NextFrameAsync(StandbyResetWait);
+            if (m_pendingSummonGeneration == generation)
+            {
+                m_pendingSummonGeneration = 0;
+            }
         }
-
-        LeaveStandbyNow();
-        return true;
     }
 
     /// <summary>

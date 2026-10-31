@@ -57,6 +57,8 @@ public partial class MainWindow : Window
         Opened += OnOpened;
         Activated += OnActivated;
         Activated += OnActivatedInStandby;
+        // A summon still waiting must not uncloak a window that has closed.
+        Closed += (_, _) => CancelPendingSummon();
         Closed += OnClosed;
         DataContextChanged += OnDataContextChanged;
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);

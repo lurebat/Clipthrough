@@ -107,7 +107,7 @@ public sealed class PopupStandbyHeadlessTests
 
         harness.Window.Dismiss();
         await PumpUntilAsync(() => harness.ViewModel.Clips.Count == ClipCount);
-        Assert.True(await harness.Window.TryLeaveStandbyAsync());
+        Assert.Equal(StandbyLeave.Left, await harness.Window.TryLeaveStandbyAsync());
 
         Assert.Equal(string.Empty, searchAtUncloak);
         Assert.Equal(ClipCount, clipsAtUncloak);
@@ -135,7 +135,7 @@ public sealed class PopupStandbyHeadlessTests
         harness.Window.Dismiss();
         // No pumping: the re-query has not landed yet.
         Assert.Single(harness.ViewModel.Clips);
-        Assert.True(await harness.Window.TryLeaveStandbyAsync());
+        Assert.Equal(StandbyLeave.Left, await harness.Window.TryLeaveStandbyAsync());
 
         Assert.Equal(ClipCount, clipsAtUncloak);
     }
@@ -245,7 +245,7 @@ public sealed class PopupStandbyHeadlessTests
         Assert.False(harness.Window.IsInStandby);
         Assert.True(harness.Window.ShowInTaskbar);
         Assert.Null(harness.ViewModel.HotkeyTargetClip);
-        Assert.False(await harness.Window.TryLeaveStandbyAsync());
+        Assert.Equal(StandbyLeave.NotInStandby, await harness.Window.TryLeaveStandbyAsync());
     }
 
     /// <summary>
@@ -338,5 +338,63 @@ public sealed class PopupStandbyHeadlessTests
         Dispatcher.UIThread.RunJobs();
 
         Assert.Empty(harness.SystemInteraction.CloakCalls);
+    }
+
+    /// <summary>
+    /// Alt+V twice before the first summon has shown anything: the second press
+    /// cancels the first, as it would have hidden a popup that had appeared. The
+    /// pending summon must then neither uncloak nor ask to be activated.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task ASecondToggleBeforeTheSummonLands_CancelsIt()
+    {
+        using var harness = await ReadyAsync();
+        await SearchNeedleAsync(harness);
+        harness.Window.Dismiss();
+
+        var summon = harness.Window.TryLeaveStandbyAsync();
+        Assert.True(harness.Window.IsSummonPending);
+        harness.Window.CancelPendingSummon();
+
+        Assert.Equal(StandbyLeave.Superseded, await summon);
+        Assert.True(harness.Window.IsInStandby);
+        Assert.Contains(harness.Window, harness.SystemInteraction.CloakedWindows);
+        Assert.False(harness.Window.IsSummonPending);
+    }
+
+    /// <summary>
+    /// A summon still waiting on the old reset must not undo what happened while
+    /// it waited: here an owned window brought the popup back and it was then
+    /// dismissed again. The old summon would have uncloaked the new standby.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task AStaleSummon_DoesNotUndoALaterDismiss()
+    {
+        using var harness = await ReadyAsync();
+        await SearchNeedleAsync(harness);
+        harness.Window.Dismiss();
+
+        var stale = harness.Window.TryLeaveStandbyAsync();
+        Assert.True(harness.Window.LeaveStandbyNow());
+        harness.Window.Dismiss();
+
+        Assert.Equal(StandbyLeave.Superseded, await stale);
+        Assert.True(harness.Window.IsInStandby);
+        Assert.Contains(harness.Window, harness.SystemInteraction.CloakedWindows);
+    }
+
+    /// <summary>A summon still waiting when the window closes uncloaks nothing.</summary>
+    [AvaloniaFact]
+    public async Task ASummonPendingWhenTheWindowCloses_IsDropped()
+    {
+        using var harness = await ReadyAsync();
+        await SearchNeedleAsync(harness);
+        harness.Window.Dismiss();
+
+        var summon = harness.Window.TryLeaveStandbyAsync();
+        harness.Window.Close();
+
+        Assert.Equal(StandbyLeave.Superseded, await summon);
+        Assert.DoesNotContain(harness.SystemInteraction.CloakCalls, c => c.Window == harness.Window && !c.Cloaked);
     }
 }

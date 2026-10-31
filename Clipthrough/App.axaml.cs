@@ -960,6 +960,14 @@ public partial class App : Application
             }
 
             var popup = window as MainWindow;
+            if (popup is { IsSummonPending: true })
+            {
+                // Pressed again before the popup appeared: as if it had, and
+                // this press had hidden it again.
+                popup.CancelPendingSummon();
+                Mark("summon-cancelled");
+                return;
+            }
             if ((popup?.IsPresentedToUser ?? window.IsVisible) && window.IsActive)
             {
                 _systemInteractionService?.ClearTargetWindowCapture();
@@ -991,7 +999,14 @@ public partial class App : Application
             PositionWindowNearCaret(window);
             Mark("positioned-near-caret");
 
-            if (popup is not null && await popup.TryLeaveStandbyAsync())
+            var left = popup is null ? StandbyLeave.NotInStandby : await popup.TryLeaveStandbyAsync();
+            if (left == StandbyLeave.Superseded)
+            {
+                Mark("summon-superseded");
+                return;
+            }
+
+            if (left == StandbyLeave.Left && popup is not null)
             {
                 Mark("left-standby");
                 RestoreAndActivateWindow(window);
@@ -1113,17 +1128,25 @@ public partial class App : Application
             // Capture the current foreground window before Clipthrough steals focus.
             _systemInteractionService?.CaptureTargetWindowForPaste();
 
-            var leftStandby = false;
+            var left = StandbyLeave.NotInStandby;
             try
             {
-                leftStandby = _mainWindow is MainWindow popup && await popup.TryLeaveStandbyAsync();
+                if (_mainWindow is MainWindow popup)
+                {
+                    left = await popup.TryLeaveStandbyAsync();
+                }
             }
             catch (Exception ex)
             {
                 Trace.TraceError($"Leaving standby failed: {ex}");
             }
 
-            if (!leftStandby && !_mainWindow.IsVisible)
+            if (left == StandbyLeave.Superseded)
+            {
+                return;
+            }
+
+            if (left == StandbyLeave.NotInStandby && !_mainWindow.IsVisible)
             {
                 _mainWindow.Show();
             }
