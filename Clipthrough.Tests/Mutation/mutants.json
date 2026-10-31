@@ -5830,5 +5830,21 @@
     "find": "TimeSpan.FromMilliseconds(Math.Min(ms, 150))",
     "replace": "TimeSpan.FromMilliseconds(ms)",
     "filter": "FullyQualifiedName~PasteTimingTests.TheSettleOverride_IsAWholeNumberOfMillisecondsWithinTheBudget"
+  },
+  {
+    "id": "standby-keeps-an-activation",
+    "file": "Clipthrough/Views/MainWindow.Presentation.cs",
+    "why": "Windows activates the cloaked popup and keystrokes go into a search box nobody can see.",
+    "find": "        if (IsInStandby)\n        {\n            m_systemInteractionService?.TryCloakWindow(this, releaseForeground: true);",
+    "replace": "        if (IsInStandby && !IsInStandby)\n        {\n            m_systemInteractionService?.TryCloakWindow(this, releaseForeground: true);",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.AnActivationInStandby_HandsTheForegroundOnAgain"
+  },
+  {
+    "id": "presented-popup-gives-activation-away",
+    "file": "Clipthrough/Views/MainWindow.Presentation.cs",
+    "why": "Activating the popup normally cloaks it again.",
+    "find": "        if (IsInStandby)\n        {\n            m_systemInteractionService?.TryCloakWindow(this, releaseForeground: true);",
+    "replace": "        if (IsInStandby || !IsInStandby)\n        {\n            m_systemInteractionService?.TryCloakWindow(this, releaseForeground: true);",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.AnActivationWhilePresented_IsLeftAlone"
   }
 ]

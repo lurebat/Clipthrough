@@ -308,4 +308,35 @@ public sealed class PopupStandbyHeadlessTests
         Assert.Equal([PasteTiming.AfterHideBudget], harness.SystemInteraction.PasteTargetWaits);
         Assert.True(harness.Window.IsInStandby);
     }
+
+    /// <summary>
+    /// A cloaked window is still a visible window to Windows, which can activate
+    /// it - when the app in front closes, say. Typing would then land in a search
+    /// box nobody can see, so an activation in standby hands the foreground on
+    /// again instead of keeping it.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task AnActivationInStandby_HandsTheForegroundOnAgain()
+    {
+        using var harness = await ReadyAsync();
+        harness.Window.Dismiss();
+        var releases = harness.SystemInteraction.CloakCalls.Count(c => c.Window == harness.Window && c.Cloaked && c.ReleasedForeground);
+
+        harness.Window.Activate();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(harness.Window.IsInStandby);
+        Assert.Equal(releases + 1, harness.SystemInteraction.CloakCalls.Count(c => c.Window == harness.Window && c.Cloaked && c.ReleasedForeground));
+    }
+
+    [AvaloniaFact]
+    public async Task AnActivationWhilePresented_IsLeftAlone()
+    {
+        using var harness = await ReadyAsync();
+
+        harness.Window.Activate();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Empty(harness.SystemInteraction.CloakCalls);
+    }
 }

@@ -56,6 +56,7 @@ public partial class MainWindow : Window
         InitializePlacement(placementStore);
         Opened += OnOpened;
         Activated += OnActivated;
+        Activated += OnActivatedInStandby;
         Closed += OnClosed;
         DataContextChanged += OnDataContextChanged;
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);

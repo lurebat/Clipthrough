@@ -168,6 +168,19 @@ public partial class MainWindow
         return true;
     }
 
+    /// <summary>
+    /// A cloaked window is still a visible window to Windows, which can activate
+    /// it - when the app in front closes, for one. Keystrokes would then go to a
+    /// search box nobody can see, so the foreground is handed on again.
+    /// </summary>
+    private void OnActivatedInStandby(object? sender, EventArgs e)
+    {
+        if (IsInStandby)
+        {
+            m_systemInteractionService?.TryCloakWindow(this, releaseForeground: true);
+        }
+    }
+
     private Task NextFrameAsync(TimeSpan timeout)
     {
         var frame = new TaskCompletionSource();
