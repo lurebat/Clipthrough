@@ -526,10 +526,58 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
 
     public void ClearTargetWindowCapture() { }
 
-    public void RestoreCapturedForeground() { }
+    public void RestoreCapturedForeground()
+    {
+        RestoreForegroundCount++;
+        Events.Add("restore");
+    }
+
+    /// <summary>The paste sequence as it happened: restore, cloak, uncloak, paste.</summary>
+    public List<string> Events { get; } = [];
+
+    /// <summary>How many times the paste target was handed the foreground.</summary>
+    public int RestoreForegroundCount { get; private set; }
+
+    /// <summary>Whether TryCloakWindow succeeds, as it does on Windows.</summary>
+    public bool CloakSupported { get; set; } = true;
+
+    /// <summary>Every cloak call, in order: (window, cloaked, releasedForeground).</summary>
+    public List<(Window Window, bool Cloaked, bool ReleasedForeground)> CloakCalls { get; } = [];
+
+    /// <summary>Windows currently cloaked.</summary>
+    public HashSet<Window> CloakedWindows { get; } = [];
+
+    /// <summary>Runs inside TryCloakWindow, to observe the state a cloak happens in.</summary>
+    public Action<Window>? OnCloak { get; set; }
+
+    public bool TryCloakWindow(Window window, bool releaseForeground)
+    {
+        if (!CloakSupported)
+        {
+            return false;
+        }
+
+        OnCloak?.Invoke(window);
+        Events.Add("cloak");
+        CloakCalls.Add((window, true, releaseForeground));
+        CloakedWindows.Add(window);
+        return true;
+    }
+
+    /// <summary>Runs inside UncloakWindow, to observe what the user is about to see.</summary>
+    public Action<Window>? OnUncloak { get; set; }
+
+    public void UncloakWindow(Window window)
+    {
+        OnUncloak?.Invoke(window);
+        Events.Add("uncloak");
+        CloakCalls.Add((window, false, false));
+        CloakedWindows.Remove(window);
+    }
 
     public void SimulatePasteKeystroke()
     {
+        Events.Add("paste");
         SimulatedPasteCount++;
     }
 

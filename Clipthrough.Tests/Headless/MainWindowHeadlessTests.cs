@@ -511,7 +511,9 @@ public sealed class MainWindowHeadlessTests
         // has completed. A fixed wait here races it, so poll instead.
         await WaitForUiAsync(() => systemInteraction.SimulatedPasteCount == 1);
 
-        Assert.False(window.IsVisible);
+        // Out of the user's sight: cloaked into standby where cloaking works,
+        // hidden where it does not (PopupStandbyHeadlessTests covers both).
+        Assert.False(window.IsPresentedToUser);
         Assert.Equal("paste me", systemInteraction.LastCopiedText);
         Assert.Equal(1, systemInteraction.SimulatedPasteCount);
     }

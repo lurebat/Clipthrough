@@ -39,6 +39,20 @@ public interface ISystemInteractionService : IDisposable
 
     void RestoreCapturedForeground();
 
+    /// <summary>
+    /// Takes <paramref name="window"/> out of sight without hiding it: DWM
+    /// cloaks it, so it keeps rendering and the next uncloak shows a frame that
+    /// is already current. With <paramref name="releaseForeground"/> the window
+    /// also gives up the foreground, which the OS hands to whatever it would
+    /// have activated had the window been hidden.
+    /// </summary>
+    /// <returns>False when cloaking is unavailable (not Windows, or DWM refused);
+    /// the caller must hide the window instead.</returns>
+    bool TryCloakWindow(Window window, bool releaseForeground);
+
+    /// <summary>Reverses <see cref="TryCloakWindow"/>.</summary>
+    void UncloakWindow(Window window);
+
     void SimulatePasteKeystroke();
 
     void ShowNotification(AppNotification notification);

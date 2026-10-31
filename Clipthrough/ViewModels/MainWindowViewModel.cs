@@ -137,6 +137,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // keep the UI thread idle so the popup snaps open quickly on the next show.
     // See ApplyCapturedClipOptimistically / ApplyUpdatedClipOptimistically / PerformRefreshAsync.
     private bool _isMainWindowVisible;
+    // True while the window is cloaked in standby: still "visible" above, so the
+    // list is maintained, but not in front of the user. See EnterStandbyAsync.
+    private bool _isInStandby;
     // Set true whenever a clip change (capture/update/OCR/maintenance) is observed
     // while the window is hidden, or when a refresh result was discarded because
     // the window became hidden mid-apply. On the next show we trigger one refresh.
@@ -2686,7 +2689,47 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// time the list was open - hiding the window deliberately keeps
     /// <see cref="SelectedClip"/> intact, so callers cannot read it directly.
     /// </summary>
-    public ClipEntry? HotkeyTargetClip => _isMainWindowVisible ? SelectedClip?.Clip : null;
+    public ClipEntry? HotkeyTargetClip => _isMainWindowVisible && !_isInStandby ? SelectedClip?.Clip : null;
+
+    /// <summary>
+    /// Whether the popup is dismissed into standby: cloaked rather than hidden,
+    /// so it is out of the user's sight while its list is still kept current.
+    /// </summary>
+    public bool IsInStandby => _isInStandby;
+
+    /// <summary>
+    /// Dismisses the popup into standby (cloak-as-hide). Unlike
+    /// <see cref="SetMainWindowVisible"/>(false), the list stays live - captures
+    /// keep landing in it - because a cloaked window keeps rendering, and the
+    /// whole point is that the next summon shows a frame that is already
+    /// correct. What a fresh popup would have reset on show is reset here
+    /// instead, before the window disappears: the search is cleared and the
+    /// newest clip selected.
+    /// </summary>
+    /// <returns>The refresh the cleared search needs, so the view can hold the
+    /// next summon until it has landed.</returns>
+    public Task EnterStandbyAsync()
+    {
+        _isInStandby = true;
+        _recentSearchNavigationIndex = -1;
+        if (!_isDatabaseReady)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (!string.IsNullOrEmpty(SearchText) || _isClipListStale)
+        {
+            _selectNewestOnNextRefresh = true;
+            SearchText = string.Empty;
+            return RefreshAsync();
+        }
+
+        SelectedClip = GetDefaultAutoSelectedClip();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>The popup is back in front of the user.</summary>
+    public void LeaveStandby() => _isInStandby = false;
 
     /// <summary>
     /// Called by the application shell whenever the main window's visibility
@@ -2696,6 +2739,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     public void SetMainWindowVisible(bool isVisible)
     {
+        // Shown or hidden for real, the window is no longer in standby.
+        _isInStandby = false;
         if (_isMainWindowVisible == isVisible)
         {
             return;

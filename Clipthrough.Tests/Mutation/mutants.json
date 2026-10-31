@@ -1947,7 +1947,7 @@
     "id": "hotkey-targets-the-selection-while-hidden",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "Hiding the popup deliberately keeps the selection, so a hotkey that still reads it transforms a clip the user last touched hours ago instead of the one they just copied.",
-    "find": "    public ClipEntry? HotkeyTargetClip => _isMainWindowVisible ? SelectedClip?.Clip : null;",
+    "find": "    public ClipEntry? HotkeyTargetClip => _isMainWindowVisible && !_isInStandby ? SelectedClip?.Clip : null;",
     "replace": "    public ClipEntry? HotkeyTargetClip => SelectedClip?.Clip;",
     "filter": "FullyQualifiedName~HotkeyTargetClipHeadlessTests"
   },
@@ -5382,5 +5382,77 @@
     "find": "if (!string.Equals(store.Read(), command, StringComparison.Ordinal))",
     "replace": "if (string.IsNullOrWhiteSpace(store.Read()))",
     "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
+  },
+  {
+    "id": "standby-hides-instead-of-cloaking",
+    "file": "Clipthrough/Views/MainWindow.Presentation.cs",
+    "why": "Dismiss falls back to Hide(), which stops rendering - the popup reopens on the previous search before resetting.",
+    "find": "TryEnterStandby(systemInteraction, viewModel))",
+    "replace": "systemInteraction is null && TryEnterStandby(systemInteraction, viewModel))",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.Dismiss_CloaksTheWindowInsteadOfHidingIt"
+  },
+  {
+    "id": "standby-keeps-the-search",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Dismissing into standby leaves the search in place, so the summon shows the old results first.",
+    "find": "            SearchText = string.Empty;\n            return RefreshAsync();",
+    "replace": "            return RefreshAsync();",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.AfterASearch_TheSummonShowsTheResetList_NotTheSearch"
+  },
+  {
+    "id": "standby-keeps-the-old-selection",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "The selection is not reset to the newest clip when the popup leaves, so it comes back on whatever was selected.",
+    "find": "        SelectedClip = GetDefaultAutoSelectedClip();\n        return Task.CompletedTask;\n    }\n\n    /// <summary>The popup is back in front of the user.</summary>",
+    "replace": "        SelectedClip = SelectedClip ?? GetDefaultAutoSelectedClip();\n        return Task.CompletedTask;\n    }\n\n    /// <summary>The popup is back in front of the user.</summary>",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.Dismiss_SelectsTheNewestClip_BeforeTheCloak"
+  },
+  {
+    "id": "summon-does-not-wait-for-the-reset",
+    "file": "Clipthrough/Views/MainWindow.Presentation.cs",
+    "why": "A summon right after a dismiss uncloaks before the cleared search has re-queried, showing the old results.",
+    "find": "if (!m_standbyReset.IsCompleted)",
+    "replace": "if (m_standbyReset.IsCompleted && !m_standbyReset.IsCompleted)",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.ASummonRightAfterTheDismiss_WaitsForTheResetBeforeUncloaking"
+  },
+  {
+    "id": "standby-keeps-the-taskbar-button",
+    "file": "Clipthrough/Views/MainWindow.Presentation.cs",
+    "why": "The taskbar button stays while the popup is dismissed (user decision: hide it).",
+    "find": "        ShowInTaskbar = false;\n        if (!systemInteraction.TryCloakWindow",
+    "replace": "        ShowInTaskbar = true;\n        if (!systemInteraction.TryCloakWindow",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.WhileInStandby_ThereIsNoTaskbarButton_AndTheSummonBringsItBack"
+  },
+  {
+    "id": "standby-treated-as-hidden",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Standby stops the list being maintained, so a clip copied while dismissed is missing on the summon and pops in after it.",
+    "find": "        _isInStandby = true;\n        _recentSearchNavigationIndex = -1;",
+    "replace": "        _isInStandby = true;\n        _isMainWindowVisible = false;\n        _recentSearchNavigationIndex = -1;",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.ACaptureWhileInStandby_IsInTheListBeforeTheSummon"
+  },
+  {
+    "id": "standby-selection-is-a-hotkey-target",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "A global hotkey acts on the selection of a popup nobody is looking at.",
+    "find": "_isMainWindowVisible && !_isInStandby ? SelectedClip?.Clip : null",
+    "replace": "_isMainWindowVisible && (_isInStandby || !_isInStandby) ? SelectedClip?.Clip : null",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.InStandby_TheSelectionIsNotAHotkeyTarget"
+  },
+  {
+    "id": "owned-windows-stay-behind",
+    "file": "Clipthrough/Views/MainWindow.Presentation.cs",
+    "why": "Settings and the other owned windows stay on screen alone when the popup is dismissed.",
+    "find": "OwnedWindows.Where(static w => w.IsVisible)",
+    "replace": "OwnedWindows.Where(static w => w.IsVisible && !w.IsVisible)",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.OwnedWindows_GoIntoStandbyWithThePopup"
+  },
+  {
+    "id": "owned-window-opens-without-the-popup",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "Opening Settings while the popup is cloaked shows Settings alone: a cloaked popup is still IsVisible.",
+    "find": "                LeaveStandbyNow();\n                m_settingsWindow.Show(this);",
+    "replace": "                m_settingsWindow.Show(this);",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.OpeningAnOwnedWindowFromStandby_SummonsThePopup"
   }
 ]

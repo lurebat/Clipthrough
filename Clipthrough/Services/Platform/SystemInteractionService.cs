@@ -450,6 +450,82 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         }
     }
 
+    public bool TryCloakWindow(Window window, bool releaseForeground)
+    {
+        if (!OperatingSystem.IsWindows() || window.TryGetPlatformHandle()?.Handle is not { } hwnd || hwnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (!SetCloaked(hwnd, true))
+            {
+                return false;
+            }
+
+            if (releaseForeground)
+            {
+                // Hiding is the only reliable way to let the OS pick the window
+                // that should get the foreground next; showing again without
+                // activation keeps the window "visible", so it goes on rendering
+                // while cloaked. The pattern is PowerToys Command Palette's
+                // (MainWindow.HideWindow).
+                ShowWindow(hwnd, SW_HIDE);
+                ShowWindow(hwnd, SW_SHOWNA);
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Cloaking the window failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    public void UncloakWindow(Window window)
+    {
+        if (!OperatingSystem.IsWindows() || window.TryGetPlatformHandle()?.Handle is not { } hwnd || hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        try
+        {
+            SetCloaked(hwnd, false);
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Uncloaking the window failed: {ex.Message}");
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static bool SetCloaked(nint hwnd, bool cloaked)
+    {
+        var value = cloaked ? 1 : 0;
+        var hr = DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, ref value, sizeof(int));
+        if (hr < 0)
+        {
+            Trace.TraceWarning($"DwmSetWindowAttribute(DWMWA_CLOAK, {cloaked}) failed: 0x{hr:X8}");
+            return false;
+        }
+
+        return true;
+    }
+
+    private const int DWMWA_CLOAK = 13;
+    private const int SW_HIDE = 0;
+    private const int SW_SHOWNA = 8;
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(nint hwnd, int attribute, ref int value, int size);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShowWindow(nint hwnd, int command);
+
     public void SimulatePasteKeystroke()
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))

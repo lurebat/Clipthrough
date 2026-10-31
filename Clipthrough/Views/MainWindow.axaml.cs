@@ -1085,8 +1085,8 @@ public partial class MainWindow : Window
 
     private void HidePopupAfterDrag(MainWindowViewModel viewModel)
     {
-        _ = viewModel.ClearSearchFilterAsync(forceRefresh: false);
-        Hide();
+        _ = viewModel;
+        Dismiss();
     }
 
     private void OnPopupDragOver(object? sender, DragEventArgs e)
@@ -1253,9 +1253,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Step 3: Hide Clipthrough. Target has already been scheduled to receive focus.
-        _ = viewModel.ClearSearchFilterAsync(forceRefresh: false);
-        Hide();
+        // Step 3: Dismiss Clipthrough. Target has already been scheduled to receive focus.
+        Dismiss();
 
         // Step 4: Give the OS time to process WM_ACTIVATE / WM_SETFOCUS on the target.
         await Task.Delay(150);
@@ -1810,6 +1809,8 @@ public partial class MainWindow : Window
                     DataContext = m_subscribedViewModel,
                 };
                 m_settingsWindow.Closing += OnSettingsWindowClosing;
+                // A cloaked popup is still 'visible'; an owned window must not open alone.
+                LeaveStandbyNow();
                 m_settingsWindow.Show(this);
             }
             else
@@ -1852,6 +1853,8 @@ public partial class MainWindow : Window
                     DataContext = m_subscribedViewModel,
                 };
                 m_aiPromptWindow.Closing += OnAiPromptWindowClosing;
+                // A cloaked popup is still 'visible'; an owned window must not open alone.
+                LeaveStandbyNow();
                 m_aiPromptWindow.Show(this);
             }
             else
@@ -1905,6 +1908,8 @@ public partial class MainWindow : Window
                     DataContext = m_subscribedSessionLogs
                 };
                 m_sessionLogsWindow.Closing += OnSessionLogsWindowClosing;
+                // A cloaked popup is still 'visible'; an owned window must not open alone.
+                LeaveStandbyNow();
                 m_sessionLogsWindow.Show(this);
             }
             else
@@ -2157,9 +2162,12 @@ public partial class MainWindow : Window
 
     private void ShowOwnedWindow(Window window)
     {
-        if (!IsVisible)
+        if (!IsPresentedToUser)
         {
-            Show();
+            if (!LeaveStandbyNow())
+            {
+                Show();
+            }
 
             if (WindowState == WindowState.Minimized)
             {
