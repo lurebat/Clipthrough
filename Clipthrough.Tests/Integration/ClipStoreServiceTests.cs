@@ -728,6 +728,13 @@ public sealed class ClipStoreServiceTests
     /// join the tokens into one alternation, so ticking "whole word" silently
     /// turned an AND search into an OR and widened the result set.
     /// </summary>
+    /// <remarks>
+    /// "cat dogma" and "category dog" carry the point. The search first narrows
+    /// to rows the trigram FTS index matches for every token (U-D4's prefilter),
+    /// a substring match, which already drops "cat alone" and "dog alone" whatever the regex does;
+    /// these two pass that prefilter and only the per-token whole-word regex
+    /// rejects them, so an alternation would let them through.
+    /// </remarks>
     [Fact]
     public async Task SearchAsync_WholeWordRequiresEveryToken()
     {
@@ -735,7 +742,7 @@ public sealed class ClipStoreServiceTests
         await scope.DatabaseInitializer.InitializeAsync();
         scope.SettingsService.SetCurrent(new AppSettings { MaxClipSizeBytes = 4096 });
 
-        foreach (var content in new[] { "cat and dog", "cat alone", "dog alone" })
+        foreach (var content in new[] { "cat and dog", "cat alone", "dog alone", "cat dogma", "category dog" })
         {
             await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
             {

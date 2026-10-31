@@ -80,7 +80,18 @@ public sealed class DatabaseInitializer
         -- re-tokenises the entire clip (content can be megabytes) on every metadata-only
         -- write — paste counters, OCR status, embedding status, pinning — which is the
         -- overwhelming majority of updates.
-        CREATE TRIGGER clips_au AFTER UPDATE OF content, source_app, source_window_title, source_url, ocr_text ON clips BEGIN
+        --
+        -- The WHEN skips an assignment that changes nothing (F-26). Re-copying a
+        -- clip and the deferred HTML/RTF update both write the same text back,
+        -- and re-tokenising a 1.8 MB clip for an identical index cost 714-763 ms
+        -- under the write lock. IS NOT, so a change to or from NULL still counts.
+        CREATE TRIGGER clips_au AFTER UPDATE OF content, source_app, source_window_title, source_url, ocr_text ON clips
+        WHEN old.content IS NOT new.content
+          OR old.source_app IS NOT new.source_app
+          OR old.source_window_title IS NOT new.source_window_title
+          OR old.source_url IS NOT new.source_url
+          OR old.ocr_text IS NOT new.ocr_text
+        BEGIN
             INSERT INTO clips_fts(clips_fts, rowid, content, source_app, source_window_title, source_url, ocr_text)
             VALUES ('delete', old.id, old.content, old.source_app, old.source_window_title, old.source_url, old.ocr_text);
             INSERT INTO clips_fts(rowid, content, source_app, source_window_title, source_url, ocr_text)
@@ -159,6 +170,27 @@ public sealed class DatabaseInitializer
             COALESCE(last_copied_at, captured_at) DESC,
             id DESC
         );
+        -- The type dropdown with nothing typed (F-09). Every index above leads
+        -- with the pinned prefix, so "content_type = ?" could only go through
+        -- idx_clips_content_type and then sort every clip of that type, reading
+        -- each image's payload on the way: 1.5-1.7 s at 60k clips, 9.7 s
+        -- encrypted. Leading with the type turns the filter into a range of
+        -- this index already in MostRecent order.
+        --
+        -- The other sorts with a type filter now start here too (EXPLAIN:
+        -- "USE TEMP B-TREE FOR RIGHT PART OF ORDER BY") instead of from
+        -- idx_clips_content_type. Both read every row of the type; this one in
+        -- recency order rather than rowid order, and the two are close to the
+        -- same order because ids are assigned at capture. That is the pattern
+        -- the complete-set note warns about, so the type-filtered sorts are
+        -- benchmarked (PerfProbes P1) rather than assumed equal.
+        CREATE INDEX IF NOT EXISTS idx_clips_type_default_order ON clips(
+            content_type,
+            (pinned_at IS NULL),
+            pinned_at DESC,
+            COALESCE(last_copied_at, captured_at) DESC,
+            id DESC
+        );
         CREATE INDEX IF NOT EXISTS idx_clips_oldest_order ON clips(
             (pinned_at IS NULL),
             pinned_at DESC,
@@ -194,6 +226,23 @@ public sealed class DatabaseInitializer
             substr(content, 1, 64) COLLATE NOCASE ASC,
             id ASC
         );
+
+        -- Startup and coverage scans (F-25). With nothing pending they still read
+        -- every clip: the sensitivity recovery 2.9 s and the OCR coverage
+        -- aggregate 1.9 s at 60k clips, 16 s and 9.9 s encrypted. Each partial
+        -- index holds only the rows its query counts. The OCR one leads with
+        -- content_type so the planner takes it over idx_clips_content_type, and
+        -- carries ocr_status, which the row stores after the payload - reading it
+        -- there walked each image's overflow chain. The row is still visited for
+        -- the content_bytes IS NOT NULL term (the bundled SQLite does not treat
+        -- the plan as covering); PerfProbes P3 measures what that costs.
+        -- Both WHERE clauses match the queries' own terms exactly
+        -- (ClipStoreService.PendingSensitivitySql / OcrCoverageSql); SQLite
+        -- only uses a partial index whose condition the query implies.
+        CREATE INDEX IF NOT EXISTS idx_clips_sensitivity_pending ON clips(id)
+            WHERE sensitivity_scanned_at IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_clips_ocr_images ON clips(content_type, ocr_status)
+            WHERE content_type = 'image' AND content_bytes IS NOT NULL;
 
         -- Retention purges, which run after every capture. Both lifetime deletes
         -- filter on exactly this pair.

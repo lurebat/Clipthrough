@@ -736,7 +736,11 @@ public partial class App : Application
             if (_mainWindow?.DataContext is MainWindowViewModel mvm
                 && mvm.HotkeyTargetClip is { } selected)
             {
-                clip = selected;
+                // A list row may carry only a prefix of its text (F-10); the
+                // transform saves its result, so read the whole clip.
+                clip = selected.IsContentTruncated
+                    ? await _clipStoreService.GetByIdAsync(selected.Id)
+                    : selected;
             }
             else
             {

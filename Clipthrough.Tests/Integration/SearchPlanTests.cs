@@ -119,6 +119,23 @@ public class SearchPlanTests
         Assert.Contains(slowPlan, s => s.Contains("USE TEMP B-TREE FOR ORDER BY", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// F-08. The threshold was tuned on rows with no payload. With real clips -
+    /// content, content_bytes and an icon inline - sorting 516 matches took
+    /// 570-649 ms at 60k clips against 126 ms walking the ordered index, and a
+    /// 1,500-match term 705-752 ms against 53 ms. A term matching a few hundred
+    /// clips is broad.
+    /// </summary>
+    [Fact]
+    public async Task ATermMatchingFiveHundredClips_TakesTheOrderedIndexPlan()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        await SeedAsync(scope, commonRows: 500, rareRows: 10);
+
+        Assert.True(await IsBroadAsync(scope, CommonToken));
+    }
+
     [Fact]
     public async Task NarrowSearch_IsNotTreatedAsBroad()
     {
@@ -192,6 +209,57 @@ public class SearchPlanTests
         }
 
         Assert.True(checkedAny, "no sort declares a covering index; the fast plan can never be used");
+    }
+
+    /// <summary>
+    /// F-09. Picking Text or Image in the type dropdown, with nothing typed, took
+    /// 1.5-1.7 s at 60k clips (9.7 s encrypted): every sort index leads with the
+    /// pinned prefix, so the filter went through idx_clips_content_type and then
+    /// sorted every clip of that type - fetching each image's megabyte blob on
+    /// the way. A type-prefixed MostRecent index answers the page from the index.
+    /// </summary>
+    [Fact]
+    public async Task TypeFilter_MostRecent_WalksATypePrefixedIndexWithoutSorting()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        await using var connection = scope.ConnectionFactory.CreateConnection();
+        await connection.OpenAsync();
+        await using (var seed = connection.CreateCommand())
+        {
+            seed.CommandText = """
+                WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < 3000)
+                INSERT INTO clips (hash, content_type, content_format, content, byte_size,
+                                   captured_at, first_copied_at, last_copied_at)
+                SELECT 'h' || i, CASE WHEN i % 3 = 0 THEN 'image' ELSE 'text' END, 'text', 'body ' || i, 8,
+                       datetime('2024-01-01', '+' || i || ' minutes'),
+                       datetime('2024-01-01', '+' || i || ' minutes'),
+                       datetime('2024-01-01', '+' || i || ' minutes')
+                FROM n;
+                """;
+            await seed.ExecuteNonQueryAsync();
+        }
+
+        var filters = new ClipSearchFilters { ContentTypes = [ContentType.Image], Limit = 200 };
+        await using var command = connection.CreateCommand();
+        command.CommandText = "EXPLAIN QUERY PLAN " + ClipStoreService.BuildSearchSql(filters, hasSearch: false, useOrderedIndexPlan: false);
+        command.Parameters.AddWithValue("$contentType0", "image");
+        command.Parameters.AddWithValue("$limit", 201);
+        command.Parameters.AddWithValue("$offset", 0);
+        var plan = new List<string>();
+        await using (var reader = await command.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync()) plan.Add(reader.GetString(3));
+        }
+
+        Assert.Contains(plan, s => s.Contains("idx_clips_type_default_order", StringComparison.Ordinal));
+        Assert.DoesNotContain(plan, s => s.Contains("USE TEMP B-TREE FOR ORDER BY", StringComparison.Ordinal));
+
+        var page = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters { ContentTypes = [ContentType.Image], Limit = 50 });
+        Assert.Equal(50, page.Items.Count);
+        Assert.All(page.Items, i => Assert.Equal(ContentType.Image, i.ContentType));
+        Assert.Equal(page.Items.Select(i => i.Id).OrderByDescending(id => id), page.Items.Select(i => i.Id));
+        Assert.Equal(3000L, page.Items[0].Id);
     }
 
     private static async Task<List<long>> RunAsync(TemporaryDatabaseScope scope, ClipSearchFilters filters, bool useOrderedIndexPlan)

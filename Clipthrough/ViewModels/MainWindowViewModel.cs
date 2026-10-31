@@ -100,6 +100,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ContentDisplayMode _contentDisplayMode;
     private string _selectedClipRenderedText = AppText.PreviewSelectContent;
     private string _selectedClipRawContent = AppText.PreviewSelectRawContent;
+
+    // Whether the text the editor was last given is the whole clip. Recorded with
+    // that text in UpdateSelectedClipPresentation, because hydration replaces the
+    // row's clip a dispatcher turn before the selection re-presents it.
+    private bool _presentedClipIsComplete;
     private string _selectedClipImageHint = AppText.PreviewSelectImage;
     private bool _isStartupInProgress;
     private bool _isDatabaseReady;
@@ -1539,10 +1544,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string CheckedClipSummaryText => AppText.FormatCheckedClipCount(CheckedClipCount);
 
+    // Not while the row carries only a prefix of its text (F-10): an edit is saved
+    // as a new clip, and saving the prefix would lose everything after it. The
+    // hydration that selection starts re-presents the clip and re-raises this.
+    // It follows what the editor was given, not the row: the row is complete a
+    // dispatcher turn before the editor is, and an edit made in between was saved
+    // as the prefix plus the edit.
     public bool IsSelectedClipTextEditable =>
-        SelectedClip?.Clip.ContentType is ContentType.Text
-        || (SelectedClip?.Clip.ContentType is ContentType.RichText
-            && _contentDisplayMode is ContentDisplayMode.Textual or ContentDisplayMode.Raw);
+        _presentedClipIsComplete
+        && SelectedClip is { } selected
+        && (selected.Clip.ContentType is ContentType.Text
+            || (selected.Clip.ContentType is ContentType.RichText
+                && _contentDisplayMode is ContentDisplayMode.Textual or ContentDisplayMode.Raw));
 
     /// <summary>
     /// Rendered rich text is read-only. The pane is a real editor and is fully
@@ -3062,7 +3075,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             if (clip.Clip.ContentType == ContentType.RichText)
             {
-                var renderedText = SelectedClipRenderedText;
+                // From the hydrated clip, not SelectedClipRenderedText: the preview
+                // is refreshed by selection's own continuation, which may not have
+                // run yet, and until it does it holds the row's prefix (F-10).
+                var renderedText = ClipDisplayFormatter.BuildRenderedText(clip.Clip, Array.Empty<string>());
                 _clipboardMonitorService.SuppressNext(renderedText);
                 await _systemInteractionService.CopyRichContentAsync(clip.FullContent, renderedText, clip.Clip.ContentFormat);
                 StatusText = AppText.FormatCopiedClip(clip.DisplayContentType.ToLower(AppText.CurrentCulture));
@@ -3071,15 +3087,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 return true;
             }
 
-            var isFileList = clip.Clip.ContentType == ContentType.Files && SelectedClipFiles.Count > 0;
+            var fileItems = clip.Clip.ContentType == ContentType.Files
+                ? ClipDisplayFormatter.BuildFileItems(clip.FullContent)
+                : Array.Empty<string>();
+            var isFileList = fileItems.Count > 0;
             var contentToCopy = isFileList
-                ? string.Join(Environment.NewLine, SelectedClipFiles.Select(static file => file.FilePath))
+                ? string.Join(Environment.NewLine, fileItems)
                 : clip.FullContent;
 
             _clipboardMonitorService.SuppressNext(contentToCopy);
             await _systemInteractionService.CopyTextAsync(contentToCopy);
             StatusText = isFileList
-                ? AppText.FormatCopiedFileList(SelectedClipFiles.Count)
+                ? AppText.FormatCopiedFileList(fileItems.Count)
                 : AppText.FormatCopiedClip(clip.DisplayContentType.ToLower(AppText.CurrentCulture));
             PublishSensitiveCopyNotificationIfNeeded(clip);
             TrackPasteInBackground(clip.Clip.Id);
@@ -3106,6 +3125,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         try
         {
+            await clip.EnsureContentHydratedAsync();
+
             // Clip.Content, not FullContent. FullContent is the *raw* display
             // string, and GetRawContentDisplay returns the decoded HTML or RTF
             // markup ahead of the text for any rich clip - so this used to put
@@ -3194,6 +3215,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        await target.EnsureContentHydratedAsync();
         var exportResult = await _clipExportService.ExportAsync(target.Clip);
         _clipboardMonitorService.SuppressNext(exportResult.PrimaryPath);
         await _systemInteractionService.CopyTextAsync(exportResult.PrimaryPath);
@@ -3219,13 +3241,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task OpenInEditorAsync()
     {
-        if (SelectedClip is null)
+        // Captured once: the selection can move while the clip is hydrated
+        // below, and the editor must get the clip the command was run on.
+        var target = SelectedClip;
+        if (target is null)
         {
             return;
         }
 
         _ = CommitSearchQueryAsync();
-        var editorPath = ResolveExternalEditorPath(SelectedClip);
+        var editorPath = ResolveExternalEditorPath(target);
         if (!string.IsNullOrWhiteSpace(editorPath) && !System.IO.File.Exists(ExtractExecutablePath(editorPath)))
         {
             _notificationService.PublishError(
@@ -3234,7 +3259,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var exportResult = await _clipExportService.ExportForToolAsync(SelectedClip.Clip);
+        await target.EnsureContentHydratedAsync();
+        var exportResult = await _clipExportService.ExportForToolAsync(target.Clip);
         await _systemInteractionService.OpenInEditorAsync(exportResult.PrimaryPath, editorPath);
         StatusText = $"{AppText.OpenedInEditorStatus}: {Path.GetFileName(exportResult.PrimaryPath)}";
     }
@@ -3345,6 +3371,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        await Task.WhenAll(checkedClips[0].EnsureContentHydratedAsync(), checkedClips[1].EnsureContentHydratedAsync());
         var left = await _clipExportService.ExportForToolAsync(checkedClips[0].Clip);
         var right = await _clipExportService.ExportForToolAsync(checkedClips[1].Clip);
 
@@ -3648,7 +3675,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        if (string.IsNullOrEmpty(GetTransformSourceText(clip)))
+        if (string.IsNullOrEmpty(await GetTransformSourceTextAsync(clip)))
         {
             StatusText = "Selected clip has no text or file paths to transform";
             return;
@@ -3691,8 +3718,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private static string GetTransformSourceText(ClipItemViewModel clip)
+    private static async Task<string> GetTransformSourceTextAsync(ClipItemViewModel clip)
     {
+        // A list row may carry only a prefix of its text (F-10); a transform
+        // saves its result as a new clip, so it has to start from all of it.
+        await clip.EnsureContentHydratedAsync();
         if (clip.Clip.ContentType != ContentType.Files)
         {
             return clip.Clip.Content ?? string.Empty;
@@ -3730,7 +3760,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             && sliceClip is not null
             && sliceLength > 0
             && sliceStart >= 0
-            && sliceStart + sliceLength <= sliceFullText.Length;
+            && sliceStart + sliceLength <= sliceFullText.Length
+            && !sliceClip.Clip.IsContentTruncated;
 
         var targets = explicitTarget is not null ? new List<ClipItemViewModel> { explicitTarget }
             : checkedClips.Count > 0 ? checkedClips
@@ -3765,7 +3796,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
             else
             {
-                source = GetTransformSourceText(target);
+                source = await GetTransformSourceTextAsync(target);
                 if (string.IsNullOrEmpty(source))
                 {
                     continue;
@@ -3882,7 +3913,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool IsOcrCoverageVisible => _ocrService.IsAvailable && !string.IsNullOrEmpty(OcrCoverageText);
 
-    private async Task RefreshSemanticCoverageAsync()
+    private CoalescingRefresh? _semanticCoverageRefresh;
+    private CoalescingRefresh? _ocrCoverageRefresh;
+
+    // Both chips refresh per OCR queue event or embedding batch, and each refresh
+    // is a full-library aggregate; overlapping triggers collapse into one
+    // trailing run instead of stacking identical queries (F-25).
+    private Task RefreshSemanticCoverageAsync()
+        => (_semanticCoverageRefresh ??= new CoalescingRefresh(RefreshSemanticCoverageCoreAsync)).RunAsync();
+
+    private Task RefreshOcrCoverageAsync()
+        => (_ocrCoverageRefresh ??= new CoalescingRefresh(RefreshOcrCoverageCoreAsync)).RunAsync();
+
+    private async Task RefreshSemanticCoverageCoreAsync()
     {
         if (_embeddingWorker is null)
         {
@@ -3925,7 +3968,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(IsSemanticCoverageVisible));
     }
 
-    private async Task RefreshOcrCoverageAsync()
+    private async Task RefreshOcrCoverageCoreAsync()
     {
         if (!_ocrService.IsAvailable)
         {
@@ -4887,6 +4930,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (ReferenceEquals(clip, SelectedClip))
         {
             UpdateSelectedClipPresentation();
+            RaiseSelectionStateProperties();
 
             // Hydration is what gives an image clip its bytes, and three
             // separate things are computed from those bytes: whether the image
@@ -4910,7 +4954,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void UpdateSelectedClipPresentation()
     {
-        var rawContent = SelectedClip?.FullContent ?? ClipDisplayFormatter.GetRawContentDisplay(null);
+        var rawContent = SelectedClip?.DisplayContent ?? ClipDisplayFormatter.GetRawContentDisplay(null);
+        _presentedClipIsComplete = SelectedClip is { Clip.IsContentTruncated: false };
         var fileItems = ClipDisplayFormatter.BuildFileItems(rawContent);
         ReplaceSelectedClipFiles(fileItems);
         _selectedClipRawContent = rawContent;
@@ -5563,6 +5608,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var useSelectionSlice = checkedClips.Count == 0
             && SelectedClip is not null
             && ReferenceEquals(targets[0], SelectedClip)
+            && !SelectedClip.Clip.IsContentTruncated
             && EditedClipSelectionLength > 0
             && EditedClipSelectionStart >= 0
             && EditedClipSelectionStart + EditedClipSelectionLength <= (EditedClipText?.Length ?? 0)
@@ -5661,7 +5707,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     }
                     else
                     {
-                        source = GetTransformSourceText(target);
+                        source = await GetTransformSourceTextAsync(target);
                         result = await _aiTransformService.TransformAsync(prompt, source);
                     }
                 }
@@ -7602,7 +7648,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return ClipBitmapFactory.TryLoad(bytes);
         }
 
-        var trimmed = clip.Content.Trim();
+        var trimmed = clip.ContentPrefix.Trim();
 
         try
         {
@@ -7665,6 +7711,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return null;
         }
 
+        await Task.WhenAll(clips.Select(static c => c.EnsureContentHydratedAsync()));
         var entries = clips.Select(static c => c.Clip).ToArray();
         return await _dragDropService.BuildDragPayloadAsync(entries, storageProvider);
     }

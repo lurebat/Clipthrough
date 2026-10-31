@@ -369,9 +369,13 @@ internal sealed class TestClipExportService : IClipExportService
 
     public int ToolExportCount { get; private set; }
 
+    /// <summary>The text the real service would have written: it reads Content, as this does.</summary>
+    public string? LastExportedContent { get; private set; }
+
     public Task<ClipExportResult> ExportAsync(ClipEntry clip, CancellationToken cancellationToken = default)
     {
         ExportCount++;
+        LastExportedContent = clip.Content;
         LastExportDirectory = Path.Combine(Path.GetTempPath(), $"clip-export-{clip.Id}");
         LastPrimaryPath = Path.Combine(LastExportDirectory, "rendered.txt");
         return Task.FromResult(new ClipExportResult(LastExportDirectory, LastPrimaryPath));

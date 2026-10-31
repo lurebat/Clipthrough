@@ -30,24 +30,32 @@ public sealed class SemanticSearchService : ISemanticSearchService
     /// <see cref="Ids"/> and <see cref="Vectors"/> may be longer than <see cref="Count"/>
     /// needs: they carry spare capacity so appends do not have to reallocate every time.
     /// Everything at or past <see cref="Count"/> is reserved space and must be ignored.
+    ///
+    /// Slots below <see cref="Count"/> whose id is <see cref="Tombstone"/> belong to a
+    /// removed clip (F-27) and are skipped; <see cref="Live"/> counts the rest.
     /// </remarks>
     private sealed class CacheSnapshot
     {
-        public static readonly CacheSnapshot Empty = new(Array.Empty<long>(), Array.Empty<float>(), 0, 0);
+        public static readonly CacheSnapshot Empty = new(Array.Empty<long>(), Array.Empty<float>(), 0, 0, 0);
 
-        public CacheSnapshot(long[] ids, float[] vectors, int count, int dim)
+        public CacheSnapshot(long[] ids, float[] vectors, int count, int dim, int live)
         {
             Ids = ids;
             Vectors = vectors;
             Count = count;
             Dim = dim;
+            Live = live;
         }
 
         public long[] Ids { get; }
         public float[] Vectors { get; }
         public int Count { get; }
         public int Dim { get; }
+        public int Live { get; }
     }
+
+    // Clip ids are SQLite rowids, which are positive, so this never names a clip.
+    private const long Tombstone = long.MinValue;
 
     // Buffer.BlockCopy counts bytes in an int, so a float array longer than this
     // cannot be copied at all. Growth stops short of it rather than overflowing.
@@ -82,7 +90,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
     /// <inheritdoc />
     public bool IsAvailable => !Volatile.Read(ref _modelUnavailable);
 
-    public int CachedCount => Volatile.Read(ref _cache).Count;
+    public int CachedCount => Volatile.Read(ref _cache).Live;
 
     /// <summary>
     /// Slots the cache has allocated, as opposed to the <see cref="CachedCount"/> it holds.
@@ -91,6 +99,9 @@ public sealed class SemanticSearchService : ISemanticSearchService
     /// capacity is unreachable memory that changes no search result.
     /// </summary>
     internal int CachedCapacity => Volatile.Read(ref _cache).Ids.Length;
+
+    /// <summary>The published vector array, so a test can prove a removal does not replace it (F-27).</summary>
+    internal float[] CachedVectors => Volatile.Read(ref _cache).Vectors;
 
     public async Task RefreshCacheAsync(CancellationToken cancellationToken = default)
     {
@@ -182,6 +193,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
             if (adds.Count == 0 && updates.Count == 0) return;
 
             var newCount = existing.Count + adds.Count;
+            var newLive = existing.Live + adds.Count;
 
             // Appending into the spare capacity of the live arrays is what keeps a
             // backfill linear: the alternative copies the entire cache once per
@@ -198,6 +210,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
 
             long[] newIds;
             float[] newVectors;
+            var firstFree = existing.Count;
             if (canAppendInPlace)
             {
                 newIds = existing.Ids;
@@ -205,12 +218,32 @@ public sealed class SemanticSearchService : ISemanticSearchService
             }
             else
             {
-                var capacity = GrowCapacity(existing.Ids.Length, newCount, dim);
+                // The copy is also where removed clips' slots are reclaimed, so
+                // tombstones never outlive the next reallocation.
+                var capacity = GrowCapacity(existing.Ids.Length, newLive, dim);
                 newIds = new long[capacity];
                 newVectors = new float[capacity * dim];
+                var compacted = new Dictionary<long, int>(newLive);
 
-                Array.Copy(existing.Ids, newIds, existing.Count);
-                Buffer.BlockCopy(existing.Vectors, 0, newVectors, 0, existing.Count * dim * sizeof(float));
+                var next = 0;
+                for (var i = 0; i < existing.Count; i++)
+                {
+                    var id = existing.Ids[i];
+                    if (id == Tombstone)
+                    {
+                        continue;
+                    }
+
+                    newIds[next] = id;
+                    Buffer.BlockCopy(existing.Vectors, i * dim * sizeof(float), newVectors, next * dim * sizeof(float), dim * sizeof(float));
+                    compacted[id] = next;
+                    next++;
+                }
+
+                slotById = compacted;
+                _slotById = compacted;
+                firstFree = next;
+                newCount = next + adds.Count;
 
                 foreach (var u in updates)
                 {
@@ -221,13 +254,13 @@ public sealed class SemanticSearchService : ISemanticSearchService
 
             for (var i = 0; i < adds.Count; i++)
             {
-                var slot = existing.Count + i;
+                var slot = firstFree + i;
                 newIds[slot] = adds[i].ClipId;
                 Buffer.BlockCopy(adds[i].Vector!, 0, newVectors, slot * dim * sizeof(float), dim * sizeof(float));
                 slotById[adds[i].ClipId] = slot;
             }
 
-            Volatile.Write(ref _cache, new CacheSnapshot(newIds, newVectors, newCount, dim));
+            Volatile.Write(ref _cache, new CacheSnapshot(newIds, newVectors, newCount, dim, newLive));
         }
         finally
         {
@@ -266,36 +299,30 @@ public sealed class SemanticSearchService : ISemanticSearchService
                 return;
             }
 
-            // Fresh arrays rather than compaction in place. The append path may
-            // write into the existing arrays because it only ever adds past the
-            // published Count, so a concurrent query never looks there. Removal
-            // moves surviving entries down over slots a query is reading right
-            // now, which would hand it one clip's id against another's vector.
-            var dim = existing.Dim;
-            var survivors = existing.Count - doomed.Count;
-            var newIds = new long[survivors];
-            // survivors * dim cannot overflow: it is bounded by the existing
-            // vector array's length, which is already a valid int.
-            var newVectors = new float[survivors * dim];
-            var slots = new Dictionary<long, int>(survivors);
-
-            var next = 0;
-            for (var i = 0; i < existing.Count; i++)
+            var live = existing.Live - doomed.Count;
+            if (live == 0)
             {
-                var id = existing.Ids[i];
-                if (doomed.Contains(id))
-                {
-                    continue;
-                }
-
-                newIds[next] = id;
-                Buffer.BlockCopy(existing.Vectors, i * dim * sizeof(float), newVectors, next * dim * sizeof(float), dim * sizeof(float));
-                slots[id] = next;
-                next++;
+                _slotById = new Dictionary<long, int>();
+                Volatile.Write(ref _cache, CacheSnapshot.Empty);
+                return;
             }
 
-            _slotById = slots;
-            Volatile.Write(ref _cache, new CacheSnapshot(newIds, newVectors, survivors, dim));
+            // Tombstone the ids and keep sharing the vectors (F-27). Copying every
+            // surviving vector cost 25 ms and 90 MB of large-object heap per removal
+            // at 60k x 384, and at the library cap every capture evicts a clip.
+            // The ids go into a new array: a query holding the previous snapshot
+            // keeps reading the old one, so it never sees an id change under it,
+            // and nothing is written to the vectors it is scoring. The next
+            // reallocating append reclaims the dead slots.
+            var newIds = new long[existing.Ids.Length];
+            Array.Copy(existing.Ids, newIds, existing.Count);
+            foreach (var id in doomed)
+            {
+                newIds[_slotById[id]] = Tombstone;
+                _slotById.Remove(id);
+            }
+
+            Volatile.Write(ref _cache, new CacheSnapshot(newIds, existing.Vectors, existing.Count, existing.Dim, live));
         }
         finally
         {
@@ -357,12 +384,17 @@ public sealed class SemanticSearchService : ISemanticSearchService
         var flat = snapshot.Vectors;
         var dim = snapshot.Dim;
 
-        var selector = new TopKSelector(Math.Min(topK, count));
+        var selector = new TopKSelector(Math.Min(topK, snapshot.Live));
         var queryVector = query.AsSpan();
         var vectors = flat.AsSpan();
 
         for (var i = 0; i < count; i++)
         {
+            if (ids[i] == Tombstone)
+            {
+                continue;
+            }
+
             selector.Offer(ids[i], Dot(vectors.Slice(i * dim, dim), queryVector));
         }
 
@@ -579,6 +611,6 @@ public sealed class SemanticSearchService : ISemanticSearchService
             Array.Resize(ref flat, written * dim);
         }
 
-        return new CacheSnapshot(ids, flat, written, dim);
+        return new CacheSnapshot(ids, flat, written, dim, written);
     }
 }

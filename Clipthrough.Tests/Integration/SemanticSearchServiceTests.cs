@@ -12,7 +12,7 @@ using Xunit;
 
 namespace Clipthrough.Tests.Integration;
 
-public sealed class SemanticSearchServiceTests
+public sealed partial class SemanticSearchServiceTests
 {
     [Fact]
     public async Task QueryAsync_RanksCachedClipsByCosineSimilarity()
