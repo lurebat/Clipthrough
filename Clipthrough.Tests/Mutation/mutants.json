@@ -5774,5 +5774,53 @@
     "find": "if (next.Count != shown.Count + 1)",
     "replace": "if (next.Count < shown.Count)",
     "filter": "FullyQualifiedName~SingleInsertionTests"
+  },
+  {
+    "id": "focus-ring-gone",
+    "file": "Clipthrough/Styles/ModernTheme.axaml",
+    "why": "Keyboard navigation shows no focus ring on the row.",
+    "find": "<Style Selector=\"ListBox.clip-list.keyboard-nav ListBoxItem:focus Border.clip-row-card\">",
+    "replace": "<Style Selector=\"ListBox.clip-list.keyboard-nav ListBoxItem:focus Border.no-such-card\">",
+    "filter": "FullyQualifiedName~FocusAndPressHeadlessTests.ArrowKeys_PutARingOnTheFocusedRow"
+  },
+  {
+    "id": "focus-ring-on-click",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "A click leaves a focus ring on the row, as if the keyboard had put it there.",
+    "find": "?.Classes.Set(KeyboardNavigationClass, false), RoutingStrategies.Tunnel",
+    "replace": "?.Classes.Set(KeyboardNavigationClass, true), RoutingStrategies.Tunnel",
+    "filter": "FullyQualifiedName~FocusAndPressHeadlessTests.AClick_SelectsWithoutARing"
+  },
+  {
+    "id": "arrow-keys-not-keyboard-nav",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "Arrow keys do not count as keyboard navigation, so the ring never shows.",
+    "find": "        list?.Classes.Set(KeyboardNavigationClass, true);\n        var repeating",
+    "replace": "        var repeating",
+    "filter": "FullyQualifiedName~FocusAndPressHeadlessTests.ArrowKeys_PutARingOnTheFocusedRow"
+  },
+  {
+    "id": "press-not-scaled-with-motion",
+    "file": "Clipthrough/Styles/ModernTheme.axaml",
+    "why": "Press feedback under motion stays at Fluent's instant 0.98.",
+    "find": "<Setter Property=\"RenderTransform\" Value=\"scale(0.97)\" />",
+    "replace": "<Setter Property=\"RenderTransform\" Value=\"scale(0.98)\" />",
+    "filter": "FullyQualifiedName~FocusAndPressHeadlessTests.APressedButton_ScalesDownOnlyWithMotion"
+  },
+  {
+    "id": "press-scaled-without-motion",
+    "file": "Clipthrough/Styles/ModernTheme.axaml",
+    "why": "Buttons still scale on press with Animations off.",
+    "find": "<Style Selector=\":is(Window):not(.motion) :is(Button):pressed\">",
+    "replace": "<Style Selector=\":is(Window).no-such-class :is(Button):pressed\">",
+    "filter": "FullyQualifiedName~FocusAndPressHeadlessTests.APressedButton_ScalesDownOnlyWithMotion"
+  },
+  {
+    "id": "confirm-dialog-ignores-owner-motion",
+    "file": "Clipthrough/Views/ConfirmDialog.axaml.cs",
+    "why": "A confirm dialog ignores the motion policy of the window it belongs to.",
+    "find": "dialog.Classes.Set(MainWindow.MotionClass, owner.Classes.Contains(MainWindow.MotionClass));",
+    "replace": "dialog.Classes.Set(MainWindow.MotionClass, !owner.Classes.Contains(MainWindow.MotionClass));",
+    "filter": "FullyQualifiedName~FocusAndPressHeadlessTests.AConfirmDialog_FollowsItsOwnersMotionPolicy"
   }
 ]

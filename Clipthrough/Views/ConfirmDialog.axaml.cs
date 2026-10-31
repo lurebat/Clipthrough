@@ -35,6 +35,8 @@ public partial class ConfirmDialog : Window
         dialog.FindControl<Button>("ConfirmButton")!.Content = confirmLabel;
         dialog.FindControl<Button>("CancelButton")!.Content = cancelLabel;
 
+        // A dialog follows its owner's motion policy (MainWindow.Motion.cs).
+        dialog.Classes.Set(MainWindow.MotionClass, owner.Classes.Contains(MainWindow.MotionClass));
         return dialog.ShowDialog<bool>(owner);
     }
 

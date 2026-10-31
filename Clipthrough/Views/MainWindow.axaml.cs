@@ -1723,6 +1723,7 @@ public partial class MainWindow : Window
         Dispatcher.UIThread.Post(() =>
         {
             var window = new HelpWindow();
+            TrackMotion(window);
             window.Show(this);
         });
     }
@@ -1735,6 +1736,7 @@ public partial class MainWindow : Window
             {
                 DataContext = sender as MainWindowViewModel ?? DataContext,
             };
+            TrackMotion(window);
             window.Show(this);
         });
     }

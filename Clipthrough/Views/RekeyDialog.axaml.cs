@@ -40,6 +40,8 @@ public partial class RekeyDialog : Window
         rememberBox.IsChecked = storageOptionsService.Current.RememberPassword;
         var currentBox = dialog.FindControl<TextBox>("CurrentPasswordBox")!;
         currentBox.Text = storageOptionsService.Current.DatabasePassword ?? string.Empty;
+        // A dialog follows its owner's motion policy (MainWindow.Motion.cs).
+        dialog.Classes.Set(MainWindow.MotionClass, owner.Classes.Contains(MainWindow.MotionClass));
         return dialog.ShowDialog<bool>(owner);
     }
 

@@ -15,6 +15,8 @@
                     <SolidColorBrush x:Key="SurfaceInteractiveHoverBrush" Color="#1A2A43" />
                     <SolidColorBrush x:Key="SurfaceSelectedBrush" Color="#1E293B" />
                     <SolidColorBrush x:Key="AccentBrush" Color="#7C3AED" />
+                    <!-- Light enough to read on the selected row's accent fill. -->
+                    <BoxShadows x:Key="ClipRowFocusRing">inset 0 0 0 2 #E9D5FF</BoxShadows>
                     <SolidColorBrush x:Key="AccentHoverBrush" Color="#8B5CF6" />
                     <SolidColorBrush x:Key="SuccessBrush" Color="#10B981" />
                     <SolidColorBrush x:Key="WarningBrush" Color="#F59E0B" />
@@ -74,6 +76,7 @@
                     <SolidColorBrush x:Key="SurfaceInteractiveHoverBrush" Color="#94A3B8" />
                     <SolidColorBrush x:Key="SurfaceSelectedBrush" Color="#BFDBFE" />
                     <SolidColorBrush x:Key="AccentBrush" Color="#6D28D9" />
+                    <BoxShadows x:Key="ClipRowFocusRing">inset 0 0 0 2 #FFFFFF</BoxShadows>
                     <SolidColorBrush x:Key="AccentHoverBrush" Color="#5B21B6" />
                     <SolidColorBrush x:Key="SuccessBrush" Color="#047857" />
                     <SolidColorBrush x:Key="WarningBrush" Color="#B45309" />
@@ -530,6 +533,37 @@
 
     <Style Selector=":is(Window).motion ListBox.clip-list.key-repeat ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="Transitions" Value="{x:Null}" />
+    </Style>
+
+    <!--
+      Keyboard focus ring (O9): the row the keyboard is on gets an inner 2 px
+      ring - inset, so it changes no layout. Only while the list is being driven
+      from the keyboard (MainWindow.Motion.cs sets keyboard-nav; a pointer press
+      clears it): a click shows the selection, not a ring. Not motion; always on.
+    -->
+    <Style Selector="ListBox.clip-list.keyboard-nav ListBoxItem:focus Border.clip-row-card">
+        <Setter Property="BoxShadow" Value="{DynamicResource ClipRowFocusRing}" />
+    </Style>
+
+    <!--
+      Press feedback (O9) follows the motion policy. Fluent scales every pressed
+      button (toggles and radio buttons too) to 0.98 at once; under motion it is 0.97 over 83 ms, and without
+      motion there is none.
+    -->
+    <Style Selector=":is(Window).motion :is(Button)">
+        <Setter Property="Transitions">
+            <Transitions>
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.083" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector=":is(Window).motion :is(Button):pressed">
+        <Setter Property="RenderTransform" Value="scale(0.97)" />
+    </Style>
+
+    <Style Selector=":is(Window):not(.motion) :is(Button):pressed">
+        <Setter Property="RenderTransform" Value="none" />
     </Style>
 
     <!--

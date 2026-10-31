@@ -30,6 +30,11 @@ public partial class MainWindow
 
     private Key? m_heldNavigationKey;
 
+    /// <summary>
+    /// On the clip list while it is being driven from the keyboard, for the
+    /// focus ring; a pointer press takes it off.
+    /// </summary>
+    internal const string KeyboardNavigationClass = "keyboard-nav";
     /// <summary>How long a single clip arriving or leaving takes to settle in (O4).</summary>
     internal static readonly TimeSpan ListChangeDuration = TimeSpan.FromMilliseconds(160);
 
@@ -51,7 +56,7 @@ public partial class MainWindow
         m_motionWindows.Add(this);
         AddHandler(KeyDownEvent, TrackNavigationKeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);
         AddHandler(KeyUpEvent, TrackNavigationKeyUp, RoutingStrategies.Tunnel, handledEventsToo: true);
-        if (this.FindControl<ListBox>("ClipsListBox") is { } list)
+        AddHandler(PointerPressedEvent, (_, _) => this.FindControl<ListBox>("ClipsListBox")?.Classes.Set(KeyboardNavigationClass, false), RoutingStrategies.Tunnel, handledEventsToo: true);        if (this.FindControl<ListBox>("ClipsListBox") is { } list)
         {
             list.Items.CollectionChanged += (_, e) => OnClipItemsChanged(list, e);
         }
@@ -78,14 +83,21 @@ public partial class MainWindow
     /// </summary>
     private void TrackNavigationKeyDown(object? sender, KeyEventArgs e)
     {
+        var list = this.FindControl<ListBox>("ClipsListBox");
+        if (e.Key == Key.Tab)
+        {
+            list?.Classes.Set(KeyboardNavigationClass, true);
+        }
+
         if (!IsNavigationKey(e.Key))
         {
             return;
         }
 
+        list?.Classes.Set(KeyboardNavigationClass, true);
         var repeating = m_heldNavigationKey == e.Key;
         m_heldNavigationKey = e.Key;
-        this.FindControl<ListBox>("ClipsListBox")?.Classes.Set(KeyRepeatClass, repeating);
+        list?.Classes.Set(KeyRepeatClass, repeating);
     }
 
     private void TrackNavigationKeyUp(object? sender, KeyEventArgs e)
