@@ -4319,7 +4319,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             entries.Add((vm.Id, vm.Clip));
             DetachClip(vm);
-            Clips.Remove(vm);
+            IsListChangeAnimatable = clipVms.Length == 1;
+            try
+            {
+                Clips.Remove(vm);
+            }
+            finally
+            {
+                IsListChangeAnimatable = false;
+            }
             // The row leaves the list but the query still returns it until the
             // delete commits, so it keeps occupying a slot for paging.
             _hiddenPendingDeletes.Add(vm.Id);
@@ -4395,6 +4403,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         cts.Cancel();
+        _animateSingleRestore = clipIds.Length == 1;
         await RefreshAsync();
         StatusText = clipIds.Length == 1 ? "Clip restored" : $"{clipIds.Length} clips restored";
     }
@@ -4686,7 +4695,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 _semanticOnlyIds.Add(id);
             }
 
-            var stats = ApplyRefreshResultIncremental(items, checkedIds);
+            var animateRestore = _animateSingleRestore && IsSingleInsertion(Clips.Select(static c => c.Id).ToList(), items.Select(static c => c.Id).ToList());
+            _animateSingleRestore = false;
+            IsListChangeAnimatable = animateRestore;
+            ApplyDiffStats stats;
+            try
+            {
+                stats = ApplyRefreshResultIncremental(items, checkedIds);
+            }
+            finally
+            {
+                IsListChangeAnimatable = false;
+            }
             if (sw is not null)
             {
                 Trace.TraceInformation(
@@ -4718,6 +4738,38 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     private readonly record struct ApplyDiffStats(int Added, int Removed, int Replaced, int Moved, bool FullRebuild);
+
+    /// <summary>
+    /// Whether <paramref name="next"/> is <paramref name="shown"/> with exactly
+    /// one row added and nothing else changed or moved - the only refresh worth
+    /// animating.
+    /// </summary>
+    internal static bool IsSingleInsertion(IReadOnlyList<long> shown, IReadOnlyList<long> next)
+    {
+        if (next.Count != shown.Count + 1)
+        {
+            return false;
+        }
+
+        var skipped = false;
+        for (int i = 0, j = 0; i < next.Count; i++)
+        {
+            if (j < shown.Count && next[i] == shown[j])
+            {
+                j++;
+                continue;
+            }
+
+            if (skipped)
+            {
+                return false;
+            }
+
+            skipped = true;
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// Reconciles <see cref="Clips"/> with <paramref name="newItems"/> by doing
@@ -4945,8 +4997,29 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // assignment in the hidden case: SetMainWindowVisible re-selects the
         // newest clip on show, so paying for the SelectedClip property storm
         // on every capture would be wasted work.
-        UpsertClipItem(clip, targetIndex, select: _isMainWindowVisible);
+        IsListChangeAnimatable = true;
+        try
+        {
+            UpsertClipItem(clip, targetIndex, select: _isMainWindowVisible);
+        }
+        finally
+        {
+            IsListChangeAnimatable = false;
+        }
     }
+
+    /// <summary>
+    /// True only while <see cref="Clips"/> is being changed by one clip arriving
+    /// or leaving - a capture, a single delete, or the undo of one - which the
+    /// view may animate. Searches, page loads and refreshes leave it false, so
+    /// nothing that replaces many rows at once can animate by accident.
+    /// </summary>
+    public bool IsListChangeAnimatable { get; private set; }
+
+    // Set by the undo of a single delete; the refresh that restores the row
+    // consumes it, and animates only if that refresh turns out to be exactly
+    // the one row coming back.
+    private bool _animateSingleRestore;
 
     /// <summary>
     /// Works out where <paramref name="clip"/> belongs in the list as it is

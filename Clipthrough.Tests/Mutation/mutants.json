@@ -5694,5 +5694,85 @@
     "find": "                    <Setter Property=\"Opacity\" Value=\"0\" />\n                    <Setter Property=\"TranslateTransform.Y\" Value=\"16\" />",
     "replace": "                    <Setter Property=\"Opacity\" Value=\"0\" />\n                    <Setter Property=\"TranslateTransform.Y\" Value=\"0\" />",
     "filter": "FullyQualifiedName~ToastMotionHeadlessTests.WithMotion_ANewToastRisesAndFadesIn"
+  },
+  {
+    "id": "list-change-ignores-the-vm-mark",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "Every list change animates, including searches replacing the whole list.",
+    "find": "DataContext is not MainWindowViewModel { IsListChangeAnimatable: true })",
+    "replace": "DataContext is not MainWindowViewModel)",
+    "filter": "FullyQualifiedName~ListChangeMotionHeadlessTests.ASearch_ReplacesTheRowsWithoutAnimating"
+  },
+  {
+    "id": "list-change-ignores-motion",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "Rows slide even with Animations off.",
+    "find": "if (!IsMotionEnabled || !IsPresentedToUser || DataContext",
+    "replace": "if (!IsPresentedToUser || DataContext",
+    "filter": "FullyQualifiedName~ListChangeMotionHeadlessTests.WithoutMotion_ACaptureDoesNotAnimate"
+  },
+  {
+    "id": "list-change-in-standby",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "Captures animate while the popup is dismissed, so it can be summoned mid-slide.",
+    "find": "if (!IsMotionEnabled || !IsPresentedToUser || DataContext",
+    "replace": "if (!IsMotionEnabled || DataContext",
+    "filter": "FullyQualifiedName~ListChangeMotionHeadlessTests.InStandby_ACaptureDoesNotAnimate"
+  },
+  {
+    "id": "capture-not-marked-animatable",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "A captured clip pops into the list.",
+    "find": "        IsListChangeAnimatable = true;\n        try\n        {\n            UpsertClipItem(clip, targetIndex, select: _isMainWindowVisible);",
+    "replace": "        IsListChangeAnimatable = false;\n        try\n        {\n            UpsertClipItem(clip, targetIndex, select: _isMainWindowVisible);",
+    "filter": "FullyQualifiedName~ListChangeMotionHeadlessTests.ACapture_SlidesTheRowsDown_AndLiftsTheNewRowAboveThem"
+  },
+  {
+    "id": "delete-not-marked-animatable",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "A deleted clip leaves a gap that snaps shut.",
+    "find": "IsListChangeAnimatable = clipVms.Length == 1;",
+    "replace": "IsListChangeAnimatable = clipVms.Length == 0;",
+    "filter": "FullyQualifiedName~ListChangeMotionHeadlessTests.ADelete_SlidesTheRowsBelowUp"
+  },
+  {
+    "id": "undo-not-marked-animatable",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "An undone delete pops back in.",
+    "find": "_animateSingleRestore = clipIds.Length == 1;",
+    "replace": "_animateSingleRestore = clipIds.Length == 0;",
+    "filter": "FullyQualifiedName~ListChangeMotionHeadlessTests.UndoingASingleDelete_AnimatesTheRowBackIn"
+  },
+  {
+    "id": "arriving-row-under-neighbours",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "The new row fades in underneath the row sliding over it (the prototype artefact).",
+    "find": "row.ZIndex = 1;",
+    "replace": "row.ZIndex = 0;",
+    "filter": "FullyQualifiedName~ListChangeMotionHeadlessTests.ACapture_SlidesTheRowsDown_AndLiftsTheNewRowAboveThem"
+  },
+  {
+    "id": "list-slide-never-disarmed",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "The slide stays armed, so scrolling afterwards animates recycled rows across the list.",
+    "find": "                visual.ImplicitAnimations = null;\n            }\n        }\n\n        if (m_raisedRow is not null)",
+    "replace": "                _ = visual;\n            }\n        }\n\n        if (m_raisedRow is not null)",
+    "filter": "FullyQualifiedName~ListChangeMotionHeadlessTests.ACapture_SlidesTheRowsDown_AndLiftsTheNewRowAboveThem"
+  },
+  {
+    "id": "single-insertion-accepts-two",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "A refresh that changes more than one row is animated as if one clip came back.",
+    "find": "            if (skipped)\n            {\n                return false;\n            }\n\n            skipped = true;",
+    "replace": "            if (skipped && !skipped)\n            {\n                return false;\n            }\n\n            skipped = true;",
+    "filter": "FullyQualifiedName~SingleInsertionTests"
+  },
+  {
+    "id": "single-insertion-accepts-same-length",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "A refresh with nothing new is treated as an arrival.",
+    "find": "if (next.Count != shown.Count + 1)",
+    "replace": "if (next.Count < shown.Count)",
+    "filter": "FullyQualifiedName~SingleInsertionTests"
   }
 ]
