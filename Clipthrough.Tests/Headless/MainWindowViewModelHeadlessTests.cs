@@ -294,6 +294,140 @@ public sealed partial class MainWindowViewModelHeadlessTests
         Assert.Equal(ClipContentFormat.Html, stored.ContentFormat);
         Assert.Equal(ContentType.RichText, stored.ContentType);
         Assert.Equal("builtin:MarkdownToHtml", stored.TransformKind);
+
+        // Live check C3: the stored text began with the CF_HTML header.
+        Assert.DoesNotContain("StartHTML", stored.ContentPrefix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Live check C3 (2026-10-29): HTML -> Markdown on a rich clip copied from
+    /// Edge did nothing, from every entry point. The transform read the clip's
+    /// plain text - which has no markup to convert - instead of the HTML stored
+    /// with it.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RowTransform_HtmlToMarkdown_OnARichBrowserClip_ConvertsItsHtml()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, new TestSessionLogService());
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var clip = (await RichBrowserClip.CaptureAsync(scope.ClipStoreService))!;
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        var row = viewModel.Clips.Single(c => c.Clip.Id == clip.Id);
+        await row.ApplyTextTransformationCommand.Execute(TextTransformation.HtmlToMarkdown).ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        var stored = Assert.Single(all.Items, c => c.SourceClipId == clip.Id);
+        Assert.Equal("builtin:HtmlToMarkdown", stored.TransformKind);
+        Assert.Contains("C3 Heading", stored.ContentPrefix, StringComparison.Ordinal);
+        Assert.Contains("**bold**", stored.ContentPrefix, StringComparison.Ordinal);
+        Assert.Contains("](https://example.com/c7-link)", stored.ContentPrefix, StringComparison.Ordinal);
+        Assert.DoesNotContain("<", stored.ContentPrefix, StringComparison.Ordinal);
+        Assert.Contains("**bold**", systemInteraction.LastCopiedText, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Rubber-duck F-16-3 follow-up. HTML -&gt; Markdown reads a rich clip's
+    /// markup, so the result must be compared with the text the clip shows, not
+    /// with that markup: a tagless fragment whose Markdown is just its text is no
+    /// change, and must not leave a duplicate clip behind.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RowTransform_HtmlToMarkdown_WhenTheMarkdownIsTheClipsText_ReportsNoChangeAndCreatesNothing()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, new TestSessionLogService());
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var clip = (await RichBrowserClip.CaptureTaglessAsync(scope.ClipStoreService, "Fish", "Fish"))!;
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        // Settle the startup refresh, so the list holds the captured row.
+        for (var attempt = 0; attempt < 200 && !viewModel.StatusText.Contains("matching", StringComparison.Ordinal); attempt++)
+        {
+            await Task.Delay(10);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.Contains("matching", viewModel.StatusText, StringComparison.Ordinal);
+
+
+        // Startup also owes a 300 ms debounced filter refresh, which no state
+        // here reveals, and every refresh ends by writing the list summary to
+        // StatusText. With the converter already warm from earlier tests the
+        // transform finishes inside that window, and the summary landing after
+        // it replaced the status under test. So assert on what the transform
+        // wrote, recorded as it happens, and count clips in the store.
+        var statusWrites = new List<string>();
+        void RecordStatus(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(MainWindowViewModel.StatusText))
+            {
+                statusWrites.Add(viewModel.StatusText);
+            }
+        }
+
+        viewModel.PropertyChanged += RecordStatus;
+        try
+        {
+            var row = viewModel.Clips.Single(c => c.Clip.Id == clip.Id);
+            await row.ApplyTextTransformationCommand.Execute(TextTransformation.HtmlToMarkdown).ToTask();
+            Dispatcher.UIThread.RunJobs();
+        }
+        finally
+        {
+            viewModel.PropertyChanged -= RecordStatus;
+        }
+
+        var transformStatuses = statusWrites.Where(s => !s.Contains("matching", StringComparison.Ordinal)).ToList();
+        Assert.True(transformStatuses.Count > 0, "The transform wrote no status at all.");
+        Assert.Equal("No text or file clips changed by transformation", transformStatuses[^1]);
+        Assert.Null(systemInteraction.LastCopiedText);
+        var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        Assert.Equal(clip.Id, Assert.Single(all.Items).Id);
+    }
+
+    /// <summary>
+    /// The other half: a tagless fragment whose entities decode still converts
+    /// from the list, because its Markdown differs from the text it shows.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RowTransform_HtmlToMarkdown_OnATaglessFragmentWithEntities_ConvertsIt()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, new TestSessionLogService());
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var clip = (await RichBrowserClip.CaptureTaglessAsync(scope.ClipStoreService, "Fish &amp; Chips", "Fish & Chips"))!;
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        var row = viewModel.Clips.Single(c => c.Clip.Id == clip.Id);
+        await row.ApplyTextTransformationCommand.Execute(TextTransformation.HtmlToMarkdown).ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        var stored = Assert.Single(all.Items, c => c.SourceClipId == clip.Id);
+        // The exporter backslash-escapes '&', which Markdown renders as a bare '&'.
+        Assert.Equal("Fish \\& Chips", stored.ContentPrefix.Trim());
+        Assert.Equal("Fish \\& Chips", systemInteraction.LastCopiedText?.Trim());
     }
 
     /// <summary>
@@ -2330,17 +2464,8 @@ public sealed partial class MainWindowViewModelHeadlessTests
             clipStore: blockingStore);
         await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
-        // The loading flag drops only once the startup refresh has landed. Startup
-        // also re-applies the saved filters, which queues a refresh of its own;
+        // Startup re-applies the saved filters, which queues a refresh of its own;
         // let it land before paging, and before every count asserted below.
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
-        while (viewModel.IsLoadingDatabase)
-        {
-            Assert.True(DateTime.UtcNow < deadline, "The view model's database did not finish opening.");
-            await Task.Delay(10);
-            Dispatcher.UIThread.RunJobs();
-        }
-
         await viewModel.WhenRefreshesIdleAsync();
         Dispatcher.UIThread.RunJobs();
 

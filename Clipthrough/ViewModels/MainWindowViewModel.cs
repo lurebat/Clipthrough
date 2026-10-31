@@ -3700,7 +3700,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 noChangeNotificationMessage: producesHtml
                     ? "The selected text did not contain a supported table, so nothing was changed."
                     : null,
-                explicitTarget: explicitTarget);
+                explicitTarget: explicitTarget,
+                builtinTransformation: transformation);
 
             // A converter that declined to run says why, rather than "no change".
             if (refusal is not null)
@@ -3772,11 +3773,33 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private static async Task<string> GetTransformSourceTextAsync(ClipItemViewModel clip)
+    private static async Task<string> GetTransformSourceTextAsync(ClipItemViewModel clip, TextTransformation? transformation = null)
     {
         // A list row may carry only a prefix of its text (F-10); a transform
         // saves its result as a new clip, so it has to start from all of it.
+        // Hydrating also brings a rich clip's markup, which MarkupSource reads.
         await clip.EnsureContentHydratedAsync();
+        if (transformation is { } builtin && TextTransformationService.MarkupSource(builtin, clip.Clip) is { } markup)
+        {
+            return markup;
+        }
+
+        return GetShownText(clip);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="result"/> is <paramref name="shown"/> again. The
+    /// Markdown exporter ends its last block with a line break that a clip's own
+    /// text does not carry, so trailing line breaks on the result do not count.
+    /// </summary>
+    private static bool ReadsAs(string result, string shown)
+        => result.AsSpan().TrimEnd("\r\n").SequenceEqual(shown);
+
+    /// <summary>
+    /// What a hydrated clip reads as: its text, or its file paths one per line.
+    /// </summary>
+    private static string GetShownText(ClipItemViewModel clip)
+    {
         if (clip.Clip.ContentType != ContentType.Files)
         {
             return clip.Clip.Content ?? string.Empty;
@@ -3796,7 +3819,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ClipContentFormat outputFormat = ClipContentFormat.PlainText,
         string? noChangeNotificationTitle = null,
         string? noChangeNotificationMessage = null,
-        ClipItemViewModel? explicitTarget = null)
+        ClipItemViewModel? explicitTarget = null,
+        TextTransformation? builtinTransformation = null)
     {
         // An explicit target (the row a context menu was opened on) replaces the
         // checked-clips / selection rule, and never uses a selection slice.
@@ -3850,13 +3874,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
             else
             {
-                source = await GetTransformSourceTextAsync(target);
+                source = await GetTransformSourceTextAsync(target, builtinTransformation);
                 if (string.IsNullOrEmpty(source))
                 {
                     continue;
                 }
                 result = await transform(source, CancellationToken.None);
-                if (string.Equals(result, source, StringComparison.Ordinal))
+                // No change is a result equal to its input or, when the input was
+                // not what the clip shows (HTML -> Markdown reads a rich clip's
+                // markup), a result that reads as the clip already does: a
+                // fragment whose Markdown is just its text changes nothing.
+                var shown = GetShownText(target);
+                if (string.Equals(result, source, StringComparison.Ordinal)
+                    || (!string.Equals(source, shown, StringComparison.Ordinal) && ReadsAs(result, shown)))
                 {
                     continue;
                 }

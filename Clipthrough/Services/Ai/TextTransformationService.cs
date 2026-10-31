@@ -48,6 +48,37 @@ public static partial class TextTransformationService
             or Models.TextTransformation.MarkdownToHtml;
 
     /// <summary>
+    /// The markup <paramref name="transformation"/> should read from
+    /// <paramref name="clip"/> instead of its text, or null to use the text.
+    /// HTML -&gt; Markdown on a rich HTML clip takes the stored HTML fragment: the
+    /// clip's text is the plain text a browser offers beside it, with no markup
+    /// left to convert (live check C3). Needs the clip's bytes; a list row does not
+    /// carry them, so callers hydrate it first.
+    /// </summary>
+    public static string? MarkupSource(Models.TextTransformation transformation, Models.ClipEntry clip)
+    {
+        if (transformation is not Models.TextTransformation.HtmlToMarkdown
+            || clip.ContentFormat is not Models.ClipContentFormat.Html
+            || Presentation.ClipDisplayFormatter.GetRawMarkup(clip) is not { } markup)
+        {
+            return null;
+        }
+
+        var fragment = Presentation.ClipboardMarkupDecoder.ExtractHtmlFragment(markup);
+        if (string.IsNullOrWhiteSpace(fragment))
+        {
+            return null;
+        }
+
+        // The fragment is HTML whatever it looks like. A selection inside one run
+        // of text arrives with no tags, only entities ("Fish &amp; Chips"), and the
+        // converter leaves input with no markup alone as plain text, so the
+        // entities were copied verbatim (F-16-3). A container makes it read as the
+        // markup it is.
+        return LooksLikeHtml(fragment) ? fragment : $"<div>{fragment}</div>";
+    }
+
+    /// <summary>
     /// Whether text transforms apply to <paramref name="clip"/>: text, rich
     /// text and file lists with content. Not images - an image clip's text is
     /// the title of the window it was copied from, not anything the user wants
@@ -411,7 +442,12 @@ public static partial class TextTransformationService
         {
             var imported = await VellumText.Interop.Markdown.MarkdownFormat.Instance
                 .ImportAsync(input, cancellationToken).ConfigureAwait(false);
-            var html = VellumText.Interop.Html.HtmlFormat.Instance.Export(imported.Doc);
+            // Export returns a CF_HTML clipboard document, header and all. The
+            // result is stored as the clip, so keep only the fragment, as every
+            // other HTML-producing transform does; the clipboard copy wraps it
+            // again (live check C3).
+            var html = Presentation.ClipboardMarkupDecoder.ExtractHtmlFragment(
+                VellumText.Interop.Html.HtmlFormat.Instance.Export(imported.Doc));
             return string.IsNullOrWhiteSpace(html) ? input : html;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

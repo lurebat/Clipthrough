@@ -44,17 +44,7 @@ public sealed partial class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             clipStore: store);
-        await viewModel.InitializeAsync();
-
-        // The loading flag drops only once the startup refresh has landed.
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
-        while (viewModel.IsLoadingDatabase)
-        {
-            Assert.True(DateTime.UtcNow < deadline, "The view model's database did not finish opening.");
-            await Task.Delay(10);
-            Dispatcher.UIThread.RunJobs();
-        }
-
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         await viewModel.WhenRefreshesIdleAsync();
         Dispatcher.UIThread.RunJobs();
 
