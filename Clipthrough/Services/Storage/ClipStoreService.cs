@@ -2738,7 +2738,7 @@ public sealed class ClipStoreService : IClipStoreService
     /// their own length; the cast turns them back into the same TEXT value.
     /// Everything else binds as a string, as before, and the cast is a no-op.
     /// </summary>
-    internal static object ClipTextParameter(string? text)
+    private static object ClipTextParameter(string? text)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -2747,6 +2747,7 @@ public sealed class ClipStoreService : IClipStoreService
 
         return text.Contains('\0', StringComparison.Ordinal) ? Encoding.UTF8.GetBytes(text) : text;
     }
+
     private static void AddUpsertParameters(
         SqliteCommand command,
         ClipCaptureRequest request,
