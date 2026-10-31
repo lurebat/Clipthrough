@@ -493,11 +493,168 @@ public sealed class PerfProbes
         Log($"=== {DateTime.Now:HH:mm:ss} db={name} enc={!string.IsNullOrEmpty(Password)} :: P16 payload migration (schema {version}, {inline} rows with inline payloads)");
 
         var sw = Stopwatch.StartNew();
-        await lib.Initializer.InitializeAsync();
+        using (InitStepLog())
+        {
+            await lib.Initializer.InitializeAsync();
+        }
         sw.Stop();
 
         var moved = await ScalarAsync(lib, "SELECT COUNT(*) FROM clip_payloads;");
         var left = await ScalarAsync(lib, "SELECT COUNT(*) FROM clips WHERE content_bytes IS NOT NULL OR source_app_icon IS NOT NULL;");
         Log($"{"InitializeAsync from schema 8 (all gated steps + U-E1 move)",-70} median={sw.Elapsed.TotalMilliseconds,9:F1} ms  payloads={moved} leftInline={left}");
+    }
+
+    /// <summary>
+    /// Upgrade-start research U4: the first start after an upgrade as the app runs
+    /// it - the move deferred - then the background move on its own. The first
+    /// figure is the time to a usable app. Point CLIPTHROUGH_BENCH_DIR at a fresh
+    /// copy of a schema-8 library.
+    /// </summary>
+    [BenchmarkFact]
+    public async Task P17_DeferredUpgrade()
+    {
+        var name = $"lib_{Clips}_{Images}{(string.IsNullOrEmpty(Password) ? "" : "_enc")}.db";
+        var lib = new PerfLibrary(Path.Combine(PerfLibrary.Root, name), Password);
+        Log($"=== {DateTime.Now:HH:mm:ss} db={name} enc={!string.IsNullOrEmpty(Password)} :: P17 deferred upgrade");
+
+        var open = Stopwatch.StartNew();
+        using (InitStepLog())
+        {
+            await lib.Initializer.InitializeAsync(progress: null, allowDeferredPayloadMove: true);
+        }
+        open.Stop();
+        Log($"{"InitializeAsync, move deferred (time to a usable app)",-70} median={open.Elapsed.TotalMilliseconds,9:F1} ms");
+
+        var move = Stopwatch.StartNew();
+        var ran = await lib.Initializer.RunDeferredPayloadMoveAsync(progress: null);
+        move.Stop();
+        var left = await ScalarAsync(lib, "SELECT COUNT(*) FROM clips WHERE content_bytes IS NOT NULL OR source_app_icon IS NOT NULL;");
+        Log($"{"RunDeferredPayloadMoveAsync (background, whole move)",-70} median={move.Elapsed.TotalMilliseconds,9:F1} ms  ran={ran} leftInline={left}");
+    }
+
+    /// <summary>
+    /// Research R1: what a search-index rebuild leaves for the next large
+    /// captures, and what draining it costs. CLIPTHROUGH_BENCH_DRAIN=1 drains
+    /// after the rebuild; otherwise the captures pay. Each capture is timed on
+    /// its own, since the first is the one that pays.
+    /// </summary>
+    [BenchmarkFact]
+    public async Task P18_RebuildMergeDebt()
+    {
+        var lib = await PerfLibrary.OpenAsync(Clips, Images, Password);
+        var drain = Environment.GetEnvironmentVariable("CLIPTHROUGH_BENCH_DRAIN") == "1";
+        Log(Header(lib) + $" :: P18 rebuild merge debt (drain={drain})");
+        lib.SettingsService.SetCurrent(AppSettings.Default with { MaxLibrarySizeMegabytes = 4096 });
+
+        var rebuild = Stopwatch.StartNew();
+        await using (var c = lib.ConnectionFactory.CreateConnection())
+        {
+            await c.OpenAsync();
+            await using var cmd = c.CreateCommand();
+            cmd.CommandTimeout = 0;
+            cmd.CommandText = "INSERT INTO clips_fts(clips_fts) VALUES ('rebuild'); INSERT INTO app_metadata (key, value) VALUES ('fts_merge_pending', '1') ON CONFLICT(key) DO UPDATE SET value = '1';";
+            await cmd.ExecuteNonQueryAsync();
+        }
+        rebuild.Stop();
+        Log($"{"FTS rebuild",-70} median={rebuild.Elapsed.TotalMilliseconds,9:F1} ms");
+
+        if (drain)
+        {
+            var sw = Stopwatch.StartNew();
+            var steps = 0;
+            Clipthrough.Database.DatabaseInitializer.BetweenSearchIndexMergeSteps = _ =>
+            {
+                steps++;
+                return Task.CompletedTask;
+            };
+            try
+            {
+                await lib.Initializer.DrainSearchIndexMergesAsync();
+            }
+            finally
+            {
+                Clipthrough.Database.DatabaseInitializer.BetweenSearchIndexMergeSteps = null;
+            }
+            Log($"{"DrainSearchIndexMergesAsync (no pauses)",-70} median={sw.Elapsed.TotalMilliseconds,9:F1} ms  steps={steps}");
+        }
+
+        await TimeLargeCapturesAsync(lib, "after rebuild");
+    }
+
+    /// <summary>
+    /// Research side finding, measurement only: large captures with FTS5
+    /// automerge at CLIPTHROUGH_BENCH_AUTOMERGE (default 4) on a library that was
+    /// never rebuilt. At 22 MB, automerge=0 halved a 1.9 MB capture; this checks
+    /// that at 60k. The setting persists, so the probe restores 4 when done.
+    /// </summary>
+    [BenchmarkFact]
+    public async Task P19_CaptureByAutomerge()
+    {
+        var lib = await PerfLibrary.OpenAsync(Clips, Images, Password);
+        var automerge = int.TryParse(Environment.GetEnvironmentVariable("CLIPTHROUGH_BENCH_AUTOMERGE"), out var a) ? a : 4;
+        Log(Header(lib) + $" :: P19 capture with automerge={automerge}");
+        lib.SettingsService.SetCurrent(AppSettings.Default with { MaxLibrarySizeMegabytes = 4096 });
+        await SetAutomergeAsync(lib, automerge);
+        try
+        {
+            var before = await ScalarAsync(lib, "SELECT COUNT(DISTINCT segid) FROM clips_fts_idx;");
+            await TimeLargeCapturesAsync(lib, $"automerge={automerge}");
+            var after = await ScalarAsync(lib, "SELECT COUNT(DISTINCT segid) FROM clips_fts_idx;");
+            Log($"    index segments: {before} before the captures, {after} after");
+        }
+        finally
+        {
+            await SetAutomergeAsync(lib, 4);
+        }
+    }
+
+    private static async Task SetAutomergeAsync(PerfLibrary lib, int value)
+    {
+        await using var c = lib.ConnectionFactory.CreateConnection();
+        await c.OpenAsync();
+        await using var cmd = c.CreateCommand();
+        cmd.CommandText = $"INSERT INTO clips_fts(clips_fts, rank) VALUES ('automerge', {value});";
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static async Task TimeLargeCapturesAsync(PerfLibrary lib, string label)
+    {
+        var text = PerfLibrary.MakeLog(new Random(Environment.TickCount), 1_900_000);
+        for (var i = 1; i <= 5; i++)
+        {
+            var t = text + Guid.NewGuid().ToString("N");
+            var sw = Stopwatch.StartNew();
+            var clip = await lib.Store.CaptureFastAsync(new ClipCaptureRequest { ContentText = t, ContentBytes = Encoding.UTF8.GetBytes(t), SourceApp = "probe.exe" });
+            sw.Stop();
+            Assert.NotNull(clip);
+            Log($"{$"CaptureFastAsync 1855 KB, capture {i} {label}",-70} median={sw.Elapsed.TotalMilliseconds,9:F1} ms");
+        }
+    }
+
+    /// <summary>Copies every [init-timing] trace line into results.txt while it lives.</summary>
+    private static IDisposable InitStepLog()
+    {
+        var listener = new InitStepListener();
+        Trace.Listeners.Add(listener);
+        return listener;
+    }
+
+    private sealed class InitStepListener : TraceListener
+    {
+        public override void Write(string? message) => WriteLine(message);
+
+        public override void WriteLine(string? message)
+        {
+            if (message is not null && message.Contains("[init-timing]", StringComparison.Ordinal))
+            {
+                Log("    " + message[message.IndexOf("[init-timing]", StringComparison.Ordinal)..]);
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            Trace.Listeners.Remove(this);
+            base.Dispose(disposing);
+        }
     }
 }

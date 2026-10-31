@@ -67,7 +67,8 @@ public sealed class StorageOptionsService : IStorageOptionsService
         => DatabaseMaintenanceScope.EnterAsync(
             _services?.GetService<IClipboardMonitorService>(),
             _services?.GetService<IBackgroundOcrQueue>(),
-            _services?.GetService<IEmbeddingWorker>());
+            _services?.GetService<IEmbeddingWorker>(),
+            _services?.GetService<Clipthrough.Database.DatabaseInitializer>());
 
     public StorageOptions Current { get; private set; }
 

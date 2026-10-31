@@ -25,12 +25,12 @@ public sealed class ClipStoreService : IClipStoreService
     private const string ClipSelectColumns = """
             c.id,
             c.content,
-            (SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id),
+            COALESCE((SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id), c.content_bytes),
             c.content_type,
             c.content_format,
             c.source_app,
             c.source_app_path,
-            (SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash),
+            COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), c.source_app_icon),
             c.hash,
             c.is_favorite,
             c.is_sensitive,
@@ -80,7 +80,7 @@ public sealed class ClipStoreService : IClipStoreService
             c.content_format,
             c.source_app,
             c.source_app_path,
-            (c.source_app_icon_hash IS NOT NULL),
+            (c.source_app_icon_hash IS NOT NULL OR c.source_app_icon IS NOT NULL),
             c.hash,
             c.is_favorite,
             c.is_sensitive,
@@ -727,7 +727,7 @@ public sealed class ClipStoreService : IClipStoreService
             SET ocr_status = 'running'
             WHERE id = $id
               AND content_type = 'image'
-              AND EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id)
+              AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id) OR clips.content_bytes IS NOT NULL)
               AND (ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'failed' OR ocr_status = 'rerun');
             """;
         command.Parameters.AddWithValue("$id", clipId);
@@ -824,7 +824,7 @@ public sealed class ClipStoreService : IClipStoreService
         command.CommandText = """
             SELECT id FROM clips
             WHERE content_type = 'image'
-              AND EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id)
+              AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id) OR clips.content_bytes IS NOT NULL)
               AND (ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'failed' OR ocr_status = 'rerun')
             ORDER BY COALESCE(last_copied_at, captured_at) DESC
             LIMIT 500;
@@ -863,7 +863,7 @@ public sealed class ClipStoreService : IClipStoreService
             COALESCE(SUM(CASE WHEN ocr_status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_count
         FROM clips
         WHERE content_type = 'image'
-          AND EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id);
+          AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id) OR clips.content_bytes IS NOT NULL);
         """;
 
     public Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default)
@@ -906,7 +906,7 @@ public sealed class ClipStoreService : IClipStoreService
             SET ocr_status = 'rerun'
             WHERE id = $id
               AND content_type = 'image'
-              AND EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id)
+              AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id) OR clips.content_bytes IS NOT NULL)
               AND ocr_status = 'succeeded';
             """;
         command.Parameters.AddWithValue("$id", clipId);
@@ -927,7 +927,7 @@ public sealed class ClipStoreService : IClipStoreService
             UPDATE clips
             SET ocr_status = 'rerun'
             WHERE content_type = 'image'
-              AND EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id)
+              AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id) OR clips.content_bytes IS NOT NULL)
               AND ocr_status = 'succeeded'
             RETURNING id;
             """;
@@ -962,16 +962,21 @@ public sealed class ClipStoreService : IClipStoreService
         int? finalClipCount = null;
         long? finalStoredBytes = null;
 
+        // A deferred upgrade start leaves the UTC backfill to the background run,
+        // while maintenance runs at once (F-13-2).
+        var utcBackfillPending = (settings.EnableSensitiveClipLifetime || settings.EnableNormalClipLifetime)
+            && await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM app_metadata WHERE key = 'utc_backfill_pending' AND value = '1';", cancellationToken, transaction) > 0;
+
         if (settings.EnableSensitiveClipLifetime)
         {
             // Deliberately not preserving pinned/favorite clips: an expiring secret
             // outranks the user's intent to keep it around.
-            removedClipIds.AddRange(await DeleteOlderThanAsync(connection, transaction, isSensitive: true, now.AddMinutes(-settings.SensitiveClipLifetimeMinutes), preserveUserKeptClips: false, cancellationToken));
+            removedClipIds.AddRange(await DeleteOlderThanAsync(connection, transaction, isSensitive: true, now.AddMinutes(-settings.SensitiveClipLifetimeMinutes), preserveUserKeptClips: false, utcBackfillPending, cancellationToken));
         }
 
         if (settings.EnableNormalClipLifetime)
         {
-            removedClipIds.AddRange(await DeleteOlderThanAsync(connection, transaction, isSensitive: false, now.AddDays(-settings.NormalClipLifetimeDays), preserveUserKeptClips: true, cancellationToken));
+            removedClipIds.AddRange(await DeleteOlderThanAsync(connection, transaction, isSensitive: false, now.AddDays(-settings.NormalClipLifetimeDays), preserveUserKeptClips: true, utcBackfillPending, cancellationToken));
         }
 
         if (settings.EnableMaxEntryCount)
@@ -1236,7 +1241,10 @@ public sealed class ClipStoreService : IClipStoreService
         await connection.OpenAsync(cancellationToken);
 
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT i.png FROM clips c JOIN app_icons i ON i.hash = c.source_app_icon_hash WHERE c.id = $id LIMIT 1;";
+        command.CommandText = """
+            SELECT COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), c.source_app_icon)
+            FROM clips c WHERE c.id = $id;
+            """;
         command.Parameters.AddWithValue("$id", clipId);
 
         var value = await command.ExecuteScalarAsync(cancellationToken);
@@ -2472,13 +2480,27 @@ public sealed class ClipStoreService : IClipStoreService
         RETURNING id;
         """;
 
-    private static async Task<List<long>> DeleteOlderThanAsync(SqliteConnection connection, SqliteTransaction transaction, bool isSensitive, DateTimeOffset cutoff, bool preserveUserKeptClips, CancellationToken cancellationToken)
+    /// <summary>
+    /// The lifetime purge while an upgrade still owes the UTC backfill
+    /// (<c>utc_backfill_pending</c>, F-13-2). Until it has run, rows can carry a
+    /// non-zero offset, which the text comparison above orders wrong by up to that
+    /// offset (F-35): in a negative-offset zone it purged unexpired sensitive clips.
+    /// julianday reads the offset. It cannot use the index's date range, a cost
+    /// paid only for the minutes the background backfill takes.
+    /// </summary>
+    internal const string OffsetAwareRetentionDeleteStatement = $"""
+        DELETE FROM clips
+        WHERE is_sensitive = $isSensitive
+          AND julianday(last_copied_at) < julianday($cutoff)
+          AND ($keepUserKept = 0 OR NOT {UserKeptClipPredicate})
+        RETURNING id;
+        """;
+
+    private static async Task<List<long>> DeleteOlderThanAsync(SqliteConnection connection, SqliteTransaction transaction, bool isSensitive, DateTimeOffset cutoff, bool preserveUserKeptClips, bool utcBackfillPending, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = $"""
-            {RetentionDeleteStatement}
-            """;
+        command.CommandText = utcBackfillPending ? OffsetAwareRetentionDeleteStatement : RetentionDeleteStatement;
         command.Parameters.AddWithValue("$isSensitive", isSensitive ? 1 : 0);
         command.Parameters.AddWithValue("$cutoff", cutoff.ToString("O", CultureInfo.InvariantCulture));
         command.Parameters.AddWithValue("$keepUserKept", preserveUserKeptClips ? 1 : 0);
@@ -2525,7 +2547,7 @@ public sealed class ClipStoreService : IClipStoreService
     /// Stored rather than computed. The icon is written after the clip, by a
     /// background lookup, so a column maintained by the write paths would go stale -
     /// but a trigger pair on the clips table keeps it exact through every path
-    /// (see DatabaseInitializer.EnsureClipStoredBytesAsync). Spelling it as the
+    /// (see DatabaseInitializer.EnsureClipStoredBytesColumnAsync). Spelling it as the
     /// expression instead is correct but unindexable, and cost 445 ms per capture at
     /// 60k clips against 2.5 ms here.
     ///
@@ -2539,8 +2561,21 @@ public sealed class ClipStoreService : IClipStoreService
     /// distinct source-app icon once (U-E1, F-39). Icons used to be stored, and
     /// counted, once per clip.
     /// </summary>
-    private const string TotalStoredBytesSql =
-        "SELECT COALESCE((SELECT SUM(" + StoredRowBytes + ") FROM clips), 0) + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons), 0);";
+    /// <remarks>
+    /// Icons count only once the payload move is done (rubber-duck F-13-5, owner
+    /// decision). While a deferred move is owed, orphaned icons cannot be swept -
+    /// finding them means scanning rows that still hold payloads inline - so
+    /// counting app_icons then made the cap evict clips to pay for icons nothing
+    /// uses. The total undercounts by the icons' bytes for that window instead,
+    /// and the eviction walk, which subtracts only stored_bytes, agrees with it.
+    /// Any walk that also subtracts an icon an eviction frees must do so only
+    /// under the same condition.
+    /// </remarks>
+    private const string TotalStoredBytesSql = $"""
+        SELECT COALESCE((SELECT SUM({StoredRowBytes}) FROM clips), 0)
+             + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons
+                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1')), 0);
+        """;
 
     /// <summary>
     /// Writes what the clips row no longer holds inline (U-E1, F-06): the payload
@@ -2626,6 +2661,18 @@ public sealed class ClipStoreService : IClipStoreService
         // and the icon's size. One lookup per distinct icon, not per row.
         var iconReferences = new Dictionary<string, (long Remaining, long Bytes)>(StringComparer.Ordinal);
 
+        // Only when the total counts icons: while the payload move is owed it does
+        // not (rubber-duck F-13-5, TotalStoredBytesSql), so an eviction frees no
+        // icon bytes from it - and the per-icon count would scan the table then,
+        // because the icon index is built only after the move.
+        bool iconsCounted;
+        await using (var moveDone = connection.CreateCommand())
+        {
+            moveDone.Transaction = transaction;
+            moveDone.CommandText = "SELECT EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1');";
+            iconsCounted = Convert.ToInt64(await moveDone.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture) == 1;
+        }
+
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
@@ -2641,7 +2688,7 @@ public sealed class ClipStoreService : IClipStoreService
                 evictionCount++;
                 totalStoredBytes -= Math.Max(0L, reader.IsDBNull(0) ? 0L : reader.GetInt64(0));
 
-                if (!reader.IsDBNull(1))
+                if (iconsCounted && !reader.IsDBNull(1))
                 {
                     var hash = reader.GetString(1);
                     if (!iconReferences.TryGetValue(hash, out var icon))

@@ -91,8 +91,8 @@
     "id": "retention-lifetime-deletes-user-kept",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "DATA LOSS. Age-based retention stops exempting pinned and favorited clips.",
-    "find": "AND ($keepUserKept = 0 OR NOT {UserKeptClipPredicate})\n        RETURNING id;",
-    "replace": "AND ($keepUserKept = 0 OR 1 = 1)\n        RETURNING id;",
+    "find": "AND last_copied_at < $cutoff\n          AND ($keepUserKept = 0 OR NOT {UserKeptClipPredicate})\n        RETURNING id;",
+    "replace": "AND last_copied_at < $cutoff\n          AND ($keepUserKept = 0 OR 1 = 1)\n        RETURNING id;",
     "filter": "ClipRetentionTests"
   },
   {
@@ -979,8 +979,8 @@
     "id": "view-model-dispose-runs-twice",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "Dispose runs from Window.Closed and blocks on a settings flush with a timeout. Losing the idempotence guard makes a second call pay that wait again during shutdown.",
-    "find": "        if (_isDisposed)\n        {\n            return;\n        }\n\n        _isDisposed = true;\n        CommitPendingDeletesOnExit();",
-    "replace": "        _isDisposed = true;\n        CommitPendingDeletesOnExit();",
+    "find": "        if (_isDisposed)\n        {\n            return;\n        }\n\n        _isDisposed = true;\n        _deferredPayloadMoveCancellation.Cancel();\n        CommitPendingDeletesOnExit();",
+    "replace": "        _isDisposed = true;\n        _deferredPayloadMoveCancellation.Cancel();\n        CommitPendingDeletesOnExit();",
     "filter": "Dispose_IsIdempotent"
   },
   {
@@ -1011,8 +1011,8 @@
     "id": "icon-read-selects-the-wrong-column",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "The narrow icon read exists to return the icon blob and nothing else; selecting another column would hand callers the wrong bytes while still looking like a cheap single-column read.",
-    "find": "        command.CommandText = \"SELECT i.png FROM clips c JOIN app_icons i ON i.hash = c.source_app_icon_hash WHERE c.id = $id LIMIT 1;\";",
-    "replace": "        command.CommandText = \"SELECT p.content_bytes FROM clips c JOIN clip_payloads p ON p.clip_id = c.id WHERE c.id = $id LIMIT 1;\";",
+    "find": "            SELECT COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), c.source_app_icon)\n            FROM clips c WHERE c.id = $id;",
+    "replace": "            SELECT COALESCE((SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id), c.source_app_icon)\n            FROM clips c WHERE c.id = $id;",
     "filter": "GetSourceAppIconAsync_ReturnsTheIconWithoutTheRestOfTheRow"
   },
   {
@@ -1491,8 +1491,8 @@
     "id": "stored-bytes-not-maintained-on-insert",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "Without the insert trigger every new clip is totalled as zero bytes, so the library size cap never fires.",
-    "find": "                SET stored_bytes = new.byte_size\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        await ExecuteNonQueryAsync(connection, \"DROP TRIGGER IF EXISTS clips_stored_bytes_au;\", cancellationToken);",
-    "replace": "                SET stored_bytes = 0\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        await ExecuteNonQueryAsync(connection, \"DROP TRIGGER IF EXISTS clips_stored_bytes_au;\", cancellationToken);",
+    "find": "                SET stored_bytes = new.byte_size\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        // A row the move has not reached still holds its icon inline, and while no",
+    "replace": "                SET stored_bytes = 0\n                WHERE id = new.id;\n            END;\n            \"\"\", cancellationToken);\n\n        // A row the move has not reached still holds its icon inline, and while no",
     "filter": "FullyQualifiedName~ClipStoredBytesTests"
   },
   {
@@ -2763,8 +2763,8 @@
     "id": "no-ocr-coverage-index",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "F-25. Without it OCR coverage reads ocr_status from each image row, after the payload: 1.9 s at 60k, 9.9 s encrypted.",
-    "find": "            WHERE content_type = 'image';\n\n        -- Orphaned app_icons",
-    "replace": "            WHERE content_type = 'files';\n\n        -- Orphaned app_icons",
+    "find": "ON clips(content_type, ocr_status)\n            WHERE content_type = 'image';",
+    "replace": "ON clips(content_type, ocr_status)\n            WHERE content_type = 'files';",
     "filter": "FullyQualifiedName~StartupScanIndexTests.OcrCoverage_IsAnsweredFromTheImageIndex"
   },
   {
@@ -2867,16 +2867,16 @@
     "id": "hydration-skips-the-payload-join",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "U-E1 plan mutant. A full read that takes content_bytes from the clips row gets NULL for every clip since the move: images and rich text lose their payload.",
-    "find": "            (SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id),\n",
-    "replace": "            c.content_bytes,\n",
+    "find": "            COALESCE((SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id), c.content_bytes),\n",
+    "replace": "            COALESCE(NULL, c.content_bytes),\n",
     "filter": "FullyQualifiedName~PayloadLayoutTests"
   },
   {
     "id": "icon-read-skips-app-icons",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "U-E1 / F-39. Icons live in app_icons; reading the old inline column shows every clip without its app icon.",
-    "find": "            (SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash),\n",
-    "replace": "            c.source_app_icon,\n",
+    "find": "            COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), c.source_app_icon),\n",
+    "replace": "            COALESCE(NULL, c.source_app_icon),\n",
     "filter": "FullyQualifiedName~PayloadLayoutTests"
   },
   {
@@ -2899,8 +2899,8 @@
     "id": "payload-move-leaves-the-old-columns",
     "file": "Clipthrough/Database/DatabaseInitializer.cs",
     "why": "F-06. Copying without NULLing the inline columns keeps every metadata read walking the blob, and doubles the file.",
-    "find": "                        SET content_bytes = NULL,\n                            source_app_icon = NULL,\n                            source_app_icon_hash",
-    "replace": "                        SET source_app_icon_hash",
+    "find": "                        SET content_bytes = NULL,\n                            source_app_icon = NULL,\n                            stored_bytes = byte_size,\n                            source_app_icon_hash",
+    "replace": "                        SET stored_bytes = byte_size,\n                            source_app_icon_hash",
     "filter": "FullyQualifiedName~PayloadLayoutTests.AnExistingLibrary_IsMoved"
   },
   {
@@ -2910,14 +2910,6 @@
     "find": "                    LIMIT $limit;\n",
     "replace": "                    LIMIT -1 + ($limit * 0);\n",
     "filter": "FullyQualifiedName~PayloadLayoutTests.AMoveInterruptedMidBatch"
-  },
-  {
-    "id": "payload-layout-shares-schema-nine",
-    "file": "Clipthrough/Database/DatabaseInitializer.cs",
-    "why": "Phase G's UTC backfill and Phase E's payload layout were both written as schema 9. A library G stamped 9 still has inline payloads; if the layout also called itself 9, that library would read as already moved and keep every payload in the clips row.",
-    "find": "    private const int CurrentSchemaVersion = 10;",
-    "replace": "    private const int CurrentSchemaVersion = 9;",
-    "filter": "FullyQualifiedName~PayloadLayoutTests.ALibraryStampedNineByTheUtcBackfill_IsStillMoved"
   },
   {
     "id": "orphaned-icons-kept-after-eviction",
@@ -2931,8 +2923,8 @@
     "id": "size-cap-ignores-stored-icons",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "The cap must bound what is on disk (the 12.5x under-count fixed earlier); since U-E1 icons are counted once, from app_icons.",
-    "find": " + \") FROM clips), 0) + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons), 0);\";",
-    "replace": " + \") FROM clips), 0) + 0;\";",
+    "find": "             + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons\n                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1')), 0);",
+    "replace": "             + 0;",
     "filter": "FullyQualifiedName~Maintenance_LibrarySizeCap_CountsTheSourceAppIconsItStores"
   },
   {
@@ -2998,6 +2990,286 @@
     "find": "            await Task.Run(async () => await StartDatabaseAsync().ConfigureAwait(false)).ConfigureAwait(false);",
     "replace": "            await StartDatabaseAsync();",
     "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests"
+  },
+  {
+    "id": "byte-size-backfill-ignores-moved-payloads",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Option A puts the payload move before the byte_size backfill, so content_bytes is NULL by then. Reading only it records zero sizes, which also makes the size cap undercount.",
+    "find": "                (SELECT LENGTH(p.content_bytes) FROM clip_payloads p WHERE p.clip_id = clips.id),\n",
+    "replace": "                (SELECT NULL FROM clip_payloads p WHERE p.clip_id = clips.id),\n",
+    "filter": "FullyQualifiedName~UpgradeStartOrderTests.ARowWithoutASize"
+  },
+  {
+    "id": "upgrade-scans-before-the-payload-move",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Option A. Every full-table scan before the move walks each inline payload (F-06); the move has to come first.",
+    "find": "                await MovePayloadsOutOfClipsAsync(connection, progress, background: false, cancellationToken);\n                TraceStep(sw, \"move-payloads\");\n\n                await RepairClipStoredBytesAsync(connection, cancellationToken);\n                TraceStep(sw, \"ensure-stored-bytes\");\n",
+    "replace": "                await RepairClipStoredBytesAsync(connection, cancellationToken);\n                TraceStep(sw, \"ensure-stored-bytes\");\n                await MovePayloadsOutOfClipsAsync(connection, progress, background: false, cancellationToken);\n                TraceStep(sw, \"move-payloads\");\n\n",
+    "filter": "FullyQualifiedName~UpgradeStartOrderTests.ThePayloadMove_RunsBefore"
+  },
+  {
+    "id": "aggregation-backfill-always-runs",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Option A. A library stamped with any version already has the aggregation backfill; rerunning it is a full scan for nothing.",
+    "find": "            if (storedVersion < GateIntroducedVersion)",
+    "replace": "            if (storedVersion < GateIntroducedVersion || storedVersion >= 0)",
+    "filter": "FullyQualifiedName~UpgradeStartOrderTests.AnUpgradeFromARecentVersion"
+  },
+  {
+    "id": "aggregation-backfill-never-runs",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "A library from before the version gate still needs copy counts and first/last-copied times filled.",
+    "find": "            if (storedVersion < GateIntroducedVersion)",
+    "replace": "            if (storedVersion < GateIntroducedVersion - 1000)",
+    "filter": "FullyQualifiedName~UpgradeStartOrderTests.ALibraryFromBeforeTheVersionGate"
+  },
+  {
+    "id": "payload-backfill-never-runs",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "A library from before schema 5 has rows with byte_size 0; skipping the backfill leaves them unsized and uncounted by the size cap.",
+    "find": "            if (storedVersion < ByteSizeIntroducedVersion)",
+    "replace": "            if (storedVersion < ByteSizeIntroducedVersion - 1000)",
+    "filter": "FullyQualifiedName~UpgradeStartOrderTests.ARowWithoutASize"
+  },
+  {
+    "id": "dedupe-skipped-without-the-unique-index",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Dedupe has to run whenever the unique hash index is missing, or creating that index fails on the duplicates.",
+    "find": "            if (!await HasUniqueClipHashIndexAsync(connection, cancellationToken))",
+    "replace": "            if (!await HasUniqueClipHashIndexAsync(connection, cancellationToken) && Environment.ProcessorCount < 0)",
+    "filter": "FullyQualifiedName~UpgradeStartOrderTests.ALibraryWithoutTheUniqueHashIndex"
+  },
+  {
+    "id": "hydration-ignores-unmoved-payloads",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U3. While the move is unfinished, a clip it has not reached keeps its payload inline; a read that only looks in clip_payloads finds nothing.",
+    "find": "            COALESCE((SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id), c.content_bytes),",
+    "replace": "            COALESCE((SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id), NULL),",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.EveryClip_ReadsItsPayloadAndIcon"
+  },
+  {
+    "id": "hydration-ignores-unmoved-icons",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U3. An unmoved clip keeps its icon inline until the move reaches it.",
+    "find": "            COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), c.source_app_icon),",
+    "replace": "            COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), NULL),",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.EveryClip_ReadsItsPayloadAndIcon"
+  },
+  {
+    "id": "list-ignores-unmoved-icons",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U3. The list shows an icon only when it is flagged available; an unmoved clip has no hash yet.",
+    "find": "            (c.source_app_icon_hash IS NOT NULL OR c.source_app_icon IS NOT NULL),",
+    "replace": "            (c.source_app_icon_hash IS NOT NULL),",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.EveryClip_ReadsItsPayloadAndIcon"
+  },
+  {
+    "id": "icon-lookup-ignores-unmoved-icons",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U3. GetSourceAppIconAsync serves the icon column in the clip list; an unmoved clip's icon is still inline.",
+    "find": "            SELECT COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), c.source_app_icon)\n            FROM clips c WHERE c.id = $id;",
+    "replace": "            SELECT COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), NULL)\n            FROM clips c WHERE c.id = $id;",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.EveryClip_ReadsItsPayloadAndIcon"
+  },
+  {
+    "id": "ocr-misses-unmoved-images",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "U3. OCR finds images by their payload; an image the move has not reached is still one.",
+    "find": "              AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id) OR clips.content_bytes IS NOT NULL)\n              AND (ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'failed' OR ocr_status = 'rerun')\n            ORDER BY COALESCE(last_copied_at, captured_at) DESC\n            LIMIT 500;",
+    "replace": "              AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id))\n              AND (ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'failed' OR ocr_status = 'rerun')\n            ORDER BY COALESCE(last_copied_at, captured_at) DESC\n            LIMIT 500;",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.EveryClip_ReadsItsPayloadAndIcon"
+  },
+  {
+    "id": "payload-move-overwrites-a-newer-payload",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U3, the lost edit. A clip written before the move reaches it has its new payload in clip_payloads and the old one still inline; an upsert copies the old over the new.",
+    "find": "                        ON CONFLICT(clip_id) DO NOTHING;",
+    "replace": "                        ON CONFLICT(clip_id) DO UPDATE SET content_bytes = excluded.content_bytes;",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.AnEditBeforeTheMoveReachesAClip"
+  },
+  {
+    "id": "payload-move-overwrites-a-newer-icon",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U3, the lost edit. An icon set before the move reaches the clip must not be replaced by the stale inline one.",
+    "find": "                if (icon is { Length: > 0 } && !hasNewerIcon)",
+    "replace": "                if (icon is { Length: > 0 } && (hasNewerIcon || !hasNewerIcon))",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.AnEditBeforeTheMoveReachesAClip"
+  },
+  {
+    "id": "upgrade-never-defers-the-move",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U4, owner decision (c). An upgrade from schema 8 opens at once and moves payloads in the background; deferring never means the 74 s / 5-7 min blocking start again.",
+    "find": "        var deferPayloadMove = allowDeferredPayloadMove && await CanDeferPayloadMoveAsync(connection, cancellationToken);",
+    "replace": "        var deferPayloadMove = allowDeferredPayloadMove && Environment.ProcessorCount < 0 && await CanDeferPayloadMoveAsync(connection, cancellationToken);",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.AnUpgradeFromSchema8_Opens"
+  },
+  {
+    "id": "old-library-defers-the-move",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U4. A library from before schema 8 runs scanning backfills that are only cheap after the move, so it must still move before opening.",
+    "find": "        return storedVersion >= StoredBytesIntroducedVersion\n",
+    "replace": "        return storedVersion >= StoredBytesIntroducedVersion - 1000\n",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.AnUpgradeFromBeforeSchema8"
+  },
+  {
+    "id": "background-move-ignores-its-time-budget",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U4. Each background batch is a write transaction captures wait behind (busy_timeout 5 s); an encrypted batch bounded only by size can take seconds.",
+    "find": "                    && (!background || rows.Count == 0 || batchClock.Elapsed < BackgroundPayloadMoveBatchBudget)",
+    "replace": "                    && (!background || rows.Count == 0 || batchClock.Elapsed >= TimeSpan.Zero || batchClock.Elapsed < BackgroundPayloadMoveBatchBudget)",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.TheBackgroundMove_CommitsInBatchesBoundedByItsTimeBudget"
+  },
+  {
+    "id": "payload-move-never-marked-done",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U4. Without the done marker every start re-runs the background move and scans for rows to move.",
+    "find": "                        INSERT INTO app_metadata (key, value) VALUES ('payload_move_done', '1')",
+    "replace": "                        INSERT INTO app_metadata (key, value) VALUES ('payload_move_done', '0')",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.AnUpgradeFromSchema8_Opens"
+  },
+  {
+    "id": "moved-row-keeps-counting-its-icon",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "U4. While the move runs, a moved row's icon is counted once in app_icons; keeping it in the row too overcounts the library and can evict clips early.",
+    "find": "                            stored_bytes = byte_size,",
+    "replace": "                            stored_bytes = stored_bytes,",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.WhileTheBackgroundMoveRuns"
+  },
+  {
+    "id": "background-move-never-started",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "U4. The app opens without moving an upgraded library's payloads; nothing else ever moves them.",
+    "find": "        DeferredUpgradeRun = RunDeferredPayloadMoveAsync();",
+    "replace": "        DeferredUpgradeRun = Environment.ProcessorCount < 0 ? RunDeferredPayloadMoveAsync() : Task.CompletedTask;",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests.AnUpgradeFromSchema8"
+  },
+  {
+    "id": "app-start-forbids-the-deferred-move",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "U4. The app has to allow the deferral, or every upgrade blocks behind the overlay.",
+    "find": "        await _databaseInitializer.InitializeAsync(new UiThreadProgress(SetLibraryUpgradeProgress), allowDeferredPayloadMove: true);",
+    "replace": "        await _databaseInitializer.InitializeAsync(new UiThreadProgress(SetLibraryUpgradeProgress), allowDeferredPayloadMove: false);",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests.AnUpgradeFromSchema8"
+  },
+  {
+    "id": "merge-drain-stops-after-one-step",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "R1. A rebuild leaves many merge steps of work; stopping after one leaves the rest for the first large captures.",
+    "find": "            if (after - before < 2)",
+    "replace": "            if (after - before < 2 || after >= 0)",
+    "filter": "FullyQualifiedName~SearchIndexMergeDrainTests.AfterARebuild"
+  },
+  {
+    "id": "rebuild-records-no-pending-merges",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "R1. The drain only runs when a rebuild recorded that it left merges behind.",
+    "find": "            INSERT INTO app_metadata (key, value) VALUES ('fts_merge_pending', '1')",
+    "replace": "            INSERT INTO app_metadata (key, value) VALUES ('fts_merge_pending', '0')",
+    "filter": "FullyQualifiedName~SearchIndexMergeDrainTests.ARebuild_RecordsThatMergesArePending"
+  },
+  {
+    "id": "merge-drain-runs-without-a-rebuild",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "R1. Without a rebuild there is no debt to drain, and merging anyway is background write work for nothing.",
+    "find": "            if (await pending.ExecuteScalarAsync(cancellationToken) is not \"1\")",
+    "replace": "            if (await pending.ExecuteScalarAsync(cancellationToken) is not \"1\" && Environment.ProcessorCount < 0)",
+    "filter": "FullyQualifiedName~SearchIndexMergeDrainTests.WithoutARebuild"
+  },
+  {
+    "id": "merge-drain-never-started",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "R1. Nothing else drains the merges a rebuild leaves.",
+    "find": "                () => _databaseInitializer.DrainSearchIndexMergesAsync(_deferredPayloadMoveCancellation.Token),",
+    "replace": "                () => Environment.ProcessorCount < 0 ? _databaseInitializer.DrainSearchIndexMergesAsync(_deferredPayloadMoveCancellation.Token) : Task.FromResult(false),",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests"
+  },
+  {
+    "id": "background-move-skips-its-first-progress",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "U4. The first report is 0%, and -1 / 5 == 0 in C#, so a bucket check with no \"nothing shown yet\" guard drops it and the job line stays empty until the first 5%.",
+    "find": "(shownPercent >= 0 && percent / 5 == shownPercent / 5)",
+    "replace": "(percent / 5 == shownPercent / 5)",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests.AnUpgradeFromSchema8"
+  },
+  {
+    "id": "deferred-start-still-checks-every-page",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Owner decision on the integrity check (b). On the cold 1 GB fixture the full-file check was 71.5 s of a 73 s deferred upgrade start; it belongs ahead of the background rewrite, not the start.",
+    "find": "        else if (await HasPendingStructuralWorkAsync(connection, cancellationToken))",
+    "replace": "        if (await HasPendingStructuralWorkAsync(connection, cancellationToken))",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.ADeferredUpgradeStart_DoesNotReadEveryPageToCheckIt"
+  },
+  {
+    "id": "background-move-skips-the-integrity-check",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Owner decision on the integrity check (b). The check moved, it was not dropped: the move rewrites every row, and a corrupt library must not be rewritten.",
+    "find": "        await VerifyIntegrityRecordingFailureAsync(connection, cancellationToken);\n        if (!moveDone)\n",
+    "replace": "        await (Environment.ProcessorCount < 0 ? VerifyIntegrityRecordingFailureAsync(connection, cancellationToken) : Task.CompletedTask);\n        if (!moveDone)\n",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.TheBackgroundMove_ChecksTheLibraryFirst"
+  },
+  {
+    "id": "deferred-start-runs-the-utc-backfill",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Owner decision (b): a deferred upgrade start rewrites no row before the background integrity check. G's UTC backfill rewrites rows, so running it on the start instead of marking it owed rewrites the library unchecked.",
+    "find": "                    await ExecuteNonQueryAsync(connection, \"INSERT INTO app_metadata (key, value) VALUES ('utc_backfill_pending', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value;\", cancellationToken);",
+    "replace": "                    await BackfillUtcTimestampsAsync(connection, cancellationToken);",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.ADeferredUpgradeStart_LeavesTimestampsAlone"
+  },
+  {
+    "id": "utc-backfill-rides-on-the-move-flag",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "The move commits payload_move_done with its last batch. If the background run treats that flag as 'nothing left', a run stopped between the move and the backfill leaves the offset timestamps unrepaired for good.",
+    "find": "        if (moveDone && !backfillPending)\n",
+    "replace": "        if (moveDone || !backfillPending && moveDone)\n",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.ABackgroundRunStoppedRightAfterTheMove"
+  },
+  {
+    "id": "utc-backfill-before-the-integrity-check",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Owner decision (b): the background run checks the library before it rewrites anything. A backfill ahead of the check rewrites rows of a library the check would have refused.",
+    "find": "        await VerifyIntegrityRecordingFailureAsync(connection, cancellationToken);\n        if (!moveDone)\n",
+    "replace": "        if (backfillPending)\n        {\n            await BackfillUtcTimestampsAsync(connection, cancellationToken);\n        }\n\n        await VerifyIntegrityRecordingFailureAsync(connection, cancellationToken);\n        if (!moveDone)\n",
+    "filter": "FullyQualifiedName~DeferredPayloadMoveTests.TheBackgroundMove_ChecksTheLibraryFirst"
+  },
+  {
+    "id": "library-size-ignores-the-icons-it-stores",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "A row the background move has not reached still holds its icon inline and counts it in stored_bytes. Measuring the library by byte_size undercounts a library mid-move by every inline icon, so the size cap stops bounding it.",
+    "find": "    private const string StoredRowBytes = \"stored_bytes\";",
+    "replace": "    private const string StoredRowBytes = \"byte_size\";",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.TheSizeCap_CountsTheInlineIconsOfRowsNotYetMoved"
+  },
+  {
+    "id": "size-purge-measures-rows-differently-to-the-total",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "The total counts stored_bytes, so the walk that decides how many clips to evict has to subtract the same measure. Walking by byte_size, a library whose inline icons put it over the cap never fits and every evictable clip is deleted.",
+    "find": "                SELECT {StoredRowBytes}, source_app_icon_hash\n                FROM clips",
+    "replace": "                SELECT byte_size, source_app_icon_hash\n                FROM clips",
+    "filter": "FullyQualifiedName~PartlyMovedLibraryTests.TheSizeCap_CountsTheInlineIconsOfRowsNotYetMoved"
+  },
+  {
+    "id": "blocking-upgrade-skips-the-utc-backfill",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "The blocking upgrade path (libraries older than schema 8, or no permission to defer) must still run G's UTC backfill once, after the move.",
+    "find": "                if (storedVersion < UtcTimestampsIntroducedVersion)\n                {\n                    await BackfillUtcTimestampsAsync(connection, cancellationToken);\n                    TraceStep(sw, \"backfill-utc-timestamps\");",
+    "replace": "                if (storedVersion < UtcTimestampsIntroducedVersion && storedVersion < 0)\n                {\n                    await BackfillUtcTimestampsAsync(connection, cancellationToken);\n                    TraceStep(sw, \"backfill-utc-timestamps\");",
+    "filter": "FullyQualifiedName~ImportedTimestampTests.RowsAlreadyImportedWithAnOffset"
+  },
+  {
+    "id": "background-move-failure-not-notified",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Owner decision on the integrity check (b). A failed background check means a corrupt library; a status-bar line alone is easily missed.",
+    "find": "            _notificationService.Publish(new AppNotification\n            {\n                Title = AppText.LibraryOptimizeFailedTitle,",
+    "replace": "            if (ex.Message.Length < 0) _notificationService.Publish(new AppNotification\n            {\n                Title = AppText.LibraryOptimizeFailedTitle,",
+    "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests.ACorruptLibrary"
+  },
+  {
+    "id": "payload-layout-shares-schema-nine",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Phase G's UTC backfill and Phase E's payload layout were both written as schema 9. A library G stamped 9 still has inline payloads; if the layout also called itself 9, that library would read as already moved and keep every payload in the clips row.",
+    "find": "    private const int CurrentSchemaVersion = 10;",
+    "replace": "    private const int CurrentSchemaVersion = 9;",
+    "filter": "FullyQualifiedName~PayloadLayoutTests.ALibraryStampedNineByTheUtcBackfill_IsStillMoved"
   },
   {
     "id": "can-transform-reads-truncated-content",
@@ -3411,8 +3683,8 @@
     "id": "startup-backup-precedes-expiry",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "F-19 / OD-4a. The startup backup ran before the first expiry, copying clips that outlived their lifetime while the app was closed.",
-    "find": "                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n",
-    "replace": "                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n",
+    "find": "                // tick a minute later removes it from the live library.\n                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n",
+    "replace": "                // tick a minute later removes it from the live library.\n                await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n",
     "filter": "FullyQualifiedName~StartupExpiresSensitiveClips_BeforeTakingTheDailyBackup"
   },
   {
@@ -3936,12 +4208,116 @@
     "filter": "FullyQualifiedName~BetweenHydrationAndThePreview_TheEditorStaysReadOnly"
   },
   {
+    "id": "icon-hash-index-built-at-a-deferred-start",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Live check F2: building idx_clips_source_app_icon_hash reads every row; before the move each row spans a page, 19.5-20.7 s on the deferred start of a 60k upgrade. It waits for the background run.",
+    "find": "        if (!allowDeferredPayloadMove || payloadMoveDone)",
+    "replace": "        if (!allowDeferredPayloadMove || payloadMoveDone || allowDeferredPayloadMove)",
+    "filter": "FullyQualifiedName~ADeferredUpgradeStart_LeavesTheIconHashIndexToTheBackgroundRun"
+  },
+  {
+    "id": "icon-hash-index-never-built-after-the-move",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "The deferred start leaves the icon-hash index to the background run; without it orphaned icons are never removed and the size cap counts them.",
+    "find": "        await ExecuteNonQueryAsync(connection, AppIconHashIndex, cancellationToken);\n\n        // The move dropped it (F-13-4).",
+    "replace": "\n        // The move dropped it (F-13-4).",
+    "filter": "FullyQualifiedName~ADeferredUpgradeStart_LeavesTheIconHashIndexToTheBackgroundRun"
+  },
+  {
+    "id": "orphan-icons-never-removed",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "DeleteOrphanedAppIconsAsync waits for the icon-hash index, and must run once it exists.",
+    "find": "            if (Convert.ToInt64(await probe.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 0)",
+    "replace": "            if (Convert.ToInt64(await probe.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) >= 0)",
+    "filter": "FullyQualifiedName~ADeferredUpgradeStart_LeavesTheIconHashIndexToTheBackgroundRun"
+  },
+  {
+    "id": "stale-schema-not-refreshed-on-open",
+    "file": "Clipthrough/Database/SqliteConnectionFactory.cs",
+    "why": "Live check F2: a pooled connection with a schema another connection changed fails its first DELETE FROM clips with \"no such table\" (SQLite bug: FTS5 delete trigger + foreign keys). Reading sqlite_master on open reloads it; PRAGMA schema_version does not.",
+    "find": "                cmd.CommandText = \"SELECT COUNT(*) FROM sqlite_master WHERE 0;\";",
+    "replace": "                cmd.CommandText = \"PRAGMA schema_version;\";",
+    "filter": "FullyQualifiedName~StaleSchemaConnectionTests"
+  },
+  {
+    "id": "maintenance-loop-dies-on-a-failed-tick",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Live check F2: one failed maintenance tick ended the periodic retention and size cap for the session, because OnError is terminal in Rx.",
+    "find": "                .Catch(static (Exception ex) => Observable.Return<Exception?>(ex)))",
+    "replace": "                .Catch(static (Exception ex) => Observable.Throw<Exception?>(ex)))",
+    "filter": "FullyQualifiedName~MaintenanceLoop_SurvivesAFailingTick"
+  },
+  {
+    "id": "backup-taken-after-a-failed-check",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Live check F3: the daily backup copied a library that had just failed quick_check; a week of that rotates every good backup out.",
+    "find": "        if (_databaseInitializer is { HasFailedIntegrityCheck: true })",
+    "replace": "        if (_databaseInitializer is { HasFailedIntegrityCheck: true } && _retention < 0)",
+    "filter": "FullyQualifiedName~TheDailyBackup_IsSkipped_AfterTheLibraryFailedItsCheck|FullyQualifiedName~ACorruptLibrary_IsNotMovedInTheBackground"
+  },
+  {
+    "id": "backup-taken-before-the-owed-check",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Live check F2/F3: the startup backup ran while the background quick_check was still reading the file, so it could copy a library about to fail.",
+    "find": "        if (_databaseInitializer is { IsIntegrityCheckOwed: true })",
+    "replace": "        if (_databaseInitializer is { IsIntegrityCheckOwed: true } && _retention < 0)",
+    "filter": "FullyQualifiedName~TheDailyBackup_WaitsForTheBackgroundCheck|FullyQualifiedName~AnUpgradeFromSchema8_OpensAtOnce"
+  },
+  {
+    "id": "no-backup-after-the-background-run",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "The startup backup waits for the background check; without asking again after the run, the day goes without a backup.",
+    "find": "                    await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);\n                }\n                catch (Exception backupFailure)",
+    "replace": "                    await Task.CompletedTask.ConfigureAwait(false);\n                }\n                catch (Exception backupFailure)",
+    "filter": "FullyQualifiedName~AnUpgradeFromSchema8_OpensAtOnce"
+  },
+  {
     "id": "undecodable-thumbnail-throws",
     "file": "Clipthrough/Presentation/ClipBitmapFactory.cs",
     "why": "Live check G1: Avalonia.Skia scaled decode throws NullReferenceException for data no codec recognises; uncaught, the row thumbnail task faulted unobserved.",
     "find": "        catch (NullReferenceException ex) when (decodeWidth is > 0)",
     "replace": "        catch (NullReferenceException ex) when (decodeWidth is < 0)",
     "filter": "FullyQualifiedName~ClipBitmapFactoryHeadlessTests"
+  },
+  {
+    "id": "integrity-failure-notification-times-out",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Owner decision after live check F3: the integrity-failure notification says to restore a backup and must stay until the user closes it, not vanish after six seconds.",
+    "find": "                Level = AppNotificationLevel.Error,\n                IsPersistent = true,\n                Actions =\n                [\n                    new AppNotificationAction\n                    {\n                        // Any action dismisses its notification; this one does nothing else.",
+    "replace": "                Level = AppNotificationLevel.Error,\n                IsPersistent = ex.Message.Length < 0,\n                Actions =\n                [\n                    new AppNotificationAction\n                    {\n                        // Any action dismisses its notification; this one does nothing else.",
+    "filter": "FullyQualifiedName~ACorruptLibrary_IsNotMovedInTheBackground"
+  },
+  {
+    "id": "maintenance-scope-skips-background-upgrade",
+    "file": "Clipthrough/Services/Storage/DatabaseMaintenanceScope.cs",
+    "why": "Rubber-duck F-13-1: the background upgrade holds its own connection, so a rekey/restore/move entered while it ran renamed or rewrote a file under a live writer. The scope must pause it before the pool clear.",
+    "find": "            if (backgroundUpgrade is not null)\n            {\n                scope._backgroundUpgradePause",
+    "replace": "            if (backgroundUpgrade is not null && backgroundUpgrade.ToString()!.Length < 0)\n            {\n                scope._backgroundUpgradePause",
+    "filter": "FullyQualifiedName~ARestoreDuringTheBackgroundMove_PausesTheMove"
+  },
+  {
+    "id": "paused-background-upgrade-never-resumes",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-13-1: a background upgrade stopped by a maintenance pause must wait and start again afterwards, not end as if the app were closing.",
+    "find": "            catch (Exception) when (stop!.IsCancellationRequested && !cancellationToken.IsCancellationRequested)",
+    "replace": "            catch (Exception) when (stop!.IsCancellationRequested && !cancellationToken.IsCancellationRequested && body.Method.Name.Length < 0)",
+    "filter": "FullyQualifiedName~ARestoreDuringTheBackgroundMove_PausesTheMove"
+  },
+  {
+    "id": "retention-ignores-pending-utc-backfill",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-13-2: while a deferred upgrade still owes the UTC backfill, rows can carry an offset and the text comparison purges unexpired sensitive clips in negative-offset zones (F-35 reopened). The purge must compare instants until the backfill has run.",
+    "find": "        command.CommandText = utcBackfillPending ? OffsetAwareRetentionDeleteStatement : RetentionDeleteStatement;",
+    "replace": "        command.CommandText = utcBackfillPending && RetentionDeleteStatement.Length < 0 ? OffsetAwareRetentionDeleteStatement : RetentionDeleteStatement;",
+    "filter": "FullyQualifiedName~WhileTheUtcBackfillIsOwed"
+  },
+  {
+    "id": "utc-backfill-overwrites-recopy",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-13-3: the background UTC backfill reads rows, then writes their converted timestamps; a re-copy in between set last_copied_at, and an unconditional write reverted it, so the clip lost its recent position and could expire as if never re-copied.",
+    "find": "                last_copied_at = CASE WHEN last_copied_at IS $readL THEN $l ELSE last_copied_at END",
+    "replace": "                last_copied_at = CASE WHEN last_copied_at IS $readL OR 1 = 1 THEN $l ELSE last_copied_at END",
+    "filter": "FullyQualifiedName~ARecopyDuringTheBackgroundUtcBackfill"
   },
   {
     "id": "fts-interrupted-repair-pending-not-read",
@@ -4128,6 +4504,38 @@
     "filter": "FullyQualifiedName~WindowGeometryTests.ARememberedWindowMostlyOnA100PercentScreen"
   },
   {
+    "id": "background-move-leaves-ocr-index-dropped",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-13-4: the payload move drops idx_clips_ocr_images; the deferred background run never recreated it, so OCR backlog/coverage scans ran without it for the rest of the session.",
+    "find": "        await ExecuteNonQueryAsync(connection, OcrImagesIndex, cancellationToken);",
+    "replace": "        await ExecuteNonQueryAsync(connection, OcrImagesIndex.Length < 0 ? OcrImagesIndex : \"SELECT 1;\", cancellationToken);",
+    "filter": "FullyQualifiedName~LeavesTheCurrentOcrIndexInPlace"
+  },
+  {
+    "id": "edit-before-move-drops-inline-icon-from-total",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-13-7: writing byte_size on a row the deferred move has not reached set stored_bytes = byte_size, dropping its still-live inline icon from the size total until the move reached it.",
+    "find": "                    + CASE WHEN new.source_app_icon_hash IS NULL THEN COALESCE(LENGTH(new.source_app_icon), 0) ELSE 0 END",
+    "replace": "                    + CASE WHEN new.source_app_icon_hash IS NULL AND 1 = 0 THEN COALESCE(LENGTH(new.source_app_icon), 0) ELSE 0 END",
+    "filter": "FullyQualifiedName~KeepsCountingItsInlineIcon"
+  },
+  {
+    "id": "edit-before-move-counts-stale-inline-icon",
+    "file": "Clipthrough/Database/DatabaseInitializer.cs",
+    "why": "Rubber-duck F-13-7: once a write gives an unmoved row a newer icon (source_app_icon_hash), its inline icon is stale and app_icons counts the new one; counting the inline one as well over-counts.",
+    "find": "                    + CASE WHEN new.source_app_icon_hash IS NULL THEN COALESCE(LENGTH(new.source_app_icon), 0) ELSE 0 END",
+    "replace": "                    + CASE WHEN new.source_app_icon_hash IS NULL OR 1 = 1 THEN COALESCE(LENGTH(new.source_app_icon), 0) ELSE 0 END",
+    "filter": "FullyQualifiedName~KeepsCountingItsInlineIcon"
+  },
+  {
+    "id": "ordinary-start-backs-up-twice",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-13-8: the background run's closing maintenance + daily backup are for a deferred start's held-back backup; on every ordinary start they duplicated the startup pass and raced it onto the same temp file.",
+    "find": "            if (upgraded)",
+    "replace": "            if (upgraded || Environment.ProcessorCount > 0)",
+    "filter": "FullyQualifiedName~AnOrdinaryStart_TakesTheDailyBackupOnce"
+  },
+  {
     "id": "maintenance-keeps-icons-a-recopy-orphaned",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "Rubber-duck F-11-3. Re-copying a clip from a different app replaces its icon hash and orphans the old icon. Sweeping only after a pass deleted clips left that icon counting toward the size cap (evicting clips the library had room for) and the reported total, until some deletion or a restart.",
@@ -4288,12 +4696,60 @@
     "filter": "FullyQualifiedName~ConnectionConstructionGuardTests"
   },
   {
+    "id": "daily-backup-reads-failed-before-owed",
+    "file": "Clipthrough/Services/Storage/DatabaseBackupService.cs",
+    "why": "Finding 4b: never back up a library that failed its integrity check this session. A failing check sets HasFailedIntegrityCheck and then clears IsIntegrityCheckOwed; reading failed-then-owed lets a check that finishes between the reads look neither, and the damaged library is backed up.",
+    "find": "        if (_databaseInitializer is { IsIntegrityCheckOwed: true })\n        {\n            Trace.TraceInformation(\"Daily backup deferred until the library's background integrity check has passed.\");\n            return;\n        }\n\n        if (BetweenIntegrityStateReads is { } between)\n        {\n            await between().ConfigureAwait(false);\n        }\n\n        // Live check F3: a backup copies the library page for page, damage included,\n        // and the rotation below keeps only a week, so backing up a library that\n        // failed its check would push the good backups out one day at a time.\n        if (_databaseInitializer is { HasFailedIntegrityCheck: true })\n        {\n            Trace.TraceWarning(\"Daily backup skipped: the library failed its integrity check this session, so the existing backups are kept as they are.\");\n            return;\n        }\n",
+    "replace": "        if (_databaseInitializer is { HasFailedIntegrityCheck: true })\n        {\n            Trace.TraceWarning(\"Daily backup skipped: the library failed its integrity check this session, so the existing backups are kept as they are.\");\n            return;\n        }\n\n        if (BetweenIntegrityStateReads is { } between)\n        {\n            await between().ConfigureAwait(false);\n        }\n\n        // Live check F3: a backup copies the library page for page, damage included,\n        // and the rotation below keeps only a week, so backing up a library that\n        // failed its check would push the good backups out one day at a time.\n        if (_databaseInitializer is { IsIntegrityCheckOwed: true })\n        {\n            Trace.TraceInformation(\"Daily backup deferred until the library's background integrity check has passed.\");\n            return;\n        }\n",
+    "filter": "FullyQualifiedName~WhenTheCheckFailsBetweenItsTwoReads"
+  },
+  {
     "id": "grid-keeps-cells-cached-against-old-definitions",
     "why": "Swaps a grid's definitions without clearing Avalonia's cell cache. Crossing the Short line at the same width leaves the Search options button indexed at column 2 of a two-column filter row, and the layout pass throws ArgumentOutOfRangeException from Grid.MeasureCellsGroup; on Windows that is inside the window procedure and kills the app (seen live on a display-mode change).",
     "file": "Clipthrough/Views/GridDefinitions.cs",
     "find": "        if (changed)",
     "replace": "        if (changed && grid.Name == \"never\")",
     "filter": "FullyQualifiedName~WorkspaceBreakpointTransitionHeadlessTests"
+  },
+  {
+    "id": "size-total-counts-icons-while-move-owed",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-13-5 (owner decision, option 2): while the deferred payload move is owed, orphaned icons cannot be swept, so counting app_icons makes the size cap evict clips to pay for icons nothing uses.",
+    "find": "                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1')), 0);",
+    "replace": "                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1') OR 1 = 1), 0);",
+    "filter": "FullyQualifiedName~WhileTheMoveIsOwed"
+  },
+  {
+    "id": "size-total-leaves-icons-out-after-the-move",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-13-5: icons leave the size total only while the move is owed; once it is done each distinct icon counts once again.",
+    "find": "                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1')), 0);",
+    "replace": "                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1') AND 1 = 0), 0);",
+    "filter": "FullyQualifiedName~WhileTheMoveIsOwed_TheSizeTotalLeavesIconsOut"
+  },
+  {
+    "id": "size-cap-walk-frees-icons-while-move-owed",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Rubber-duck F-13-5: while icons are out of the size total, an eviction that frees an icon frees nothing the total counted; a walk that subtracts the icon stops with the library still over its cap. Guards the merge with the F-11-1 walk (ReadIconReferencesAsync).",
+    "find": "                if (iconsCounted && !reader.IsDBNull(1))",
+    "replace": "                if ((iconsCounted || connection.ConnectionString.Length > 0) && !reader.IsDBNull(1))",
+    "filter": "FullyQualifiedName~WhileTheMoveIsOwed_EvictingAnIconsLastClipFreesOnlyItsPayload"
+  },
+  {
+    "id": "integrity-failure-notification-omits-unbacked-note",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-13-10 (owner decision, option 1): the integrity-failure notification says to restore a backup, but the daily backup waited for the check, so nothing copied this session is in one; it must say so, and where a restore keeps the replaced library.",
+    "find": "                Message = _databaseInitializer.HasFailedIntegrityCheck\n                    ? ",
+    "replace": "                Message = _databaseInitializer.HasFailedIntegrityCheck && ex.Message.Length < 0\n                    ? ",
+    "filter": "FullyQualifiedName~ACorruptLibrary_IsNotMovedInTheBackground"
+  },
+  {
+    "id": "unbacked-note-on-every-run-failure",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Rubber-duck F-13-10: the backup note belongs to the failed integrity check, the only failure that says to restore a backup; other background-run failures do not get it.",
+    "find": "                Message = _databaseInitializer.HasFailedIntegrityCheck\n                    ? ",
+    "replace": "                Message = _databaseInitializer.HasFailedIntegrityCheck || ex.Message.Length >= 0\n                    ? ",
+    "filter": "FullyQualifiedName~ABackgroundRunFailureOtherThanTheCheck_HasNoBackupNote"
   },
   {
     "id": "own-write-suppression-ignores-owner",

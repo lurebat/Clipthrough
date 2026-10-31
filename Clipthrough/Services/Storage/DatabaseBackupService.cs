@@ -33,6 +33,7 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
     private readonly IBackgroundOcrQueue? _ocrQueue;
     private readonly IEmbeddingWorker? _embeddingWorker;
     private readonly ISettingsService? _settingsService;
+    private readonly Clipthrough.Database.DatabaseInitializer? _databaseInitializer;
     private readonly int _retention;
 
     /// <summary>
@@ -40,19 +41,25 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
     /// injected so restore operations can quiesce them via
     /// <see cref="DatabaseMaintenanceScope"/>.
     /// </summary>
+    /// <param name="databaseInitializer">
+    /// Says whether this session's integrity check failed or is still owed; the
+    /// daily backup is skipped or deferred accordingly (live check F3).
+    /// </param>
     public DatabaseBackupService(
         IStorageOptionsService storageOptionsService,
         IClipboardMonitorService? clipboardMonitor,
         IBackgroundOcrQueue? ocrQueue,
         IEmbeddingWorker? embeddingWorker,
         int retention = DefaultRetention,
-        ISettingsService? settingsService = null)
+        ISettingsService? settingsService = null,
+        Clipthrough.Database.DatabaseInitializer? databaseInitializer = null)
     {
         _storageOptionsService = storageOptionsService;
         _clipboardMonitor = clipboardMonitor;
         _ocrQueue = ocrQueue;
         _embeddingWorker = embeddingWorker;
         _settingsService = settingsService;
+        _databaseInitializer = databaseInitializer;
         _retention = retention < 1 ? 1 : retention;
     }
 
@@ -62,8 +69,42 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
     /// </summary>
     internal Func<Task>? SnapshotTakenForTests { get; set; }
 
+    /// <summary>
+    /// Test seam: runs between the two reads of the initializer's integrity state
+    /// in <see cref="EnsureDailyBackupAsync"/>, where a background check can finish.
+    /// </summary>
+    internal static Func<Task>? BetweenIntegrityStateReads { get; set; }
+
     public async Task EnsureDailyBackupAsync(CancellationToken cancellationToken = default)
     {
+        // Owed first, then failed: a failing check sets HasFailedIntegrityCheck before
+        // it clears IsIntegrityCheckOwed, so once this reads "not owed" the failure,
+        // if any, is already visible to the read below. The other order let a check
+        // finishing between the two reads look neither owed nor failed, and the
+        // damaged library was backed up (Finding 4b).
+        //
+        // A deferred upgrade start skipped the check, and the background run has not
+        // done it yet. The view model asks again once that run has finished.
+        if (_databaseInitializer is { IsIntegrityCheckOwed: true })
+        {
+            Trace.TraceInformation("Daily backup deferred until the library's background integrity check has passed.");
+            return;
+        }
+
+        if (BetweenIntegrityStateReads is { } between)
+        {
+            await between().ConfigureAwait(false);
+        }
+
+        // Live check F3: a backup copies the library page for page, damage included,
+        // and the rotation below keeps only a week, so backing up a library that
+        // failed its check would push the good backups out one day at a time.
+        if (_databaseInitializer is { HasFailedIntegrityCheck: true })
+        {
+            Trace.TraceWarning("Daily backup skipped: the library failed its integrity check this session, so the existing backups are kept as they are.");
+            return;
+        }
+
         var dbPath = _storageOptionsService.Current.DatabasePath;
         if (string.IsNullOrEmpty(dbPath) || !File.Exists(dbPath))
         {
@@ -509,7 +550,7 @@ public sealed class DatabaseBackupService : IDatabaseBackupService
         // Step 1: Enter maintenance scope — stops workers and clears the pool
         // so no pooled connection holds the live file open during the swap.
         await using var scope = await DatabaseMaintenanceScope.EnterAsync(
-            _clipboardMonitor, _ocrQueue, _embeddingWorker);
+            _clipboardMonitor, _ocrQueue, _embeddingWorker, _databaseInitializer);
 
         await Task.Run(() => RestoreCore(backupPath, dbPath), cancellationToken).ConfigureAwait(false);
     }
