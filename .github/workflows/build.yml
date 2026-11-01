@@ -61,8 +61,15 @@ jobs:
           name: test-results
           path: TestResults/**
 
-      - name: Publish
-        run: dotnet publish .\Clipthrough\Clipthrough.csproj --configuration Release --output artifacts\win-x64
+      - name: Publish (framework-dependent win-x64)
+        run: dotnet publish .\Clipthrough\Clipthrough.csproj --configuration Release -r win-x64 --self-contained false --output artifacts\win-x64
+
+      - name: Stage native symbols
+        shell: pwsh
+        run: >
+          ./.github/scripts/Stage-PublishSymbols.ps1
+          -PublishDirectory artifacts\win-x64
+          -SymbolsDirectory artifacts\symbols
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v7
@@ -70,3 +77,8 @@ jobs:
           name: Clipthrough-win-x64
           path: artifacts\win-x64\**
 
+      - name: Upload native symbols
+        uses: actions/upload-artifact@v7
+        with:
+          name: Clipthrough-win-x64-symbols
+          path: artifacts\symbols\**
