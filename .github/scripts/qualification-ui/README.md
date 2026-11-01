@@ -82,3 +82,11 @@ input/foreground, or inaccessible Settings are honest blocked outcomes.
 Timeouts are blocked, not semantic successes. Inspect artifacts before mapping
 these independent gates into the parent report: no physical GPU, monitor, IME,
 multi-DPI-transition or HTML rendering qualification is claimed.
+
+Startup discovery foregrounds the verified receiver and sends actual Alt+V before
+looking for a presented, foreground candidate-owned UIA window. It identifies
+the main window by the Search clips control or first-run Create library button,
+not by a literal title (the app appends its display version). It never bypasses
+the registered hotkey with ShowWindow. Before/after discovery, and on failure,
+`startup-*-top-level-uia.json` inventories top-level PID, title, HWND, foreground,
+offscreen state and bounds; failure also saves a desktop screenshot.

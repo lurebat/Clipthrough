@@ -333,7 +333,8 @@ function Invoke-HostedUiQualification {
     Set-Gate 'interactive_clipboard_paste_hotkey_smoke' $smokeStatus `
         "Actual foreground input, popup hotkeys, plain target paste and full PNG pixel comparison; see live-ui/ui-evidence.json. Harness exit=$uiExit."
     if ($uiExit -eq 1 -or $uiExit -eq 2) {
-        throw "Hosted UI harness failed with exit $uiExit; inspect its evidence."
+        Set-Gate 'interactive_clipboard_paste_hotkey_smoke' 'failed' `
+            "Hosted UI harness failed with exit $uiExit; inspect its evidence. Other independent fixture gates will still run."
     }
 }
 
@@ -697,14 +698,15 @@ finally {
             $gate.detail = "Not reached because an earlier operation failed: $fatalError"
         }
     }
-    $requiredGateFailure = [bool]($script:gates | Where-Object { $_.required -and $_.status -ne 'passed' })
+    $hasFailedGate = [bool]($script:gates | Where-Object { $_.status -eq 'failed' })
+    $requiredGateFailure = $hasFailedGate -or [bool]($script:gates | Where-Object { $_.required -and $_.status -ne 'passed' })
     $report = [ordered]@{
         schemaVersion = 1
         workflow = 'Windows release qualification (validation only)'
         sourceCommit = $env:GITHUB_SHA
         candidateVersion = $candidateVersion
         generatedAtUtc = [DateTime]::UtcNow.ToString('O')
-        outcome = if ($fatalError) { 'failed' } elseif ($requiredGateFailure) { 'blocked' } else { 'passed' }
+        outcome = if ($fatalError -or $hasFailedGate) { 'failed' } elseif ($requiredGateFailure) { 'blocked' } else { 'passed' }
         fatalError = $fatalError
         limitations = @(
             'Actual input delivery, normal UI rows/storage, RTF rendered paste, PNG full-detail and popup hotkeys are reported separately in live-ui/ui-evidence.json; unsupported or incomplete scenarios are not passes.',

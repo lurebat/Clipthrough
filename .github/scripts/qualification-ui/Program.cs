@@ -188,15 +188,69 @@ internal static class Program
     private static AutomationElement FindAppWindow()
     {
         AutomationElement? found = null;
-        Wait(() =>
+        try
         {
-            found = AutomationElement.RootElement.FindFirst(TreeScope.Children,
-                new AndCondition(new PropertyCondition(AutomationElement.ProcessIdProperty, candidate.Id),
-                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window),
-                    new PropertyCondition(AutomationElement.NameProperty, "Clipthrough")));
-            return found != null;
-        }, "Accessible candidate main window", 20);
+            TopLevelInventory("startup-before-summon");
+            // A hidden/cloaked popup may not be in UIA's top-level tree at all.
+            // From a verified external foreground, Alt+V summons rather than
+            // toggling an already-active popup off. Never use ShowWindow here.
+            FocusReceiver();
+            Pump(500);
+            Native.Chord(0x12, 0x56);
+            Wait(() =>
+            {
+                var windows = AutomationElement.RootElement.FindAll(TreeScope.Children,
+                    new AndCondition(new PropertyCondition(AutomationElement.ProcessIdProperty, candidate.Id),
+                        new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window)))
+                    .Cast<AutomationElement>();
+                found = windows.FirstOrDefault(window =>
+                {
+                    var handle = (nint)window.Current.NativeWindowHandle;
+                    if (handle == 0 || Native.GetForegroundWindow() != handle || !Native.Presented(handle)) return false;
+                    // Identify the actual main workspace/first-run form by its
+                    // controls, not a title that includes the release version.
+                    return window.FindFirst(TreeScope.Descendants,
+                        new OrCondition(
+                            new PropertyCondition(AutomationElement.NameProperty, "Search clips"),
+                            new PropertyCondition(AutomationElement.NameProperty, "Create library"))) != null;
+                });
+                return found != null;
+            }, "Alt+V foregrounds accessible candidate workspace or first-run library form", 20);
+            TopLevelInventory("startup-after-summon");
+            Screenshot("startup-summoned");
+        }
+        catch (Exception)
+        {
+            try { TopLevelInventory("startup-discovery-failed"); }
+            catch (Exception inventoryError) { Evidence["startupInventoryError"] = inventoryError.ToString(); }
+            try { Screenshot("startup-discovery-failed"); }
+            catch (Exception screenshotError) { Evidence["startupScreenshotError"] = screenshotError.ToString(); }
+            SaveEvidence();
+            throw;
+        }
         return found!;
+    }
+
+    private static void TopLevelInventory(string label)
+    {
+        var records = AutomationElement.RootElement.FindAll(TreeScope.Children, Condition.TrueCondition)
+            .Cast<AutomationElement>().Take(200).Select(element =>
+            {
+                var handle = (nint)element.Current.NativeWindowHandle;
+                return new
+                {
+                    pid = element.Current.ProcessId,
+                    candidateOwned = element.Current.ProcessId == candidate.Id,
+                    name = element.Current.Name,
+                    type = element.Current.ControlType.ProgrammaticName,
+                    handle = handle.ToInt64(),
+                    foreground = handle != 0 && handle == Native.GetForegroundWindow(),
+                    offscreen = element.Current.IsOffscreen,
+                    bounds = element.Current.BoundingRectangle.ToString(CultureInfo.InvariantCulture)
+                };
+            }).ToArray();
+        File.WriteAllText(Path.Combine(output, label + "-top-level-uia.json"),
+            JsonSerializer.Serialize(records, new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
     }
 
     private static AutomationElement App() => AutomationElement.FromHandle(main);
