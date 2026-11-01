@@ -6,7 +6,7 @@
         <Nullable>enable</Nullable>
     <!-- Lets .editorconfig's IDE0051/IDE0052 = error fail the build (F-40). -->
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
-        <Version>0.17.1</Version>
+        <Version>0.18.0</Version>
         <ApplicationIcon>Assets\avalonia-logo.ico</ApplicationIcon>
         <ApplicationManifest>app.manifest</ApplicationManifest>
         <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
