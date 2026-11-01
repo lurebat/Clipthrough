@@ -64,6 +64,53 @@ public sealed class ReleasePackagingTests
         return arguments[0].Groups["value"].Value.Trim('\'', '"', '`');
     }
 
+    private static void AssertFrameworkDependentWinX64Publish(string workflowPath)
+    {
+        var workflow = File.ReadAllText(workflowPath);
+        var publish = Regex.Match(workflow, @"(?s)dotnet publish(?<arguments>.*?--output\s+\S+)");
+        Assert.True(publish.Success, workflowPath + " has no dotnet publish command with an output path.");
+
+        var arguments = publish.Groups["arguments"].Value;
+        Assert.Contains("-r win-x64", arguments, StringComparison.Ordinal);
+        Assert.Contains("--self-contained false", arguments, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WindowsBuildAndReleasePublishForWinX64FrameworkDependent()
+    {
+        AssertFrameworkDependentWinX64Publish(RepoFile(".github", "workflows", "build.yml"));
+        AssertFrameworkDependentWinX64Publish(RepoFile(".github", "workflows", "release.yml"));
+    }
+
+    [Fact]
+    public void WindowsPublishWorkflowsStageNativeSymbolsSeparately()
+    {
+        var build = File.ReadAllText(RepoFile(".github", "workflows", "build.yml")).Replace('\\', '/');
+        var release = File.ReadAllText(RepoFile(".github", "workflows", "release.yml")).Replace('\\', '/');
+        var stager = File.ReadAllText(RepoFile(".github", "scripts", "Stage-PublishSymbols.ps1"));
+
+        Assert.Contains(".github/scripts/Stage-PublishSymbols.ps1", build, StringComparison.Ordinal);
+        Assert.Contains("Clipthrough-win-x64-symbols", build, StringComparison.Ordinal);
+        Assert.Contains(".github/scripts/Stage-PublishSymbols.ps1", release, StringComparison.Ordinal);
+        Assert.Contains("-win-x64-symbols.zip", release, StringComparison.Ordinal);
+        Assert.True(
+            build.IndexOf("Stage-PublishSymbols.ps1", StringComparison.Ordinal) < build.IndexOf("name: Upload binary artifact", StringComparison.Ordinal),
+            "The build workflow must remove native symbols before uploading the user artifact.");
+        Assert.True(
+            release.IndexOf("Stage-PublishSymbols.ps1", StringComparison.Ordinal) < release.IndexOf("name: Package zip", StringComparison.Ordinal),
+            "The release workflow must remove native symbols before creating the user ZIP.");
+        Assert.True(
+            release.IndexOf("Stage-PublishSymbols.ps1", StringComparison.Ordinal) < release.IndexOf("name: Build Velopack package", StringComparison.Ordinal),
+            "The release workflow must remove native symbols before creating the Velopack package.");
+        Assert.Contains("libSkiaSharp.pdb", stager, StringComparison.Ordinal);
+        Assert.Contains("libHarfBuzzSharp.pdb", stager, StringComparison.Ordinal);
+        Assert.Contains("Copy-Item", stager, StringComparison.Ordinal);
+        Assert.Contains("Remove-Item", stager, StringComparison.Ordinal);
+        Assert.Contains("Clipthrough.deps.json", stager, StringComparison.Ordinal);
+        Assert.Contains("runtimeTarget", stager, StringComparison.Ordinal);
+        Assert.Contains("'runtime', 'native'", stager, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void TheInstallerRequiresAServicedDotnetRuntime()
     {

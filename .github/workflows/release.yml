@@ -55,12 +55,21 @@ jobs:
         # afterwards because the fix would ship through the updater that broke.
         run: dotnet tool install -g vpk --version 1.2.0
 
-      - name: Publish (framework-dependent)
+      - name: Publish (framework-dependent win-x64)
         run: >
           dotnet publish .\Clipthrough\Clipthrough.csproj
           --configuration Release
+          -r win-x64
+          --self-contained false
           -p:Version=${{ steps.ver.outputs.version }}
           --output artifacts\publish
+
+      - name: Stage native symbols
+        shell: pwsh
+        run: >
+          ./.github/scripts/Stage-PublishSymbols.ps1
+          -PublishDirectory artifacts\publish
+          -SymbolsDirectory artifacts\symbols
 
       - name: Package zip
         shell: pwsh
@@ -68,6 +77,8 @@ jobs:
           $zip = "artifacts\Clipthrough-${{ steps.ver.outputs.version }}-win-x64.zip"
           Compress-Archive -Path artifacts\publish\* -DestinationPath $zip
           echo "ZIP_PATH=$zip" >> $env:GITHUB_ENV
+          $symbolsZip = "artifacts\Clipthrough-${{ steps.ver.outputs.version }}-win-x64-symbols.zip"
+          Compress-Archive -Path artifacts\symbols\* -DestinationPath $symbolsZip
 
       - name: Build Velopack package
         shell: pwsh
@@ -101,6 +112,7 @@ jobs:
           $releaseDir = "artifacts\release"
           New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
           Copy-Item "artifacts\Clipthrough-${{ steps.ver.outputs.version }}-win-x64.zip" $releaseDir
+          Copy-Item "artifacts\Clipthrough-${{ steps.ver.outputs.version }}-win-x64-symbols.zip" $releaseDir
           Get-ChildItem "artifacts\velopack" -File | Copy-Item -Destination $releaseDir
 
           Get-ChildItem $releaseDir -File |
