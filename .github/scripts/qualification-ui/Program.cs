@@ -318,7 +318,10 @@ internal static class Program
             Screenshot("seed-" + suffix);
             Dump(App(), "seed-" + suffix);
         }
-        Native.Chord(0x11, 0xBC); // Ctrl+, opens the real Settings window.
+        var settingsButton = Named(App(), "Settings");
+        if (!settingsButton.TryGetCurrentPattern(InvokePattern.Pattern, out var openSettings))
+            throw new Unavailable("The actual Settings button is not invokable.");
+        ((InvokePattern)openSettings).Invoke();
         AutomationElement? settings = null;
         Wait(() =>
         {

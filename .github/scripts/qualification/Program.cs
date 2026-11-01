@@ -7,12 +7,13 @@ using Velopack.Sources;
 
 if (args.Length is < 1 or > 2)
 {
-    Console.Error.WriteLine("Usage: FeedApplyHarness <feed-directory> [data-directory]");
+    Console.Error.WriteLine("Usage: FeedApplyHarness <feed-directory> [data-directory|--stage-only]");
     return 2;
 }
 
 var feedDirectory = Path.GetFullPath(args[0]);
-var dataDirectory = args.Length == 2 ? Path.GetFullPath(args[1]) : null;
+var stageOnly = args.Length == 2 && args[1] == "--stage-only";
+var dataDirectory = args.Length == 2 && !stageOnly ? Path.GetFullPath(args[1]) : null;
 if (!File.Exists(Path.Combine(feedDirectory, "releases.win.json")))
 {
     throw new FileNotFoundException("The Velopack stable feed manifest is missing.", Path.Combine(feedDirectory, "releases.win.json"));
@@ -38,6 +39,14 @@ Console.WriteLine($"Feed check selected {update.TargetFullRelease?.Version}.");
 await manager.DownloadUpdatesAsync(update, progress => Console.WriteLine($"Feed download: {progress}%"));
 var pending = manager.UpdatePendingRestart
     ?? throw new InvalidOperationException("Velopack did not stage the downloaded candidate.");
+if (stageOnly)
+{
+    Console.WriteLine($"Staged {pending.Version} through the installed client's download/bootstrap path; not applying.");
+    cancellation.Cancel();
+    listener.Stop();
+    await server;
+    return 0;
+}
 var restartArguments = dataDirectory is null ? Array.Empty<string>() : new[] { "--data-dir", dataDirectory };
 Console.WriteLine(dataDirectory is null
     ? $"Applying downloaded {pending.Version} and restarting through the portable marker."

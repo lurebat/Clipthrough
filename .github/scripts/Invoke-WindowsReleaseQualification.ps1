@@ -366,9 +366,23 @@ function Invoke-FailedApplyRollback {
     $oldManifestHash = (Get-FileHash -Algorithm SHA256 $oldManifestPath).Hash.ToLowerInvariant()
     $oldPayloadHash = (Get-FileHash -Algorithm SHA256 $oldPayloadPath).Hash.ToLowerInvariant()
     $candidatePackageHash = (Get-FileHash -Algorithm SHA256 $packagePath).Hash.ToLowerInvariant()
+    $bootstrapDirectory = Join-Path $rollbackRoot 'current'
+    Copy-Item -Path (Join-Path $harness '*') -Destination $bootstrapDirectory -Force
+    Invoke-CheckedProcess -FilePath (Join-Path $bootstrapDirectory 'FeedApplyHarness.exe') `
+        -ArgumentList @($feed, '--stage-only') `
+        -WorkingDirectory $bootstrapDirectory `
+        -StdoutPath (Join-Path $evidenceDirectory 'rollback-bootstrap.stdout.log') `
+        -StderrPath (Join-Path $evidenceDirectory 'rollback-bootstrap.stderr.log') | Out-Null
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $candidateArchive = [System.IO.Compression.ZipFile]::OpenRead($packagePath)
     try {
+        $updaterEntry = $candidateArchive.GetEntry('lib/app/Squirrel.exe')
+        if ($null -eq $updaterEntry) { throw 'The target package has no updater bootstrap payload.' }
+        $expectedUpdaterHash = Get-ArchiveEntryHash $updaterEntry
+        $actualUpdaterHash = (Get-FileHash -Algorithm SHA256 (Join-Path $rollbackRoot 'Update.exe')).Hash.ToLowerInvariant()
+        if ($actualUpdaterHash -ne $expectedUpdaterHash) {
+            throw 'The installed old client did not bootstrap the target package updater before apply.'
+        }
         $candidatePayloadEntry = $candidateArchive.GetEntry('lib/app/Clipthrough.dll')
         if ($null -eq $candidatePayloadEntry) {
             throw 'The generated candidate package has no lib/app/Clipthrough.dll payload to exercise.'
@@ -380,6 +394,7 @@ function Invoke-FailedApplyRollback {
     }
     $rollbackEvidence = [ordered]@{
         fixture = 'fresh extracted v0.17.1 portable package'
+        bootstrappedUpdaterSha256 = $actualUpdaterHash
         package = $packagePath
         packageSha256 = $candidatePackageHash
         candidatePayload = 'lib/app/Clipthrough.dll'
