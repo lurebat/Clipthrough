@@ -12,6 +12,10 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') {
+    throw 'Installer and legacy app callbacks are permitted only on an isolated GitHub-hosted Windows runner.'
+}
+
 $publish = (Resolve-Path $PublishDirectory).Path
 $feed = (Resolve-Path $FeedDirectory).Path
 $harness = (Resolve-Path $HarnessDirectory).Path
@@ -34,6 +38,8 @@ $installRoot = Join-Path $workspace 'installed'
 $chosenDataRoot = Join-Path $workspace 'chosen-data'
 $portableRoot = Join-Path $workspace 'portable'
 $portableDataRoot = Join-Path $portableRoot 'ClipthroughData'
+$rollbackRoot = Join-Path $workspace 'failed-apply-portable'
+$rollbackDataRoot = Join-Path $rollbackRoot 'ClipthroughData'
 $minimumRuntime = [version]'10.0.14'
 
 $script:gates = [System.Collections.Generic.List[object]]::new()
@@ -49,6 +55,8 @@ foreach ($gate in @(
         @{ Name = 'runtime_floor'; Required = $true },
         @{ Name = 'velopack_prerequisite_below_floor'; Required = $false },
         @{ Name = 'failed_package_rejection_preserves_version'; Required = $true },
+        @{ Name = 'failed_apply_payload_and_manifest_preserved'; Required = $true },
+        @{ Name = 'failed_apply_seeded_database_preserved'; Required = $true },
         @{ Name = 'failed_update_rollback'; Required = $true },
         @{ Name = 'interactive_clipboard_paste_hotkey_smoke'; Required = $false },
         @{ Name = 'normal_ui_storage_and_record_visibility'; Required = $false },
@@ -282,6 +290,190 @@ function Invoke-FeedUpdate {
     return [ordered]@{ manifest = $manifest; dataRootLog = $dataLog; updaterOutput = $stdout }
 }
 
+function Invoke-FailedApplyRollback {
+    $packagePath = Join-Path $feed "Clipthrough-$candidateVersion-full.nupkg"
+    if (-not (Test-Path $packagePath)) {
+        throw "The generated full update package required for the rollback exercise is missing: $packagePath"
+    }
+
+    Expand-Archive -LiteralPath $portablePath -DestinationPath $rollbackRoot -Force
+    if (-not (Test-Path (Join-Path $rollbackRoot '.portable')) -or -not (Test-Path (Join-Path $rollbackRoot 'Update.exe'))) {
+        throw 'The isolated rollback fixture is not a fresh Velopack portable installation.'
+    }
+    New-Item -ItemType File -Force -Path (Join-Path $rollbackRoot 'portable.flag') | Out-Null
+    Invoke-QualificationTest -Mode seed -DataRoot $rollbackDataRoot -Label 'seed-failed-apply'
+    Invoke-QualificationTest -Mode verify -DataRoot $rollbackDataRoot -Label 'verify-before-failed-apply'
+
+    $databasePath = Join-Path $rollbackDataRoot 'clipthrough.db'
+    if (-not (Test-Path $databasePath -PathType Leaf)) {
+        throw "The shipping storage-service fixture did not create its expected database: $databasePath"
+    }
+    $databaseHashBefore = (Get-FileHash -Algorithm SHA256 $databasePath).Hash.ToLowerInvariant()
+    $oldManifestPath = Join-Path $rollbackRoot 'current\sq.version'
+    $oldPayloadPath = Join-Path $rollbackRoot 'current\Clipthrough.dll'
+    if (-not (Test-Path $oldManifestPath -PathType Leaf) -or -not (Test-Path $oldPayloadPath -PathType Leaf)) {
+        throw 'The fresh portable installation lacks its current version manifest or main managed payload.'
+    }
+    $oldManifest = Read-VersionManifest $rollbackRoot
+    $oldManifestHash = (Get-FileHash -Algorithm SHA256 $oldManifestPath).Hash.ToLowerInvariant()
+    $oldPayloadHash = (Get-FileHash -Algorithm SHA256 $oldPayloadPath).Hash.ToLowerInvariant()
+    $candidatePackageHash = (Get-FileHash -Algorithm SHA256 $packagePath).Hash.ToLowerInvariant()
+    $rollbackEvidence = [ordered]@{
+        fixture = 'fresh extracted v0.17.1 portable package'
+        package = $packagePath
+        packageSha256 = $candidatePackageHash
+        oldManifest = $oldManifest
+        oldManifestSha256 = $oldManifestHash
+        oldPayload = 'current\Clipthrough.dll'
+        oldPayloadSha256 = $oldPayloadHash
+        dataRoot = $rollbackDataRoot
+        databaseSha256Before = $databaseHashBefore
+        replacementFailureInjected = $false
+        updateExitCode = $null
+        updaterLog = $null
+        newExtractionLockedFile = $null
+    }
+
+    $versionOutput = Join-Path $evidenceDirectory 'rollback-updater-version.log'
+    $versionError = Join-Path $evidenceDirectory 'rollback-updater-version.stderr.log'
+    $versionExit = Invoke-CheckedProcess -FilePath (Join-Path $rollbackRoot 'Update.exe') `
+        -ArgumentList @('--version') `
+        -StdoutPath $versionOutput `
+        -StderrPath $versionError `
+        -WorkingDirectory $rollbackRoot `
+        -TimeoutSeconds 30 `
+        -AllowAnyExitCode
+    $rollbackEvidence.updaterVersionOutput = (Get-Content -Raw $versionOutput) + (Get-Content -Raw $versionError)
+    $rollbackEvidence.updaterVersionExitCode = $versionExit
+
+    $tempDirectory = Join-Path $rollbackRoot 'packages\VelopackTemp'
+    New-Item -ItemType Directory -Force -Path $tempDirectory | Out-Null
+    $updaterLog = Join-Path $evidenceDirectory 'failed-replacement-apply.log'
+    $updaterStdout = Join-Path $evidenceDirectory 'failed-replacement-apply.stdout.log'
+    $updaterStderr = Join-Path $evidenceDirectory 'failed-replacement-apply.stderr.log'
+    $rollbackEvidence.updaterLog = $updaterLog
+    $updater = Start-Process -FilePath (Join-Path $rollbackRoot 'Update.exe') `
+        -ArgumentList @('--verbose', '--log', $updaterLog, 'apply', '--silent', '--norestart', '--package', $packagePath) `
+        -WorkingDirectory $rollbackRoot `
+        -PassThru `
+        -RedirectStandardOutput $updaterStdout `
+        -RedirectStandardError $updaterStderr
+
+    $lockedStream = $null
+    $lockedFile = $null
+    $timedOut = $false
+    $deadline = [DateTime]::UtcNow.AddMinutes(3)
+    try {
+        while ([DateTime]::UtcNow -lt $deadline) {
+            $updater.Refresh()
+            if ($updater.HasExited) { break }
+
+            if ($null -eq $lockedStream) {
+                foreach ($directory in Get-ChildItem -LiteralPath $tempDirectory -Directory -ErrorAction SilentlyContinue) {
+                    $candidatePayload = Join-Path $directory.FullName 'Clipthrough.dll'
+                    if (-not (Test-Path $candidatePayload -PathType Leaf)) { continue }
+                    try {
+                        $stream = [System.IO.File]::Open(
+                            $candidatePayload,
+                            [System.IO.FileMode]::Open,
+                            [System.IO.FileAccess]::Read,
+                            [System.IO.FileShare]::ReadWrite)
+                        if ($stream.Length -gt 0) {
+                            $lockedStream = $stream
+                            $lockedFile = $candidatePayload
+                            $rollbackEvidence.replacementFailureInjected = $true
+                            $rollbackEvidence.newExtractionLockedFile = $candidatePayload
+                            Write-Host "Holding $candidatePayload without FILE_SHARE_DELETE until Update.exe exits."
+                            break
+                        }
+                        $stream.Dispose()
+                    }
+                    catch [System.IO.IOException] {
+                    }
+                    catch [System.UnauthorizedAccessException] {
+                    }
+                }
+            }
+
+            Start-Sleep -Milliseconds 100
+        }
+
+        $updater.Refresh()
+        if (-not $updater.HasExited) {
+            $timedOut = $true
+            Stop-Process -Id $updater.Id -Force
+        }
+        else {
+            [void]$updater.WaitForExit()
+            $updater.Refresh()
+            $rollbackEvidence.updateExitCode = $updater.ExitCode
+        }
+    }
+    finally {
+        if ($null -ne $lockedStream) {
+            $lockedStream.Dispose()
+        }
+    }
+
+    if ($timedOut) {
+        $rollbackEvidence.failure = 'The actual updater did not exit within the three-minute bound.'
+        Set-Gate 'failed_apply_payload_and_manifest_preserved' 'failed' $rollbackEvidence.failure
+        Set-Gate 'failed_update_rollback' 'failed' $rollbackEvidence.failure
+    }
+
+    $logText = if (Test-Path $updaterLog) { Get-Content -Raw -Path $updaterLog } else { '' }
+    $reachedReplacement = $logText.Contains('Replacing current dir', [StringComparison]::OrdinalIgnoreCase)
+    $failedReplacement = $logText.Contains('Failed to replace current dir', [StringComparison]::OrdinalIgnoreCase)
+    $currentManifestPath = Join-Path $rollbackRoot 'current\sq.version'
+    $currentPayloadPath = Join-Path $rollbackRoot 'current\Clipthrough.dll'
+    $manifestPreserved = Test-Path $currentManifestPath -PathType Leaf `
+        -and (Read-VersionManifest $rollbackRoot) -eq $oldManifest
+    $payloadPreserved = Test-Path $currentPayloadPath -PathType Leaf `
+        -and (Get-FileHash -Algorithm SHA256 $currentPayloadPath).Hash.ToLowerInvariant() -eq $oldPayloadHash
+    $rollbackEvidence.applyLogReachedReplacement = $reachedReplacement
+    $rollbackEvidence.applyLogReportedReplacementFailure = $failedReplacement
+    $rollbackEvidence.oldManifestRestored = $manifestPreserved
+    $rollbackEvidence.oldPayloadByteMatch = $payloadPreserved
+
+    if ($rollbackEvidence.replacementFailureInjected -and $reachedReplacement -and $failedReplacement -and $manifestPreserved -and $payloadPreserved -and $rollbackEvidence.updateExitCode -ne 0) {
+        Set-Gate 'failed_apply_payload_and_manifest_preserved' 'passed' "Update.exe hit its current-directory replacement error and restored the old manifest $oldManifest plus current\\Clipthrough.dll SHA-256 $oldPayloadHash."
+        Set-Gate 'failed_update_rollback' 'passed' "A held-open extracted candidate payload caused the real Update.exe apply replacement rename to fail; its old version rollback completed with exit $($rollbackEvidence.updateExitCode)."
+    }
+    else {
+        $detail = "replacement lock injected=$($rollbackEvidence.replacementFailureInjected); log reached replacement=$reachedReplacement; log reported failed replacement=$failedReplacement; old manifest restored=$manifestPreserved; old payload byte-match=$payloadPreserved; updater exit=$($rollbackEvidence.updateExitCode)."
+        Set-Gate 'failed_apply_payload_and_manifest_preserved' 'failed' $detail
+        Set-Gate 'failed_update_rollback' 'failed' "The real apply-replacement failure did not restore the old manifest and payload. $detail"
+    }
+
+    $databaseHashAfter = if (Test-Path $databasePath -PathType Leaf) {
+        (Get-FileHash -Algorithm SHA256 $databasePath).Hash.ToLowerInvariant()
+    } else {
+        $null
+    }
+    $rollbackEvidence.databaseSha256After = $databaseHashAfter
+    $databasePreserved = $null -ne $databaseHashAfter -and $databaseHashAfter -eq $databaseHashBefore
+    try {
+        Invoke-QualificationTest -Mode verify -DataRoot $rollbackDataRoot -Label 'verify-after-failed-apply'
+        $recordsReadable = $true
+    }
+    catch {
+        $recordsReadable = $false
+        $rollbackEvidence.databaseReadFailure = $_.Exception.ToString()
+    }
+    $rollbackEvidence.databaseRecordsReadableAfterApply = $recordsReadable
+    if ($databasePreserved -and $recordsReadable) {
+        Set-Gate 'failed_apply_seeded_database_preserved' 'passed' "The exact isolated library SHA-256 remained $databaseHashBefore and the shipping store read both seeded record IDs after the failed apply."
+    }
+    else {
+        Set-Gate 'failed_apply_seeded_database_preserved' 'failed' "Database file hash preserved=$databasePreserved; shipping store records readable=$recordsReadable; before=$databaseHashBefore; after=$databaseHashAfter."
+    }
+
+    [System.IO.File]::WriteAllText(
+        (Join-Path $evidenceDirectory 'failed-apply-rollback.json'),
+        ($rollbackEvidence | ConvertTo-Json -Depth 8),
+        [System.Text.UTF8Encoding]::new($false))
+}
+
 $requiredGateFailure = $false
 $fatalError = $null
 try {
@@ -323,8 +515,9 @@ try {
 
     $setupStdout = Join-Path $evidenceDirectory 'setup.stdout.log'
     $setupStderr = Join-Path $evidenceDirectory 'setup.stderr.log'
+    $setupLog = Join-Path $evidenceDirectory 'setup-install.log'
     $setupProcess = Start-Process -FilePath $setupPath `
-        -ArgumentList @('--silent', '--installTo', "`"$installRoot`"") `
+        -ArgumentList @('--silent', '--log', "`"$setupLog`"", '--installto', "`"$installRoot`"", '--', '--help') `
         -PassThru `
         -RedirectStandardOutput $setupStdout `
         -RedirectStandardError $setupStderr
@@ -410,7 +603,7 @@ try {
     $afterFailure = Read-VersionManifest $installRoot
     if ($afterFailure -ne $beforeFailure) { throw "Rejected package changed the installed version from $beforeFailure to $afterFailure." }
     Set-Gate 'failed_package_rejection_preserves_version' 'passed' "Update.exe rejected the malformed package with exit $applyExit and kept manifest version $beforeFailure."
-    Set-Gate 'failed_update_rollback' 'blocked' "Malformed package rejection left $beforeFailure installed (Update.exe exit $applyExit), proving pre-apply preservation only. Velopack post-replacement startup rollback is not exercised; no destructive test seam is present."
+    Invoke-FailedApplyRollback
 }
 catch {
     $fatalError = $_.Exception.ToString()
@@ -439,7 +632,7 @@ finally {
             'The shipping storage service validates the actual configured DB path and synthetic records; visible normal-window row presentation is not tested.',
             'A visible window station and accessible input desktop are not proof of a physical monitor, hardware GPU, graphics-driver behavior or IME.',
             'The update feed uses Velopack 1.2.0 SimpleWebSource against a local HTTP fixture because this workflow has read-only GitHub permissions and does not publish a release.',
-            'The failed-package case verifies rejection before replacement, not rollback after a new app version fails during startup.'
+            'The malformed-package case is distinct from the injected apply-replacement failure: it verifies rejection before any swap.'
         )
         gates = @($script:gates)
     }
