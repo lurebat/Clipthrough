@@ -17,6 +17,7 @@ public sealed class HostedUpgradeQualificationTests
     private const string RootVariable = "CLIPTHROUGH_QUALIFICATION_DATA_ROOT";
     private const string ModeVariable = "CLIPTHROUGH_QUALIFICATION_MODE";
     private const string SourceVariable = "CLIPTHROUGH_QUALIFICATION_SOURCE";
+    private const string DatabasePathVariable = "CLIPTHROUGH_QUALIFICATION_DATABASE_PATH";
 
     [Fact]
     public async Task SeedOrVerifySyntheticLibraryThroughShippingStorageServices()
@@ -24,6 +25,7 @@ public sealed class HostedUpgradeQualificationTests
         var root = Environment.GetEnvironmentVariable(RootVariable);
         var mode = Environment.GetEnvironmentVariable(ModeVariable);
         var sourceValue = Environment.GetEnvironmentVariable(SourceVariable);
+        var configuredDatabasePath = Environment.GetEnvironmentVariable(DatabasePathVariable);
         var sourceIsValid = Enum.TryParse<AppDataRootSource>(sourceValue, out _);
         Assert.SkipUnless(
             !string.IsNullOrWhiteSpace(root)
@@ -36,7 +38,9 @@ public sealed class HostedUpgradeQualificationTests
         var dataRoot = AppDataRoot.Chosen(root!, source);
         using var services = new ServiceCollection().BuildServiceProvider();
         var storage = new StorageOptionsService(new FakeDataProtectionService(), dataRoot, services);
-        var expectedDatabasePath = Path.GetFullPath(Path.Combine(root!, AppDataRoot.DatabaseFileName));
+        var expectedDatabasePath = string.IsNullOrWhiteSpace(configuredDatabasePath)
+            ? Path.GetFullPath(Path.Combine(root!, AppDataRoot.DatabaseFileName))
+            : Path.GetFullPath(configuredDatabasePath, root!);
         Assert.Equal(expectedDatabasePath, storage.Current.DatabasePath);
         var factory = new SqliteConnectionFactory(storage);
         var sensitivity = new SensitivityService(factory);

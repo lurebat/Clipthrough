@@ -322,6 +322,8 @@ internal static class Program
         AutomationElement? settings = null;
         Run("settings_virtual_key_shortcut", () =>
         {
+            Require(FindSettingsWindow() == null, "Settings is already open before the key-event control.");
+            Evidence["settingsAbsentBeforeChord"] = true;
             Named(App(), "Search clips").SetFocus();
             Native.Chord(0x11, 0xBC);
             try
@@ -331,6 +333,7 @@ internal static class Program
                     settings = FindSettingsWindow();
                     return settings != null;
                 }, "Real Ctrl+VK_OEM_COMMA while search is focused opens Settings", 8);
+                Evidence["settingsPresentAfterChord"] = true;
             }
             finally
             {
@@ -341,10 +344,19 @@ internal static class Program
         });
         if (settings == null)
         {
-            var settingsButton = Named(App(), "Settings");
-            if (!settingsButton.TryGetCurrentPattern(InvokePattern.Pattern, out var openSettings))
-                throw new Unavailable("The actual Settings button is not invokable.");
-            ((InvokePattern)openSettings).Invoke();
+            var settingsButton = App().FindFirst(TreeScope.Descendants,
+                new AndCondition(new PropertyCondition(AutomationElement.NameProperty, "Settings"),
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button)))
+                ?? throw new Unavailable("The actual Settings button is absent.");
+            if (settingsButton.TryGetCurrentPattern(InvokePattern.Pattern, out var openSettings))
+                ((InvokePattern)openSettings).Invoke();
+            else
+            {
+                var bounds = settingsButton.Current.BoundingRectangle;
+                if (bounds.IsEmpty || settingsButton.Current.IsOffscreen)
+                    throw new Unavailable("The actual Settings button is not visible.");
+                Native.Click((int)(bounds.Left + bounds.Width / 2), (int)(bounds.Top + bounds.Height / 2));
+            }
         }
         Wait(() =>
         {
@@ -369,17 +381,21 @@ internal static class Program
         Evidence["storage"] = new { uiDatabasePath = expected, fileLength = new FileInfo(expected).Length, syntheticRows = new[] { Seed + "alpha", Seed + "beta" } };
         Screenshot("settings-database");
         Dump(settings!, "settings-database");
-        var cancel = Named(settings!, "Cancel");
+        var cancel = settings!.FindFirst(TreeScope.Descendants,
+            new AndCondition(new PropertyCondition(AutomationElement.NameProperty, "Cancel"),
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button)))
+            ?? throw new Unavailable("Settings Cancel button is absent.");
         if (!cancel.TryGetCurrentPattern(InvokePattern.Pattern, out var invoke)) throw new Unavailable("Settings Cancel is not invokable.");
+        Require(FindSettingsWindow() != null, "Settings must be present before cancellation.");
+        Evidence["settingsPresentBeforeCancel"] = true;
         ((InvokePattern)invoke).Invoke(); // Do not save or change product settings.
-        Wait(() => AutomationElement.RootElement.FindFirst(TreeScope.Children,
-            new AndCondition(new PropertyCondition(AutomationElement.ProcessIdProperty, candidate.Id),
-                new PropertyCondition(AutomationElement.NameProperty, "Settings"))) == null, "Settings cancellation", 8);
+        Wait(() => FindSettingsWindow() == null, "Settings cancellation", 8);
+        Evidence["settingsAbsentAfterCancel"] = true;
     }
 
     private static AutomationElement? FindSettingsWindow()
-        => AutomationElement.RootElement.FindFirst(TreeScope.Children,
-            new AndCondition(new PropertyCondition(AutomationElement.ProcessIdProperty, candidate.Id),
+        => App().FindFirst(TreeScope.Descendants,
+            new AndCondition(new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window),
                 new PropertyCondition(AutomationElement.NameProperty, "Settings")));
 
     private static void CheckHotkeys()

@@ -89,12 +89,13 @@ public sealed class PasteTimingTests
 
         await PasteTiming.BeforePasteAsync(system, PasteTiming.HotkeyBudget);
 
+        var postWaitGap = Stopwatch.GetElapsedTime(system.WaitCompletedAt);
         var elapsed = Stopwatch.GetElapsedTime(started);
         Assert.Equal(PasteTiming.HotkeyBudget, system.Timeout);
         Assert.True(elapsed >= PasteTiming.HotkeyBudget, $"pasted before the old sleep ended: {elapsed.TotalMilliseconds} ms");
-        // Without the clip the margin would come on top of the whole budget.
-        Assert.True(elapsed < PasteTiming.HotkeyBudget + PasteTiming.SettleAfterForeground,
-            $"took longer than the sleep it replaced: {elapsed.TotalMilliseconds} ms");
+        // Measure only the extra wait, not scheduler overshoot while spending the budget.
+        Assert.True(postWaitGap < PasteTiming.SettleAfterForeground / 2,
+            $"added a settle margin after the budget was spent: {postWaitGap.TotalMilliseconds} ms");
     }
 
     [Fact]
@@ -114,16 +115,19 @@ public sealed class PasteTimingTests
     private sealed class ScriptedForeground(TimeSpan? forwardAfter) : ISystemInteractionService
     {
         public TimeSpan Timeout { get; private set; }
+        public long WaitCompletedAt { get; private set; }
 
         public async Task<bool> WaitForPasteTargetAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
         {
             Timeout = timeout;
             var started = Stopwatch.GetTimestamp();
-            return await PasteTiming.WaitUntilAsync(
+            var ready = await PasteTiming.WaitUntilAsync(
                 () => forwardAfter is { } after && Stopwatch.GetElapsedTime(started) >= after,
                 timeout,
                 PasteTiming.PollInterval,
                 cancellationToken);
+            WaitCompletedAt = Stopwatch.GetTimestamp();
+            return ready;
         }
 
         public Task CopyTextAsync(string text) => throw new NotSupportedException();
