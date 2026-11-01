@@ -206,7 +206,15 @@ internal static class Program
                 found = windows.FirstOrDefault(window =>
                 {
                     var handle = (nint)window.Current.NativeWindowHandle;
-                    if (handle == 0 || Native.GetForegroundWindow() != handle || !Native.Presented(handle)) return false;
+                    if (handle == 0 || !Native.Presented(handle)) return false;
+                    var welcome = window.FindFirst(TreeScope.Descendants,
+                        new PropertyCondition(AutomationElement.NameProperty, "Create library"));
+                    if (welcome != null && !welcome.Current.IsOffscreen)
+                    {
+                        Native.SetForegroundWindow(handle);
+                        return Native.GetForegroundWindow() == handle;
+                    }
+                    if (Native.GetForegroundWindow() != handle) return false;
                     // Identify the actual main workspace/first-run form by its
                     // controls, not a title that includes the release version.
                     return window.FindFirst(TreeScope.Descendants,
