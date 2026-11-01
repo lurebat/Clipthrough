@@ -24,15 +24,9 @@ public sealed class SettingsLegacyMirrorFirstRunTests : IDisposable
 {
     private const string MirrorKey = "settings:app:v1";
 
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "Clipthrough.Tests", "mirror-" + Guid.NewGuid().ToString("N"));
+    private readonly string _root = TestTempDirectories.CreateDirectory();
 
-    public SettingsLegacyMirrorFirstRunTests() => Directory.CreateDirectory(_root);
-
-    public void Dispose()
-    {
-        SqliteConnection.ClearAllPools();
-        try { Directory.Delete(_root, recursive: true); } catch { /* best effort */ }
-    }
+    public void Dispose() => TestTempDirectories.TryDelete(_root);
 
     [Fact]
     public async Task SavingBeforeTheLibraryFolderExists_LogsNothingAndCreatesNothing()

@@ -25,22 +25,11 @@ public sealed class SqliteErrorsTests : IDisposable
 
     public SqliteErrorsTests()
     {
-        _directory = Path.Combine(Path.GetTempPath(), "Clipthrough.Tests", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_directory);
+        _directory = TestTempDirectories.CreateDirectory();
         _databasePath = Path.Combine(_directory, "encrypted.db");
     }
 
-    public void Dispose()
-    {
-        SqliteConnection.ClearAllPools();
-        try
-        {
-            Directory.Delete(_directory, recursive: true);
-        }
-        catch (IOException)
-        {
-        }
-    }
+    public void Dispose() => TestTempDirectories.TryDelete(_directory);
 
     private static string ConnectionString(string path, string? password, SqliteOpenMode mode)
     {

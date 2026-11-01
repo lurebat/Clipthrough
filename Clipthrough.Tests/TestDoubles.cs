@@ -677,8 +677,7 @@ internal sealed class TemporaryDatabaseScope : IDisposable
 
     public TemporaryDatabaseScope()
     {
-        _directoryPath = Path.Combine(Path.GetTempPath(), "Clipthrough.Tests", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_directoryPath);
+        _directoryPath = TestTempDirectories.CreateDirectory();
         DatabasePath = Path.Combine(_directoryPath, "clipthrough.db");
 
         StorageOptionsService = new TestStorageOptionsService(DatabasePath);
@@ -693,6 +692,8 @@ internal sealed class TemporaryDatabaseScope : IDisposable
     }
 
     public string DatabasePath { get; }
+
+    public string DirectoryPath => _directoryPath;
 
     public TestStorageOptionsService StorageOptionsService { get; }
 
@@ -712,22 +713,7 @@ internal sealed class TemporaryDatabaseScope : IDisposable
 
     public ClipStoreService ClipStoreService { get; }
 
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_directoryPath))
-            {
-                Directory.Delete(_directoryPath, recursive: true);
-            }
-        }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
-    }
+    public void Dispose() => TestTempDirectories.TryDelete(_directoryPath);
 }
 
 internal sealed class TestAiTransformService : IAiTransformService
