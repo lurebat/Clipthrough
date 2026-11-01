@@ -33,6 +33,21 @@ namespace Clipthrough.ViewModels;
 public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
     private const int PageSize = 200;
+
+    /// <summary>
+    /// How long after the last keystroke or filter change the list re-queries.
+    /// Measured at 60k clips, the query itself is 135-750 ms, so the throttle
+    /// was the smaller part of the wait; 150 ms still coalesces ordinary typing
+    /// into one query, while 80 ms re-queried three to seven times per word and
+    /// made the list jump while typing.
+    /// </summary>
+    internal static readonly TimeSpan SearchThrottle = TimeSpan.FromMilliseconds(150);
+
+    /// <summary>
+    /// How long work must have been running before the busy bar appears, so a
+    /// refresh that finishes sooner never blinks it on.
+    /// </summary>
+    internal static readonly TimeSpan BusyIndicatorDelay = TimeSpan.FromMilliseconds(200);
     private static readonly IBrush s_defaultDetailBorderBrush = new SolidColorBrush(Color.Parse("#243247"));
     private static readonly IBrush s_defaultDetailAccentBrush = new SolidColorBrush(Color.Parse("#64748B"));
     private static readonly IBrush s_warningBadgeBackgroundBrush = new SolidColorBrush(Color.Parse("#3A2807"));
@@ -137,6 +152,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // keep the UI thread idle so the popup snaps open quickly on the next show.
     // See ApplyCapturedClipOptimistically / ApplyUpdatedClipOptimistically / PerformRefreshAsync.
     private bool _isMainWindowVisible;
+    // True while the window is cloaked in standby: still "visible" above, so the
+    // list is maintained, but not in front of the user. See EnterStandbyAsync.
+    private bool _isInStandby;
     // Set true whenever a clip change (capture/update/OCR/maintenance) is observed
     // while the window is hidden, or when a refresh result was discarded because
     // the window became hidden mid-apply. On the next show we trigger one refresh.
@@ -397,7 +415,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         x => x.UseSemanticClipSearch)
                     .Select(static _ => Unit.Default))
                 .Skip(1)
-                .Throttle(TimeSpan.FromMilliseconds(300), RxSchedulers.MainThreadScheduler)
+                .Throttle(SearchThrottle, RxSchedulers.MainThreadScheduler)
                 // Straight into the refresh queue, not through RefreshCommand: a
                 // ReactiveCommand cannot execute while it is already executing, so
                 // a query change during a running refresh was dropped rather than
@@ -492,6 +510,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .ObserveOn(RxSchedulers.MainThreadScheduler)
                 .Subscribe(busy => IsCapturing = busy,
                     ex => Trace.TraceError($"Capture-busy subscription failed: {ex}")));
+
+        // The busy bar follows IsBusyOrCapturing, but only once it has held for
+        // BusyIndicatorDelay: most refreshes finish well inside that, and a bar
+        // that blinks on for each of them reads as flicker, not progress.
+        _subscriptions.Add(
+            this.WhenAnyValue(x => x.IsBusyOrCapturing)
+                .Select(busy => busy
+                    ? Observable.Timer(BusyIndicatorDelay, RxSchedulers.MainThreadScheduler).Select(static _ => true)
+                    : Observable.Return(false))
+                .Switch()
+                .DistinctUntilChanged()
+                .Subscribe(show => ShowBusyIndicator = show,
+                    ex => Trace.TraceError($"Busy-indicator subscription failed: {ex}")));
 
         _subscriptions.Add(
             Observable.Interval(TimeSpan.FromSeconds(10), RxSchedulers.MainThreadScheduler)
@@ -1037,6 +1068,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public bool IsBusyOrCapturing => IsBusy || IsCapturing;
+
+    /// <summary>Whether the busy bar is shown: busy for at least <see cref="BusyIndicatorDelay"/>.</summary>
+    public bool ShowBusyIndicator
+    {
+        get => _showBusyIndicator;
+        private set => this.RaiseAndSetIfChanged(ref _showBusyIndicator, value);
+    }
+
+    private bool _showBusyIndicator;
 
     public string StatusText
     {
@@ -2162,6 +2202,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
 
     public string SettingsThemeModeLabel => AppText.SettingsThemeModeLabel;
+    public string SettingsMotionLabel => AppText.SettingsMotionLabel;
+    public string SettingsMotionHint => AppText.SettingsMotionHint;
 
     public string SettingsRegexBacktrackingLabel => AppText.SettingsRegexBacktrackingLabel;
 
@@ -2686,7 +2728,47 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// time the list was open - hiding the window deliberately keeps
     /// <see cref="SelectedClip"/> intact, so callers cannot read it directly.
     /// </summary>
-    public ClipEntry? HotkeyTargetClip => _isMainWindowVisible ? SelectedClip?.Clip : null;
+    public ClipEntry? HotkeyTargetClip => _isMainWindowVisible && !_isInStandby ? SelectedClip?.Clip : null;
+
+    /// <summary>
+    /// Whether the popup is dismissed into standby: cloaked rather than hidden,
+    /// so it is out of the user's sight while its list is still kept current.
+    /// </summary>
+    public bool IsInStandby => _isInStandby;
+
+    /// <summary>
+    /// Dismisses the popup into standby (cloak-as-hide). Unlike
+    /// <see cref="SetMainWindowVisible"/>(false), the list stays live - captures
+    /// keep landing in it - because a cloaked window keeps rendering, and the
+    /// whole point is that the next summon shows a frame that is already
+    /// correct. What a fresh popup would have reset on show is reset here
+    /// instead, before the window disappears: the search is cleared and the
+    /// newest clip selected.
+    /// </summary>
+    /// <returns>The refresh the cleared search needs, so the view can hold the
+    /// next summon until it has landed.</returns>
+    public Task EnterStandbyAsync()
+    {
+        _isInStandby = true;
+        _recentSearchNavigationIndex = -1;
+        if (!_isDatabaseReady)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (!string.IsNullOrEmpty(SearchText) || _isClipListStale)
+        {
+            _selectNewestOnNextRefresh = true;
+            SearchText = string.Empty;
+            return RefreshAsync();
+        }
+
+        SelectedClip = GetDefaultAutoSelectedClip();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>The popup is back in front of the user.</summary>
+    public void LeaveStandby() => _isInStandby = false;
 
     /// <summary>
     /// Called by the application shell whenever the main window's visibility
@@ -2696,6 +2778,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     public void SetMainWindowVisible(bool isVisible)
     {
+        // Shown or hidden for real, the window is no longer in standby.
+        _isInStandby = false;
         if (_isMainWindowVisible == isVisible)
         {
             return;
@@ -4235,7 +4319,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             entries.Add((vm.Id, vm.Clip));
             DetachClip(vm);
-            Clips.Remove(vm);
+            IsListChangeAnimatable = clipVms.Length == 1;
+            try
+            {
+                Clips.Remove(vm);
+            }
+            finally
+            {
+                IsListChangeAnimatable = false;
+            }
             // The row leaves the list but the query still returns it until the
             // delete commits, so it keeps occupying a slot for paging.
             _hiddenPendingDeletes.Add(vm.Id);
@@ -4311,6 +4403,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         cts.Cancel();
+        _animateSingleRestore = clipIds.Length == 1;
         await RefreshAsync();
         StatusText = clipIds.Length == 1 ? "Clip restored" : $"{clipIds.Length} clips restored";
     }
@@ -4602,7 +4695,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 _semanticOnlyIds.Add(id);
             }
 
-            var stats = ApplyRefreshResultIncremental(items, checkedIds);
+            var animateRestore = _animateSingleRestore && IsSingleInsertion(Clips.Select(static c => c.Id).ToList(), items.Select(static c => c.Id).ToList());
+            _animateSingleRestore = false;
+            IsListChangeAnimatable = animateRestore;
+            ApplyDiffStats stats;
+            try
+            {
+                stats = ApplyRefreshResultIncremental(items, checkedIds);
+            }
+            finally
+            {
+                IsListChangeAnimatable = false;
+            }
             if (sw is not null)
             {
                 Trace.TraceInformation(
@@ -4634,6 +4738,38 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     private readonly record struct ApplyDiffStats(int Added, int Removed, int Replaced, int Moved, bool FullRebuild);
+
+    /// <summary>
+    /// Whether <paramref name="next"/> is <paramref name="shown"/> with exactly
+    /// one row added and nothing else changed or moved - the only refresh worth
+    /// animating.
+    /// </summary>
+    internal static bool IsSingleInsertion(IReadOnlyList<long> shown, IReadOnlyList<long> next)
+    {
+        if (next.Count != shown.Count + 1)
+        {
+            return false;
+        }
+
+        var skipped = false;
+        for (int i = 0, j = 0; i < next.Count; i++)
+        {
+            if (j < shown.Count && next[i] == shown[j])
+            {
+                j++;
+                continue;
+            }
+
+            if (skipped)
+            {
+                return false;
+            }
+
+            skipped = true;
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// Reconciles <see cref="Clips"/> with <paramref name="newItems"/> by doing
@@ -4861,8 +4997,29 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // assignment in the hidden case: SetMainWindowVisible re-selects the
         // newest clip on show, so paying for the SelectedClip property storm
         // on every capture would be wasted work.
-        UpsertClipItem(clip, targetIndex, select: _isMainWindowVisible);
+        IsListChangeAnimatable = true;
+        try
+        {
+            UpsertClipItem(clip, targetIndex, select: _isMainWindowVisible);
+        }
+        finally
+        {
+            IsListChangeAnimatable = false;
+        }
     }
+
+    /// <summary>
+    /// True only while <see cref="Clips"/> is being changed by one clip arriving
+    /// or leaving - a capture, a single delete, or the undo of one - which the
+    /// view may animate. Searches, page loads and refreshes leave it false, so
+    /// nothing that replaces many rows at once can animate by accident.
+    /// </summary>
+    public bool IsListChangeAnimatable { get; private set; }
+
+    // Set by the undo of a single delete; the refresh that restores the row
+    // consumes it, and animates only if that refresh turns out to be exactly
+    // the one row coming back.
+    private bool _animateSingleRestore;
 
     /// <summary>
     /// Works out where <paramref name="clip"/> belongs in the list as it is
@@ -6207,6 +6364,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             MinimizeToTray = Settings.MinimizeToTray,
             StartWithWindows = Settings.StartWithWindows,
             ThemeMode = Settings.ThemeMode,
+            Motion = Settings.Motion,
             EnableNormalClipLifetime = Settings.EnableNormalClipLifetime,
             NormalClipLifetimeDays = normalClipLifetimeDays,
             EnableSensitiveClipLifetime = Settings.EnableSensitiveClipLifetime,
@@ -6346,6 +6504,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.MinimizeToTray = settings.MinimizeToTray;
         Settings.StartWithWindows = settings.StartWithWindows;
         Settings.ThemeMode = settings.ThemeMode;
+        Settings.Motion = settings.Motion;
         Settings.EnableNormalClipLifetime = settings.EnableNormalClipLifetime;
         Settings.NormalClipLifetimeDays = settings.NormalClipLifetimeDays.ToString(CultureInfo.InvariantCulture);
         Settings.EnableSensitiveClipLifetime = settings.EnableSensitiveClipLifetime;

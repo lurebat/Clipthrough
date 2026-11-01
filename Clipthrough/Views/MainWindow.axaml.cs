@@ -47,14 +47,18 @@ public partial class MainWindow : Window
 
     public MainWindow() : this(null) { }
 
-    public MainWindow(ISystemInteractionService? systemInteractionService, IWindowPlacementStore? placementStore = null)
+    public MainWindow(ISystemInteractionService? systemInteractionService, IWindowPlacementStore? placementStore = null, IMotionService? motionService = null)
     {
         m_systemInteractionService = systemInteractionService;
         InitializeComponent();
+        InitializeMotion(motionService);
         RequestWorkspaceBreakpoint(WorkspaceBreakpoints.Classify(ClientSize));
         InitializePlacement(placementStore);
         Opened += OnOpened;
         Activated += OnActivated;
+        Activated += OnActivatedInStandby;
+        // A summon still waiting must not uncloak a window that has closed.
+        Closed += (_, _) => CancelPendingSummon();
         Closed += OnClosed;
         DataContextChanged += OnDataContextChanged;
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
@@ -1085,8 +1089,8 @@ public partial class MainWindow : Window
 
     private void HidePopupAfterDrag(MainWindowViewModel viewModel)
     {
-        _ = viewModel.ClearSearchFilterAsync(forceRefresh: false);
-        Hide();
+        _ = viewModel;
+        Dismiss();
     }
 
     private void OnPopupDragOver(object? sender, DragEventArgs e)
@@ -1253,12 +1257,14 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Step 3: Hide Clipthrough. Target has already been scheduled to receive focus.
-        _ = viewModel.ClearSearchFilterAsync(forceRefresh: false);
-        Hide();
+        // Step 3: Dismiss Clipthrough. Target has already been scheduled to receive focus.
+        Dismiss();
 
-        // Step 4: Give the OS time to process WM_ACTIVATE / WM_SETFOCUS on the target.
-        await Task.Delay(150);
+        // Step 4: Wait for the target to hold the foreground (PasteTiming).
+        if (m_systemInteractionService is { } systemInteraction)
+        {
+            await PasteTiming.BeforePasteAsync(systemInteraction, PasteTiming.AfterHideBudget);
+        }
 
         // Step 5: Deliver Ctrl+V to the (now foreground) target window.
         m_systemInteractionService?.SimulatePasteKeystroke();
@@ -1720,6 +1726,7 @@ public partial class MainWindow : Window
         Dispatcher.UIThread.Post(() =>
         {
             var window = new HelpWindow();
+            TrackMotion(window);
             window.Show(this);
         });
     }
@@ -1732,6 +1739,7 @@ public partial class MainWindow : Window
             {
                 DataContext = sender as MainWindowViewModel ?? DataContext,
             };
+            TrackMotion(window);
             window.Show(this);
         });
     }
@@ -1810,6 +1818,9 @@ public partial class MainWindow : Window
                     DataContext = m_subscribedViewModel,
                 };
                 m_settingsWindow.Closing += OnSettingsWindowClosing;
+                // A cloaked popup is still 'visible'; an owned window must not open alone.
+                LeaveStandbyNow();
+                TrackMotion(m_settingsWindow);
                 m_settingsWindow.Show(this);
             }
             else
@@ -1852,6 +1863,9 @@ public partial class MainWindow : Window
                     DataContext = m_subscribedViewModel,
                 };
                 m_aiPromptWindow.Closing += OnAiPromptWindowClosing;
+                // A cloaked popup is still 'visible'; an owned window must not open alone.
+                LeaveStandbyNow();
+                TrackMotion(m_aiPromptWindow);
                 m_aiPromptWindow.Show(this);
             }
             else
@@ -1905,6 +1919,9 @@ public partial class MainWindow : Window
                     DataContext = m_subscribedSessionLogs
                 };
                 m_sessionLogsWindow.Closing += OnSessionLogsWindowClosing;
+                // A cloaked popup is still 'visible'; an owned window must not open alone.
+                LeaveStandbyNow();
+                TrackMotion(m_sessionLogsWindow);
                 m_sessionLogsWindow.Show(this);
             }
             else
@@ -2157,9 +2174,12 @@ public partial class MainWindow : Window
 
     private void ShowOwnedWindow(Window window)
     {
-        if (!IsVisible)
+        if (!IsPresentedToUser)
         {
-            Show();
+            if (!LeaveStandbyNow())
+            {
+                Show();
+            }
 
             if (WindowState == WindowState.Minimized)
             {

@@ -61,6 +61,15 @@
                             <ComboBox ItemsSource="{Binding Settings.ThemeModeOptions}"
                                       SelectedItem="{Binding Settings.ThemeMode}" />
                         </StackPanel>
+                        <StackPanel Spacing="6">
+                            <TextBlock Classes="detail-label"
+                                       Text="{Binding SettingsMotionLabel}" />
+                            <ComboBox ItemsSource="{Binding Settings.MotionOptions}"
+                                      SelectedItem="{Binding Settings.Motion}" />
+                            <TextBlock Classes="body-muted"
+                                       TextWrapping="Wrap"
+                                       Text="{Binding SettingsMotionHint}" />
+                        </StackPanel>
                         <CheckBox Content="{Binding SettingsCloseToTrayLabel}"
                                   IsChecked="{Binding Settings.CloseToTray}" />
                         <CheckBox Content="{Binding SettingsMinimizeToTrayLabel}"

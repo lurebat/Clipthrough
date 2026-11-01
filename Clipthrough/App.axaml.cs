@@ -29,19 +29,10 @@ public partial class App : Application
     private ISystemInteractionService? _systemInteractionService;
     private ISettingsService? _settingsService;
     /// <summary>
-    /// Pause between putting a clip on the clipboard and sending Ctrl+V, and
-    /// again before touching the database.
+    /// Pause between sending Ctrl+V and deleting the clip that was pasted, so
+    /// the target has read the clipboard before anything else happens. The wait
+    /// *before* Ctrl+V is <see cref="PasteTiming"/>'s.
     /// </summary>
-    /// <remarks>
-    /// 120 ms is the value these hotkeys have always used. Note the paste
-    /// sequence is implemented three times in this codebase and the delays have
-    /// diverged - <see cref="Views.MainWindow"/> waits 150 ms, and two paths
-    /// lower in this file still use bare literals. They are deliberately NOT
-    /// unified here: which delay is correct is a question about how long a
-    /// foreign window needs to see a clipboard update, and nothing in the test
-    /// suite can answer it. Unifying them on a guess would be a behavioural
-    /// change wearing a refactor's clothes.
-    /// </remarks>
     private const int PasteSettleDelayMs = 120;
 
     private IClipStoreService? _clipStoreService;
@@ -105,7 +96,7 @@ public partial class App : Application
             _updateService = Services.GetRequiredService<IUpdateService>();
             _aiTransformService = Services.GetRequiredService<IAiTransformService>();
 
-            _mainWindow = desktop.MainWindow = new MainWindow(_systemInteractionService, Services.GetRequiredService<IWindowPlacementStore>())
+            _mainWindow = desktop.MainWindow = new MainWindow(_systemInteractionService, Services.GetRequiredService<IWindowPlacementStore>(), Services.GetRequiredService<IMotionService>())
             {
                 DataContext = mainWindowViewModel,
             };
@@ -249,6 +240,7 @@ public partial class App : Application
         services.AddSingleton<IWindowPlacementStore, WindowPlacementStore>();
         services.AddSingleton<ISessionLogService>(_ => SessionLogService.Instance);
         services.AddSingleton<ISystemInteractionService, SystemInteractionService>();
+        services.AddSingleton<IMotionService, MotionService>();
         services.AddSingleton<DatabaseInitializer>();
         services.AddSingleton<IClipExportService, ClipExportService>();
         services.AddSingleton<ISearchHistoryService, SearchHistoryService>();
@@ -409,7 +401,7 @@ public partial class App : Application
         }
 
         e.Cancel = true;
-        HideMainWindowToTray();
+        HideMainWindowToTray(minimized: false);
     }
 
     private void OnMainWindowPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
@@ -426,7 +418,7 @@ public partial class App : Application
 
         if (_mainWindow.WindowState == WindowState.Minimized)
         {
-            HideMainWindowToTray();
+            HideMainWindowToTray(minimized: true);
         }
     }
 
@@ -682,7 +674,7 @@ public partial class App : Application
                 return;
             }
 
-            await Task.Delay(PasteSettleDelayMs);
+            await PasteTiming.BeforePasteAsync(_systemInteractionService, PasteTiming.HotkeyBudget);
             _systemInteractionService.SimulatePasteKeystroke();
             await Task.Delay(PasteSettleDelayMs);
             await _clipStoreService.DeleteAsync(clip.Id);
@@ -706,7 +698,7 @@ public partial class App : Application
 
             await _clipStoreService.MarkPastedAsync(clip.Id);
             await _clipStoreService.SetFavoriteAsync(clip.Id, true);
-            await Task.Delay(PasteSettleDelayMs);
+            await PasteTiming.BeforePasteAsync(_systemInteractionService, PasteTiming.HotkeyBudget);
             _systemInteractionService.SimulatePasteKeystroke();
         }
         catch (Exception ex) { Trace.TraceWarning($"PasteAndFavorite failed: {ex.Message}"); }
@@ -726,7 +718,7 @@ public partial class App : Application
             _clipboardMonitorService.SuppressNext(clip.Content);
             await _systemInteractionService.CopyTextAsync(clip.Content);
             await _clipStoreService.MarkPastedAsync(clip.Id);
-            await Task.Delay(PasteSettleDelayMs);
+            await PasteTiming.BeforePasteAsync(_systemInteractionService, PasteTiming.HotkeyBudget);
             _systemInteractionService.SimulatePasteKeystroke();
         }
         catch (Exception ex) { Trace.TraceWarning($"PasteAsPlainText failed: {ex.Message}"); }
@@ -797,16 +789,20 @@ public partial class App : Application
                     // handler intercepts the keystroke and overwrites the
                     // transformed clipboard content with the original clip.
                     _systemInteractionService.RestoreCapturedForeground();
-                    if (w.DataContext is MainWindowViewModel vm)
+                    if (w is MainWindow popup)
                     {
-                        _ = vm.ClearSearchFilterAsync(forceRefresh: false);
+                        popup.Dismiss();
                     }
-                    w.Hide();
-                    await Task.Delay(150);
+                    else
+                    {
+                        w.Hide();
+                    }
+
+                    await PasteTiming.BeforePasteAsync(_systemInteractionService, PasteTiming.AfterHideBudget);
                 }
                 else
                 {
-                    await Task.Delay(120);
+                    await PasteTiming.BeforePasteAsync(_systemInteractionService, PasteTiming.HotkeyBudget);
                 }
                 _systemInteractionService.SimulatePasteKeystroke();
             }
@@ -864,7 +860,7 @@ public partial class App : Application
         if (_mainWindow is null) return;
         Dispatcher.UIThread.Post(() =>
         {
-            if (!_mainWindow.IsVisible)
+            if (!(_mainWindow is MainWindow popup && popup.LeaveStandbyNow()) && !_mainWindow.IsVisible)
             {
                 _mainWindow.Show();
             }
@@ -927,9 +923,7 @@ public partial class App : Application
                 return;
             }
 
-            // Give the target window a moment to become ready and the clipboard
-            // change to propagate before we synthesize the paste keystroke.
-            await Task.Delay(120);
+            await PasteTiming.BeforePasteAsync(_systemInteractionService, PasteTiming.HotkeyBudget);
             _systemInteractionService.SimulatePasteKeystroke();
         }
         catch (Exception ex)
@@ -940,7 +934,21 @@ public partial class App : Application
 
     private void ToggleMainWindowVisibility(Window window)
     {
-        Dispatcher.UIThread.Post(() =>
+        Dispatcher.UIThread.Post(async () =>
+        {
+            try
+            {
+                await ToggleMainWindowVisibilityCoreAsync(window);
+            }
+            catch (Exception ex)
+            {
+                Trace.TraceError($"Toggling the popup failed: {ex}");
+            }
+        });
+    }
+
+    private async Task ToggleMainWindowVisibilityCoreAsync(Window window)
+    {
         {
             var sw = CommandLineOptions.LogPopupTimings ? Stopwatch.StartNew() : null;
             void Mark(string label)
@@ -951,9 +959,25 @@ public partial class App : Application
                 }
             }
 
-            if (window.IsVisible && window.IsActive)
+            var popup = window as MainWindow;
+            if (popup is { IsSummonPending: true })
+            {
+                // Pressed again before the popup appeared: as if it had, and
+                // this press had hidden it again.
+                popup.CancelPendingSummon();
+                Mark("summon-cancelled");
+                return;
+            }
+            if ((popup?.IsPresentedToUser ?? window.IsVisible) && window.IsActive)
             {
                 _systemInteractionService?.ClearTargetWindowCapture();
+                if (popup is not null)
+                {
+                    popup.Dismiss();
+                    Mark("dismiss-complete");
+                    return;
+                }
+
                 if (window.DataContext is MainWindowViewModel viewModel)
                 {
                     // Flip the visibility flag BEFORE clearing the search /
@@ -974,6 +998,22 @@ public partial class App : Application
 
             PositionWindowNearCaret(window);
             Mark("positioned-near-caret");
+
+            var left = popup is null ? StandbyLeave.NotInStandby : await popup.TryLeaveStandbyAsync();
+            if (left == StandbyLeave.Superseded)
+            {
+                Mark("summon-superseded");
+                return;
+            }
+
+            if (left == StandbyLeave.Left && popup is not null)
+            {
+                Mark("left-standby");
+                RestoreAndActivateWindow(window);
+                popup.FocusClipOnNextActivation();
+                Mark("activated");
+                return;
+            }
 
             if (!window.IsVisible)
             {
@@ -1001,7 +1041,7 @@ public partial class App : Application
                 sw.Stop();
                 Trace.TraceInformation($"[popup-timing] show-total {sw.ElapsedMilliseconds}ms");
             }
-        });
+        }
     }
 
     /// <summary>
@@ -1018,7 +1058,10 @@ public partial class App : Application
         }
     }
 
-    private void HideMainWindowToTray()
+    /// <param name="minimized">The window was minimized rather than closed. A
+    /// minimized window is hidden as before: putting it into standby would mean
+    /// restoring it first, and the restore activates it.</param>
+    private void HideMainWindowToTray(bool minimized)
     {
         if (_mainWindow is null)
         {
@@ -1028,13 +1071,20 @@ public partial class App : Application
         Dispatcher.UIThread.Post(() =>
         {
             _systemInteractionService?.ClearTargetWindowCapture();
-            if (_mainWindow.DataContext is MainWindowViewModel viewModel)
+            if (!minimized && _mainWindow is MainWindow popup)
             {
-                viewModel.SetMainWindowVisible(false);
-                _ = viewModel.ClearSearchFilterAsync(forceRefresh: false);
+                popup.Dismiss();
             }
-            RestoreWindowState(_mainWindow);
-            _mainWindow.Hide();
+            else
+            {
+                if (_mainWindow.DataContext is MainWindowViewModel viewModel)
+                {
+                    viewModel.SetMainWindowVisible(false);
+                    _ = viewModel.ClearSearchFilterAsync(forceRefresh: false);
+                }
+                RestoreWindowState(_mainWindow);
+                _mainWindow.Hide();
+            }
 
             if (_hasShownTrayNotification)
             {
@@ -1057,7 +1107,7 @@ public partial class App : Application
     {
         Dispatcher.UIThread.Post(() =>
         {
-            if (_mainWindow is null || _mainWindow.IsVisible)
+            if (_mainWindow is null || (_mainWindow is MainWindow popup ? popup.IsPresentedToUser : _mainWindow.IsVisible))
             {
                 return;
             }
@@ -1073,12 +1123,30 @@ public partial class App : Application
             return;
         }
 
-        Dispatcher.UIThread.Post(() =>
+        Dispatcher.UIThread.Post(async () =>
         {
             // Capture the current foreground window before Clipthrough steals focus.
             _systemInteractionService?.CaptureTargetWindowForPaste();
 
-            if (!_mainWindow.IsVisible)
+            var left = StandbyLeave.NotInStandby;
+            try
+            {
+                if (_mainWindow is MainWindow popup)
+                {
+                    left = await popup.TryLeaveStandbyAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                Trace.TraceError($"Leaving standby failed: {ex}");
+            }
+
+            if (left == StandbyLeave.Superseded)
+            {
+                return;
+            }
+
+            if (left == StandbyLeave.NotInStandby && !_mainWindow.IsVisible)
             {
                 _mainWindow.Show();
             }

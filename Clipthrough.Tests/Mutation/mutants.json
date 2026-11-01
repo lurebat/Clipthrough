@@ -1947,7 +1947,7 @@
     "id": "hotkey-targets-the-selection-while-hidden",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "Hiding the popup deliberately keeps the selection, so a hotkey that still reads it transforms a clip the user last touched hours ago instead of the one they just copied.",
-    "find": "    public ClipEntry? HotkeyTargetClip => _isMainWindowVisible ? SelectedClip?.Clip : null;",
+    "find": "    public ClipEntry? HotkeyTargetClip => _isMainWindowVisible && !_isInStandby ? SelectedClip?.Clip : null;",
     "replace": "    public ClipEntry? HotkeyTargetClip => SelectedClip?.Clip;",
     "filter": "FullyQualifiedName~HotkeyTargetClipHeadlessTests"
   },
@@ -5384,6 +5384,126 @@
     "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
   },
   {
+    "id": "standby-hides-instead-of-cloaking",
+    "file": "Clipthrough/Views/MainWindow.Presentation.cs",
+    "why": "Dismiss falls back to Hide(), which stops rendering - the popup reopens on the previous search before resetting.",
+    "find": "TryEnterStandby(systemInteraction, viewModel))",
+    "replace": "systemInteraction is null && TryEnterStandby(systemInteraction, viewModel))",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.Dismiss_CloaksTheWindowInsteadOfHidingIt"
+  },
+  {
+    "id": "standby-keeps-the-search",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Dismissing into standby leaves the search in place, so the summon shows the old results first.",
+    "find": "            SearchText = string.Empty;\n            return RefreshAsync();",
+    "replace": "            return RefreshAsync();",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.AfterASearch_TheSummonShowsTheResetList_NotTheSearch"
+  },
+  {
+    "id": "standby-keeps-the-old-selection",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "The selection is not reset to the newest clip when the popup leaves, so it comes back on whatever was selected.",
+    "find": "        SelectedClip = GetDefaultAutoSelectedClip();\n        return Task.CompletedTask;\n    }\n\n    /// <summary>The popup is back in front of the user.</summary>",
+    "replace": "        SelectedClip = SelectedClip ?? GetDefaultAutoSelectedClip();\n        return Task.CompletedTask;\n    }\n\n    /// <summary>The popup is back in front of the user.</summary>",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.Dismiss_SelectsTheNewestClip_BeforeTheCloak"
+  },
+  {
+    "id": "summon-does-not-wait-for-the-reset",
+    "file": "Clipthrough/Views/MainWindow.Presentation.cs",
+    "why": "A summon right after a dismiss uncloaks before the cleared search has re-queried, showing the old results.",
+    "find": "if (!m_standbyReset.IsCompleted)",
+    "replace": "if (m_standbyReset.IsCompleted && !m_standbyReset.IsCompleted)",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.ASummonRightAfterTheDismiss_WaitsForTheResetBeforeUncloaking"
+  },
+  {
+    "id": "standby-keeps-the-taskbar-button",
+    "file": "Clipthrough/Views/MainWindow.Presentation.cs",
+    "why": "The taskbar button stays while the popup is dismissed (user decision: hide it).",
+    "find": "        ShowInTaskbar = false;\n        if (!systemInteraction.TryCloakWindow",
+    "replace": "        ShowInTaskbar = true;\n        if (!systemInteraction.TryCloakWindow",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.WhileInStandby_ThereIsNoTaskbarButton_AndTheSummonBringsItBack"
+  },
+  {
+    "id": "standby-treated-as-hidden",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Standby stops the list being maintained, so a clip copied while dismissed is missing on the summon and pops in after it.",
+    "find": "        _isInStandby = true;\n        _recentSearchNavigationIndex = -1;",
+    "replace": "        _isInStandby = true;\n        _isMainWindowVisible = false;\n        _recentSearchNavigationIndex = -1;",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.ACaptureWhileInStandby_IsInTheListBeforeTheSummon"
+  },
+  {
+    "id": "standby-selection-is-a-hotkey-target",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "A global hotkey acts on the selection of a popup nobody is looking at.",
+    "find": "_isMainWindowVisible && !_isInStandby ? SelectedClip?.Clip : null",
+    "replace": "_isMainWindowVisible && (_isInStandby || !_isInStandby) ? SelectedClip?.Clip : null",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.InStandby_TheSelectionIsNotAHotkeyTarget"
+  },
+  {
+    "id": "owned-windows-stay-behind",
+    "file": "Clipthrough/Views/MainWindow.Presentation.cs",
+    "why": "Settings and the other owned windows stay on screen alone when the popup is dismissed.",
+    "find": "OwnedWindows.Where(static w => w.IsVisible)",
+    "replace": "OwnedWindows.Where(static w => w.IsVisible && !w.IsVisible)",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.OwnedWindows_GoIntoStandbyWithThePopup"
+  },
+  {
+    "id": "owned-window-opens-without-the-popup",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "Opening Settings while the popup is cloaked shows Settings alone: a cloaked popup is still IsVisible.",
+    "find": "                LeaveStandbyNow();\n                TrackMotion(m_settingsWindow);",
+    "replace": "                TrackMotion(m_settingsWindow);",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.OpeningAnOwnedWindowFromStandby_SummonsThePopup"
+  },
+  {
+    "id": "paste-and-hide-sleeps",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "Paste-and-hide goes back to a fixed sleep instead of waiting for the target.",
+    "find": "await PasteTiming.BeforePasteAsync(systemInteraction, PasteTiming.AfterHideBudget);",
+    "replace": "await Task.Delay(systemInteraction is null ? TimeSpan.Zero : PasteTiming.AfterHideBudget);",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.Enter_PastesAfterTheTargetIsForward_NotAfterAFixedSleep"
+  },
+  {
+    "id": "paste-settle-not-clipped",
+    "file": "Clipthrough/Services/System/PasteTiming.cs",
+    "why": "The settle margin is not clipped to the budget left.",
+    "find": "return left < SettleAfterForeground ? left : SettleAfterForeground;",
+    "replace": "return left > TimeSpan.Zero ? SettleAfterForeground : left;",
+    "filter": "FullyQualifiedName~PasteTimingTests.RemainingSettle_NeverRunsPastTheBudget"
+  },
+  {
+    "id": "paste-settle-on-top-of-budget",
+    "file": "Clipthrough/Services/System/PasteTiming.cs",
+    "why": "A target that never comes forward is pasted into a settle margin after the old sleep would have ended.",
+    "find": "var settle = RemainingSettle(Stopwatch.GetElapsedTime(started), budget);",
+    "replace": "var settle = SettleAfterForeground + (RemainingSettle(Stopwatch.GetElapsedTime(started), budget) * 0);",
+    "filter": "FullyQualifiedName~PasteTimingTests.BeforePaste_TargetNeverForward_TakesTheOldSleepAndNoMore"
+  },
+  {
+    "id": "paste-wait-sleeps-first",
+    "file": "Clipthrough/Services/System/PasteTiming.cs",
+    "why": "The wait sleeps before its first look, so a target that is already forward still costs a poll.",
+    "find": "        while (true)\n        {\n            if (isReady())",
+    "replace": "        while (true)\n        {\n            await Task.Delay(pollInterval, cancellationToken).ConfigureAwait(true);\n            if (isReady())",
+    "filter": "FullyQualifiedName~PasteTimingTests.WaitUntil_AlreadyForward_DoesNotWaitAtAll"
+  },
+  {
+    "id": "paste-wait-never-gives-up",
+    "file": "Clipthrough/Services/System/PasteTiming.cs",
+    "why": "A target that never comes forward holds the paste far past the old sleep.",
+    "find": "if (Stopwatch.GetElapsedTime(started) >= timeout)",
+    "replace": "if (Stopwatch.GetElapsedTime(started) >= timeout + timeout + TimeSpan.FromSeconds(10))",
+    "filter": "FullyQualifiedName~PasteTimingTests.WaitUntil_GivesUpAtTheTimeout"
+  },
+  {
+    "id": "paste-forward-still-sleeps",
+    "file": "Clipthrough/Services/System/PasteTiming.cs",
+    "why": "The paste still waits out the old sleep even when the target is forward at once.",
+    "find": "await systemInteraction.WaitForPasteTargetAsync(budget, cancellationToken).ConfigureAwait(true);",
+    "replace": "await systemInteraction.WaitForPasteTargetAsync(budget, cancellationToken).ConfigureAwait(true);\n        await Task.Delay(budget - SettleAfterForeground, cancellationToken).ConfigureAwait(true);",
+    "filter": "FullyQualifiedName~PasteTimingTests.BeforePaste_TargetForwardAtOnce_IsMuchShorterThanTheOldSleep"
+  },
+  {
     "id": "clip-text-with-nul-bound-as-string",
     "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
     "why": "SQLitePCLRaw binds a string longer than 512 UTF-8 bytes as NUL-terminated, so a clip holding U+0000 past that size kept only the text before the NUL. Binding NUL-containing text as its UTF-8 bytes keeps all of it.",
@@ -5398,6 +5518,390 @@
     "find": "                        CAST($content AS TEXT),\n                        $contentType,\n                        $contentFormat,\n                        $sourceApp,",
     "replace": "                        $content,\n                        $contentType,\n                        $contentFormat,\n                        $sourceApp,",
     "filter": "FullyQualifiedName~CaptureAsync_KeepsTextAfterANul"
+  },
+  {
+    "id": "search-throttle-back-to-300",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Results wait out the old 300 ms throttle before the query even starts.",
+    "find": "internal static readonly TimeSpan SearchThrottle = TimeSpan.FromMilliseconds(150);",
+    "replace": "internal static readonly TimeSpan SearchThrottle = TimeSpan.FromMilliseconds(300);",
+    "filter": "FullyQualifiedName~SearchResponsivenessHeadlessTests.ResultsLandAfterTheThrottle_AndBeforeTheOldOne"
+  },
+  {
+    "id": "search-throttle-too-short",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Every keystroke re-queries the library and the list jumps while typing.",
+    "find": "internal static readonly TimeSpan SearchThrottle = TimeSpan.FromMilliseconds(150);",
+    "replace": "internal static readonly TimeSpan SearchThrottle = TimeSpan.FromMilliseconds(10);",
+    "filter": "FullyQualifiedName~SearchResponsivenessHeadlessTests.ResultsLandAfterTheThrottle_AndBeforeTheOldOne"
+  },
+  {
+    "id": "busy-bar-not-delayed",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "The busy bar blinks on for every quick refresh.",
+    "find": "internal static readonly TimeSpan BusyIndicatorDelay = TimeSpan.FromMilliseconds(200);",
+    "replace": "internal static readonly TimeSpan BusyIndicatorDelay = TimeSpan.FromMilliseconds(0);",
+    "filter": "FullyQualifiedName~SearchResponsivenessHeadlessTests.AFastRefresh_NeverShowsTheBusyBar"
+  },
+  {
+    "id": "busy-bar-never-hides",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "The busy bar stays up after the work has finished.",
+    "find": ": Observable.Return(false))\n                .Switch()\n                .DistinctUntilChanged()\n                .Subscribe(show => ShowBusyIndicator = show,",
+    "replace": ": Observable.Never<bool>())\n                .Switch()\n                .DistinctUntilChanged()\n                .Subscribe(show => ShowBusyIndicator = show,",
+    "filter": "FullyQualifiedName~SearchResponsivenessHeadlessTests.SlowWork_ShowsTheBusyBar_AndItGoesWhenTheWorkDoes"
+  },
+  {
+    "id": "busy-bar-bound-to-raw-busy",
+    "file": "Clipthrough/Views/MainWindow.axaml",
+    "why": "The bar on screen follows the undelayed busy flag and blinks on for every refresh.",
+    "find": "IsVisible=\"{Binding ShowBusyIndicator}\"",
+    "replace": "IsVisible=\"{Binding IsBusyOrCapturing}\"",
+    "filter": "FullyQualifiedName~SearchResponsivenessHeadlessTests.AFastRefresh_NeverShowsTheBusyBar"
+  },
+  {
+    "id": "motion-system-ignores-the-os",
+    "file": "Clipthrough/Services/System/MotionService.cs",
+    "why": "System animates even when Windows has Animation effects off (and over Remote Desktop).",
+    "find": "_ => osAnimationsEnabled,",
+    "replace": "_ => osAnimationsEnabled || !osAnimationsEnabled,",
+    "filter": "FullyQualifiedName~MotionServiceTests.Policy"
+  },
+  {
+    "id": "motion-default-is-on",
+    "file": "Clipthrough/Models/AppSettings.cs",
+    "why": "The default stops following Windows (user decision: default System).",
+    "find": "public MotionPreference Motion { get; init; } = MotionPreference.System;",
+    "replace": "public MotionPreference Motion { get; init; } = MotionPreference.On;",
+    "filter": "FullyQualifiedName~MotionServiceTests.TheDefaultIsSystem"
+  },
+  {
+    "id": "motion-unknown-value-kept",
+    "file": "Clipthrough/Models/AppSettings.cs",
+    "why": "A settings file with an unknown Motion value leaves the policy undefined.",
+    "find": "Motion = System.Enum.IsDefined(Motion) ? Motion : MotionPreference.System,",
+    "replace": "Motion = Motion,",
+    "filter": "FullyQualifiedName~MotionServiceTests.AnUnknownStoredValue_NormalizesToSystem"
+  },
+  {
+    "id": "motion-os-change-not-watched",
+    "file": "Clipthrough/Services/System/MotionService.cs",
+    "why": "Turning Animation effects on or off in Windows is ignored until restart.",
+    "find": "_osWatch ??= _systemInteraction.WatchOsAnimationSetting(window, Update);",
+    "replace": "_osWatch ??= _systemInteraction.WatchOsAnimationSetting(window, () => { });",
+    "filter": "FullyQualifiedName~MotionServiceTests.System_FollowsTheOsSettingAsItChanges"
+  },
+  {
+    "id": "motion-setting-change-ignored",
+    "file": "Clipthrough/Services/System/MotionService.cs",
+    "why": "Changing Animations in Settings does nothing until restart.",
+    "find": "private void OnSettingsChanged(object? sender, AppSettings e) => Update();",
+    "replace": "private void OnSettingsChanged(object? sender, AppSettings e) => _ = e;",
+    "filter": "FullyQualifiedName~MotionServiceTests.ChangingTheSetting_TakesEffectAtOnce"
+  },
+  {
+    "id": "motion-not-saved",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "The Animations choice in Settings is not written back.",
+    "find": "            Motion = Settings.Motion,\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~MotionPolicyHeadlessTests.TheSettingsDialog_LoadsAndSavesTheMotionPreference"
+  },
+  {
+    "id": "motion-not-loaded",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "Settings opens showing the default instead of the saved Animations choice, and saving then overwrites it.",
+    "find": "        Settings.Motion = settings.Motion;\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~MotionPolicyHeadlessTests.TheSettingsDialog_LoadsAndSavesTheMotionPreference"
+  },
+  {
+    "id": "motion-class-skips-owned-windows",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "The Settings window ignores the motion policy.",
+    "find": "                TrackMotion(m_settingsWindow);\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~MotionPolicyHeadlessTests.AnOwnedWindowOpenedLater_FollowsThePolicyToo"
+  },
+  {
+    "id": "motion-class-never-removed",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "Turning motion off leaves the windows animating.",
+    "find": "window.Classes.Set(MotionClass, enabled);",
+    "replace": "window.Classes.Set(MotionClass, enabled || !enabled);",
+    "filter": "FullyQualifiedName~MotionPolicyHeadlessTests.TurningMotionOff_TakesTheClassOffAtOnce"
+  },
+  {
+    "id": "selection-crossfade-instant",
+    "file": "Clipthrough/Styles/ModernTheme.axaml",
+    "why": "The selection highlight snaps instead of crossfading.",
+    "find": "<BrushTransition Property=\"Background\" Duration=\"0:0:0.083\" />",
+    "replace": "<BrushTransition Property=\"Background\" Duration=\"0:0:0\" />",
+    "filter": "FullyQualifiedName~ListHighlightMotionHeadlessTests.WithMotion_SelectionCrossfades"
+  },
+  {
+    "id": "hover-fade-wrong-duration",
+    "file": "Clipthrough/Styles/ModernTheme.axaml",
+    "why": "Hover fades over something other than 100 ms.",
+    "find": "<BrushTransition Property=\"Background\" Duration=\"0:0:0.1\" />",
+    "replace": "<BrushTransition Property=\"Background\" Duration=\"0:0:0.2\" />",
+    "filter": "FullyQualifiedName~ListHighlightMotionHeadlessTests.Hover_FadesOnlyWithMotion"
+  },
+  {
+    "id": "selection-fade-ignores-motion",
+    "file": "Clipthrough/Styles/ModernTheme.axaml",
+    "why": "The selection fades even with Animations off.",
+    "find": "<Style Selector=\":is(Window).motion ListBox.clip-list ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter\">",
+    "replace": "<Style Selector=\"ListBox.clip-list ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter\">",
+    "filter": "FullyQualifiedName~ListHighlightMotionHeadlessTests.WithoutMotion_SelectionIsInstant"
+  },
+  {
+    "id": "key-repeat-still-fades",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "Holding an arrow key leaves the highlight trailing behind the selection.",
+    "find": "var repeating = m_heldNavigationKey == e.Key\n            && Stopwatch.GetElapsedTime(m_lastNavigationKeyDown) <= KeyRepeatWindow;",
+    "replace": "var repeating = m_heldNavigationKey == e.Key\n            && Stopwatch.GetElapsedTime(m_lastNavigationKeyDown) <= KeyRepeatWindow && e.Key == Key.None;",
+    "filter": "FullyQualifiedName~ListHighlightMotionHeadlessTests.WithMotion_AKeyRepeat_MovesTheHighlightInstantly"
+  },
+  {
+    "id": "key-release-not-tracked",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "After one held key every later press is treated as a repeat and never fades again.",
+    "find": "        m_heldNavigationKey = null;\n        this.FindControl<ListBox>(\"ClipsListBox\")?.Classes.Set(KeyRepeatClass, false);",
+    "replace": "        this.FindControl<ListBox>(\"ClipsListBox\")?.Classes.Set(KeyRepeatClass, false);",
+    "filter": "FullyQualifiedName~ListHighlightMotionHeadlessTests.WithMotion_AFreshPressAfterRelease_StillFades"
+  },
+  {
+    "id": "toast-entrance-ignores-motion",
+    "file": "Clipthrough/Styles/ModernTheme.axaml",
+    "why": "Toasts animate in even with Animations off.",
+    "find": "<Style Selector=\":is(Window).motion Border.toast\">",
+    "replace": "<Style Selector=\"Border.toast\">",
+    "filter": "FullyQualifiedName~ToastMotionHeadlessTests.WithoutMotion_ANewToastSimplyAppears"
+  },
+  {
+    "id": "toast-does-not-fade",
+    "file": "Clipthrough/Styles/ModernTheme.axaml",
+    "why": "A new toast pops to full opacity instead of fading in.",
+    "find": "                <KeyFrame Cue=\"0%\">\n                    <Setter Property=\"Opacity\" Value=\"0\" />\n                    <Setter Property=\"TranslateTransform.Y\" Value=\"16\" />",
+    "replace": "                <KeyFrame Cue=\"0%\">\n                    <Setter Property=\"Opacity\" Value=\"1\" />\n                    <Setter Property=\"TranslateTransform.Y\" Value=\"16\" />",
+    "filter": "FullyQualifiedName~ToastMotionHeadlessTests.WithMotion_ANewToastRisesAndFadesIn"
+  },
+  {
+    "id": "toast-does-not-rise",
+    "file": "Clipthrough/Styles/ModernTheme.axaml",
+    "why": "A new toast fades in place instead of rising into it.",
+    "find": "                    <Setter Property=\"Opacity\" Value=\"0\" />\n                    <Setter Property=\"TranslateTransform.Y\" Value=\"16\" />",
+    "replace": "                    <Setter Property=\"Opacity\" Value=\"0\" />\n                    <Setter Property=\"TranslateTransform.Y\" Value=\"0\" />",
+    "filter": "FullyQualifiedName~ToastMotionHeadlessTests.WithMotion_ANewToastRisesAndFadesIn"
+  },
+  {
+    "id": "list-change-ignores-the-vm-mark",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "Every list change animates, including searches replacing the whole list.",
+    "find": "DataContext is not MainWindowViewModel { IsListChangeAnimatable: true })",
+    "replace": "DataContext is not MainWindowViewModel)",
+    "filter": "FullyQualifiedName~ListChangeMotionHeadlessTests.ASearch_ReplacesTheRowsWithoutAnimating"
+  },
+  {
+    "id": "list-change-ignores-motion",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "Rows slide even with Animations off.",
+    "find": "if (!IsMotionEnabled || !IsPresentedToUser || DataContext",
+    "replace": "if (!IsPresentedToUser || DataContext",
+    "filter": "FullyQualifiedName~ListChangeMotionHeadlessTests.WithoutMotion_ACaptureDoesNotAnimate"
+  },
+  {
+    "id": "list-change-in-standby",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "Captures animate while the popup is dismissed, so it can be summoned mid-slide.",
+    "find": "if (!IsMotionEnabled || !IsPresentedToUser || DataContext",
+    "replace": "if (!IsMotionEnabled || DataContext",
+    "filter": "FullyQualifiedName~ListChangeMotionHeadlessTests.InStandby_ACaptureDoesNotAnimate"
+  },
+  {
+    "id": "capture-not-marked-animatable",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "A captured clip pops into the list.",
+    "find": "        IsListChangeAnimatable = true;\n        try\n        {\n            UpsertClipItem(clip, targetIndex, select: _isMainWindowVisible);",
+    "replace": "        IsListChangeAnimatable = false;\n        try\n        {\n            UpsertClipItem(clip, targetIndex, select: _isMainWindowVisible);",
+    "filter": "FullyQualifiedName~ListChangeMotionHeadlessTests.ACapture_SlidesTheRowsDown_AndLiftsTheNewRowAboveThem"
+  },
+  {
+    "id": "delete-not-marked-animatable",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "A deleted clip leaves a gap that snaps shut.",
+    "find": "IsListChangeAnimatable = clipVms.Length == 1;",
+    "replace": "IsListChangeAnimatable = clipVms.Length == 0;",
+    "filter": "FullyQualifiedName~ListChangeMotionHeadlessTests.ADelete_SlidesTheRowsBelowUp"
+  },
+  {
+    "id": "undo-not-marked-animatable",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "An undone delete pops back in.",
+    "find": "_animateSingleRestore = clipIds.Length == 1;",
+    "replace": "_animateSingleRestore = clipIds.Length == 0;",
+    "filter": "FullyQualifiedName~ListChangeMotionHeadlessTests.UndoingASingleDelete_AnimatesTheRowBackIn"
+  },
+  {
+    "id": "arriving-row-under-neighbours",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "The new row fades in underneath the row sliding over it (the prototype artefact).",
+    "find": "row.ZIndex = 1;",
+    "replace": "row.ZIndex = 0;",
+    "filter": "FullyQualifiedName~ListChangeMotionHeadlessTests.ACapture_SlidesTheRowsDown_AndLiftsTheNewRowAboveThem"
+  },
+  {
+    "id": "list-slide-never-disarmed",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "The slide stays armed, so scrolling afterwards animates recycled rows across the list.",
+    "find": "                visual.ImplicitAnimations = null;\n            }\n        }\n\n        // Every row lifted since the last disarm",
+    "replace": "                _ = visual;\n            }\n        }\n\n        // Every row lifted since the last disarm",
+    "filter": "FullyQualifiedName~ListChangeMotionHeadlessTests.ACapture_SlidesTheRowsDown_AndLiftsTheNewRowAboveThem"
+  },
+  {
+    "id": "single-insertion-accepts-two",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "A refresh that changes more than one row is animated as if one clip came back.",
+    "find": "            if (skipped)\n            {\n                return false;\n            }\n\n            skipped = true;",
+    "replace": "            if (skipped && !skipped)\n            {\n                return false;\n            }\n\n            skipped = true;",
+    "filter": "FullyQualifiedName~SingleInsertionTests"
+  },
+  {
+    "id": "single-insertion-accepts-same-length",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "A refresh with nothing new is treated as an arrival.",
+    "find": "if (next.Count != shown.Count + 1)",
+    "replace": "if (next.Count < shown.Count)",
+    "filter": "FullyQualifiedName~SingleInsertionTests"
+  },
+  {
+    "id": "focus-ring-gone",
+    "file": "Clipthrough/Styles/ModernTheme.axaml",
+    "why": "Keyboard navigation shows no focus ring on the row.",
+    "find": "<Style Selector=\"ListBox.clip-list.keyboard-nav ListBoxItem:focus Border.clip-row-card\">",
+    "replace": "<Style Selector=\"ListBox.clip-list.keyboard-nav ListBoxItem:focus Border.no-such-card\">",
+    "filter": "FullyQualifiedName~FocusAndPressHeadlessTests.ArrowKeys_PutARingOnTheFocusedRow"
+  },
+  {
+    "id": "focus-ring-on-click",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "A click leaves a focus ring on the row, as if the keyboard had put it there.",
+    "find": "            list.Classes.Set(KeyboardNavigationClass, false);",
+    "replace": "            list.Classes.Set(KeyboardNavigationClass, true);",
+    "filter": "FullyQualifiedName~FocusAndPressHeadlessTests.AClick_SelectsWithoutARing"
+  },
+  {
+    "id": "arrow-keys-not-keyboard-nav",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "Arrow keys do not count as keyboard navigation, so the ring never shows.",
+    "find": "        list?.Classes.Set(KeyboardNavigationClass, true);\n        var repeating",
+    "replace": "        var repeating",
+    "filter": "FullyQualifiedName~FocusAndPressHeadlessTests.ArrowKeys_PutARingOnTheFocusedRow"
+  },
+  {
+    "id": "press-not-scaled-with-motion",
+    "file": "Clipthrough/Styles/ModernTheme.axaml",
+    "why": "Press feedback under motion stays at Fluent's instant 0.98.",
+    "find": "<Setter Property=\"RenderTransform\" Value=\"scale(0.97)\" />",
+    "replace": "<Setter Property=\"RenderTransform\" Value=\"scale(0.98)\" />",
+    "filter": "FullyQualifiedName~FocusAndPressHeadlessTests.APressedButton_ScalesDownOnlyWithMotion"
+  },
+  {
+    "id": "press-scaled-without-motion",
+    "file": "Clipthrough/Styles/ModernTheme.axaml",
+    "why": "Buttons still scale on press with Animations off.",
+    "find": "<Style Selector=\":is(Window):not(.motion) :is(Button):pressed\">",
+    "replace": "<Style Selector=\":is(Window).no-such-class :is(Button):pressed\">",
+    "filter": "FullyQualifiedName~FocusAndPressHeadlessTests.APressedButton_ScalesDownOnlyWithMotion"
+  },
+  {
+    "id": "confirm-dialog-ignores-owner-motion",
+    "file": "Clipthrough/Views/ConfirmDialog.axaml.cs",
+    "why": "A confirm dialog ignores the motion policy of the window it belongs to.",
+    "find": "dialog.Classes.Set(MainWindow.MotionClass, owner.Classes.Contains(MainWindow.MotionClass));",
+    "replace": "dialog.Classes.Set(MainWindow.MotionClass, !owner.Classes.Contains(MainWindow.MotionClass));",
+    "filter": "FullyQualifiedName~FocusAndPressHeadlessTests.AConfirmDialog_FollowsItsOwnersMotionPolicy"
+  },
+  {
+    "id": "paste-settle-override-unclamped",
+    "file": "Clipthrough/Services/System/PasteTiming.cs",
+    "why": "A settle override larger than the budget makes pastes later than the old sleep.",
+    "find": "TimeSpan.FromMilliseconds(Math.Min(ms, 150))",
+    "replace": "TimeSpan.FromMilliseconds(ms)",
+    "filter": "FullyQualifiedName~PasteTimingTests.TheSettleOverride_IsAWholeNumberOfMillisecondsWithinTheBudget"
+  },
+  {
+    "id": "standby-keeps-an-activation",
+    "file": "Clipthrough/Views/MainWindow.Presentation.cs",
+    "why": "Windows activates the cloaked popup and keystrokes go into a search box nobody can see.",
+    "find": "        if (IsInStandby)\n        {\n            m_systemInteractionService?.TryCloakWindow(this, releaseForeground: true);",
+    "replace": "        if (IsInStandby && !IsInStandby)\n        {\n            m_systemInteractionService?.TryCloakWindow(this, releaseForeground: true);",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.AnActivationInStandby_HandsTheForegroundOnAgain"
+  },
+  {
+    "id": "presented-popup-gives-activation-away",
+    "file": "Clipthrough/Views/MainWindow.Presentation.cs",
+    "why": "Activating the popup normally cloaks it again.",
+    "find": "        if (IsInStandby)\n        {\n            m_systemInteractionService?.TryCloakWindow(this, releaseForeground: true);",
+    "replace": "        if (IsInStandby || !IsInStandby)\n        {\n            m_systemInteractionService?.TryCloakWindow(this, releaseForeground: true);",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.AnActivationWhilePresented_IsLeftAlone"
+  },
+  {
+    "id": "stale-summon-not-revalidated",
+    "file": "Clipthrough/Views/MainWindow.Presentation.cs",
+    "why": "A summon that waited uncloaks and activates the popup even after a later toggle or dismiss.",
+    "find": "            if (generation != m_presentationGeneration)\n            {\n                return StandbyLeave.Superseded;",
+    "replace": "            if (generation != m_presentationGeneration && generation == 0)\n            {\n                return StandbyLeave.Superseded;",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.AStaleSummon_DoesNotUndoALaterDismiss"
+  },
+  {
+    "id": "second-toggle-does-not-cancel",
+    "file": "Clipthrough/Views/MainWindow.Presentation.cs",
+    "why": "Alt+V pressed twice before the popup appeared leaves it shown instead of dismissed.",
+    "find": "        m_presentationGeneration++;\n        m_pendingSummonGeneration = 0;",
+    "replace": "        m_pendingSummonGeneration = 0;",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.ASecondToggleBeforeTheSummonLands_CancelsIt"
+  },
+  {
+    "id": "dismiss-does-not-supersede",
+    "file": "Clipthrough/Views/MainWindow.Presentation.cs",
+    "why": "A dismiss does not invalidate an older pending summon, which then uncloaks the new standby.",
+    "find": "        m_presentationGeneration++;\n        var reset = viewModel?.EnterStandbyAsync() ?? Task.CompletedTask;",
+    "replace": "        var reset = viewModel?.EnterStandbyAsync() ?? Task.CompletedTask;",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.AStaleSummon_DoesNotUndoALaterDismiss"
+  },
+  {
+    "id": "close-does-not-drop-the-summon",
+    "file": "Clipthrough/Views/MainWindow.axaml.cs",
+    "why": "A summon pending when the window closes uncloaks a closed window.",
+    "find": "        Closed += (_, _) => CancelPendingSummon();\n",
+    "replace": "",
+    "filter": "FullyQualifiedName~PopupStandbyHeadlessTests.ASummonPendingWhenTheWindowCloses_IsDropped"
+  },
+  {
+    "id": "overlapping-arrivals-leave-a-row-raised",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "A second arrival within the armed window leaves the first row raised for good.",
+    "find": "        m_raisedRows.Add(row);",
+    "replace": "        m_raisedRows.Clear();\n        m_raisedRows.Add(row);",
+    "filter": "FullyQualifiedName~ListChangeMotionHeadlessTests.TwoQuickCaptures_LeaveNoRowRaised"
+  },
+  {
+    "id": "key-repeat-without-time-window",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "A press long after one whose KeyUp was lost is taken for a repeat and does not fade.",
+    "find": "&& Stopwatch.GetElapsedTime(m_lastNavigationKeyDown) <= KeyRepeatWindow;",
+    "replace": "&& Stopwatch.GetElapsedTime(m_lastNavigationKeyDown) >= TimeSpan.Zero && KeyRepeatWindow > TimeSpan.Zero;",
+    "filter": "FullyQualifiedName~ListHighlightMotionHeadlessTests.WithMotion_APressLongAfterAnUnreleasedOne_StillFades"
+  },
+  {
+    "id": "pointer-leaves-key-repeat-on",
+    "file": "Clipthrough/Views/MainWindow.Motion.cs",
+    "why": "After holding an arrow key, clicks stop fading until the next key.",
+    "find": "            list.Classes.Set(KeyRepeatClass, false);\n        }\n    }",
+    "replace": "        }\n    }",
+    "filter": "FullyQualifiedName~ListHighlightMotionHeadlessTests.WithMotion_AClickAfterAKeyRepeat_Fades"
   },
   {
     "id": "deferred-update-stores-nul-text-as-blob",

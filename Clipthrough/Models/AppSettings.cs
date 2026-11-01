@@ -107,6 +107,9 @@ public sealed record AppSettings
 
     public ThemeMode ThemeMode { get; init; } = ThemeMode.Dark;
 
+    /// <summary>Whether Clipthrough animates its own UI; System follows Windows' Animation effects.</summary>
+    public MotionPreference Motion { get; init; } = MotionPreference.System;
+
     public bool EnableNormalClipLifetime { get; init; } = true;
 
     public int NormalClipLifetimeDays { get; init; } = DefaultNormalClipLifetimeDays;
@@ -363,6 +366,7 @@ public sealed record AppSettings
         ExternalImageEditorPath = ExternalImageEditorPath?.Trim() ?? string.Empty,
         ExternalDiffToolPath = ExternalDiffToolPath?.Trim() ?? string.Empty,
         RegexSearchEngine = System.Enum.IsDefined(RegexSearchEngine) ? RegexSearchEngine : RegexSearchEngine.NonBacktracking,
+        Motion = System.Enum.IsDefined(Motion) ? Motion : MotionPreference.System,
         LastContentDisplayMode = NormalizeContentDisplayMode(LastContentDisplayMode),
         LastImageViewMode = LastImageViewMode,
         LastShowFavoritesOnly = LastShowFavoritesOnly,

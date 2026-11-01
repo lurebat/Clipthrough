@@ -36,6 +36,10 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
     private readonly Dictionary<string, WindowsGlobalHotKeyRegistration> _namedHotKeys = new(StringComparer.Ordinal);
     private WindowsBalloonNotificationHost? _notificationHost;
     private nint _capturedPasteTarget;
+    // The window RestoreCapturedForeground last handed the foreground to, which
+    // a paste then waits for. Zero when the paste comes from a global hotkey and
+    // nothing was restored: the target is whatever already has the foreground.
+    private nint _lastRestoredPasteTarget;
 
     // Appended to the Start with Windows command (AppDataRoot.RelaunchArguments),
     // so a login starts Clipthrough on the data folder --data-dir chose.
@@ -408,6 +412,7 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         }
 
         var target = System.Threading.Interlocked.Exchange(ref _capturedPasteTarget, IntPtr.Zero);
+        _lastRestoredPasteTarget = target;
         if (target == IntPtr.Zero)
         {
             Trace.TraceWarning("[Paste] RestoreCapturedForeground: no captured target (HWND is zero).");
@@ -449,6 +454,165 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
             }
         }
     }
+
+    public async Task<bool> WaitForPasteTargetAsync(TimeSpan timeout, System.Threading.CancellationToken cancellationToken = default)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return true;
+        }
+
+        var target = System.Threading.Interlocked.Exchange(ref _lastRestoredPasteTarget, IntPtr.Zero);
+        var started = Stopwatch.GetTimestamp();
+        var ready = await PasteTiming.WaitUntilAsync(
+            () => IsPasteTargetForeground(target),
+            timeout,
+            PasteTiming.PollInterval,
+            cancellationToken);
+        if (CommandLineOptions.LogPopupTimings || !ready)
+        {
+            Trace.TraceInformation(
+                $"[Paste] target 0x{target:X} {(ready ? "forward" : "not forward")} after {Stopwatch.GetElapsedTime(started).TotalMilliseconds:F1} ms");
+        }
+
+        return ready;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static bool IsPasteTargetForeground(nint target)
+    {
+        var foreground = GetForegroundWindow();
+        if (foreground == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        if (target != IntPtr.Zero)
+        {
+            return foreground == target;
+        }
+
+        GetWindowThreadProcessId(foreground, out var processId);
+        return processId != (uint)Environment.ProcessId;
+    }
+
+    public bool TryCloakWindow(Window window, bool releaseForeground)
+    {
+        if (!OperatingSystem.IsWindows() || window.TryGetPlatformHandle()?.Handle is not { } hwnd || hwnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (!SetCloaked(hwnd, true))
+            {
+                return false;
+            }
+
+            if (releaseForeground)
+            {
+                // Hiding is the only reliable way to let the OS pick the window
+                // that should get the foreground next; showing again without
+                // activation keeps the window "visible", so it goes on rendering
+                // while cloaked. The pattern is PowerToys Command Palette's
+                // (MainWindow.HideWindow).
+                ShowWindow(hwnd, SW_HIDE);
+                ShowWindow(hwnd, SW_SHOWNA);
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Cloaking the window failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    public void UncloakWindow(Window window)
+    {
+        if (!OperatingSystem.IsWindows() || window.TryGetPlatformHandle()?.Handle is not { } hwnd || hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        try
+        {
+            SetCloaked(hwnd, false);
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Uncloaking the window failed: {ex.Message}");
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static bool SetCloaked(nint hwnd, bool cloaked)
+    {
+        var value = cloaked ? 1 : 0;
+        var hr = DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, ref value, sizeof(int));
+        if (hr < 0)
+        {
+            Trace.TraceWarning($"DwmSetWindowAttribute(DWMWA_CLOAK, {cloaked}) failed: 0x{hr:X8}");
+            return false;
+        }
+
+        return true;
+    }
+
+    public bool AreOsAnimationsEnabled()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return true;
+        }
+
+        var enabled = 1;
+        return !SystemParametersInfo(SPI_GETCLIENTAREAANIMATION, 0, ref enabled, 0) || enabled != 0;
+    }
+
+    public IDisposable WatchOsAnimationSetting(Window window, Action onChanged)
+    {
+        ArgumentNullException.ThrowIfNull(onChanged);
+        if (!OperatingSystem.IsWindows())
+        {
+            return System.Reactive.Disposables.Disposable.Empty;
+        }
+
+        // Re-read on any WM_SETTINGCHANGE rather than only SPI_SETCLIENTAREAANIMATION:
+        // the read is one cheap call, and a broadcast that names a different
+        // section must not leave the answer stale.
+        Win32Properties.CustomWndProcHookCallback hook = (nint hwnd, uint msg, nint wParam, nint lParam, ref bool handled) =>
+        {
+            if (msg == WM_SETTINGCHANGE)
+            {
+                onChanged();
+            }
+
+            return IntPtr.Zero;
+        };
+        Win32Properties.AddWndProcHookCallback(window, hook);
+        return System.Reactive.Disposables.Disposable.Create(() => Win32Properties.RemoveWndProcHookCallback(window, hook));
+    }
+
+    private const uint SPI_GETCLIENTAREAANIMATION = 0x1042;
+    private const uint WM_SETTINGCHANGE = 0x001A;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SystemParametersInfo(uint action, uint param, ref int value, uint winIni);
+
+    private const int DWMWA_CLOAK = 13;
+    private const int SW_HIDE = 0;
+    private const int SW_SHOWNA = 8;
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(nint hwnd, int attribute, ref int value, int size);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShowWindow(nint hwnd, int command);
 
     public void SimulatePasteKeystroke()
     {

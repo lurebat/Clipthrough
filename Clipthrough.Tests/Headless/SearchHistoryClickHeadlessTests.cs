@@ -53,7 +53,7 @@ public sealed class SearchHistoryClickHeadlessTests
         await PumpAsync(TimeSpan.FromMilliseconds(600));
 
         harness.ViewModel.SearchText = Query;
-        // The search box refreshes 300 ms after the last keystroke.
+        // The search box refreshes MainWindowViewModel.SearchThrottle after the last keystroke.
         await PumpAsync(TimeSpan.FromMilliseconds(600));
 
         Assert.Equal(2, harness.ViewModel.Clips.Count(c => c.Clip.Content.Contains(Query, StringComparison.Ordinal)));

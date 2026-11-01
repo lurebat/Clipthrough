@@ -526,10 +526,68 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
 
     public void ClearTargetWindowCapture() { }
 
-    public void RestoreCapturedForeground() { }
+    public void RestoreCapturedForeground()
+    {
+        RestoreForegroundCount++;
+        Events.Add("restore");
+    }
+
+    /// <summary>The paste sequence as it happened: restore, cloak, uncloak, wait, paste.</summary>
+    public List<string> Events { get; } = [];
+
+    /// <summary>How many times the paste target was handed the foreground.</summary>
+    public int RestoreForegroundCount { get; private set; }
+
+    /// <summary>Every wait for the paste target, in order.</summary>
+    public List<TimeSpan> PasteTargetWaits { get; } = [];
+
+    public Task<bool> WaitForPasteTargetAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        PasteTargetWaits.Add(timeout);
+        Events.Add("wait");
+        return Task.FromResult(true);
+    }
+
+    /// <summary>Whether TryCloakWindow succeeds, as it does on Windows.</summary>
+    public bool CloakSupported { get; set; } = true;
+
+    /// <summary>Every cloak call, in order: (window, cloaked, releasedForeground).</summary>
+    public List<(Window Window, bool Cloaked, bool ReleasedForeground)> CloakCalls { get; } = [];
+
+    /// <summary>Windows currently cloaked.</summary>
+    public HashSet<Window> CloakedWindows { get; } = [];
+
+    /// <summary>Runs inside TryCloakWindow, to observe the state a cloak happens in.</summary>
+    public Action<Window>? OnCloak { get; set; }
+
+    public bool TryCloakWindow(Window window, bool releaseForeground)
+    {
+        if (!CloakSupported)
+        {
+            return false;
+        }
+
+        OnCloak?.Invoke(window);
+        Events.Add("cloak");
+        CloakCalls.Add((window, true, releaseForeground));
+        CloakedWindows.Add(window);
+        return true;
+    }
+
+    /// <summary>Runs inside UncloakWindow, to observe what the user is about to see.</summary>
+    public Action<Window>? OnUncloak { get; set; }
+
+    public void UncloakWindow(Window window)
+    {
+        OnUncloak?.Invoke(window);
+        Events.Add("uncloak");
+        CloakCalls.Add((window, false, false));
+        CloakedWindows.Remove(window);
+    }
 
     public void SimulatePasteKeystroke()
     {
+        Events.Add("paste");
         SimulatedPasteCount++;
     }
 
@@ -557,6 +615,32 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
     public PixelPoint? GetCaretScreenPosition() => null;
 
     public bool IsTargetWindowElevated() => false;
+
+    /// <summary>What the OS reports for Animation effects.</summary>
+    public bool OsAnimationsEnabled { get; set; } = true;
+
+    public bool AreOsAnimationsEnabled() => OsAnimationsEnabled;
+
+    /// <summary>How many times something started watching the OS setting.</summary>
+    public int OsAnimationWatchCount { get; private set; }
+
+    private readonly List<Action> _osAnimationWatchers = [];
+
+    public IDisposable WatchOsAnimationSetting(Window window, Action onChanged)
+    {
+        OsAnimationWatchCount++;
+        _osAnimationWatchers.Add(onChanged);
+        return System.Reactive.Disposables.Disposable.Create(() => _osAnimationWatchers.Remove(onChanged));
+    }
+
+    /// <summary>Delivers a WM_SETTINGCHANGE to every watcher.</summary>
+    public void RaiseOsAnimationSettingChanged()
+    {
+        foreach (var watcher in _osAnimationWatchers.ToArray())
+        {
+            watcher();
+        }
+    }
 
     /// <summary>Every Start with Windows call, in order: ("sync" | "reconcile", enabled).</summary>
     public List<(string Kind, bool Enabled)> StartWithWindowsCalls { get; } = [];

@@ -20,15 +20,19 @@ internal sealed class MainWindowTestHarness : IDisposable
 {
     private readonly TemporaryDatabaseScope _scope;
 
-    private MainWindowTestHarness(TemporaryDatabaseScope scope, MainWindowViewModel viewModel, MainWindow window, TestSystemInteractionService systemInteraction)
+    private MainWindowTestHarness(TemporaryDatabaseScope scope, MainWindowViewModel viewModel, MainWindow window, TestSystemInteractionService systemInteraction, TestClipboardMonitorService clipboardMonitor)
     {
         _scope = scope;
+        ClipboardMonitor = clipboardMonitor;
         ViewModel = viewModel;
         Window = window;
         SystemInteraction = systemInteraction;
     }
 
     public MainWindowViewModel ViewModel { get; }
+
+    /// <summary>The monitor the view model listens to, so a test can deliver a capture.</summary>
+    public TestClipboardMonitorService ClipboardMonitor { get; }
 
     public MainWindow Window { get; }
 
@@ -74,7 +78,8 @@ internal sealed class MainWindowTestHarness : IDisposable
     public static MainWindowTestHarness Create(
         Func<AppSettings, AppSettings>? configureSettings = null,
         bool aiConfigured = false,
-        IWindowPlacementStore? placementStore = null)
+        IWindowPlacementStore? placementStore = null,
+        Func<ISettingsService, IMotionService>? motionFactory = null)
     {
         var scope = new TemporaryDatabaseScope();
 
@@ -93,10 +98,11 @@ internal sealed class MainWindowTestHarness : IDisposable
         scope.SettingsService.SetCurrent(configureSettings?.Invoke(settings) ?? settings);
 
         var systemInteraction = new TestSystemInteractionService();
+        var clipboardMonitor = new TestClipboardMonitorService();
 
         var viewModel = new MainWindowViewModel(
             scope.ClipStoreService,
-            new TestClipboardMonitorService(),
+            clipboardMonitor,
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -112,11 +118,12 @@ internal sealed class MainWindowTestHarness : IDisposable
             new BackgroundJobIndicator(),
             scope.DatabaseInitializer);
 
-        var window = new MainWindow(systemInteraction, placementStore) { DataContext = viewModel };
+        var motion = motionFactory?.Invoke(scope.SettingsService);
+        var window = new MainWindow(systemInteraction, placementStore, motion) { DataContext = viewModel };
         window.Show();
         Dispatcher.UIThread.RunJobs();
 
-        return new MainWindowTestHarness(scope, viewModel, window, systemInteraction);
+        return new MainWindowTestHarness(scope, viewModel, window, systemInteraction, clipboardMonitor);
     }
 
     /// <summary>

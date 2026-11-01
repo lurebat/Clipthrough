@@ -190,8 +190,23 @@ errors.
 
 ---
 
-## ViewModels and decomposition
+## Popup and motion
 
+**standby** — The dismissed state of the popup: DWM-cloaked rather than hidden.
+The window keeps rendering, so it is reset out of sight and reappears on a
+current frame. `MainWindow.IsPresentedToUser` is false in standby though
+`IsVisible` stays true. See `MainWindow.Presentation.cs`.
+
+**paste budget** — The longest a paste may wait before sending Ctrl+V: the
+fixed sleep it replaced (150 ms after a dismiss, 120 ms for a hotkey). The wait
+ends as soon as the target holds the foreground plus a settle margin, and never
+runs past the budget. See `PasteTiming`.
+
+**motion policy** — The Animations setting (`MotionPreference`: System, On,
+Off) resolved against Windows' Animation effects. It reaches the UI as the
+`motion` class; nothing animates without it.
+
+## ViewModels and decomposition
 **MainWindowViewModel** — Primary ViewModel. Large; decomposed in v0.13.0 via
 issue #10 into sub-ViewModels: `UpdateViewModel` (self-update commands),
 `DatabaseMaintenanceViewModel` (integrity, backup, restore),
