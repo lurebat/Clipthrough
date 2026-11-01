@@ -284,7 +284,7 @@ public sealed class ClipStoreService : IClipStoreService
         command.Transaction = transaction;
         command.CommandText = """
             UPDATE clips
-            SET content = CASE WHEN $content IS NULL OR TRIM($content) = '' THEN content ELSE $content END,
+            SET content = CASE WHEN CAST($content AS TEXT) IS NULL OR TRIM(CAST($content AS TEXT)) = '' THEN content ELSE CAST($content AS TEXT) END,
                 content_type = $contentType,
                 content_format = $contentFormat,
                 byte_size = $byteSize,
@@ -299,7 +299,7 @@ public sealed class ClipStoreService : IClipStoreService
             WHERE id = $id;
             """;
         command.Parameters.AddWithValue("$id", clipId);
-        command.Parameters.AddWithValue("$content", string.IsNullOrWhiteSpace(contentText) ? DBNull.Value : contentText);
+        command.Parameters.AddWithValue("$content", ClipTextParameter(contentText));
         command.Parameters.AddWithValue("$contentType", request.ContentType.ToStorageValue());
         command.Parameters.AddWithValue("$contentFormat", request.ContentFormat.ToStorageValue());
         command.Parameters.AddWithValue("$byteSize", byteSize);
@@ -1380,7 +1380,7 @@ public sealed class ClipStoreService : IClipStoreService
                         updateCommand.Transaction = transaction;
                         updateCommand.CommandText = """
                             UPDATE clips
-                            SET content = CASE WHEN $content IS NULL OR TRIM($content) = '' THEN content ELSE $content END,
+                            SET content = CASE WHEN CAST($content AS TEXT) IS NULL OR TRIM(CAST($content AS TEXT)) = '' THEN content ELSE CAST($content AS TEXT) END,
                                                                 content_format = $contentFormat,
                                 source_app = CASE WHEN $sourceApp IS NULL OR TRIM($sourceApp) = '' THEN source_app ELSE $sourceApp END,
                                 source_app_path = CASE WHEN $sourceAppPath IS NULL OR TRIM($sourceAppPath) = '' THEN source_app_path ELSE $sourceAppPath END,
@@ -1422,7 +1422,7 @@ public sealed class ClipStoreService : IClipStoreService
                         image_width, image_height, source_clip_id, transform_kind, import_kind,
                         sensitivity_scanned_at)
                     VALUES (
-                        $content, $contentType, $contentFormat,
+                        CAST($content AS TEXT), $contentType, $contentFormat,
                         $sourceApp, $sourceAppPath, $sourceAppIconHash, $sourceWindowTitle, $sourceUrl,
                         $hash, $isFavorite, $isSensitive, $capturedAt, 1,
                         $capturedAt, $capturedAt, $byteSize,
@@ -1481,7 +1481,7 @@ public sealed class ClipStoreService : IClipStoreService
                     updateCommand.Transaction = transaction;
                     updateCommand.CommandText = """
                         UPDATE clips
-                        SET content = CASE WHEN $content IS NULL OR TRIM($content) = '' THEN content ELSE $content END,
+                        SET content = CASE WHEN CAST($content AS TEXT) IS NULL OR TRIM(CAST($content AS TEXT)) = '' THEN content ELSE CAST($content AS TEXT) END,
                                                         content_format = $contentFormat,
                             source_app = CASE WHEN $sourceApp IS NULL OR TRIM($sourceApp) = '' THEN source_app ELSE $sourceApp END,
                             source_app_path = CASE WHEN $sourceAppPath IS NULL OR TRIM($sourceAppPath) = '' THEN source_app_path ELSE $sourceAppPath END,
@@ -1535,7 +1535,7 @@ public sealed class ClipStoreService : IClipStoreService
                         import_kind,
                         sensitivity_scanned_at)
                     VALUES (
-                        $content,
+                        CAST($content AS TEXT),
                         $contentType,
                         $contentFormat,
                         $sourceApp,
@@ -2729,6 +2729,25 @@ public sealed class ClipStoreService : IClipStoreService
         return (reader.GetInt64(0), reader.GetInt64(1));
     }
 
+    /// <summary>
+    /// The value to bind for a clip's text, read back in SQL as
+    /// <c>CAST($content AS TEXT)</c>. SQLitePCLRaw binds a string of up to 512
+    /// UTF-8 bytes with its length but a longer one as NUL-terminated, so SQLite
+    /// kept only what came before an embedded U+0000 once a clip passed that
+    /// size. Text holding a NUL is bound as its UTF-8 bytes instead, which carry
+    /// their own length; the cast turns them back into the same TEXT value.
+    /// Everything else binds as a string, as before, and the cast is a no-op.
+    /// </summary>
+    private static object ClipTextParameter(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return DBNull.Value;
+        }
+
+        return text.Contains('\0', StringComparison.Ordinal) ? Encoding.UTF8.GetBytes(text) : text;
+    }
+
     private static void AddUpsertParameters(
         SqliteCommand command,
         ClipCaptureRequest request,
@@ -2744,7 +2763,7 @@ public sealed class ClipStoreService : IClipStoreService
             command.Parameters.AddWithValue("$id", clipId.Value);
         }
 
-        command.Parameters.AddWithValue("$content", string.IsNullOrWhiteSpace(contentText) ? DBNull.Value : contentText);
+        command.Parameters.AddWithValue("$content", ClipTextParameter(contentText));
         command.Parameters.AddWithValue("$contentBytes", request.ContentBytes.Length == 0 ? DBNull.Value : request.ContentBytes);
         command.Parameters.AddWithValue("$contentType", request.ContentType.ToStorageValue());
         command.Parameters.AddWithValue("$contentFormat", request.ContentFormat.ToStorageValue());

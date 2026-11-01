@@ -5382,5 +5382,53 @@
     "find": "if (!string.Equals(store.Read(), command, StringComparison.Ordinal))",
     "replace": "if (string.IsNullOrWhiteSpace(store.Read()))",
     "filter": "FullyQualifiedName~StartWithWindowsReconcileTests"
+  },
+  {
+    "id": "clip-text-with-nul-bound-as-string",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "SQLitePCLRaw binds a string longer than 512 UTF-8 bytes as NUL-terminated, so a clip holding U+0000 past that size kept only the text before the NUL. Binding NUL-containing text as its UTF-8 bytes keeps all of it.",
+    "find": "        return text.Contains('\\0', StringComparison.Ordinal) ? Encoding.UTF8.GetBytes(text) : text;",
+    "replace": "        return text.Contains('\\0', StringComparison.Ordinal) && text.Length < 0 ? Encoding.UTF8.GetBytes(text) : text;",
+    "filter": "FullyQualifiedName~KeepsTextAfterANul"
+  },
+  {
+    "id": "clip-text-bytes-stored-as-blob",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "Text bound as UTF-8 bytes must be cast back to TEXT; without the cast a NUL-containing clip is stored as a BLOB, unlike every other clip.",
+    "find": "                        CAST($content AS TEXT),\n                        $contentType,\n                        $contentFormat,\n                        $sourceApp,",
+    "replace": "                        $content,\n                        $contentType,\n                        $contentFormat,\n                        $sourceApp,",
+    "filter": "FullyQualifiedName~CaptureAsync_KeepsTextAfterANul"
+  },
+  {
+    "id": "deferred-update-stores-nul-text-as-blob",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "The deferred-content update must cast NUL-holding text back to TEXT; without the cast the clip is stored as a BLOB.",
+    "find": "UPDATE clips\n            SET content = CASE WHEN CAST($content AS TEXT) IS NULL OR TRIM(CAST($content AS TEXT)) = '' THEN content ELSE CAST($content AS TEXT) END,",
+    "replace": "UPDATE clips\n            SET content = CASE WHEN CAST($content AS TEXT) IS NULL OR TRIM(CAST($content AS TEXT)) = '' THEN content ELSE $content END,",
+    "filter": "FullyQualifiedName~UpdateDeferredContentAsync_KeepsTextAfterANul"
+  },
+  {
+    "id": "batch-reimport-stores-nul-text-as-blob",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "A re-imported clip rewrites its content; without the cast NUL-holding text is stored as a BLOB.",
+    "find": "UPDATE clips\n                            SET content = CASE WHEN CAST($content AS TEXT) IS NULL OR TRIM(CAST($content AS TEXT)) = '' THEN content ELSE CAST($content AS TEXT) END,",
+    "replace": "UPDATE clips\n                            SET content = CASE WHEN CAST($content AS TEXT) IS NULL OR TRIM(CAST($content AS TEXT)) = '' THEN content ELSE $content END,",
+    "filter": "FullyQualifiedName~CaptureBatchAsync_ReImportingTextWithANul"
+  },
+  {
+    "id": "recopy-stores-nul-text-as-blob",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "A re-copied clip rewrites its content; without the cast NUL-holding text is stored as a BLOB.",
+    "find": "UPDATE clips\n                        SET content = CASE WHEN CAST($content AS TEXT) IS NULL OR TRIM(CAST($content AS TEXT)) = '' THEN content ELSE CAST($content AS TEXT) END,",
+    "replace": "UPDATE clips\n                        SET content = CASE WHEN CAST($content AS TEXT) IS NULL OR TRIM(CAST($content AS TEXT)) = '' THEN content ELSE $content END,",
+    "filter": "FullyQualifiedName~CaptureAsync_ReCopyingTextWithANul"
+  },
+  {
+    "id": "batch-import-stores-nul-text-as-blob",
+    "file": "Clipthrough/Services/Storage/ClipStoreService.cs",
+    "why": "The batch insert must cast NUL-holding text back to TEXT; without the cast an imported clip is stored as a BLOB.",
+    "find": "                        CAST($content AS TEXT), $contentType, $contentFormat,",
+    "replace": "                        $content, $contentType, $contentFormat,",
+    "filter": "FullyQualifiedName~CaptureBatchAsync_KeepsTextAfterANul"
   }
 ]

@@ -13,6 +13,125 @@ namespace Clipthrough.Tests.Integration;
 public sealed class ClipStoreServiceTests
 {
     /// <summary>
+    /// Text holding U+0000 (Base64 Decode can produce one; so can a paste from a
+    /// binary-ish source). SQLitePCLRaw binds a string of up to 512 UTF-8 bytes
+    /// with its length but a longer one as NUL-terminated, so the store kept
+    /// only the text before the NUL once a clip passed that size - silently, on
+    /// the one copy the user has.
+    /// </summary>
+    public static TheoryData<int> TextLengthsAroundTheBindingThreshold() => new() { 16, 505, 520, 5000 };
+
+    private static string TextWithANul(int length)
+    {
+        var text = new StringBuilder("left\0");
+        while (text.Length < length)
+        {
+            text.Append("right-hand side kept ");
+        }
+
+        return text.ToString(0, length);
+    }
+
+    private static ClipCaptureRequest TextRequest(string text) => new()
+    {
+        ContentType = ContentType.Text,
+        ContentFormat = ClipContentFormat.PlainText,
+        ContentText = text,
+        ContentBytes = Encoding.UTF8.GetBytes(text),
+    };
+
+    /// <summary>
+    /// The clip holds the whole text, and holds it as TEXT like every other clip:
+    /// text with a NUL is bound as bytes, and a write that dropped its
+    /// CAST(... AS TEXT) would store a BLOB that still reads back as the same
+    /// string here.
+    /// </summary>
+    private static async Task AssertStoredAsTextAsync(TemporaryDatabaseScope scope, long id, string text)
+    {
+        var stored = await scope.ClipStoreService.GetByIdAsync(id);
+        Assert.Equal(text.Length, stored!.Content.Length);
+        Assert.Equal(text, stored.Content);
+
+        await using var connection = scope.ConnectionFactory.CreateConnection();
+        await connection.OpenAsync();
+        await using var type = connection.CreateCommand();
+        type.CommandText = "SELECT typeof(content) FROM clips WHERE id = $id;";
+        type.Parameters.AddWithValue("$id", id);
+        Assert.Equal("text", await type.ExecuteScalarAsync());
+    }
+
+    private static async Task<long> OnlyClipIdAsync(TemporaryDatabaseScope scope) =>
+        Assert.Single((await scope.ClipStoreService.SearchAsync(new ClipSearchFilters())).Items).Id;
+
+    [Theory]
+    [MemberData(nameof(TextLengthsAroundTheBindingThreshold))]
+    public async Task CaptureAsync_KeepsTextAfterANul_AtEveryLength(int length)
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        var text = TextWithANul(length);
+
+        var clip = await scope.ClipStoreService.CaptureAsync(TextRequest(text));
+
+        await AssertStoredAsTextAsync(scope, clip!.Id, text);
+    }
+
+    /// <summary>A re-copy of the same text takes the update path, which writes content too.</summary>
+    [Theory]
+    [MemberData(nameof(TextLengthsAroundTheBindingThreshold))]
+    public async Task CaptureAsync_ReCopyingTextWithANul_KeepsItAll(int length)
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        var text = TextWithANul(length);
+
+        await scope.ClipStoreService.CaptureAsync(TextRequest(text));
+        await scope.ClipStoreService.CaptureAsync(TextRequest(text));
+
+        await AssertStoredAsTextAsync(scope, await OnlyClipIdAsync(scope), text);
+    }
+
+    [Theory]
+    [MemberData(nameof(TextLengthsAroundTheBindingThreshold))]
+    public async Task CaptureBatchAsync_KeepsTextAfterANul_AtEveryLength(int length)
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        var text = TextWithANul(length);
+
+        Assert.Equal(1, (await scope.ClipStoreService.CaptureBatchAsync([TextRequest(text)])).Imported);
+
+        await AssertStoredAsTextAsync(scope, await OnlyClipIdAsync(scope), text);
+    }
+
+    [Theory]
+    [MemberData(nameof(TextLengthsAroundTheBindingThreshold))]
+    public async Task CaptureBatchAsync_ReImportingTextWithANul_KeepsItAll(int length)
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        var text = TextWithANul(length);
+
+        await scope.ClipStoreService.CaptureBatchAsync([TextRequest(text)]);
+        await scope.ClipStoreService.CaptureBatchAsync([TextRequest(text)]);
+
+        await AssertStoredAsTextAsync(scope, await OnlyClipIdAsync(scope), text);
+    }
+
+    [Theory]
+    [MemberData(nameof(TextLengthsAroundTheBindingThreshold))]
+    public async Task UpdateDeferredContentAsync_KeepsTextAfterANul_AtEveryLength(int length)
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        var clip = await scope.ClipStoreService.CaptureAsync(TextRequest("placeholder before the deferred content"));
+        var text = TextWithANul(length);
+
+        await scope.ClipStoreService.UpdateDeferredContentAsync(clip!.Id, TextRequest(text));
+
+        await AssertStoredAsTextAsync(scope, clip.Id, text);
+    }
+    /// <summary>
     /// Synthetic, obviously-fake credential text. It is not a real secret; it
     /// exists only because it matches the built-in "Passwords" rule
     /// ((?i)(password|passwd|pwd)['":\s=]+\S{6,}), which is what these tests

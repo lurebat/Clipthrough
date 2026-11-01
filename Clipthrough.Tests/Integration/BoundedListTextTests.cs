@@ -93,10 +93,8 @@ public sealed class BoundedListTextTests
     /// a TEXT value, so a clip holding U+0000 (Base64 Decode can produce one) came
     /// back from the list as the text before the NUL, flagged complete. Hydration
     /// then had nothing to do, and copy, export, transform and edit all silently
-    /// dropped the rest. The long case is written with SQL rather than captured:
-    /// binding a string parameter longer than about 500 UTF-8 bytes stops at its
-    /// first NUL, so capture cannot store one today, but a NUL past the bound must
-    /// not depend on that.
+    /// dropped the rest. The long case appends its tail with SQL, so this test does
+    /// not depend on how capture binds text (docs/solutions/nul-text-truncated-past-512-bytes.md).
     /// </summary>
     [Theory]
     [InlineData(false)]
