@@ -15,6 +15,7 @@ internal static class Program
     {
         ["hosted_input_desktop"] = new(),
         ["normal_ui_storage_and_record_visibility"] = new(),
+        ["settings_virtual_key_shortcut"] = new(),
         ["hotkey_summon_dismiss"] = new(),
         ["plain_paste_target_content"] = new(),
         ["rich_paste_target_content"] = new(),
@@ -318,16 +319,36 @@ internal static class Program
             Screenshot("seed-" + suffix);
             Dump(App(), "seed-" + suffix);
         }
-        var settingsButton = Named(App(), "Settings");
-        if (!settingsButton.TryGetCurrentPattern(InvokePattern.Pattern, out var openSettings))
-            throw new Unavailable("The actual Settings button is not invokable.");
-        ((InvokePattern)openSettings).Invoke();
         AutomationElement? settings = null;
+        Run("settings_virtual_key_shortcut", () =>
+        {
+            Named(App(), "Search clips").SetFocus();
+            Native.Chord(0x11, 0xBC);
+            try
+            {
+                Wait(() =>
+                {
+                    settings = FindSettingsWindow();
+                    return settings != null;
+                }, "Real Ctrl+VK_OEM_COMMA while search is focused opens Settings", 8);
+            }
+            finally
+            {
+                TopLevelInventory("settings-virtual-key");
+                Screenshot("settings-virtual-key");
+                Dump(App(), "settings-virtual-key");
+            }
+        });
+        if (settings == null)
+        {
+            var settingsButton = Named(App(), "Settings");
+            if (!settingsButton.TryGetCurrentPattern(InvokePattern.Pattern, out var openSettings))
+                throw new Unavailable("The actual Settings button is not invokable.");
+            ((InvokePattern)openSettings).Invoke();
+        }
         Wait(() =>
         {
-            settings = AutomationElement.RootElement.FindFirst(TreeScope.Children,
-                new AndCondition(new PropertyCondition(AutomationElement.ProcessIdProperty, candidate.Id),
-                    new PropertyCondition(AutomationElement.NameProperty, "Settings")));
+            settings = FindSettingsWindow();
             return settings != null;
         }, "Settings window accessibility");
         var filter = Descendants(settings!).FirstOrDefault(e => e.Current.ControlType == ControlType.Edit && !e.Current.IsOffscreen)
@@ -355,6 +376,11 @@ internal static class Program
             new AndCondition(new PropertyCondition(AutomationElement.ProcessIdProperty, candidate.Id),
                 new PropertyCondition(AutomationElement.NameProperty, "Settings"))) == null, "Settings cancellation", 8);
     }
+
+    private static AutomationElement? FindSettingsWindow()
+        => AutomationElement.RootElement.FindFirst(TreeScope.Children,
+            new AndCondition(new PropertyCondition(AutomationElement.ProcessIdProperty, candidate.Id),
+                new PropertyCondition(AutomationElement.NameProperty, "Settings")));
 
     private static void CheckHotkeys()
     {
@@ -561,12 +587,24 @@ internal static class Program
     private static void Wait(Func<bool> predicate, string description, int seconds = 15)
     {
         var clock = Stopwatch.StartNew();
+        Exception? unavailable = null;
         while (clock.Elapsed.TotalSeconds < seconds)
         {
-            if (predicate()) return;
+            try
+            {
+                if (predicate()) return;
+            }
+            catch (ElementNotAvailableException ex)
+            {
+                unavailable = ex;
+            }
+            catch (System.Runtime.InteropServices.COMException ex) when (ex.HResult == unchecked((int)0x80004005))
+            {
+                unavailable = ex;
+            }
             Pump(60);
         }
-        throw new Unavailable($"Timed out ({seconds}s): {description}. No passing claim.");
+        throw new Unavailable($"Timed out ({seconds}s): {description}. Last UIA unavailability: {unavailable?.Message ?? "none"}. No passing claim.");
     }
 
     private static void Require(bool condition, string detail) { if (!condition) throw new InvalidOperationException(detail); }
