@@ -5942,5 +5942,29 @@
     "find": "                        CAST($content AS TEXT), $contentType, $contentFormat,",
     "replace": "                        $content, $contentType, $contentFormat,",
     "filter": "FullyQualifiedName~CaptureBatchAsync_KeepsTextAfterANul"
+  },
+  {
+    "id": "test-temp-delete-keeps-pooled-handles",
+    "file": "Clipthrough.Tests/TestTempDirectories.cs",
+    "why": "Without clearing the pool, a disposed connection keeps the per-test database open, the delete fails, and every test that used a database leaves its directory in %TEMP% - 29 GiB before anyone noticed.",
+    "find": "    public static bool TryDelete(string path)\n    {\n        SqliteConnection.ClearAllPools();",
+    "replace": "    public static bool TryDelete(string path)\n    {\n        _ = typeof(SqliteConnection);",
+    "filter": "FullyQualifiedName~TestTempDirectoryCleanupTests.DisposingAScopeThatUsedTheDatabase_RemovesItsDirectory"
+  },
+  {
+    "id": "test-temp-sweep-ignores-age",
+    "file": "Clipthrough.Tests/TestTempDirectories.cs",
+    "why": "The sweep runs at the start of every test run; without the age check it deletes the databases of a run that is still going in another worktree.",
+    "find": "                    || Directory.GetCreationTimeUtc(path) >= cutoff\n                    || Directory.GetLastWriteTimeUtc(path) >= cutoff)",
+    "replace": "                    || cutoff > DateTime.MaxValue.AddDays(-1))",
+    "filter": "FullyQualifiedName~TestTempDirectoryCleanupTests.SweepStale_RemovesOnlyOldPerTestDirectories"
+  },
+  {
+    "id": "test-temp-sweep-ignores-name",
+    "file": "Clipthrough.Tests/TestTempDirectories.cs",
+    "why": "The sweep may only delete directories the tests created; without the name check it deletes anything old under the root.",
+    "find": "                if (!PerTestDirectoryName().IsMatch(Path.GetFileName(path))\n",
+    "replace": "                if ((!PerTestDirectoryName().IsMatch(Path.GetFileName(path)) && path.Length < 0)\n",
+    "filter": "FullyQualifiedName~TestTempDirectoryCleanupTests.SweepStale_RemovesOnlyOldPerTestDirectories"
   }
 ]
