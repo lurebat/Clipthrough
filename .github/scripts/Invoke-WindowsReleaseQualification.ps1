@@ -6,6 +6,8 @@ param(
     [Parameter(Mandatory)]
     [string] $HarnessDirectory,
     [Parameter(Mandatory)]
+    [string] $UiHarnessDirectory,
+    [Parameter(Mandatory)]
     [string] $EvidencePath
 )
 
@@ -19,6 +21,7 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') {
 $publish = (Resolve-Path $PublishDirectory).Path
 $feed = (Resolve-Path $FeedDirectory).Path
 $harness = (Resolve-Path $HarnessDirectory).Path
+$uiHarness = (Resolve-Path $UiHarnessDirectory).Path
 $evidence = [System.IO.Path]::GetFullPath($EvidencePath)
 $evidenceDirectory = [System.IO.Path]::GetDirectoryName($evidence)
 New-Item -ItemType Directory -Force -Path $evidenceDirectory | Out-Null
@@ -290,6 +293,42 @@ function Invoke-FeedUpdate {
     return [ordered]@{ manifest = $manifest; dataRootLog = $dataLog; updaterOutput = $stdout }
 }
 
+function Invoke-HostedUiQualification {
+    $uiDirectory = Join-Path $evidenceDirectory 'live-ui'
+    New-Item -ItemType Directory -Force -Path $uiDirectory | Out-Null
+    [IO.File]::WriteAllText(
+        (Join-Path $chosenDataRoot '.hosted-synthetic-root'),
+        'Clipthrough hosted synthetic qualification root',
+        [Text.UTF8Encoding]::new($false))
+    $uiExit = Invoke-CheckedProcess -FilePath (Join-Path $uiHarness 'HostedUiHarness.exe') `
+        -ArgumentList @('--launch', (Join-Path $installRoot 'current\Clipthrough.exe'), $chosenDataRoot, $uiDirectory) `
+        -StdoutPath (Join-Path $uiDirectory 'harness.stdout.log') `
+        -StderrPath (Join-Path $uiDirectory 'harness.stderr.log') `
+        -TimeoutSeconds 300 -AllowAnyExitCode
+    $uiReportPath = Join-Path $uiDirectory 'ui-evidence.json'
+    if (-not (Test-Path $uiReportPath)) {
+        throw "UI harness exited $uiExit without a completed evidence report."
+    }
+    $uiReport = Get-Content -Raw -LiteralPath $uiReportPath | ConvertFrom-Json
+    foreach ($gateName in @('hosted_input_desktop', 'normal_ui_storage_and_record_visibility', 'rich_paste_target_content')) {
+        $uiGate = $uiReport.gates.$gateName
+        Set-Gate $gateName $uiGate.status $uiGate.detail
+    }
+    $smokeGates = @('hotkey_summon_dismiss', 'plain_paste_target_content', 'png_full_detail_paste')
+    $smokeStatus = if (@($smokeGates | Where-Object { $uiReport.gates.$_.status -eq 'failed' }).Count) {
+        'failed'
+    } elseif (@($smokeGates | Where-Object { $uiReport.gates.$_.status -ne 'passed' }).Count) {
+        'blocked'
+    } else {
+        'passed'
+    }
+    Set-Gate 'interactive_clipboard_paste_hotkey_smoke' $smokeStatus `
+        "Actual foreground input, popup hotkeys, plain target paste and full PNG pixel comparison; see live-ui/ui-evidence.json. Harness exit=$uiExit."
+    if ($uiExit -eq 1 -or $uiExit -eq 2) {
+        throw "Hosted UI harness failed with exit $uiExit; inspect its evidence."
+    }
+}
+
 function Invoke-FailedApplyRollback {
     $packagePath = Join-Path $feed "Clipthrough-$candidateVersion-full.nupkg"
     if (-not (Test-Path $packagePath)) {
@@ -318,10 +357,24 @@ function Invoke-FailedApplyRollback {
     $oldManifestHash = (Get-FileHash -Algorithm SHA256 $oldManifestPath).Hash.ToLowerInvariant()
     $oldPayloadHash = (Get-FileHash -Algorithm SHA256 $oldPayloadPath).Hash.ToLowerInvariant()
     $candidatePackageHash = (Get-FileHash -Algorithm SHA256 $packagePath).Hash.ToLowerInvariant()
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $candidateArchive = [System.IO.Compression.ZipFile]::OpenRead($packagePath)
+    try {
+        $candidatePayloadEntry = $candidateArchive.GetEntry('lib/app/Clipthrough.dll')
+        if ($null -eq $candidatePayloadEntry) {
+            throw 'The generated candidate package has no lib/app/Clipthrough.dll payload to exercise.'
+        }
+        $candidatePackagePayloadHash = Get-ArchiveEntryHash $candidatePayloadEntry
+    }
+    finally {
+        $candidateArchive.Dispose()
+    }
     $rollbackEvidence = [ordered]@{
         fixture = 'fresh extracted v0.17.1 portable package'
         package = $packagePath
         packageSha256 = $candidatePackageHash
+        candidatePayload = 'lib/app/Clipthrough.dll'
+        candidatePayloadSha256 = $candidatePackagePayloadHash
         oldManifest = $oldManifest
         oldManifestSha256 = $oldManifestHash
         oldPayload = 'current\Clipthrough.dll'
@@ -346,8 +399,8 @@ function Invoke-FailedApplyRollback {
     $rollbackEvidence.updaterVersionOutput = (Get-Content -Raw $versionOutput) + (Get-Content -Raw $versionError)
     $rollbackEvidence.updaterVersionExitCode = $versionExit
 
-    $tempDirectory = Join-Path $rollbackRoot 'packages\VelopackTemp'
-    New-Item -ItemType Directory -Force -Path $tempDirectory | Out-Null
+    $packagesDirectory = Join-Path $rollbackRoot 'packages'
+    New-Item -ItemType Directory -Force -Path $packagesDirectory | Out-Null
     $updaterLog = Join-Path $evidenceDirectory 'failed-replacement-apply.log'
     $updaterStdout = Join-Path $evidenceDirectory 'failed-replacement-apply.stdout.log'
     $updaterStderr = Join-Path $evidenceDirectory 'failed-replacement-apply.stderr.log'
@@ -369,10 +422,10 @@ function Invoke-FailedApplyRollback {
             if ($updater.HasExited) { break }
 
             if ($null -eq $lockedStream) {
-                foreach ($directory in Get-ChildItem -LiteralPath $tempDirectory -Directory -ErrorAction SilentlyContinue) {
-                    $candidatePayload = Join-Path $directory.FullName 'Clipthrough.dll'
-                    if (-not (Test-Path $candidatePayload -PathType Leaf)) { continue }
+                foreach ($candidateFile in Get-ChildItem -LiteralPath $packagesDirectory -Filter 'Clipthrough.dll' -File -Recurse -ErrorAction SilentlyContinue) {
+                    $candidatePayload = $candidateFile.FullName
                     try {
+                        # Denying FILE_SHARE_DELETE forces the second directory rename to fail, not app startup.
                         $stream = [System.IO.File]::Open(
                             $candidatePayload,
                             [System.IO.FileMode]::Open,
@@ -381,8 +434,11 @@ function Invoke-FailedApplyRollback {
                         if ($stream.Length -gt 0) {
                             $lockedStream = $stream
                             $lockedFile = $candidatePayload
+                            $actualCandidatePayloadHash = (Get-FileHash -Algorithm SHA256 $candidatePayload).Hash.ToLowerInvariant()
                             $rollbackEvidence.replacementFailureInjected = $true
                             $rollbackEvidence.newExtractionLockedFile = $candidatePayload
+                            $rollbackEvidence.newExtractionPayloadSha256 = $actualCandidatePayloadHash
+                            $rollbackEvidence.newExtractionPayloadMatchesPackage = $actualCandidatePayloadHash -eq $candidatePackagePayloadHash
                             Write-Host "Holding $candidatePayload without FILE_SHARE_DELETE until Update.exe exits."
                             break
                         }
@@ -423,26 +479,33 @@ function Invoke-FailedApplyRollback {
 
     $logText = if (Test-Path $updaterLog) { Get-Content -Raw -Path $updaterLog } else { '' }
     $reachedReplacement = $logText.Contains('Replacing current dir', [StringComparison]::OrdinalIgnoreCase)
-    $failedReplacement = $logText.Contains('Failed to replace current dir', [StringComparison]::OrdinalIgnoreCase)
+    $failedReplacement = $logText.Contains('Failed to replace current dir', [StringComparison]::OrdinalIgnoreCase) `
+        -or $logText.Contains('Unable to complete the update, and the app was left in a broken state.', [StringComparison]::OrdinalIgnoreCase)
     $currentManifestPath = Join-Path $rollbackRoot 'current\sq.version'
     $currentPayloadPath = Join-Path $rollbackRoot 'current\Clipthrough.dll'
-    $manifestPreserved = Test-Path $currentManifestPath -PathType Leaf `
+    $manifestPreserved = (Test-Path $currentManifestPath -PathType Leaf) `
         -and (Read-VersionManifest $rollbackRoot) -eq $oldManifest
-    $payloadPreserved = Test-Path $currentPayloadPath -PathType Leaf `
+    $payloadPreserved = (Test-Path $currentPayloadPath -PathType Leaf) `
         -and (Get-FileHash -Algorithm SHA256 $currentPayloadPath).Hash.ToLowerInvariant() -eq $oldPayloadHash
     $rollbackEvidence.applyLogReachedReplacement = $reachedReplacement
     $rollbackEvidence.applyLogReportedReplacementFailure = $failedReplacement
     $rollbackEvidence.oldManifestRestored = $manifestPreserved
     $rollbackEvidence.oldPayloadByteMatch = $payloadPreserved
 
-    if ($rollbackEvidence.replacementFailureInjected -and $reachedReplacement -and $failedReplacement -and $manifestPreserved -and $payloadPreserved -and $rollbackEvidence.updateExitCode -ne 0) {
+    if ($rollbackEvidence.replacementFailureInjected -and $rollbackEvidence.newExtractionPayloadMatchesPackage -and $reachedReplacement -and $failedReplacement -and $manifestPreserved -and $payloadPreserved -and $rollbackEvidence.updateExitCode -ne 0) {
         Set-Gate 'failed_apply_payload_and_manifest_preserved' 'passed' "Update.exe hit its current-directory replacement error and restored the old manifest $oldManifest plus current\\Clipthrough.dll SHA-256 $oldPayloadHash."
         Set-Gate 'failed_update_rollback' 'passed' "A held-open extracted candidate payload caused the real Update.exe apply replacement rename to fail; its old version rollback completed with exit $($rollbackEvidence.updateExitCode)."
     }
     else {
-        $detail = "replacement lock injected=$($rollbackEvidence.replacementFailureInjected); log reached replacement=$reachedReplacement; log reported failed replacement=$failedReplacement; old manifest restored=$manifestPreserved; old payload byte-match=$payloadPreserved; updater exit=$($rollbackEvidence.updateExitCode)."
-        Set-Gate 'failed_apply_payload_and_manifest_preserved' 'failed' $detail
-        Set-Gate 'failed_update_rollback' 'failed' "The real apply-replacement failure did not restore the old manifest and payload. $detail"
+        $detail = "replacement lock injected=$($rollbackEvidence.replacementFailureInjected); candidate payload matches package=$($rollbackEvidence.newExtractionPayloadMatchesPackage); log reached replacement=$reachedReplacement; log reported failed replacement=$failedReplacement; old manifest restored=$manifestPreserved; old payload byte-match=$payloadPreserved; updater exit=$($rollbackEvidence.updateExitCode)."
+        if ($reachedReplacement -and $failedReplacement -and $rollbackEvidence.newExtractionPayloadMatchesPackage) {
+            Set-Gate 'failed_apply_payload_and_manifest_preserved' 'failed' $detail
+            Set-Gate 'failed_update_rollback' 'failed' "The real apply-replacement failure did not restore the old manifest and payload. $detail"
+        }
+        else {
+            Set-Gate 'failed_apply_payload_and_manifest_preserved' 'blocked' "The fixture did not establish the intended replacement failure. $detail"
+            Set-Gate 'failed_update_rollback' 'blocked' "Rollback has not been exercised by a verified replacement failure. $detail"
+        }
     }
 
     $databaseHashAfter = if (Test-Path $databasePath -PathType Leaf) {
@@ -517,7 +580,7 @@ try {
     $setupStderr = Join-Path $evidenceDirectory 'setup.stderr.log'
     $setupLog = Join-Path $evidenceDirectory 'setup-install.log'
     $setupProcess = Start-Process -FilePath $setupPath `
-        -ArgumentList @('--silent', '--log', "`"$setupLog`"", '--installto', "`"$installRoot`"", '--', '--help') `
+        -ArgumentList @('--silent', '--log', "`"$setupLog`"", '--installto', "`"$installRoot`"") `
         -PassThru `
         -RedirectStandardOutput $setupStdout `
         -RedirectStandardError $setupStderr
@@ -527,6 +590,13 @@ try {
     }
     $setupProcess.Refresh()
     if ($setupProcess.ExitCode -ne 0) { throw "Legacy Setup exited with $($setupProcess.ExitCode)." }
+    $setupApps = @(Get-Process -Name Clipthrough -ErrorAction SilentlyContinue)
+    foreach ($setupApp in $setupApps) {
+        if (-not $setupApp.Path.StartsWith($installRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Setup started an app outside its isolated installation: $($setupApp.Path)"
+        }
+        Stop-Process -Id $setupApp.Id -Force
+    }
     $oldManifest = Read-VersionManifest $installRoot
     if ($oldManifest -notmatch '0\.17\.1') { throw "The Setup installed unexpected version '$oldManifest'." }
     if (-not (Test-Path (Join-Path $installRoot 'Update.exe'))) { throw 'The Setup install has no Update.exe.' }
@@ -542,6 +612,7 @@ try {
     Invoke-QualificationTest -Mode verify -DataRoot $chosenDataRoot -Label 'verify-installed-update'
     Set-Gate 'candidate_feed_download_and_apply' 'passed' "Velopack 1.2.0 SimpleWebSource consumed the generated stable feed over loopback HTTP, downloaded the full candidate and UpdateManager applied it through the real installed locator: $($installedUpdate.manifest). Feed transport was local fixture, not the production GitHub release endpoint."
     Set-Gate 'explicit_data_root_restart_survival' 'passed' "The actual post-update app restart logged CommandLine root $chosenDataRoot; the shipping store read the seeded IDs after the restart."
+    Invoke-HostedUiQualification
 
     Expand-Archive -LiteralPath $portablePath -DestinationPath $portableRoot -Force
     if (-not (Test-Path (Join-Path $portableRoot '.portable')) -or -not (Test-Path (Join-Path $portableRoot 'Update.exe'))) {
@@ -628,8 +699,8 @@ finally {
         outcome = if ($fatalError) { 'failed' } elseif ($requiredGateFailure) { 'blocked' } else { 'passed' }
         fatalError = $fatalError
         limitations = @(
-            'No clipboard, foreground paste, image, detail-view or hotkey smoke checks are performed.',
-            'The shipping storage service validates the actual configured DB path and synthetic records; visible normal-window row presentation is not tested.',
+            'Actual input delivery, normal UI rows/storage, RTF rendered paste, PNG full-detail and popup hotkeys are reported separately in live-ui/ui-evidence.json; unsupported or incomplete scenarios are not passes.',
+            'HTML rendered paste is not covered by the native RTF target scenario.',
             'A visible window station and accessible input desktop are not proof of a physical monitor, hardware GPU, graphics-driver behavior or IME.',
             'The update feed uses Velopack 1.2.0 SimpleWebSource against a local HTTP fixture because this workflow has read-only GitHub permissions and does not publish a release.',
             'The malformed-package case is distinct from the injected apply-replacement failure: it verifies rejection before any swap.'

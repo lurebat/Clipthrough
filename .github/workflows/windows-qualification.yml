@@ -66,6 +66,10 @@ jobs:
             --self-contained false `
             --output artifacts\qualification\feed-harness
           if ($LASTEXITCODE -ne 0) { throw "Feed helper build failed with exit code $LASTEXITCODE." }
+          dotnet build .\.github\scripts\qualification-ui\HostedUiHarness.csproj `
+            --configuration Release `
+            --output artifacts\qualification\ui-harness
+          if ($LASTEXITCODE -ne 0) { throw "UI helper build failed with exit code $LASTEXITCODE." }
 
       - name: Qualify release install, update and data survival
         shell: pwsh
@@ -73,6 +77,7 @@ jobs:
           -PublishDirectory .\artifacts\qualification\publish `
           -FeedDirectory .\artifacts\qualification\feed `
           -HarnessDirectory .\artifacts\qualification\feed-harness `
+          -UiHarnessDirectory .\artifacts\qualification\ui-harness `
           -EvidencePath .\artifacts\qualification\evidence.json
 
       - name: Upload qualification evidence
@@ -86,5 +91,7 @@ jobs:
             artifacts/qualification/**/*.log
             artifacts/qualification/**/*.trx
             artifacts/qualification/**/*.txt
+            artifacts/qualification/**/*.png
+            artifacts/qualification/**/*.rtf
           if-no-files-found: warn
           retention-days: 30
