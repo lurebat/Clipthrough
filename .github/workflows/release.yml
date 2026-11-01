@@ -103,6 +103,7 @@ jobs:
             --packVersion ${{ steps.ver.outputs.version }} `
             --packDir artifacts\publish `
             --mainExe Clipthrough.exe `
+            --exclude '(?!)' `
             --framework net10.0.14-x64-runtime `
             --outputDir artifacts\velopack
 

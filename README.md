@@ -74,7 +74,7 @@ dotnet test .\Clipthrough.Tests\Clipthrough.Tests.csproj
 
 ### Release a new version
 
-Tag the commit `vX.Y.Z` and push. The `release.yml` workflow publishes a framework-dependent build, zips it, creates the Velopack installer/feed assets, and publishes a GitHub Release. The published release updates the default feed at `https://github.com/lurebat/Clipthrough/releases/latest/download`.
+Tag the commit `vX.Y.Z` and push. The `release.yml` workflow publishes a framework-dependent win-x64 build, zips it, creates the Velopack installer/feed assets, and publishes a GitHub Release. Native symbols ship separately; managed PDBs stay with the application in both the ZIP and Velopack packages. The published release updates the default feed at `https://github.com/lurebat/Clipthrough/releases/latest/download`.
 
 ```powershell
 git tag v0.5.0
@@ -83,14 +83,19 @@ git push origin v0.5.0
 
 ### Build a local release package
 
-Use the same flow as the GitHub release workflow:
+Use the same flow as the GitHub release workflow, with its pinned version of `vpk`. This builds local assets without publishing a release:
 
 ```powershell
 dotnet restore .\Clipthrough.slnx
-dotnet publish .\Clipthrough\Clipthrough.csproj --configuration Release -p:Version=0.5.0 --output .\artifacts\publish
+dotnet publish .\Clipthrough\Clipthrough.csproj --configuration Release -r win-x64 --self-contained false -p:Version=0.5.0 --output .\artifacts\publish
+pwsh .\.github\scripts\Stage-PublishSymbols.ps1 -PublishDirectory .\artifacts\publish -SymbolsDirectory .\artifacts\symbols
 Compress-Archive -Path .\artifacts\publish\* -DestinationPath .\artifacts\Clipthrough-0.5.0-win-x64.zip
-vpk pack --packId Clipthrough --packVersion 0.5.0 --packDir .\artifacts\publish --mainExe Clipthrough.exe --outputDir .\artifacts\velopack
+Compress-Archive -Path .\artifacts\symbols\* -DestinationPath .\artifacts\Clipthrough-0.5.0-win-x64-symbols.zip
+$runtimeFloor = (Get-Content .\artifacts\publish\Clipthrough.runtimeconfig.json -Raw | ConvertFrom-Json).runtimeOptions.framework.version
+vpk pack --packId Clipthrough --packVersion 0.5.0 --packDir .\artifacts\publish --mainExe Clipthrough.exe --exclude '(?!)' --framework "net$runtimeFloor-x64-runtime" --outputDir .\artifacts\velopack
 ```
+
+Velopack's default `--exclude` removes all PDBs. The never-matching override keeps the managed symbols after `Stage-PublishSymbols.ps1` has removed the native ones; `ReleasePackagingTests` guards the override.
 
 ## Project layout
 

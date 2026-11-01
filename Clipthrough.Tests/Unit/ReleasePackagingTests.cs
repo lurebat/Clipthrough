@@ -151,6 +151,22 @@ public sealed class ReleasePackagingTests
         Assert.Equal(target.Groups["minor"].Value, match.Groups["minor"].Value);
     }
 
+    [Fact]
+    public void VelopackKeepsManagedSymbolsAfterNativeSymbolsAreStaged()
+    {
+        var workflow = File.ReadAllText(RepoFile(".github", "workflows", "release.yml"));
+        var pack = Regex.Match(workflow, @"(?s)vpk pack(?<arguments>.*?--outputDir\s+\S+)");
+        Assert.True(pack.Success, "release.yml has no vpk pack command with an output directory.");
+
+        // vpk 1.2.0 defaults --exclude to .*\.pdb, even after our stager has
+        // removed native symbols. Override it so managed symbols survive packaging.
+        var exclude = Regex.Match(pack.Groups["arguments"].Value, @"--exclude\s+['""](?<pattern>[^'""]+)['""]");
+        Assert.True(exclude.Success, "vpk pack must override its default PDB exclusion.");
+        var pattern = new Regex(exclude.Groups["pattern"].Value, RegexOptions.CultureInvariant);
+        Assert.False(pattern.IsMatch("Clipthrough.pdb"));
+        Assert.False(pattern.IsMatch("ShareX.ImageEditor.pdb"));
+    }
+
     /// <summary>
     /// The release ZIP is the same publish output without Velopack in front
     /// of it, so the only thing that can refuse a runtime below the floor is
