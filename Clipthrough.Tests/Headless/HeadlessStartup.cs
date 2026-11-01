@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
 using Clipthrough.ViewModels;
@@ -34,5 +35,33 @@ internal static class HeadlessStartup
             await Task.Delay(10);
             Dispatcher.UIThread.RunJobs();
         }
+    }
+
+    /// <summary>
+    /// Makes <paramref name="scope"/> wait for <paramref name="viewModel"/>'s
+    /// unawaited database work before deleting its directory: the latest
+    /// database start (a save from the welcome screen starts one) and the
+    /// maintenance pass that a start or a save leaves running. Either outlived
+    /// the test still opening the database, so the delete failed and the
+    /// directory leaked (docs/solutions/test-temp-databases-leak-through-the-connection-pool.md).
+    /// The work posts to the UI thread, so the wait pumps it; it runs from the
+    /// scope's Dispose, after the view model and window are torn down, which
+    /// is the order docs/solutions/headless-teardown-leaks-dispatcher-jobs.md requires.
+    /// </summary>
+    public static void DrainDatabaseWorkBeforeDelete(TemporaryDatabaseScope scope, MainWindowViewModel viewModel)
+    {
+        scope.BeforeDelete = () =>
+        {
+            // Bounded and silent: teardown must not fail the test that owned it.
+            // The start assigns the maintenance task as it finishes, so both are
+            // re-read on every pass.
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+            while ((viewModel.DatabaseStartupTask is { IsCompleted: false } || viewModel.MaintenanceTask is { IsCompleted: false })
+                && DateTime.UtcNow < deadline)
+            {
+                try { Dispatcher.UIThread.RunJobs(); } catch { /* test teardown */ }
+                Thread.Sleep(10);
+            }
+        };
     }
 }

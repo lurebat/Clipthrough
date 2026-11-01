@@ -5966,5 +5966,29 @@
     "find": "                if (!PerTestDirectoryName().IsMatch(Path.GetFileName(path))\n",
     "replace": "                if ((!PerTestDirectoryName().IsMatch(Path.GetFileName(path)) && path.Length < 0)\n",
     "filter": "FullyQualifiedName~TestTempDirectoryCleanupTests.SweepStale_RemovesOnlyOldPerTestDirectories"
+  },
+  {
+    "id": "headless-scope-skips-database-work-drain",
+    "file": "Clipthrough.Tests/Headless/HeadlessStartup.cs",
+    "why": "A save from the welcome screen starts the database in the background and nothing awaits it; without the drain the start is still reopening the database when the scope deletes it, and the directory leaks.",
+    "find": "                && DateTime.UtcNow < deadline)",
+    "replace": "                && DateTime.UtcNow > deadline)",
+    "filter": "FullyQualifiedName~MainWindowViewModelHeadlessTests.ASaveFromTheWelcomeScreen_DoesNotLeaveItsDatabaseDirectoryBehind"
+  },
+  {
+    "id": "headless-scope-skips-maintenance-drain",
+    "file": "Clipthrough.Tests/Headless/HeadlessStartup.cs",
+    "why": "A save with the database open ends with a maintenance pass nothing awaits; without waiting for it the pass reopens the database while the scope deletes it, and the directory leaks.",
+    "find": "|| viewModel.MaintenanceTask is { IsCompleted: false })",
+    "replace": "|| (viewModel.MaintenanceTask is { IsCompleted: false } && deadline < DateTime.MinValue))",
+    "filter": "FullyQualifiedName~MainWindowViewModelHeadlessTests.ASaveWithTheDatabaseOpen_DoesNotLeaveItsDatabaseDirectoryBehind"
+  },
+  {
+    "id": "startup-backup-untracked",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "The daily backup a database start runs on a pool thread is part of MaintenanceTask; untracked, a test scope deletes its directory while the backup is still copying into it, and the directory leaks.",
+    "find": "        TrackMaintenance(Task.Run(async () =>",
+    "replace": "        _ = (Task.Run(async () =>",
+    "filter": "FullyQualifiedName~MainWindowViewModelHeadlessTests.TheStartupBackup_RunsBeforeTheScopeDeletesItsDirectory"
   }
 ]

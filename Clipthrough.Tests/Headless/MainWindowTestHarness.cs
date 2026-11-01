@@ -117,6 +117,7 @@ internal sealed class MainWindowTestHarness : IDisposable
             new NoOpBackgroundOcrQueue(),
             new BackgroundJobIndicator(),
             scope.DatabaseInitializer);
+        HeadlessStartup.DrainDatabaseWorkBeforeDelete(scope, viewModel);
 
         var motion = motionFactory?.Invoke(scope.SettingsService);
         var window = new MainWindow(systemInteraction, placementStore, motion) { DataContext = viewModel };

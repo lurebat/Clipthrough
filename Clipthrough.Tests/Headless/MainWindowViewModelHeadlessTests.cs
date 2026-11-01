@@ -2040,7 +2040,7 @@ public sealed partial class MainWindowViewModelHeadlessTests
         Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null,
         Clipthrough.Services.IDatabaseBackupService? databaseBackupService = null)
     {
-        return new MainWindowViewModel(
+        var viewModel = new MainWindowViewModel(
             clipStore ?? scope.ClipStoreService,
             clipboardMonitor,
             scope.SettingsService,
@@ -2061,6 +2061,8 @@ public sealed partial class MainWindowViewModelHeadlessTests
             embeddingWorker: embeddingWorker,
             databaseBackupService: databaseBackupService,
             dragDropService: dragDropService);
+        HeadlessStartup.DrainDatabaseWorkBeforeDelete(scope, viewModel);
+        return viewModel;
     }
 
     /// <summary>
