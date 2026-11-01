@@ -2380,7 +2380,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             });
 
             StartBackgroundServices();
-            _ = ApplyMaintenanceAndRefreshAsync(forceRefresh: false);
+            TrackMaintenance(ApplyMaintenanceAndRefreshAsync(forceRefresh: false));
         }
         catch (Exception ex)
         {
@@ -6457,7 +6457,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 _embeddingWorker?.Poke();
             }
         });
-        _ = ApplyMaintenanceAndRefreshAsync();
+        TrackMaintenance(ApplyMaintenanceAndRefreshAsync());
 
         if (_isDatabaseReady && _ocrService.IsAvailable)
         {
@@ -6775,7 +6775,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // Take a daily backup once the database has been opened, integrity-
         // checked, and migrated. Fire-and-forget so a slow file-system copy
         // never delays the first refresh.
-        _ = Task.Run(async () =>
+        TrackMaintenance(Task.Run(async () =>
         {
             try
             {
@@ -6797,7 +6797,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 Trace.TraceWarning($"Daily backup failed: {ex.Message}");
             }
-        });
+        }));
     }
 
     /// <summary>
@@ -7364,6 +7364,36 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         return rules.ToArray();
+    }
+
+    /// <summary>
+    /// Every maintenance pass or daily backup still running that a database
+    /// start or a settings save started. Nothing in the app awaits them; tests
+    /// do, because they reopen the database after the test has finished with it.
+    /// </summary>
+    internal Task? MaintenanceTask
+    {
+        get
+        {
+            lock (_maintenanceTaskGate)
+            {
+                return _maintenanceTask;
+            }
+        }
+    }
+
+    private readonly Lock _maintenanceTaskGate = new();
+    private Task? _maintenanceTask;
+
+    private void TrackMaintenance(Task pass)
+    {
+        // A save can start a pass while the start's pass is still running, and
+        // the daily backup is tracked from a pool thread.
+        lock (_maintenanceTaskGate)
+        {
+            var previous = _maintenanceTask;
+            _maintenanceTask = previous is { IsCompleted: false } ? Task.WhenAll(previous, pass) : pass;
+        }
     }
 
     private async Task ApplyMaintenanceAndRefreshAsync(bool forceRefresh = true)

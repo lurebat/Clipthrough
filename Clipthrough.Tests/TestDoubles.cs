@@ -713,7 +713,20 @@ internal sealed class TemporaryDatabaseScope : IDisposable
 
     public ClipStoreService ClipStoreService { get; }
 
-    public void Dispose() => TestTempDirectories.TryDelete(_directoryPath);
+    /// <summary>
+    /// Runs before the directory is deleted. A view model leaves database work
+    /// running that its synchronous Dispose does not await - a database start,
+    /// a maintenance pass, the daily backup - and while it runs it reopens the database,
+    /// so the delete fails however the pools are cleared. See
+    /// HeadlessStartup.DrainDatabaseWorkBeforeDelete.
+    /// </summary>
+    internal Action? BeforeDelete { get; set; }
+
+    public void Dispose()
+    {
+        BeforeDelete?.Invoke();
+        TestTempDirectories.TryDelete(_directoryPath);
+    }
 }
 
 internal sealed class TestAiTransformService : IAiTransformService

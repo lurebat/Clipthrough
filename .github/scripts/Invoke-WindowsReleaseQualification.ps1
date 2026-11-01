@@ -234,7 +234,8 @@ function Wait-ForDataRootLog {
             $stream = $null
             $reader = $null
             try {
-                $stream = [System.IO.File]::OpenRead($log)
+                $stream = [System.IO.File]::Open($log, [System.IO.FileMode]::Open,
+                    [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
                 $offset = if ($StartOffset -ge 0 -and $stream.Length -ge $StartOffset) { $StartOffset } else { 0 }
                 [void]$stream.Seek($offset, [System.IO.SeekOrigin]::Begin)
                 $reader = [System.IO.StreamReader]::new($stream)

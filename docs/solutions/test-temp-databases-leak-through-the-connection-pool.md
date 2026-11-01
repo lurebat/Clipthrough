@@ -49,6 +49,41 @@ Clearing the pool globally in teardown is safe only because the test assembly
 disables parallelization (`AvaloniaHeadlessSetup.cs`). If that ever changes,
 one test's teardown would close another test's pooled connections.
 
+## Work that outlives the test
+
+Clearing the pool is not enough when something reopens the database after the
+clear: the delete fails again and the directory still leaks. A full headless
+run with the fix above still left five directories, and three pieces of
+`MainWindowViewModel` work nobody awaited caused them:
+
+- A save from the welcome screen starts the database in the background
+  (`DatabaseStartupTask`) and returns.
+- A database start, and a save with the database open, end with a maintenance
+  pass that reloads the rules and refreshes the list.
+- A database start runs the daily backup on a pool thread, which copies the
+  library into `backups\`.
+
+The view model's `Dispose` is synchronous, so it cannot wait for them. The
+view model now keeps the passes and the backup in `MaintenanceTask` (internal,
+for tests; the app still does not await it). `TemporaryDatabaseScope` has a
+`BeforeDelete` hook, and `HeadlessStartup.DrainDatabaseWorkBeforeDelete` sets
+it to wait for `DatabaseStartupTask` and `MaintenanceTask` while pumping the
+UI thread. The wait is bounded at 30 seconds. `CreateViewModel` in
+`MainWindowViewModelHeadlessTests` and `MainWindowTestHarness.Create` install
+it. It runs from the scope's `Dispose`, after the view model and window are
+torn down, which is the order
+`headless-teardown-leaks-dispatcher-jobs.md` requires.
+
+The fix was not to lengthen `TryDelete`'s retries. That would only move the
+race, and on an empty library most of this work finishes inside them anyway.
+That is also why the regression tests slow the maintenance pass and the backup
+on purpose: without that, a scope that does not wait still passes.
+
+When measuring a leak like this, run the mutation check before the
+measurement, not between. `Invoke-MutationCheck.ps1` builds into the same
+`artifacts\bin` and leaves the last mutant's assembly there, so a later
+`--no-build` run tests the mutant.
+
 ## Prevention
 
 - Create per-test directories with `TestTempDirectories.CreateDirectory()`
@@ -63,3 +98,9 @@ one test's teardown would close another test's pooled connections.
   GUID-named directories. Three mutants in `mutants.json` (`test-temp-*`)
   prove it fails when the pool clear, the age guard or the name guard is
   removed.
+- Background database work a view model starts and does not await goes into
+  `MaintenanceTask` through `TrackMaintenance`, so a test can wait for it.
+  The three `MainWindowViewModelHeadlessTests.TempCleanup.cs` tests cover the
+  database start, the maintenance pass and the daily backup. Their mutants
+  (`headless-scope-skips-*`, `startup-backup-untracked`) prove each one fails
+  without its wait.
