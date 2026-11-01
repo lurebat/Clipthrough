@@ -44,7 +44,8 @@ public sealed class HostedUpgradeQualificationTests
         Assert.Equal(expectedDatabasePath, storage.Current.DatabasePath);
         var factory = new SqliteConnectionFactory(storage);
         var sensitivity = new SensitivityService(factory);
-        await new DatabaseInitializer(factory, sensitivity).InitializeAsync();
+        if (mode == "seed")
+            await new DatabaseInitializer(factory, sensitivity).InitializeAsync();
         var store = new ClipStoreService(factory, sensitivity, new TestSettingsService(), new TestNotificationService());
 
         if (mode == "seed")
