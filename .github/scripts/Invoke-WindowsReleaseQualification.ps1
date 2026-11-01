@@ -365,6 +365,24 @@ function Invoke-HostedUiQualification {
     }
 }
 
+function Get-RollbackFileEvidence {
+    param([string] $Path)
+    $stream = [System.IO.File]::Open(
+        $Path,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read,
+        [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete)
+    try {
+        return [ordered]@{
+            length = $stream.Length
+            sha256 = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($stream)).ToLowerInvariant()
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
 function Get-RollbackDataRootSnapshot {
     param([string] $DataRoot)
     $files = @(
@@ -378,11 +396,12 @@ function Get-RollbackDataRootSnapshot {
         foreach ($relativePath in $files) {
             $path = Join-Path $DataRoot $relativePath
             if (Test-Path $path -PathType Leaf) {
+                $file = Get-RollbackFileEvidence $path
                 [ordered]@{
                     name = $relativePath
                     exists = $true
-                    length = (Get-Item -LiteralPath $path).Length
-                    sha256 = (Get-FileHash -Algorithm SHA256 $path).Hash.ToLowerInvariant()
+                    length = $file.length
+                    sha256 = $file.sha256
                 }
             }
             else {
@@ -416,33 +435,50 @@ function Get-RollbackDataRootChanges {
     )
 }
 
-function Find-RenamedOldInstallationRoots {
-    param([string] $Root, [string] $ManifestSha256, [string] $PayloadSha256)
+function Get-RollbackInstallationInventory {
+    param([string] $Root, [string[]] $ExcludedRoots = @())
     $parent = Split-Path -Parent $Root
-    $candidateDirectories = [System.Collections.Generic.List[string]]::new()
-    $packageDirectory = Join-Path $Root 'packages'
-    if (Test-Path $packageDirectory -PathType Container) {
-        foreach ($directory in Get-ChildItem -LiteralPath $packageDirectory -Directory -Recurse -ErrorAction SilentlyContinue) {
-            $candidateDirectories.Add($directory.FullName)
+    $excluded = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($excludedRoot in $ExcludedRoots) {
+        if (-not [string]::IsNullOrWhiteSpace($excludedRoot)) {
+            [void]$excluded.Add([System.IO.Path]::GetFullPath($excludedRoot))
         }
     }
-    if (Test-Path $parent -PathType Container) {
-        foreach ($directory in Get-ChildItem -LiteralPath $parent -Directory -ErrorAction SilentlyContinue) {
-            if ($directory.FullName -ne $Root) {
-                $candidateDirectories.Add($directory.FullName)
-            }
+
+    $directories = [System.Collections.Generic.List[string]]::new()
+    if (Test-Path $Root -PathType Container) { $directories.Add([System.IO.Path]::GetFullPath($Root)) }
+    foreach ($directory in Get-ChildItem -LiteralPath $parent -Directory -ErrorAction Stop) {
+        $fullPath = [System.IO.Path]::GetFullPath($directory.FullName)
+        if ($fullPath -ne [System.IO.Path]::GetFullPath($Root) -and -not $excluded.Contains($fullPath)) {
+            $directories.Add($fullPath)
         }
     }
+
+    $knownFiles = @(
+        'current\sq.version',
+        'current\Clipthrough.dll',
+        'settings.json',
+        'storage.json',
+        'window.json',
+        'copilot-token.bin',
+        'logs\clipthrough.log',
+        'ClipthroughData\clipthrough.db'
+    )
     return @(
-        foreach ($directory in $candidateDirectories | Select-Object -Unique) {
-            $manifestPath = Join-Path $directory 'current\sq.version'
-            $payloadPath = Join-Path $directory 'current\Clipthrough.dll'
-            if (-not (Test-Path $manifestPath -PathType Leaf) -or -not (Test-Path $payloadPath -PathType Leaf)) { continue }
-            $manifestHash = (Get-FileHash -Algorithm SHA256 $manifestPath).Hash.ToLowerInvariant()
-            $payloadHash = (Get-FileHash -Algorithm SHA256 $payloadPath).Hash.ToLowerInvariant()
-            if ($manifestHash -eq $ManifestSha256 -and $payloadHash -eq $PayloadSha256) {
-                $directory
-            }
+        foreach ($directory in $directories | Select-Object -Unique) {
+            $files = @(
+                foreach ($relativePath in $knownFiles) {
+                    $path = Join-Path $directory $relativePath
+                    if (-not (Test-Path $path -PathType Leaf)) {
+                        [ordered]@{ name = $relativePath; exists = $false; length = $null; sha256 = $null }
+                        continue
+                    }
+
+                    $file = Get-RollbackFileEvidence $path
+                    [ordered]@{ name = $relativePath; exists = $true; length = $file.length; sha256 = $file.sha256 }
+                }
+            )
+            [ordered]@{ path = $directory; files = $files }
         }
     )
 }
@@ -450,6 +486,7 @@ function Find-RenamedOldInstallationRoots {
 function Invoke-RollbackCandidateAppStart {
     param([string] $Root, [string] $DataRoot, [string] $SourceName, [string] $Label)
     $priorIds = @(Get-Process -Name Clipthrough -ErrorAction SilentlyContinue | ForEach-Object Id)
+    $expectedAppPath = [System.IO.Path]::GetFullPath((Join-Path $Root 'current\Clipthrough.exe'))
     $logPath = Join-Path $DataRoot 'logs\clipthrough.log'
     $logOffset = if (Test-Path $logPath -PathType Leaf) { (Get-Item -LiteralPath $logPath).Length } else { 0 }
     $appStdout = Join-Path $evidenceDirectory "$Label-app.stdout.log"
@@ -462,13 +499,32 @@ function Invoke-RollbackCandidateAppStart {
         -RedirectStandardError $appStderr
     try {
         $dataRootLog = Wait-ForDataRootLog -Root $DataRoot -SourceName $SourceName -StartOffset $logOffset -TimeoutSeconds 180
+        $deadline = [DateTime]::UtcNow.AddSeconds(30)
+        $candidateApp = $null
+        do {
+            $candidateApp = Get-Process -Name Clipthrough -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $_.Id -notin $priorIds `
+                        -and [System.IO.Path]::GetFullPath($_.Path).Equals($expectedAppPath, [StringComparison]::OrdinalIgnoreCase)
+                } |
+                Select-Object -First 1
+            if ($null -eq $candidateApp) { Start-Sleep -Milliseconds 250 }
+        } while ($null -eq $candidateApp -and [DateTime]::UtcNow -lt $deadline)
+        if ($null -eq $candidateApp) {
+            throw "The root execution stub logged startup, but no live candidate process was found at $expectedAppPath."
+        }
         Start-Sleep -Seconds 3
-        $app.Refresh()
-        if ($app.HasExited) {
-            throw "Candidate app exited with $($app.ExitCode) after logging its resolved data root."
+        $candidateApp.Refresh()
+        if ($candidateApp.HasExited -or -not [System.IO.Path]::GetFullPath($candidateApp.Path).Equals(
+                $expectedAppPath, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'The verified current\Clipthrough.exe process exited or changed image before the recovery check completed.'
         }
         return [ordered]@{
             processStarted = $true
+            processId = $candidateApp.Id
+            processPath = $candidateApp.Path
+            executionStubProcessId = $app.Id
+            executionStubExited = $app.HasExited
             dataRootLog = $dataRootLog
             dataRootLogOffsetBeforeLaunch = $logOffset
             stillRunningAfterThreeSeconds = $true
@@ -531,6 +587,10 @@ function Invoke-FailedApplyRollback {
                 updateExitCode = $null
                 databaseByteIdenticalAfterApply = $false
                 databaseRecordsReadableAfterApply = $false
+                installationInventoryBeforeApply = @()
+                installationInventoryAfterApply = @()
+                installationInventoryError = $null
+                newSiblingDirectoriesAfterApply = @()
             }
             recovery = [ordered]@{
                 error = $null
@@ -539,6 +599,13 @@ function Invoke-FailedApplyRollback {
                 databaseRecordsReadableAfterRecovery = $false
                 databaseByteIdenticalAfterRecovery = $false
                 databaseByteIdenticalImmediatelyAfterSetupOrOverlay = $false
+                installationInventoryBeforeRecovery = @()
+                installationInventoryAfterRecovery = @()
+                newSiblingDirectoriesAfterRecovery = @()
+                installationInventoryAfterAppStart = @()
+                newSiblingDirectoriesAfterAppStart = @()
+                renamedOldInstallationRootsAfterRecovery = @()
+                installationInventoryError = $null
                 storageConfigRestorationRequired = $false
                 storageConfigStillPointsToPreservedLibrary = $false
                 portableFlagPreserved = $true
@@ -568,6 +635,10 @@ function Invoke-FailedApplyRollback {
                 updateExitCode = $null
                 databaseByteIdenticalAfterApply = $false
                 databaseRecordsReadableAfterApply = $false
+                installationInventoryBeforeApply = @()
+                installationInventoryAfterApply = @()
+                installationInventoryError = $null
+                newSiblingDirectoriesAfterApply = @()
             }
             recovery = [ordered]@{
                 error = $null
@@ -576,6 +647,13 @@ function Invoke-FailedApplyRollback {
                 databaseRecordsReadableAfterRecovery = $false
                 databaseByteIdenticalAfterRecovery = $false
                 databaseByteIdenticalImmediatelyAfterSetupOrOverlay = $false
+                installationInventoryBeforeRecovery = @()
+                installationInventoryAfterRecovery = @()
+                newSiblingDirectoriesAfterRecovery = @()
+                installationInventoryAfterAppStart = @()
+                newSiblingDirectoriesAfterAppStart = @()
+                renamedOldInstallationRootsAfterRecovery = @()
+                installationInventoryError = $null
                 storageConfigRestorationRequired = $false
                 storageConfigStillPointsToPreservedLibrary = $false
                 portableFlagPreserved = $false
@@ -647,7 +725,7 @@ function Invoke-FailedApplyRollback {
             if (-not (Test-Path $databasePath -PathType Leaf)) {
                 throw "The shipping storage-service fixture did not create its synthetic library: $databasePath"
             }
-            $fixture.databaseSha256Before = (Get-FileHash -Algorithm SHA256 $databasePath).Hash.ToLowerInvariant()
+            $fixture.databaseSha256Before = (Get-RollbackFileEvidence $databasePath).sha256
 
             $settingsPath = Join-Path $fixture.dataRoot 'settings.json'
             $windowPath = Join-Path $fixture.dataRoot 'window.json'
@@ -692,6 +770,14 @@ function Invoke-FailedApplyRollback {
         }
 
         try {
+            try {
+                $fixture.failure.installationInventoryBeforeApply = @(
+                    Get-RollbackInstallationInventory -Root $fixture.root -ExcludedRoots @($fixtures | ForEach-Object root)
+                )
+            }
+            catch {
+                $fixture.failure.installationInventoryError = "Before apply: $($_.Exception.Message)"
+            }
             $bootstrapDirectory = Join-Path $fixture.root 'current'
             Copy-Item -Path (Join-Path $harness '*') -Destination $bootstrapDirectory -Force
             $stageStdout = Join-Path $evidenceDirectory "rollback-$($fixture.name)-bootstrap.stdout.log"
@@ -826,31 +912,44 @@ function Invoke-FailedApplyRollback {
                     -and $fixture.failure.currentManifestAbsent `
                     -and $fixture.failure.currentPayloadAbsent)
 
-            $oldRootCopies = Find-RenamedOldInstallationRoots `
-                -Root $fixture.root `
-                -ManifestSha256 $fixture.oldManifestSha256 `
-                -PayloadSha256 $fixture.oldPayloadSha256
-            $fixture.failure.renamedOldRootCopiesAfterApply = $oldRootCopies
-            $fixture.failure.renamedOldRootExistsAfterApply = $oldRootCopies.Count -gt 0
-            $fixture.failure.timedOut = $timedOut
-
             $databaseHashAfterApply = if (Test-Path $fixture.databasePath -PathType Leaf) {
-                (Get-FileHash -Algorithm SHA256 $fixture.databasePath).Hash.ToLowerInvariant()
+                (Get-RollbackFileEvidence $fixture.databasePath).sha256
             } else { $null }
             $fixture.failure.databaseSha256AfterApply = $databaseHashAfterApply
             $fixture.failure.databaseByteIdenticalAfterApply = $databaseHashAfterApply -eq $fixture.databaseSha256Before
-            $fixture.failure.dataRootSnapshotAfterApply = Get-RollbackDataRootSnapshot $fixture.dataRoot
-            $fixture.failure.rootFileChangesAfterApply = Get-RollbackDataRootChanges `
-                -Before $fixture.dataRootSnapshotBefore `
-                -After $fixture.failure.dataRootSnapshotAfterApply
             try {
                 $verifyLabel = "verify-after-failed-apply-$($fixture.name)"
-                Invoke-QualificationTest -Mode verify -DataRoot $fixture.dataRoot -Label $verifyLabel
+                Invoke-QualificationTest -Mode verify `
+                    -DataRoot $fixture.dataRoot `
+                    -Label $verifyLabel `
+                    -DatabasePath $fixture.databasePath `
+                    -SourceName CommandLine
                 $fixture.failure.databaseRecordsReadableAfterApply = $true
             }
             catch {
                 $fixture.failure.databaseRecordsReadableAfterApply = $false
                 $fixture.failure.databaseReadFailure = $_.Exception.ToString()
+            }
+            $fixture.failure.timedOut = $timedOut
+            try {
+                $fixture.failure.dataRootSnapshotAfterApply = Get-RollbackDataRootSnapshot $fixture.dataRoot
+                $fixture.failure.rootFileChangesAfterApply = Get-RollbackDataRootChanges `
+                    -Before $fixture.dataRootSnapshotBefore `
+                    -After $fixture.failure.dataRootSnapshotAfterApply
+                $fixture.failure.installationInventoryAfterApply = @(
+                    Get-RollbackInstallationInventory -Root $fixture.root -ExcludedRoots @($fixtures | ForEach-Object root)
+                )
+                $beforePaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                foreach ($entry in $fixture.failure.installationInventoryBeforeApply) { [void]$beforePaths.Add($entry.path) }
+                if ([string]::IsNullOrWhiteSpace($fixture.failure.installationInventoryError)) {
+                    $fixture.failure.newSiblingDirectoriesAfterApply = @(
+                        $fixture.failure.installationInventoryAfterApply |
+                            Where-Object { $_.path -ne [System.IO.Path]::GetFullPath($fixture.root) -and -not $beforePaths.Contains($_.path) }
+                    )
+                }
+            }
+            catch {
+                $fixture.failure.installationInventoryError = "After apply: $($_.Exception.Message)"
             }
         }
         catch {
@@ -865,6 +964,14 @@ function Invoke-FailedApplyRollback {
             continue
         }
         try {
+            try {
+                $fixture.recovery.installationInventoryBeforeRecovery = @(
+                    Get-RollbackInstallationInventory -Root $fixture.root -ExcludedRoots @($fixtures | ForEach-Object root)
+                )
+            }
+            catch {
+                $fixture.recovery.installationInventoryError = "Before recovery: $($_.Exception.Message)"
+            }
             if ($fixture.isPortable) {
                 Expand-Archive -LiteralPath $candidatePortable[0].FullName -DestinationPath $fixture.root -Force
                 if (-not (Test-Path (Join-Path $fixture.root 'portable.flag') -PathType Leaf) `
@@ -895,6 +1002,52 @@ function Invoke-FailedApplyRollback {
                 $fixture.recovery.method = 'real candidate Setup.exe with --silent --installto and no EXEARGS'
             }
 
+            try {
+                $fixture.recovery.installationInventoryAfterRecovery = @(
+                    Get-RollbackInstallationInventory -Root $fixture.root -ExcludedRoots @($fixtures | ForEach-Object root)
+                )
+                $beforePaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                foreach ($entry in $fixture.recovery.installationInventoryBeforeRecovery) { [void]$beforePaths.Add($entry.path) }
+                $newSiblingDirectories = if ([string]::IsNullOrWhiteSpace($fixture.recovery.installationInventoryError)) {
+                    @(
+                        $fixture.recovery.installationInventoryAfterRecovery |
+                            Where-Object { $_.path -ne [System.IO.Path]::GetFullPath($fixture.root) -and -not $beforePaths.Contains($_.path) }
+                    )
+                } else { @() }
+                $fixture.recovery.newSiblingDirectoriesAfterRecovery = @(
+                    foreach ($entry in $newSiblingDirectories) {
+                        $fileByName = @{}
+                        foreach ($file in $entry.files) { $fileByName[$file.name] = $file }
+                        $matchedSentinels = @(
+                            foreach ($prior in $fixture.dataRootSnapshotBefore) {
+                                if ($prior.exists -and $fileByName.ContainsKey($prior.name) `
+                                    -and $fileByName[$prior.name].exists `
+                                    -and $fileByName[$prior.name].sha256 -eq $prior.sha256) {
+                                    $prior.name
+                                }
+                            }
+                        )
+                        $database = $fileByName['ClipthroughData\clipthrough.db']
+                        if ($database.exists -and $database.sha256 -eq $fixture.databaseSha256Before) {
+                            $matchedSentinels += 'ClipthroughData\clipthrough.db'
+                        }
+                        [ordered]@{
+                            path = $entry.path
+                            files = $entry.files
+                            matchingPreApplySentinels = $matchedSentinels
+                            containsByteIdenticalSyntheticLibrary = $database.exists -and $database.sha256 -eq $fixture.databaseSha256Before
+                        }
+                    }
+                )
+                $fixture.recovery.renamedOldInstallationRootsAfterRecovery = @(
+                    $fixture.recovery.newSiblingDirectoriesAfterRecovery |
+                        Where-Object { $_.containsByteIdenticalSyntheticLibrary -and @($_.matchingPreApplySentinels).Count -gt 0 }
+                )
+            }
+            catch {
+                $fixture.recovery.installationInventoryError = "After recovery: $($_.Exception.Message)"
+            }
+
             $fixture.recovery.manifestAfterRecovery = Read-VersionManifest $fixture.root
             $fixture.recovery.manifestIsCandidate = $fixture.recovery.manifestAfterRecovery -eq $candidateVersion
             if (-not $fixture.recovery.manifestIsCandidate) {
@@ -902,26 +1055,19 @@ function Invoke-FailedApplyRollback {
             }
             $fixture.recovery.manifestSha256 = (Get-FileHash -Algorithm SHA256 (Join-Path $fixture.root 'current\sq.version')).Hash.ToLowerInvariant()
             $fixture.recovery.payloadSha256 = (Get-FileHash -Algorithm SHA256 (Join-Path $fixture.root 'current\Clipthrough.dll')).Hash.ToLowerInvariant()
-            $fixture.recovery.renamedOldInstallationRootsAfterRecovery = Find-RenamedOldInstallationRoots `
-                -Root $fixture.root `
-                -ManifestSha256 $fixture.oldManifestSha256 `
-                -PayloadSha256 $fixture.oldPayloadSha256
-            $fixture.recovery.rootFilesAfterRecovery = Get-RollbackDataRootSnapshot $fixture.dataRoot
-            $fixture.recovery.rootFileChanges = Get-RollbackDataRootChanges `
-                -Before $fixture.dataRootSnapshotBefore `
-                -After $fixture.recovery.rootFilesAfterRecovery
             $databaseHashImmediatelyAfterRepair = if (Test-Path $fixture.databasePath -PathType Leaf) {
-                (Get-FileHash -Algorithm SHA256 $fixture.databasePath).Hash.ToLowerInvariant()
+                (Get-RollbackFileEvidence $fixture.databasePath).sha256
             } else { $null }
             $fixture.recovery.databaseSha256ImmediatelyAfterSetupOrOverlay = $databaseHashImmediatelyAfterRepair
             $fixture.recovery.databaseByteIdenticalImmediatelyAfterSetupOrOverlay = `
                 $databaseHashImmediatelyAfterRepair -eq $fixture.databaseSha256Before
-            if (-not $fixture.recovery.databaseByteIdenticalImmediatelyAfterSetupOrOverlay) {
-                throw 'Candidate Setup/overlay did not leave the synthetic library byte-identical; refusing to recreate or reseed it.'
-            }
+            $fixture.recovery.rootFilesAfterRecovery = Get-RollbackDataRootSnapshot $fixture.dataRoot
+            $fixture.recovery.rootFileChanges = Get-RollbackDataRootChanges `
+                -Before $fixture.dataRootSnapshotBefore `
+                -After $fixture.recovery.rootFilesAfterRecovery
             $storageConfigPath = Join-Path $fixture.dataRoot 'storage.json'
             $fixture.recovery.storageConfigSha256BeforeRepair = if (Test-Path $storageConfigPath -PathType Leaf) {
-                (Get-FileHash -Algorithm SHA256 $storageConfigPath).Hash.ToLowerInvariant()
+                (Get-RollbackFileEvidence $storageConfigPath).sha256
             } else { $null }
             $storageConfigValidForLibrary = $false
             if (Test-Path $storageConfigPath -PathType Leaf) {
@@ -938,13 +1084,16 @@ function Invoke-FailedApplyRollback {
             }
             $fixture.recovery.storageConfigRestorationRequired = -not $storageConfigValidForLibrary
             $fixture.recovery.storageConfigSha256AfterSetupOrOverlay = if (Test-Path $storageConfigPath -PathType Leaf) {
-                (Get-FileHash -Algorithm SHA256 $storageConfigPath).Hash.ToLowerInvariant()
+                (Get-RollbackFileEvidence $storageConfigPath).sha256
             } else { $null }
             $fixture.recovery.storageConfigStillPointsToPreservedLibrary = $storageConfigValidForLibrary
             $fixture.recovery.userVisibleDataReset = @(
                 $fixture.recovery.rootFileChanges |
                     Where-Object { $_.name -in @('settings.json', 'storage.json', 'window.json') -and $_.state -ne 'unchanged' }
             ).Count -gt 0
+            if (-not $fixture.recovery.databaseByteIdenticalImmediatelyAfterSetupOrOverlay) {
+                throw 'Candidate Setup/overlay did not leave the synthetic library byte-identical at its configured path; refusing to recreate or reseed it.'
+            }
             if ($fixture.recovery.storageConfigRestorationRequired) {
                 throw 'Candidate Setup/overlay did not leave storage.json pointing at the preserved synthetic library; refusing to restore it automatically or claim app recovery.'
             }
@@ -973,7 +1122,7 @@ function Invoke-FailedApplyRollback {
                 $fixture.recovery.databaseReadFailure = $_.Exception.ToString()
             }
             $databaseHashAfterRecovery = if (Test-Path $fixture.databasePath -PathType Leaf) {
-                (Get-FileHash -Algorithm SHA256 $fixture.databasePath).Hash.ToLowerInvariant()
+                (Get-RollbackFileEvidence $fixture.databasePath).sha256
             } else { $null }
             $fixture.recovery.databaseSha256AfterRecovery = $databaseHashAfterRecovery
             $fixture.recovery.databaseByteIdenticalAfterRecovery = $databaseHashAfterRecovery -eq $fixture.databaseSha256Before
@@ -982,10 +1131,15 @@ function Invoke-FailedApplyRollback {
             $fixture.recovery.rootFileChangesAfterAppStart = Get-RollbackDataRootChanges `
                 -Before $fixture.dataRootSnapshotBefore `
                 -After $fixture.recovery.rootFilesAfterAppStart
-            $fixture.recovery.renamedOldInstallationRootsAfterAppStart = Find-RenamedOldInstallationRoots `
-                -Root $fixture.root `
-                -ManifestSha256 $fixture.oldManifestSha256 `
-                -PayloadSha256 $fixture.oldPayloadSha256
+            $fixture.recovery.installationInventoryAfterAppStart = @(
+                Get-RollbackInstallationInventory -Root $fixture.root -ExcludedRoots @($fixtures | ForEach-Object root)
+            )
+            $afterRecoveryPaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+            foreach ($entry in $fixture.recovery.installationInventoryAfterRecovery) { [void]$afterRecoveryPaths.Add($entry.path) }
+            $fixture.recovery.newSiblingDirectoriesAfterAppStart = @(
+                $fixture.recovery.installationInventoryAfterAppStart |
+                    Where-Object { $_.path -ne [System.IO.Path]::GetFullPath($fixture.root) -and -not $afterRecoveryPaths.Contains($_.path) }
+            )
         }
         catch {
             $fixture.recovery.error = $_.Exception.ToString()
@@ -993,6 +1147,7 @@ function Invoke-FailedApplyRollback {
         }
         if ($fixture.recovery.manifestIsCandidate `
             -and [string]::IsNullOrWhiteSpace($fixture.recovery.error) `
+            -and [string]::IsNullOrWhiteSpace($fixture.recovery.installationInventoryError) `
             -and $fixture.recovery.appStart.processStarted `
             -and $fixture.recovery.appStart.stillRunningAfterThreeSeconds `
             -and $fixture.recovery.databaseRecordsReadableAfterRecovery `

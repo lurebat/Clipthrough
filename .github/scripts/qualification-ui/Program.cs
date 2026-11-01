@@ -283,7 +283,10 @@ internal static class Program
     {
         edit.SetFocus();
         Native.Chord(0x11, 0x41);
-        Native.Type(text);
+        if (text.Length == 0)
+            Native.Chord(0x08);
+        else
+            Native.Type(text);
         Wait(() => edit.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern) && ((ValuePattern)pattern).Current.Value == text,
             "Text input reflected through UI Automation", 8);
     }
