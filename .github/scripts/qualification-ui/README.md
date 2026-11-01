@@ -61,7 +61,10 @@ It otherwise cancels Settings and never changes display settings:
 - Toggle the real popup with Alt+V; require actual foreground on summon and
   hidden/minimized/DWM-cloaked presentation on dismissal (not `IsVisible` alone).
 - Publish unique Unicode and RTF via Win32 clipboard, allow normal capture,
-  find/select the real app rows and press Enter. Require exact received text.
+  find/select the real app rows, replace the clipboard with independently
+  verified plain poison lacking RTF/PNG formats, and press Enter. Require exact
+  received text, proving restoration from history rather than forwarding the
+  original capture input.
   Native RichEdit must render the RTF marker bold/red and its suffix non-bold;
   persist received RTF and a target screenshot. This is **RTF rich paste**, not
   HTML paste qualification; HTML rendering remains a separate unqualified gate.

@@ -102,6 +102,12 @@ internal static class Native
         return format;
     }
 
+    internal static bool Available(uint format)
+    {
+        Guard();
+        return IsClipboardFormatAvailable(format);
+    }
+
     internal static byte[] Text(string text) => Encoding.Unicode.GetBytes(text + '\0');
 
     internal static bool Presented(nint window)
@@ -135,6 +141,7 @@ internal static class Native
     [DllImport("user32.dll", SetLastError = true)] private static extern bool EmptyClipboard();
     [DllImport("user32.dll", SetLastError = true)] private static extern nint SetClipboardData(uint format, nint handle);
     [DllImport("user32.dll", SetLastError = true)] private static extern nint GetClipboardData(uint format);
+    [DllImport("user32.dll")] private static extern bool IsClipboardFormatAvailable(uint format);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern uint RegisterClipboardFormat(string name);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern nint GlobalAlloc(uint flags, nuint bytes);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern nint GlobalLock(nint handle);

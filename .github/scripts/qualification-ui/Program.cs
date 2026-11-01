@@ -316,6 +316,7 @@ internal static class Program
         Search(marker);
         Select(FindRow(marker));
         Screenshot("plain-selected");
+        PoisonClipboardAndReselect(marker, marker);
         Native.Chord(0x0D);
         Wait(() => receiver.Rich.Text == marker, "Installed app Enter paste into real text receiver");
         Require(!Native.Presented(main), "App paste did not dismiss popup.");
@@ -335,6 +336,7 @@ internal static class Program
         Select(FindRow(marker));
         Dump(App(), "rich-selected");
         Screenshot("rich-selected");
+        PoisonClipboardAndReselect(marker, marker);
         Native.Chord(0x0D);
         Wait(() => receiver.Rich.Text.Contains(marker, StringComparison.Ordinal), "App pastes captured RTF into native RichEdit renderer");
         Require(receiver.Rich.Text == marker + " normal", "Rich paste text differs from fixture.");
@@ -370,6 +372,7 @@ internal static class Program
             "Image full dimensions shown in the actual app");
         Dump(App(), "image-detail");
         Screenshot("image-detail");
+        PoisonClipboardAndReselect("", "321", "197");
         Native.Chord(0x0D);
         Wait(() => receiver.ImageTarget.Image != null || receiver.PasteError != null, "App image paste reaches PNG receiver");
         if (receiver.PasteError != null) throw new InvalidOperationException("PNG paste receiver failed.", receiver.PasteError);
@@ -381,6 +384,28 @@ internal static class Program
         received.Save(Path.Combine(output, "received-full-detail.png"), ImageFormat.Png);
         Evidence["imagePaste"] = new { width = received.Width, height = received.Height, comparedPixels = original.Width * original.Height, allPixelsEqual = true, pngBytesReceived = receiver.PngBytes };
         Screenshot("image-rendered-target");
+    }
+
+    private static void PoisonClipboardAndReselect(string query, params string[] rowParts)
+    {
+        var poison = "hosted-poison-" + Guid.NewGuid().ToString("N");
+        Native.Publish(receiver.Handle, (13, Native.Text(poison)));
+        Require(Encoding.Unicode.GetString(Native.Read(13)).TrimEnd('\0') == poison,
+            "Clipboard poison was not independently read back.");
+        Require(!Native.Available(Native.Format("Rich Text Format")) && !Native.Available(Native.Format("PNG")),
+            "Clipboard poison retained rich/image fixture formats.");
+        Search(poison);
+        FindRow(poison);
+        Search(query);
+        var originalRow = FindRow(rowParts);
+        Select(originalRow);
+        if (!originalRow.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var pattern))
+            throw new Unavailable("Cannot verify selected fixture after poison capture.");
+        Require(((SelectionItemPattern)pattern).Current.IsSelected,
+            "Poison capture displaced the selected fixture.");
+        Require(Encoding.Unicode.GetString(Native.Read(13)).TrimEnd('\0') == poison,
+            "Fixture selection changed the clipboard before the actual Enter paste.");
+        Evidence["clipboardPoison"] = new { text = poison, verified = true };
     }
 
     private static void FocusReceiver(bool image = false)

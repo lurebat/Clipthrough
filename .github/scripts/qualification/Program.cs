@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using Velopack;
+using Velopack.Locators;
 using Velopack.Sources;
 
 if (args.Length is < 1 or > 2)
@@ -23,7 +24,8 @@ var port = ((IPEndPoint)listener.LocalEndpoint).Port;
 using var cancellation = new CancellationTokenSource();
 var server = ServeFeedAsync(listener, feedDirectory, cancellation.Token);
 var feedUrl = $"http://127.0.0.1:{port}/";
-var manager = new UpdateManager(new SimpleWebSource(feedUrl));
+var locator = VelopackLocator.CreateDefaultForPlatform();
+var manager = new UpdateManager(new SimpleWebSource(feedUrl), locator: locator);
 
 if (!manager.IsInstalled)
 {

@@ -26,6 +26,14 @@ jobs:
       - name: Install pinned Velopack CLI
         run: dotnet tool install -g vpk --version 1.2.0
 
+      - name: Resolve candidate version
+        shell: pwsh
+        run: |
+          [xml]$project = Get-Content -Raw .\Clipthrough\Clipthrough.csproj
+          $version = @($project.Project.PropertyGroup.Version | Where-Object { $_ })[0]
+          if ([string]::IsNullOrWhiteSpace($version)) { throw "Candidate version is missing." }
+          "CANDIDATE_VERSION=$version" >> $env:GITHUB_ENV
+
       - name: Restore and publish candidate
         shell: pwsh
         run: |
@@ -40,7 +48,7 @@ jobs:
             --configuration Release `
             -r win-x64 `
             --self-contained false `
-            -p:Version=1.0.0 `
+            -p:Version=$env:CANDIDATE_VERSION `
             --output artifacts\qualification\publish
           if ($LASTEXITCODE -ne 0) { throw "Publish failed with exit code $LASTEXITCODE." }
           .\.github\scripts\Stage-PublishSymbols.ps1 `
@@ -49,7 +57,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Native symbol staging failed with exit code $LASTEXITCODE." }
           vpk pack `
             --packId Clipthrough `
-            --packVersion 1.0.0 `
+            --packVersion $env:CANDIDATE_VERSION `
             --packDir artifacts\qualification\publish `
             --mainExe Clipthrough.exe `
             --exclude '(?!)' `
@@ -78,6 +86,7 @@ jobs:
           -FeedDirectory .\artifacts\qualification\feed `
           -HarnessDirectory .\artifacts\qualification\feed-harness `
           -UiHarnessDirectory .\artifacts\qualification\ui-harness `
+          -CandidateVersion $env:CANDIDATE_VERSION `
           -EvidencePath .\artifacts\qualification\evidence.json
 
       - name: Upload qualification evidence

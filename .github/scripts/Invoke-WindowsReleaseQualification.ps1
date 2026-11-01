@@ -8,6 +8,8 @@ param(
     [Parameter(Mandatory)]
     [string] $UiHarnessDirectory,
     [Parameter(Mandatory)]
+    [string] $CandidateVersion,
+    [Parameter(Mandatory)]
     [string] $EvidencePath
 )
 
@@ -34,7 +36,7 @@ $fullPackageUrl = 'https://github.com/lurebat/Clipthrough/releases/download/v0.1
 $fullPackageSha256 = '6bf69a537b9a77c056cfab59261b92718036ce01162064643a82a01b2a73e083'
 $portableUrl = 'https://github.com/lurebat/Clipthrough/releases/download/v0.17.1/Clipthrough-win-Portable.zip'
 $portableSha256 = '40fdc2af97e5c28b3477ab2c54293cfc76fac26e6c90370324b84dd6cbb13fa0'
-$candidateVersion = '1.0.0'
+$candidateVersion = $CandidateVersion
 $workspace = Join-Path $evidenceDirectory 'runner-state'
 $downloadDirectory = Join-Path $workspace 'downloads'
 $installRoot = Join-Path $workspace 'installed'
@@ -86,8 +88,9 @@ function Assert-LegacyNupkgMapping {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [System.IO.Compression.ZipFile]::OpenRead($PackagePath)
     try {
-        $appEntries = @($archive.Entries | Where-Object { $_.FullName.StartsWith('lib/app/', [StringComparison]::OrdinalIgnoreCase) -and -not $_.FullName.EndsWith('/') })
-        if ($appEntries.Count -ne 105) { throw "Expected 105 lib/app payloads in the old full package; found $($appEntries.Count)." }
+        $aliasSources = @('lib/app/Clipthrough_ExecutionStub.exe', 'lib/app/Squirrel.exe')
+        $appEntries = @($archive.Entries | Where-Object { $_.FullName.StartsWith('lib/app/', [StringComparison]::OrdinalIgnoreCase) -and -not $_.FullName.EndsWith('/') -and $_.FullName -notin $aliasSources })
+        if ($appEntries.Count -eq 0) { throw 'The pinned old full package contains no lib/app payloads.' }
         $mapping = [System.Collections.Generic.List[object]]::new()
         foreach ($entry in $appEntries) {
             $relative = $entry.FullName.Substring('lib/app/'.Length).Replace('/', '\')
@@ -100,8 +103,8 @@ function Assert-LegacyNupkgMapping {
         }
 
         foreach ($alias in @(
-                @{ Source = 'Clipthrough_ExecutionStub.exe'; Destination = 'Clipthrough.exe' },
-                @{ Source = 'Squirrel.exe'; Destination = 'Update.exe' }
+                @{ Source = 'lib/app/Clipthrough_ExecutionStub.exe'; Destination = 'Clipthrough.exe' },
+                @{ Source = 'lib/app/Squirrel.exe'; Destination = 'Update.exe' }
             )) {
             $entry = $archive.GetEntry($alias.Source)
             if ($null -eq $entry) { throw "The legacy package alias source is missing: $($alias.Source)" }
@@ -113,7 +116,7 @@ function Assert-LegacyNupkgMapping {
             $mapping.Add([ordered]@{ source = $alias.Source; destination = $destination; sha256 = $sourceHash })
         }
 
-        if ($mapping.Count -ne 107) { throw "Expected 107 verified payload mappings; found $($mapping.Count)." }
+        if ($mapping.Count -ne $appEntries.Count + 2) { throw 'Not every payload and root alias was verified.' }
         [System.IO.File]::WriteAllText(
             (Join-Path $evidenceDirectory 'legacy-package-mapping.json'),
             ($mapping | ConvertTo-Json -Depth 4),
@@ -183,7 +186,12 @@ function Read-VersionManifest {
     param([string] $Root)
     $path = Join-Path $Root 'current\sq.version'
     if (-not (Test-Path $path)) { throw "Velopack version manifest is missing: $path" }
-    return (Get-Content -Raw -Path $path).Trim()
+    [xml]$manifest = Get-Content -Raw -LiteralPath $path
+    $versionNode = $manifest.SelectSingleNode("/*[local-name()='package']/*[local-name()='metadata']/*[local-name()='version']")
+    if ($null -eq $versionNode -or [string]::IsNullOrWhiteSpace($versionNode.InnerText)) {
+        throw "Velopack version manifest has no metadata version: $path"
+    }
+    return $versionNode.InnerText.Trim()
 }
 
 function Wait-ForCandidateManifest {
@@ -192,8 +200,8 @@ function Wait-ForCandidateManifest {
     do {
         $manifestPath = Join-Path $Root 'current\sq.version'
         if (Test-Path $manifestPath) {
-            $manifest = (Get-Content -Raw -Path $manifestPath).Trim()
-            if ($manifest -match [regex]::Escape($candidateVersion)) { return $manifest }
+            $manifest = Read-VersionManifest $Root
+            if ($manifest -eq $candidateVersion) { return $manifest }
         }
         Start-Sleep -Seconds 2
     } while ([DateTime]::UtcNow -lt $deadline)
@@ -598,12 +606,12 @@ try {
         Stop-Process -Id $setupApp.Id -Force
     }
     $oldManifest = Read-VersionManifest $installRoot
-    if ($oldManifest -notmatch '0\.17\.1') { throw "The Setup installed unexpected version '$oldManifest'." }
+    if ($oldManifest -ne '0.17.1') { throw "The Setup installed unexpected version '$oldManifest'." }
     if (-not (Test-Path (Join-Path $installRoot 'Update.exe'))) { throw 'The Setup install has no Update.exe.' }
     if (-not (Test-Path $setupStdout) -or -not (Test-Path $setupStderr)) { throw 'Setup process logs were not captured.' }
     Set-Gate 'old_setup_install' 'passed' "Silent real Setup install exited 0; Update.exe and current/sq.version prove installed version $oldManifest."
     Assert-LegacyNupkgMapping -PackagePath $fullPackagePath -Root $installRoot
-    Set-Gate 'old_package_payload_mapping' 'passed' 'All 105 lib/app entries byte-match under current; explicit package-root aliases Clipthrough_ExecutionStub.exe -> Clipthrough.exe and Squirrel.exe -> Update.exe also match (107 total).'
+    Set-Gate 'old_package_payload_mapping' 'passed' 'Every lib/app entry in the hash-pinned old package byte-matches current; both explicit root aliases also match. Exact entry count and hashes are in legacy-package-mapping.json.'
 
     Invoke-QualificationTest -Mode seed -DataRoot $chosenDataRoot -Label 'seed-installed'
     Set-Gate 'synthetic_data_seed_and_read' 'passed' 'The shipping DatabaseInitializer and ClipStoreService seeded two isolated synthetic clips and read them back by id.'
