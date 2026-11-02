@@ -11,10 +11,12 @@ public static class SqliteErrors
     /// <summary>
     /// SQLITE_NOTADB. With SQLCipher this is what a wrong key looks like: the
     /// header decrypts to nonsense, which is indistinguishable from a file that
-    /// genuinely is not a database. Measured against this app's provider
-    /// (SQLitePCLRaw.bundle_e_sqlcipher): a wrong password, no password at all
-    /// against an encrypted database, and a text file all report 26, while a
-    /// missing file reports 14 (SQLITE_CANTOPEN).
+    /// genuinely is not a database. Measured against both providers the app has
+    /// shipped (SQLitePCLRaw.bundle_e_sqlcipher, then SQLite3MC.PCLRaw.bundle in
+    /// SQLCipher mode): a wrong password, no password at all against an
+    /// encrypted database, and a text file all report 26, while a missing file
+    /// reports 14 (SQLITE_CANTOPEN). So does a connection that misses the cipher
+    /// recipe - see SqliteConnectionFactory.DataSourceFor.
     /// </summary>
     private const int NotADatabase = 26;
 

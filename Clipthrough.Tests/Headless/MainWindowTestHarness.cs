@@ -20,15 +20,19 @@ internal sealed class MainWindowTestHarness : IDisposable
 {
     private readonly TemporaryDatabaseScope _scope;
 
-    private MainWindowTestHarness(TemporaryDatabaseScope scope, MainWindowViewModel viewModel, MainWindow window, TestSystemInteractionService systemInteraction)
+    private MainWindowTestHarness(TemporaryDatabaseScope scope, MainWindowViewModel viewModel, MainWindow window, TestSystemInteractionService systemInteraction, TestClipboardMonitorService clipboardMonitor)
     {
         _scope = scope;
+        ClipboardMonitor = clipboardMonitor;
         ViewModel = viewModel;
         Window = window;
         SystemInteraction = systemInteraction;
     }
 
     public MainWindowViewModel ViewModel { get; }
+
+    /// <summary>The monitor the view model listens to, so a test can deliver a capture.</summary>
+    public TestClipboardMonitorService ClipboardMonitor { get; }
 
     public MainWindow Window { get; }
 
@@ -50,6 +54,18 @@ internal sealed class MainWindowTestHarness : IDisposable
     /// </summary>
     public TestStorageOptionsService StorageOptions => _scope.StorageOptionsService;
 
+    /// <summary>
+    /// The notification service the view model listens to, so a test can raise
+    /// a toast through the real path.
+    /// </summary>
+    public TestNotificationService Notifications => _scope.NotificationService;
+
+    /// <summary>The store the view model reads, so a test can put real clips behind a search.</summary>
+    public ClipStoreService ClipStore => _scope.ClipStoreService;
+
+    /// <summary>The search history the view model records into.</summary>
+    public SearchHistoryService SearchHistory => _scope.SearchHistoryService;
+
     public TextBox SearchBox => Window.FindControl<TextBox>("SearchTextBox")!;
 
     public ListBox ClipList => Window.FindControl<ListBox>("ClipsListBox")!;
@@ -61,7 +77,9 @@ internal sealed class MainWindowTestHarness : IDisposable
     /// </param>
     public static MainWindowTestHarness Create(
         Func<AppSettings, AppSettings>? configureSettings = null,
-        bool aiConfigured = false)
+        bool aiConfigured = false,
+        IWindowPlacementStore? placementStore = null,
+        Func<ISettingsService, IMotionService>? motionFactory = null)
     {
         var scope = new TemporaryDatabaseScope();
 
@@ -80,11 +98,11 @@ internal sealed class MainWindowTestHarness : IDisposable
         scope.SettingsService.SetCurrent(configureSettings?.Invoke(settings) ?? settings);
 
         var systemInteraction = new TestSystemInteractionService();
+        var clipboardMonitor = new TestClipboardMonitorService();
 
         var viewModel = new MainWindowViewModel(
             scope.ClipStoreService,
-            new TestClipboardMonitorService(),
-            new TestClipSampleDataService(),
+            clipboardMonitor,
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -99,12 +117,14 @@ internal sealed class MainWindowTestHarness : IDisposable
             new NoOpBackgroundOcrQueue(),
             new BackgroundJobIndicator(),
             scope.DatabaseInitializer);
+        HeadlessStartup.DrainDatabaseWorkBeforeDelete(scope, viewModel);
 
-        var window = new MainWindow(systemInteraction) { DataContext = viewModel };
+        var motion = motionFactory?.Invoke(scope.SettingsService);
+        var window = new MainWindow(systemInteraction, placementStore, motion) { DataContext = viewModel };
         window.Show();
         Dispatcher.UIThread.RunJobs();
 
-        return new MainWindowTestHarness(scope, viewModel, window, systemInteraction);
+        return new MainWindowTestHarness(scope, viewModel, window, systemInteraction, clipboardMonitor);
     }
 
     /// <summary>

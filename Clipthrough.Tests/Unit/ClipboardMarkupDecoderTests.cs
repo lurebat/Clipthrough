@@ -200,6 +200,24 @@ public sealed class ClipboardMarkupDecoderTests
         Assert.Equal(fragment, extracted);
     }
 
+    /// <summary>
+    /// Rubber-duck F-16-2. HTML a transform produced (Markdown -&gt; HTML, box table
+    /// -&gt; HTML) is stored as a bare fragment, with no CF_HTML header. Text in it
+    /// that merely reads like a header field is content, not offsets: treating it
+    /// as offsets cut this fragment to <c>&lt;p&gt;Before S</c>.
+    /// </summary>
+    [Fact]
+    public void ExtractHtmlFragment_OnABareFragment_IgnoresHeaderLikeTextInItsContent()
+    {
+        const string fragment = "<p>Before StartFragment:0000000000 EndFragment:0000000011 after</p>";
+
+        Assert.Equal(fragment, ClipboardMarkupDecoder.ExtractHtmlFragment(fragment));
+        Assert.Equal(fragment, ClipboardMarkupDecoder.ExtractHtmlDocument(fragment));
+
+        // Anti-vacuity: read as offsets, that text selects something else.
+        Assert.Equal("<p>Before S", ExtractUsingHeaderOffsetsOnly(fragment));
+    }
+
     // Slices the payload the way the header offsets alone would, to prove a skew changes
     // the answer. Mirrors GetHeaderRegion's byte-to-char conversion.
     private static string ExtractUsingHeaderOffsetsOnly(string html)

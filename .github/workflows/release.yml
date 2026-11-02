@@ -27,7 +27,10 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 10.0.x
+          # The SDK feature band comes from global.json, so CI builds with the
+          # band a developer does. A new band can bring new analyzers, and the
+          # build enforces a set of them at error.
+          global-json-file: global.json
 
       - name: Resolve version
         id: ver
@@ -52,12 +55,21 @@ jobs:
         # afterwards because the fix would ship through the updater that broke.
         run: dotnet tool install -g vpk --version 1.2.0
 
-      - name: Publish (framework-dependent)
+      - name: Publish (framework-dependent win-x64)
         run: >
           dotnet publish .\Clipthrough\Clipthrough.csproj
           --configuration Release
+          -r win-x64
+          --self-contained false
           -p:Version=${{ steps.ver.outputs.version }}
           --output artifacts\publish
+
+      - name: Stage native symbols
+        shell: pwsh
+        run: >
+          ./.github/scripts/Stage-PublishSymbols.ps1
+          -PublishDirectory artifacts\publish
+          -SymbolsDirectory artifacts\symbols
 
       - name: Package zip
         shell: pwsh
@@ -65,15 +77,34 @@ jobs:
           $zip = "artifacts\Clipthrough-${{ steps.ver.outputs.version }}-win-x64.zip"
           Compress-Archive -Path artifacts\publish\* -DestinationPath $zip
           echo "ZIP_PATH=$zip" >> $env:GITHUB_ENV
+          $symbolsZip = "artifacts\Clipthrough-${{ steps.ver.outputs.version }}-win-x64-symbols.zip"
+          Compress-Archive -Path artifacts\symbols\* -DestinationPath $symbolsZip
 
       - name: Build Velopack package
         shell: pwsh
+        # --framework: the app is published framework-dependent, so it runs on
+        # whatever .NET the user's machine has, and runtime security fixes reach
+        # users only through it. Velopack checks this before installing and
+        # before applying every update, and downloads the latest patch when the
+        # machine is below the floor. The third part is the floor: net10.0
+        # alone would accept any 10.0.x. 10.0.14 is the out-of-band Brotli fix
+        # that followed 10.0.13's ~44 CVEs. "runtime", not "desktop": the app
+        # loads only Microsoft.NETCore.App (see Clipthrough.runtimeconfig.json;
+        # Avalonia does not use the Windows Desktop framework), so requiring
+        # the desktop bundle would make users download one they never load.
+        # Velopack silently ignores a string it cannot parse, so
+        # ReleasePackagingTests checks this one the way the client reads it.
+        # The ZIP has no Velopack in front of it; there the same floor comes
+        # from Clipthrough.runtimeconfig.json (set in Clipthrough.csproj), which
+        # the test requires to match this one.
         run: |
           vpk pack `
             --packId Clipthrough `
             --packVersion ${{ steps.ver.outputs.version }} `
             --packDir artifacts\publish `
             --mainExe Clipthrough.exe `
+            --exclude '(?!)' `
+            --framework net10.0.14-x64-runtime `
             --outputDir artifacts\velopack
 
       - name: Stage release assets
@@ -82,6 +113,7 @@ jobs:
           $releaseDir = "artifacts\release"
           New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
           Copy-Item "artifacts\Clipthrough-${{ steps.ver.outputs.version }}-win-x64.zip" $releaseDir
+          Copy-Item "artifacts\Clipthrough-${{ steps.ver.outputs.version }}-win-x64-symbols.zip" $releaseDir
           Get-ChildItem "artifacts\velopack" -File | Copy-Item -Destination $releaseDir
 
           Get-ChildItem $releaseDir -File |
@@ -98,12 +130,24 @@ jobs:
           name: Clipthrough-${{ steps.ver.outputs.version }}-win-x64
           path: artifacts\release\*
 
+      - name: Select version-specific release notes
+        id: notes
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          $path = ".github/release-notes/$env:RELEASE_VERSION.md"
+          if (Test-Path -LiteralPath $path) {
+            echo "body_path=$path" >> $env:GITHUB_OUTPUT
+          }
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: Clipthrough ${{ steps.ver.outputs.tag }}
           draft: false
+          body_path: ${{ steps.notes.outputs.body_path }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           # Use GitHub's date+semver logic so that when two release workflows

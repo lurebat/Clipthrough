@@ -9,6 +9,7 @@ public partial class AboutWindow : Window
     public AboutWindow()
     {
         InitializeComponent();
+        WindowFitter.Attach(this);
         KeyDown += (_, e) =>
         {
             if (e.Key == Key.Escape)

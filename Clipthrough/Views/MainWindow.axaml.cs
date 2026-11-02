@@ -47,12 +47,18 @@ public partial class MainWindow : Window
 
     public MainWindow() : this(null) { }
 
-    public MainWindow(ISystemInteractionService? systemInteractionService)
+    public MainWindow(ISystemInteractionService? systemInteractionService, IWindowPlacementStore? placementStore = null, IMotionService? motionService = null)
     {
         m_systemInteractionService = systemInteractionService;
         InitializeComponent();
+        InitializeMotion(motionService);
+        RequestWorkspaceBreakpoint(WorkspaceBreakpoints.Classify(ClientSize));
+        InitializePlacement(placementStore);
         Opened += OnOpened;
         Activated += OnActivated;
+        Activated += OnActivatedInStandby;
+        // A summon still waiting must not uncloak a window that has closed.
+        Closed += (_, _) => CancelPendingSummon();
         Closed += OnClosed;
         DataContextChanged += OnDataContextChanged;
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
@@ -61,6 +67,11 @@ public partial class MainWindow : Window
 
     private void OnOpened(object? sender, EventArgs e)
     {
+        // Every show, not only the first: Opened is raised again when the window
+        // comes back from the tray, possibly onto a screen that has since shrunk
+        // or gone. (audit F-49)
+        WindowFitter.Fit(this);
+
         if (m_clipListScrollViewer is not null)
         {
             FocusInitialPopupTarget();
@@ -774,6 +785,13 @@ public partial class MainWindow : Window
 
     private void FocusSelectedClipInList()
     {
+        // Leaving the search box for its results commits the query (OD-9b).
+        // Only from the box: this also runs on paths that are not a search at all.
+        if (GetSearchBox()?.IsKeyboardFocusWithin == true && DataContext is MainWindowViewModel committing)
+        {
+            _ = committing.CommitSearchQueryAsync();
+        }
+
         if (m_clipsListBox is null)
         {
             return;
@@ -953,6 +971,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Clicking a result picks it, which commits the search that found it
+        // (S40/OD-9b). Here rather than on SelectionChanged, because the app
+        // also moves the selection itself - refreshes, auto-select - and that
+        // is not the user picking anything.
+        _ = viewModel.CommitSearchQueryAsync();
+
         // Stash the pointer position so PointerMoved can detect a drag
         // gesture once the pointer has travelled past the system threshold.
         // Cache the original PressedEventArgs — Avalonia's DoDragDropAsync
@@ -1065,8 +1089,8 @@ public partial class MainWindow : Window
 
     private void HidePopupAfterDrag(MainWindowViewModel viewModel)
     {
-        _ = viewModel.ClearSearchFilterAsync(forceRefresh: false);
-        Hide();
+        _ = viewModel;
+        Dismiss();
     }
 
     private void OnPopupDragOver(object? sender, DragEventArgs e)
@@ -1183,6 +1207,15 @@ public partial class MainWindow : Window
 
     private bool TryHandleEnterToCopyShortcut(MainWindowViewModel viewModel, KeyEventArgs e)
     {
+        // Enter in the search box commits the query to history even when it found
+        // nothing to paste (OD-9b). Not handled: it still pastes when it can.
+        if (e.Key == Key.Enter
+            && (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Meta)) == KeyModifiers.None
+            && GetSearchBox()?.IsKeyboardFocusWithin == true)
+        {
+            _ = viewModel.CommitSearchQueryAsync();
+        }
+
         if (viewModel.SelectedClip is null || viewModel.IsSettingsOpen || viewModel.IsWelcomeOpen || viewModel.SessionLogs.IsOpen)
         {
             return false;
@@ -1224,12 +1257,14 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Step 3: Hide Clipthrough. Target has already been scheduled to receive focus.
-        _ = viewModel.ClearSearchFilterAsync(forceRefresh: false);
-        Hide();
+        // Step 3: Dismiss Clipthrough. Target has already been scheduled to receive focus.
+        Dismiss();
 
-        // Step 4: Give the OS time to process WM_ACTIVATE / WM_SETFOCUS on the target.
-        await Task.Delay(150);
+        // Step 4: Wait for the target to hold the foreground (PasteTiming).
+        if (m_systemInteractionService is { } systemInteraction)
+        {
+            await PasteTiming.BeforePasteAsync(systemInteraction, PasteTiming.AfterHideBudget);
+        }
 
         // Step 5: Deliver Ctrl+V to the (now foreground) target window.
         m_systemInteractionService?.SimulatePasteKeystroke();
@@ -1599,6 +1634,7 @@ public partial class MainWindow : Window
             m_subscribedViewModel.HelpRequested -= OnHelpRequested;
             m_subscribedViewModel.AboutRequested -= OnAboutRequested;
             m_subscribedViewModel.Clips.CollectionChanged -= OnClipsCollectionChanged;
+            m_subscribedViewModel.ConfirmAsync = null;
             m_subscribedViewModel = null;
         }
 
@@ -1613,6 +1649,7 @@ public partial class MainWindow : Window
             m_subscribedViewModel.HelpRequested += OnHelpRequested;
             m_subscribedViewModel.AboutRequested += OnAboutRequested;
             m_subscribedViewModel.Clips.CollectionChanged += OnClipsCollectionChanged;
+            m_subscribedViewModel.ConfirmAsync = (title, body, accept, cancel) => ConfirmDialog.ShowAsync(this, title, body, accept, cancel);
             UpdateSettingsWindowVisibility(viewModel.IsSettingsOpen);
             UpdateAiPromptWindowVisibility(viewModel.IsAiPromptOpen);
             // The encrypted-database prompt is already open by the time the view
@@ -1689,6 +1726,7 @@ public partial class MainWindow : Window
         Dispatcher.UIThread.Post(() =>
         {
             var window = new HelpWindow();
+            TrackMotion(window);
             window.Show(this);
         });
     }
@@ -1701,6 +1739,7 @@ public partial class MainWindow : Window
             {
                 DataContext = sender as MainWindowViewModel ?? DataContext,
             };
+            TrackMotion(window);
             window.Show(this);
         });
     }
@@ -1779,6 +1818,9 @@ public partial class MainWindow : Window
                     DataContext = m_subscribedViewModel,
                 };
                 m_settingsWindow.Closing += OnSettingsWindowClosing;
+                // A cloaked popup is still 'visible'; an owned window must not open alone.
+                LeaveStandbyNow();
+                TrackMotion(m_settingsWindow);
                 m_settingsWindow.Show(this);
             }
             else
@@ -1821,6 +1863,9 @@ public partial class MainWindow : Window
                     DataContext = m_subscribedViewModel,
                 };
                 m_aiPromptWindow.Closing += OnAiPromptWindowClosing;
+                // A cloaked popup is still 'visible'; an owned window must not open alone.
+                LeaveStandbyNow();
+                TrackMotion(m_aiPromptWindow);
                 m_aiPromptWindow.Show(this);
             }
             else
@@ -1874,6 +1919,9 @@ public partial class MainWindow : Window
                     DataContext = m_subscribedSessionLogs
                 };
                 m_sessionLogsWindow.Closing += OnSessionLogsWindowClosing;
+                // A cloaked popup is still 'visible'; an owned window must not open alone.
+                LeaveStandbyNow();
+                TrackMotion(m_sessionLogsWindow);
                 m_sessionLogsWindow.Show(this);
             }
             else
@@ -2126,9 +2174,12 @@ public partial class MainWindow : Window
 
     private void ShowOwnedWindow(Window window)
     {
-        if (!IsVisible)
+        if (!IsPresentedToUser)
         {
-            Show();
+            if (!LeaveStandbyNow())
+            {
+                Show();
+            }
 
             if (WindowState == WindowState.Minimized)
             {

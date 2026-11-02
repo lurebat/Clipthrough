@@ -128,6 +128,39 @@ public sealed class SettingsViewModel : ViewModelBase
 
     public ThemeMode[] ThemeModeOptions { get; } = Enum.GetValues<ThemeMode>();
 
+    private MotionPreference _motion = AppSettings.Default.Motion;
+    public MotionPreference Motion
+    {
+        get => _motion;
+        set => this.RaiseAndSetIfChanged(ref _motion, value);
+    }
+
+    public MotionPreference[] MotionOptions { get; } = Enum.GetValues<MotionPreference>();
+
+    private RegexSearchEngine _regexSearchEngine = AppSettings.Default.RegexSearchEngine;
+    public RegexSearchEngine RegexSearchEngine
+    {
+        get => _regexSearchEngine;
+        set
+        {
+            if (_regexSearchEngine == value)
+            {
+                return;
+            }
+
+            _regexSearchEngine = value;
+            this.RaisePropertyChanged();
+            this.RaisePropertyChanged(nameof(UseBacktrackingRegex));
+        }
+    }
+
+    /// <summary>The Settings check box's view of <see cref="RegexSearchEngine"/>.</summary>
+    public bool UseBacktrackingRegex
+    {
+        get => RegexSearchEngine == RegexSearchEngine.Backtracking;
+        set => RegexSearchEngine = value ? RegexSearchEngine.Backtracking : RegexSearchEngine.NonBacktracking;
+    }
+
     // --- Storage paths / limits ---
 
     private string _maxClipSizeKilobytes = (AppSettings.Default.MaxClipSizeBytes / 1024d).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
@@ -137,11 +170,18 @@ public sealed class SettingsViewModel : ViewModelBase
         set => this.RaiseAndSetIfChanged(ref _maxClipSizeKilobytes, value);
     }
 
-    private string _databasePath = StorageOptions.Default.DatabasePath;
+    private string _databasePath = string.Empty;
     public string DatabasePath
     {
         get => _databasePath;
         set => this.RaiseAndSetIfChanged(ref _databasePath, value);
+    }
+
+    private bool _honorClipboardHistoryOptOut = AppSettings.Default.HonorClipboardHistoryOptOut;
+    public bool HonorClipboardHistoryOptOut
+    {
+        get => _honorClipboardHistoryOptOut;
+        set => this.RaiseAndSetIfChanged(ref _honorClipboardHistoryOptOut, value);
     }
 
     private string _excludedCaptureAppsText = string.Empty;
@@ -605,7 +645,7 @@ public sealed class SettingsViewModel : ViewModelBase
         SensitivitySection = Section(
             "sensitivity rules pattern regex severity warn block name enabled");
         ExcludedAppsSection = Section(
-            "excluded exclude exclusion ignore app apps application blocklist blacklist password manager keepass 1password bitwarden privacy capture source process never",
+            "excluded exclude exclusion ignore app apps application blocklist blacklist password manager keepass 1password bitwarden privacy capture source process never clipboard history opt-out chrome edge",
             isExpanded: false);
         AiSection = Section(
             "ai openai chatgpt gpt model api key base url prompt transform",
@@ -617,7 +657,7 @@ public sealed class SettingsViewModel : ViewModelBase
             "ocr image text extract recognition language bcp-47 windows.media.ocr",
             isExpanded: false);
         SemanticSection = Section(
-            "semantic embedding embeddings similarity vector search meaning ai ml rerun reembed sort relevance date proximity",
+            "semantic embedding embeddings similarity vector search meaning ai ml rerun reembed sort relevance date proximity regex regular expression backtracking engine backreference lookaround slow",
             isExpanded: false);
     }
 

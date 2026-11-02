@@ -64,7 +64,7 @@ public static class ClipClipboardWriter
                 return false;
             }
 
-            await WriteAsync(monitor, () => interaction.CopyBitmapAsync(bitmap));
+            await WriteAsync(monitor, content: null, () => interaction.CopyBitmapAsync(bitmap));
             return true;
         }
 
@@ -75,15 +75,21 @@ public static class ClipClipboardWriter
 
         if (clip.ContentType == ContentType.RichText)
         {
-            var plainText = ClipDisplayFormatter.RenderRichContent(clip.Content);
-            await WriteAsync(monitor, () => interaction.CopyRichContentAsync(clip.Content, plainText, clip.ContentFormat));
+            // Capture keeps the source app's plain text in Content and the
+            // markup only in ContentBytes. Publishing Content as the HTML/RTF
+            // payload put the flattened text on the clipboard as "rich" text.
+            // Content is the markup only on rows stored without bytes.
+            var markup = ClipDisplayFormatter.GetRawMarkup(clip);
+            var richContent = string.IsNullOrWhiteSpace(markup) ? clip.Content : markup;
+            var plainText = ClipDisplayFormatter.GetDisplayRichText(clip);
+            await WriteAsync(monitor, plainText, () => interaction.CopyRichContentAsync(richContent, plainText, clip.ContentFormat));
             return true;
         }
 
         // Text and file lists both go as text: a file clip's content is already
         // the newline-separated paths, and there is no file-drop write on
         // ISystemInteractionService to offer instead.
-        await WriteAsync(monitor, () => interaction.CopyTextAsync(clip.Content));
+        await WriteAsync(monitor, clip.Content, () => interaction.CopyTextAsync(clip.Content));
         return true;
     }
 
@@ -98,9 +104,9 @@ public static class ClipClipboardWriter
     /// is what leaves a failed write holding an armed suppression, so the failure
     /// is unwound here rather than left to the gate's expiry window.
     /// </remarks>
-    private static async Task WriteAsync(IClipboardMonitorService monitor, Func<Task> write)
+    private static async Task WriteAsync(IClipboardMonitorService monitor, string? content, Func<Task> write)
     {
-        monitor.SuppressNext();
+        monitor.SuppressNext(content);
         try
         {
             await write();

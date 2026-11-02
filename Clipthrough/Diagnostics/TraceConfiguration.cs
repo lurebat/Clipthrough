@@ -28,13 +28,13 @@ public static class TraceConfiguration
         "[Layout]Layout cycle detected. Item 'Avalonia.Controls.Grid'",
     ];
 
-    public static string LogFilePath { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Clipthrough",
-        "logs",
-        "clipthrough.log");
+    /// <summary>
+    /// The session log, inside the data folder. Null until
+    /// <see cref="Initialize"/> has run, which Program does first thing.
+    /// </summary>
+    public static string? LogFilePath { get; private set; }
 
-    public static void Initialize()
+    public static void Initialize(string logFilePath)
     {
         if (s_initialized)
         {
@@ -42,12 +42,13 @@ public static class TraceConfiguration
         }
 
         s_initialized = true;
+        LogFilePath = logFilePath;
 
-        var logDirectory = Path.GetDirectoryName(LogFilePath)!;
+        var logDirectory = Path.GetDirectoryName(logFilePath)!;
         Directory.CreateDirectory(logDirectory);
-        RotateLogIfNeeded(LogFilePath);
+        RotateLogIfNeeded(logFilePath);
 
-        var stream = new FileStream(LogFilePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+        var stream = new FileStream(logFilePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
         var writer = new StreamWriter(stream) { AutoFlush = true };
         Trace.Listeners.Add(SessionLogService.Instance);
         Trace.Listeners.Add(new FilteringTraceListener(writer, "clipthrough-file", s_ignoredNoiseFragments));
@@ -56,7 +57,7 @@ public static class TraceConfiguration
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
-        Trace.TraceInformation($"Trace logging initialized. Log file: {LogFilePath}");
+        Trace.TraceInformation($"Trace logging initialized. Log file: {logFilePath}");
     }
 
     private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)

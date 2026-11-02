@@ -98,7 +98,7 @@ public class SemanticCoverageProgressHeadlessTests
 
         var worker = new DrivableEmbeddingWorker { Eligible = 100 };
         using var viewModel = CreateViewModelForCoverage(scope, worker);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         // Exactly how StartDatabaseInBackgroundAsync reaches it: off the UI thread.
         await Task.Run(() => viewModel.StartBackgroundServices());
@@ -125,7 +125,7 @@ public class SemanticCoverageProgressHeadlessTests
 
         var worker = new DrivableEmbeddingWorker();
         using var viewModel = CreateViewModelForCoverage(scope, worker);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         var failure = await Record.ExceptionAsync(() => Task.Run(() => viewModel.StartBackgroundServices()));
 
@@ -149,7 +149,6 @@ public class SemanticCoverageProgressHeadlessTests
         => new(
             scope.ClipStoreService,
             new TestClipboardMonitorService(),
-            new TestClipSampleDataService(),
             scope.SettingsService,
             new TestSystemInteractionService(),
             scope.StorageOptionsService,

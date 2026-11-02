@@ -15,7 +15,7 @@ namespace Clipthrough.Tests.Unit;
 /// ClipAngel database; they verify that hostile/oversized inputs are rejected before any
 /// allocation or decryption attempt.
 /// </summary>
-public sealed class ClipAngelImportServiceTests
+public sealed partial class ClipAngelImportServiceTests
 {
     // -----------------------------------------------------------------------
     // File-size cap tests (U20: cap file + decrypted size)

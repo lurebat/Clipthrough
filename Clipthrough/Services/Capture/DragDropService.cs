@@ -59,7 +59,7 @@ public sealed class DragDropService : IDragDropService
         return transfer;
     }
 
-    public Task<IReadOnlyList<ClipCaptureRequest>> TryBuildCaptureRequestsAsync(IDataTransfer drop, ClipboardSourceApplicationInfo? sourceInfo)
+    public async Task<IReadOnlyList<ClipCaptureRequest>> TryBuildCaptureRequestsAsync(IDataTransfer drop, ClipboardSourceApplicationInfo? sourceInfo)
     {
         ArgumentNullException.ThrowIfNull(drop);
 
@@ -80,16 +80,21 @@ public sealed class DragDropService : IDragDropService
             {
                 if (paths.Length == 1 && IsImageExtension(Path.GetExtension(paths[0])))
                 {
-                    var imageRequest = TryBuildImageRequestFromFile(paths[0], sourceInfo);
+                    // The caller is the drop handler on the UI thread, and a large
+                    // photo takes seconds to read, decode and re-encode as PNG.
+                    // Nothing below reads the drop again, which matters: Avalonia
+                    // releases the OLE data object once the handler first yields.
+                    var path = paths[0];
+                    var imageRequest = await Task.Run(() => TryBuildImageRequestFromFile(path, sourceInfo));
                     if (imageRequest is not null)
                     {
                         requests.Add(imageRequest);
-                        return Task.FromResult<IReadOnlyList<ClipCaptureRequest>>(requests);
+                        return requests;
                     }
                 }
 
                 requests.Add(BuildFilesRequest(paths, sourceInfo));
-                return Task.FromResult<IReadOnlyList<ClipCaptureRequest>>(requests);
+                return requests;
             }
         }
 
@@ -101,7 +106,7 @@ public sealed class DragDropService : IDragDropService
             if (imageRequest is not null)
             {
                 requests.Add(imageRequest);
-                return Task.FromResult<IReadOnlyList<ClipCaptureRequest>>(requests);
+                return requests;
             }
         }
 
@@ -113,7 +118,7 @@ public sealed class DragDropService : IDragDropService
             if (imageRequest is not null)
             {
                 requests.Add(imageRequest);
-                return Task.FromResult<IReadOnlyList<ClipCaptureRequest>>(requests);
+                return requests;
             }
         }
 
@@ -123,14 +128,14 @@ public sealed class DragDropService : IDragDropService
         if (!string.IsNullOrWhiteSpace(html))
         {
             requests.Add(BuildRichTextRequest(html, plainText, ClipContentFormat.Html, sourceInfo));
-            return Task.FromResult<IReadOnlyList<ClipCaptureRequest>>(requests);
+            return requests;
         }
 
         var rtf = drop.TryGetValue(RtfFormat);
         if (!string.IsNullOrWhiteSpace(rtf))
         {
             requests.Add(BuildRichTextRequest(rtf, plainText, ClipContentFormat.Rtf, sourceInfo));
-            return Task.FromResult<IReadOnlyList<ClipCaptureRequest>>(requests);
+            return requests;
         }
 
         // 5) Plain text fallback.
@@ -139,7 +144,7 @@ public sealed class DragDropService : IDragDropService
             requests.Add(BuildTextRequest(plainText, sourceInfo));
         }
 
-        return Task.FromResult<IReadOnlyList<ClipCaptureRequest>>(requests);
+        return requests;
     }
 
     private async Task PopulateSingleClipPayloadAsync(DataTransfer transfer, ClipEntry clip, IStorageProvider storageProvider)
@@ -328,7 +333,7 @@ public sealed class DragDropService : IDragDropService
         };
     }
 
-    private static ClipCaptureRequest? TryBuildImageRequestFromFile(string path, ClipboardSourceApplicationInfo? sourceInfo)
+    internal static ClipCaptureRequest? TryBuildImageRequestFromFile(string path, ClipboardSourceApplicationInfo? sourceInfo)
     {
         try
         {
@@ -347,20 +352,52 @@ public sealed class DragDropService : IDragDropService
         }
     }
 
-    private static ClipCaptureRequest? TryBuildImageRequestFromBytes(byte[] bytes, ClipboardSourceApplicationInfo? sourceInfo, string? label = null)
+    private static ReadOnlySpan<byte> PngSignature => [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+
+    /// <summary>
+    /// Builds an image clip from a dropped file's bytes, stored as PNG (F-43).
+    /// </summary>
+    /// <remarks>
+    /// Every other image path stores PNG, and everything downstream assumes it:
+    /// export names the file .png, the AI request labels it image/png, drag-out
+    /// writes clip-N.png. A JPEG, GIF, WebP or BMP dropped from disk used to be
+    /// stored verbatim and then mislabelled everywhere. PNG input is kept
+    /// byte-for-byte; anything else is decoded and re-encoded. SkiaSharp
+    /// directly rather than Avalonia's Bitmap: it is the same decoder Avalonia
+    /// renders through, and it needs no UI platform, so a test can check the
+    /// bytes really are PNG.
+    /// </remarks>
+    internal static ClipCaptureRequest? TryBuildImageRequestFromBytes(byte[] bytes, ClipboardSourceApplicationInfo? sourceInfo, string? label = null)
     {
         try
         {
-            using var stream = new MemoryStream(bytes, writable: false);
-            using var bitmap = new Avalonia.Media.Imaging.Bitmap(stream);
+            using var decoded = SkiaSharp.SKBitmap.Decode(bytes);
+            if (decoded is null)
+            {
+                Trace.TraceWarning("Drag-in image decode failed: not a format SkiaSharp can read.");
+                return null;
+            }
+
+            byte[] png;
+            if (bytes.AsSpan().StartsWith(PngSignature))
+            {
+                png = bytes;
+            }
+            else
+            {
+                using var image = SkiaSharp.SKImage.FromBitmap(decoded);
+                using var encoded = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+                png = encoded.ToArray();
+            }
+
             return new ClipCaptureRequest
             {
                 ContentType = ContentType.Image,
                 ContentFormat = ClipContentFormat.Bitmap,
                 ContentText = label,
-                ContentBytes = bytes,
-                ImageWidth = bitmap.PixelSize.Width,
-                ImageHeight = bitmap.PixelSize.Height,
+                ContentBytes = png,
+                ImageWidth = decoded.Width,
+                ImageHeight = decoded.Height,
                 SourceApp = sourceInfo?.Name,
                 SourceAppPath = sourceInfo?.Path,
                 SourceAppIconBytes = sourceInfo?.IconBytes,

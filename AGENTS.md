@@ -19,7 +19,7 @@ shortcuts, and pluggable source attribution.
   - `Converters/` — `IValueConverter` implementations used in AXAML bindings.
   - `Styles/` — `ModernTheme.axaml` + class-based selectors.
   - `Localization/` — `AppText` static dictionary (single source of truth for user-visible strings).
-  - `Data/` — SQLite helpers, schema migrations.
+  - `Database/` — connection factory, schema and migrations (`DatabaseInitializer`).
 - `Clipthrough.Tests/` — xUnit test project
   - `TestDoubles.cs` — fakes/stubs for each service interface.
   - Service tests use real SQLite (in-memory or temp files).
@@ -32,17 +32,23 @@ shortcuts, and pluggable source attribution.
 - **DI**: services are registered in `App.axaml.cs` → `ConfigureServices()`. Add new services there.
 - **MVVM**: all UI state is on ViewModels. Views have minimal code-behind (only for window lifecycle, DataContext subscriptions, or interop that can't be bound).
 - **ReactiveUI**: commands are `ReactiveCommand` with explicit signatures (`ReactiveCommand<TParam, TResult>`). Async commands use `CreateFromTask`. Never use `ICommand` directly.
-- **Settings**: `IAppSettingsService` loads/saves the `AppSettings` record. The ViewModel exposes a mirror of each field with a `Settings*` prefix so editing can be transactional (Cancel reverts).
+- **Settings**: `ISettingsService` loads/saves the `AppSettings` record. The ViewModel exposes a mirror of each field with a `Settings*` prefix so editing can be transactional (Cancel reverts).
 - **Localization**: user-visible strings come from `AppText`. Add new entries to the dictionary in `AppText.cs`. Never hardcode strings in AXAML or VMs.
 - **Theming**: use class selectors (`Classes="surface-panel"`) from `ModernTheme.axaml`. Brushes come from `DynamicResource`s so they respect dark/light mode.
-- **Persistence**: schema changes go in `Data/ClipSchema.cs` with an idempotent migration (ADD COLUMN IF NOT EXISTS, etc.). Bump version only when required.
+- **Persistence**: schema changes go in `Database/DatabaseInitializer.cs` with an idempotent migration (ADD COLUMN IF NOT EXISTS, etc.). Bump version only when required.
+- **Connections and encryption**: every `SqliteConnection` - in shipping code and in tests - comes from `SqliteConnectionFactory.Create` (tests: `TestConnections.Create`). The factory adds the cipher recipe that keeps SQLite3 Multiple Ciphers writing the SQLCipher 4 format; a connection without it silently writes a cipher no SQLCipher build can read. `ConnectionConstructionGuardTests` enforces this. See `docs/solutions/every-connection-carries-the-cipher-recipe.md`.
+- **Data folder (`AppDataRoot`)**: Clipthrough's own files - `settings.json`, `storage.json`, `window.json`, `copilot-token.bin`, the logs, and the default library - live under one `AppDataRoot`. `Program.Main` resolves it once with `AppDataRootResolver` and `App` registers it in DI. The first source present wins: `--data-dir`, then `CLIPTHROUGH_DATA_DIR`, then a `portable.flag` marker at the application root, then `%LOCALAPPDATA%\Clipthrough`. A service that keeps a file takes `AppDataRoot` in its DI constructor. Never call `Environment.GetFolderPath(SpecialFolder.LocalApplicationData)` or build a `%LOCALAPPDATA%\Clipthrough` path yourself. `AppDataRootGuardTests` fails on any use outside the resolver, in tests too; tests build temp roots with `AppDataRoot.Chosen` or `AppDataRoot.Default(fakeLocalAppData)`. An unusable folder stops startup with an `AppText` message; it never falls back to the default. A relative `CLIPTHROUGH_DATA_DIR` and a `--data-dir` value starting with `-` count as unusable. A relative library path resolves against the root, and portable mode writes it relative. Temp files (tool copies, drag files, the ClipAngel import copy) stay in `%TEMP%` on purpose. The single-instance mutex stays global, and so does the one Start with Windows entry. `AppDataRoot.RelaunchArguments` (`--data-dir <folder>` when the command line chose the folder) is appended to it and to Velopack's restart after an update, so both come back to the same folder. Because the entry is shared, startup only reconciles an entry that is missing or this configuration's own (`ISystemInteractionService.ReconcileStartWithWindows`). Ownership compares the executable and `--data-dir` after splitting the command with `CommandLineToArgvW`. Only the Settings toggle (`SyncStartWithWindows`) replaces or removes another configuration's entry. `StartWithWindowsReconcileTests` pins each rule. See `docs/solutions/velopack-replaces-current-on-every-update.md` for the Velopack layout rule.
 - **Hotkeys**: global hotkeys are registered via `ISystemInteractionService.TryRegisterGlobalHotKey` which on Windows uses `RegisterHotKey` + `Win32Properties.AddWndProcHookCallback`. Never hold a managed `WndProc` delegate yourself — use the Avalonia helper to avoid GC crashes.
 - **AI transforms** (`IAiTransformService` / `AiTransformService`): OpenAI-compatible chat-completions client. Base URL + API key + model come from `AppSettings.Ai*` with env-var fallback (`OPENAI_BASE_URL`, `OPENAI_API_KEY`). Service has a test-friendly ctor taking an `HttpClient`.
-- **Text transformations** (`TextTransformationService.Apply`): pure static function mapping `TextTransformation` → output. The `BoxTableToHtml` parser scans line-by-line, detects consecutive table-line blocks (box-drawing, Markdown `|---|`, or ASCII `+---+`), converts each to a `<table>`, and preserves surrounding text as escaped `<div>...<br>...</div>` blocks. Returns the original input verbatim if no table block is found.
-- **Transform menus** (top `Edit > Transform`, toolbar flyout, right-click context menu): driven by `s_transformMenuEntries` in `MainWindow.axaml.cs` keyed by `(Group, Header, TextTransformation)`. `BuildTransformMenuItems` groups by `Group`; groups with a single entry are flattened to top-level. The right-click context menu in `MainWindow.axaml` lists the same transforms statically, because it applies them to the clip that was right-clicked rather than to the current selection — a different command on a different view model, so it cannot be generated from the table. Adding a transform means editing both, but you no longer have to remember to: `TransformMenuParityHeadlessTests` fails when the two lists differ in membership or in wording, and when a new `TextTransformation` reaches neither. Withholding one on purpose is allowed and has to be named in that test's `withheld` set, which is also checked for staleness.
-- **Auto-copy after transform**: `ApplyTransformToTargetsAsync` and `ApplyTransformationToSingleClipAsync` invoke `CopyTransformResultToClipboardAsync` whenever exactly one target was transformed (single clip or selection slice). HTML-output transforms write CF_HTML via `CopyRichContentAsync`; everything else uses `CopyTextAsync`. Always call `_clipboardMonitorService.SuppressNext()` first so the capture doesn't double-create the clip. Multi-clip transforms intentionally do NOT auto-copy.
+- **Text transformations** (`TextTransformationService.ApplyAsync`): static, and asynchronous because the HTML/Markdown converters are - VellumText's importers are async-only and parse on a thread of their own. Every other transformation is a pure string function that completes synchronously on the caller, so awaiting it moves nothing off the caller's thread. Await it from the UI thread; never block on it there (`.Result`, `.Wait()`, `GetAwaiter().GetResult()`). The converters resume with `ConfigureAwait(false)` so their synchronous export does not land back on the UI thread; `MarkdownTransformationTests.Conversion_CompletesWithoutTheCallersThread` fails if one does. The `BoxTableToHtml` parser scans line-by-line, detects consecutive table-line blocks (box-drawing, Markdown `|---|`, or ASCII `+---+`), converts each to a `<table>`, and preserves surrounding text as escaped `<div>...<br>...</div>` blocks. Returns the original input verbatim if no table block is found.
+- **Transform menus** (top `Edit > Transform`, toolbar flyout, right-click context menu): driven by `TransformMenuCatalog.Entries` in `Views/TransformMenuCatalog.cs` keyed by `(Group, Header, TextTransformation)`. `BuildTransformMenuItems` groups by `Group`; groups with a single entry are flattened to top-level. The right-click context menu in `MainWindow.axaml` lists the same transforms statically, because it applies them to the clip that was right-clicked rather than to the current selection — a different command on a different view model, so it cannot be generated from the table. Adding a transform means editing both, but you no longer have to remember to: `TransformMenuParityHeadlessTests` fails when the two lists differ in membership or in wording, and when a new `TextTransformation` reaches neither. Withholding one on purpose is allowed and has to be named in that test's `withheld` set, which is also checked for staleness.
+- **Auto-copy after transform**: `ApplyTransformToTargetsAsync` and `ApplyTransformationToSingleClipAsync` invoke `CopyTransformResultToClipboardAsync` whenever exactly one target was transformed (single clip or selection slice). HTML-output transforms write CF_HTML via `CopyRichContentAsync`; everything else uses `CopyTextAsync`. Always call `_clipboardMonitorService.SuppressNext(text)` first, passing the text being written, so the capture doesn't double-create the clip. Suppression is by content, not by event count: the first notification is ignored before the clipboard is read (only while Clipthrough owns the clipboard - another application's copy in the same moment is captured), and any further one carrying the same text inside the window - Remote Desktop's rdpclip re-publishes every write - is recognised after the read (F-52). Different content is always captured. Multi-clip transforms intentionally do NOT auto-copy.
 - **Custom hotkey bindings** (`Models/CustomHotkeyBinding.cs`, `Models/CustomHotkeyTarget.cs`, `App.axaml.cs#ExecuteCustomHotkey`): `Target` uses `kind:value` with **four** kinds — `builtin` (a `TextTransformation` member), `ai` (a saved preset name), `prompt` (an inline system prompt sent straight to `IAiTransformService.TransformAsync`, for one-offs with no preset), and `aiprompt` (opens the AI prompt dialog; needs no clip and pastes nothing). Parsing lives in `CustomHotkeyTarget.Parse` and is covered by `CustomHotkeyTargetTests`; only the **first** colon separates, because a prompt routinely contains one. The kind is lowercased and its token is preserved verbatim, since a transformed clip persists `TransformKind` as `token:value`. An unparseable target is silent by nature — the gesture is registered, the key is swallowed, nothing happens — so it is worth a test rather than a try.
 - **Image AI transforms**: image clips can use AI presets/prompts in both image-to-text and image-to-image modes. Keep prompt UX and command routing aligned with the selected clip type.
+- **Window fit and responsive layout**: the main window reflows from 480x360 DIP up. `WorkspaceBreakpoints.Classify` picks Wide (at least 1100 DIP, the original layout), Medium, Narrow (preview stacked under the list) or Short (search modifiers collapsed into Search options; footer and counters hidden). `MainWindow.Layout.cs` sets the matching `bp-*` classes on the window and moves panes between grid rows and columns. Every other change is a style in `MainWindow.axaml` keyed on those classes. Change grid definitions only through `GridDefinitions.Set`: Avalonia's Grid keeps cells cached against the old definitions, and that crashed the app on a display-mode change. Every window calls `WindowFitter.Attach(this)` to stay inside its screen's working area. Layout tests assert against the working area with `Clipthrough.Tests/Layout/OnScreen.cs` and install `TestScreens` first, because headless only has a 1920x1280 stub screen. See `docs/solutions/windows-off-screen-on-small-or-scaled-monitors.md`.
+- **Popup presentation** (`Views/MainWindow.Presentation.cs`): dismissing the popup puts it into **standby** - DWM-cloaked, still shown as far as Avalonia is concerned, so it keeps rendering and the next summon shows a current frame. So **`Window.IsVisible` no longer means "the user can see it"**: use `MainWindow.IsPresentedToUser`. Dismiss through `MainWindow.Dismiss()` and summon through `TryLeaveStandbyAsync()` / `LeaveStandbyNow()`, never `Hide()`/`Show()` directly. In standby the view model keeps the list live (`SetMainWindowVisible` stays true) but `HotkeyTargetClip` treats it as gone. Minimize-to-tray and any platform without cloaking still hide. `docs/solutions/popup-reopens-on-a-stale-frame.md`.
+- **Paste timing** (`Services/System/PasteTiming.cs`): wait for the paste target with `PasteTiming.BeforePasteAsync(system, budget)`, never a fixed `Task.Delay`. The budget is the old fixed sleep (`AfterHideBudget` 150 ms, `HotkeyBudget` 120 ms) and the wait never exceeds it. Re-measure `SettleAfterForeground` with `tools/paste-timing/Invoke-PasteSweep.ps1`.
+- **Motion** (`IMotionService`, `Views/MainWindow.Motion.cs`): every transition and animation is scoped under the `motion` class, which the Animations setting (`System` follows `SPI_GETCLIENTAREAANIMATION`) puts on the popup and the windows it owns. A new animated style must be under `:is(Window).motion`, and a window opened from the popup must be passed to `TrackMotion`. List insert/remove animates only changes the view model marks with `IsListChangeAnimatable`; leave it false for anything that replaces many rows (searches, paging, refreshes). Mid-animation values are hard to sample headlessly - the headless clock runs on wall time - so motion tests sample from the first frame or pin the transition itself.
 - **Session logs** (`ISessionLogService` / `SessionLogService`): user-facing session logs are fed from `Trace`. Preserve real app warnings/errors, but avoid surfacing known benign framework noise that would drown out actionable entries.
 
 ## Validation
@@ -69,6 +75,14 @@ overloads, and `CA2201` where raising a reserved exception type *is* the
 behaviour under test). `external/.editorconfig` is a `root = true` shield so
 none of this fires on vendored code.
 
+Because analyzers are enforced at `error`, the SDK feature band is pinned in
+`global.json` (`rollForward: latestPatch`): a new band can ship new analyzer
+diagnostics and break a release build with no commit here. CI reads the same
+file through `setup-dotnet`'s `global-json-file`. Moving to a new band is a
+deliberate edit to `global.json`, made together with whatever it newly flags.
+If `dotnet` reports that no compatible SDK was found, install the newest SDK in
+that band rather than editing the file.
+
 The headless filter is there because a few Avalonia headless tests still fail
 intermittently — a couple of percent of runs — with a `[Test Case Cleanup
 Failure]` naming an innocent test. That is work outliving a previous test, not
@@ -76,6 +90,16 @@ a bug in the test named; see
 `docs/solutions/headless-teardown-leaks-dispatcher-jobs.md` before spending
 time on it. Run them locally if you are specifically touching view code, and
 re-run before believing a single red result.
+
+CI does run them, in a separate step: `.github/scripts/Invoke-HeadlessTests.ps1`.
+An assertion failure fails the build at once; only a run whose every failure
+message opens with `[Test Case Cleanup Failure` is retried, once, and only for those tests. A
+run that did not demonstrably complete - no TRX, no test executed, a run-level
+error such as xUnit's "Catastrophic failure", or a non-zero exit with no failed
+test - fails the build and is never retried. Run
+the same script locally to reproduce what CI decides, or pass `-ClassifyOnly`
+an existing TRX to see how its failures would be treated.
+`CiHeadlessGateScriptTests` runs the script against hand-written TRX files.
 
 If Clipthrough is running it holds a lock on its own output, and any build that
 needs to copy a changed assembly into it fails with `MSB3027` / `MSB3021` on
@@ -95,6 +119,25 @@ with `NETSDK1005`. When the lock does bite, MSBuild can leave the previous
 assembly in place, so the tests silently run the old build; treat an
 unexpectedly passing run after a lock error as untrustworthy.
 
+## Benchmarks
+
+`Clipthrough.Tests/Benchmarks/` holds the realistic-size fixture (`PerfLibrary`:
+60k clips, about 1 GB, 700 images, a long tail of multi-megabyte text) and the
+probes that measure search, capture, startup queries, the embedding claim and
+the semantic cache against it. They are `[BenchmarkFact]`s, skipped unless
+`CLIPTHROUGH_BENCH=1`, so the default run and CI never seed the library.
+
+```
+$env:CLIPTHROUGH_BENCH = '1'
+# optional: CLIPTHROUGH_BENCH_DIR, CLIPTHROUGH_BENCH_CLIPS, CLIPTHROUGH_BENCH_IMAGES,
+#           CLIPTHROUGH_BENCH_PASSWORD (set it for the encrypted variant)
+dotnet test .\Clipthrough.Tests\Clipthrough.Tests.csproj --filter "FullyQualifiedName~Benchmarks"
+```
+
+The library is seeded once and reused (delete its `.seeded` marker to reseed);
+results are appended to `results.txt` beside it. A performance change reports
+before and after numbers from the same machine, run while it is otherwise
+idle - numbers from a loaded machine are not comparable to anything.
 ## Testing expectations
 
 - **Pure logic** (formatting, parsing, fuzzy matching, text transformation): unit tests in the service's test class.
@@ -157,9 +200,10 @@ Measured on the VellumText 0.4.1 -> 0.5.0 upgrade: 0.5.0 gates Cut inside
 `CutAsync`, so `RichDocumentView`'s own Ctrl+X handler became redundant and its
 mutant went from KILLED to SURVIVED. **The suite was green, the build was clean,
 and `-ValidateOnly` passed all 284 anchors.** Nothing short of running the
-mutants against the new package would have shown it. We pin Avalonia too
-(`12.1.1`), so the same thing is waiting on that bump: a test that passes because
-Avalonia grew a guard is not a test of our code.
+mutants against the new package would have shown it. We pin Avalonia too (the
+`Avalonia*` references in `Clipthrough.csproj`), so the same thing can happen on
+every Avalonia bump: a test that passes because Avalonia grew a guard is not a
+test of our code.
 
 So a dependency bump is not done when the suite is green. Run the sweep, or at
 minimum re-run the mutants covering anything we implemented *because* of that
@@ -251,6 +295,49 @@ compilation for this reason; put scratch files in the session folder instead.
 - **Async void** is allowed only for event handlers. Prefer `async Task` everywhere else.
 - **P/Invoke**: struct layouts must match Win32 exactly. Prefer `System.Runtime.InteropServices.LibraryImport` on .NET 10 where possible — note this is aspirational, not descriptive: the codebase is currently 48 `DllImport` and 0 `LibraryImport`, so follow the surrounding style when editing an existing interop block rather than converting it piecemeal.
 
+## Settled decisions
+
+Owner decisions from the 2026-10-25 codebase audit. The full record - the
+options weighed and the finding each one closes - is the OD table in
+`docs/plans/2026-10-25-001-fix-codebase-audit-plan.md`. Do not re-raise one,
+in a review or an audit, without naming the assumption that changed. Each names
+the unit that implements it, so whether the code matches is checkable.
+
+- **S36 - AI key over plain HTTP is an accepted risk (OD-11, F-37).**
+  `OPENAI_API_KEY` is sent as the bearer token to whatever AI base URL is
+  configured, including a non-loopback `http://` endpoint. This stays.
+- **S37 - no paid update signing (OD-5, U-C7).** The owner decided against paid
+  code signing (2026-10-28). The update feed is pinned to the repository path,
+  and release integrity rests on that pin plus the GitHub account and CI token:
+  an accepted risk, and F-38 is closed only as far as the pin goes. A free route
+  (SignPath Foundation) is recorded in
+  `docs/plans/2026-10-28-001-fts-rebuild-and-upgrade-start-research.md` but not
+  taken.
+- **S38 - regex search engine (OD-7, U-B6).** Regex search uses
+  `RegexOptions.NonBacktracking` by default. A setting switches to the
+  backtracking engine, which keeps a 250 ms match timeout reported as "pattern
+  too slow".
+- **S39 - clipboard-history opt-out (OD-10, U-C1).** Content published with
+  `CanIncludeInClipboardHistory` = 0 is not captured while the setting is on,
+  and the setting defaults to on.
+  Refinement: the rule governs clipboard capture. A drag-and-drop onto
+  Clipthrough is a deliberate import and bypasses the opt-out, the excluded-apps
+  list and `Clipboard Viewer Ignore` alike (`ImportDroppedDataAsync`; pinned by
+  `ADropMarkedNotForClipboardHistory_IsStillImported`). Owner decision pending
+  confirmation, 2026-10-30.
+- **S40 - search history (OD-9, U-G8).** A query is recorded only when the user
+  commits to it - Enter, or acting on a result - never on a throttled refresh.
+- **S41 - quitting inside the undo window (OD-8, U-B4).** Pending deletes are
+  committed on exit.
+- **S42 - rekey password whitespace (OD-12, U-A2).** The Rekey dialog rejects a
+  new password with leading or trailing whitespace, consistent with the trimming
+  in the unlock prompt and `StorageOptions.Normalize`.
+
+Two refinements the owner made while Phase C was in review carry the same
+weight. OD-4 (U-C4a): backup copies are purged of sensitive clips only while the
+sensitive-lifetime setting is on; with it off, backups keep them. OD-3 (U-C3):
+Editor and Compare tool copies are also removed at app exit.
+
 ## How to add a feature (template)
 
 1. Read the relevant checkpoint files in the session folder for prior context.
@@ -267,10 +354,10 @@ compilation for this reason; put scratch files in the session folder instead.
 ## Docs
 
 - `README.md`: user-facing. Keep setup, feature list, and screenshots current when behavior changes.
-- `AGENTS.md` (this file): developer/agent guidance. Update when architecture or conventions change.
+- `AGENTS.md` (this file): developer/agent guidance. Update when architecture or conventions change. `AgentDocReferenceTests` fails when this file, `CONCEPTS.md`, `.github/copilot-instructions.md` or a skill names a source file, service interface or `s_` field that does not exist.
 - `CONTRIBUTING.md`: PR and style guidance.
 - `CONCEPTS.md`: glossary of project-specific terms (ClipEntry, WAL, lazy hydration, MetaSegments, etc.). Consult before using a term you haven't seen in code, and update when introducing a new project-specific concept.
 - `docs/solutions/`: verified fix and pattern docs (regression-prevention knowledge base). Each doc has YAML frontmatter (`tags`, `version`, `severity`). Read relevant docs before touching persistence, threading, background workers, or search. Add a doc after landing a non-obvious bug fix. See `docs/solutions/README.md` for structure and frontmatter schema.
 - `.github/copilot-cli-skills/clipthrough-transforms.md`: agent-facing reference for built-in transformations, the auto-copy contract, AI presets, and the custom-hotkey `Target` syntax (`builtin:` / `ai:` / `prompt:`). Update when adding transforms or new hotkey kinds.
-- `.github/copilot-cli-skills/clipthrough-storage-schema.md`: agent-facing reference for the SQLite schema, FTS5 triggers, indexes, and the migration pattern. Update on every schema change.
+- `.github/copilot-cli-skills/clipthrough-storage-schema.md`: agent-facing reference for the SQLite schema, FTS5 triggers, indexes, and the migration pattern. Update on every schema change. `StorageSchemaDocTests` fails when its `clips` columns, index names or status values stop matching the schema and the SQL.
 - `.github/copilot-cli-skills/clipthrough-platform-windows.md`: agent-facing reference for Windows interop — clipboard formats (CF_HTML wrapping), foreground capture + paste sequencing, AttachThreadInput, SendInput, and global hotkeys via `Win32Properties.AddWndProcHookCallback`. Update when changing platform behavior.

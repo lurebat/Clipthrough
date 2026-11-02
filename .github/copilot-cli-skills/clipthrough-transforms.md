@@ -4,7 +4,7 @@ Use this reference when the user wants to add, modify, or bind a clip transforma
 
 ## Built-in text transformations
 
-All values live in the `Clipthrough.Models.TextTransformation` enum and are applied via `Clipthrough.Services.TextTransformationService.Apply(kind, input)`. Pure, no I/O, safe to unit-test.
+All values live in the `Clipthrough.Models.TextTransformation` enum and are applied via `await Clipthrough.Services.TextTransformationService.ApplyAsync(kind, input)`. No I/O and safe to unit-test; asynchronous only because `HtmlToMarkdown` and `MarkdownToHtml` await VellumText's async-only importers. Every other kind completes synchronously. Never block on it from the UI thread.
 
 | Group      | Enum value                  | Notes                                                         |
 | ---------- | --------------------------- | ------------------------------------------------------------- |
@@ -36,8 +36,8 @@ All values live in the `Clipthrough.Models.TextTransformation` enum and are appl
 | Encoding   | `Base64Encode`              |                                                               |
 | Encoding   | `Base64Decode`              | Tolerates missing padding; returns input on bad payload       |
 | Tables     | `BoxTableToHtml`            | See below                                                     |
-| Convert    | `HtmlToMarkdown`            | Markup -> Markdown, via VellumText. Non-markup is returned unchanged. |
-| Convert    | `MarkdownToHtml`            | Markdown -> markup, via VellumText. Produces HTML.            |
+| Convert    | `HtmlToMarkdown`            | Markup -> Markdown, via VellumText. Non-markup is returned unchanged. No nesting refusal: VellumText 0.8 bounds deep markup itself (`HostileRichPayloadTests`). |
+| Convert    | `MarkdownToHtml`            | Markdown -> markup, via VellumText. Produces HTML. Input past `ImportGuards` is returned unchanged; on VellumText 0.7.0 deep nesting overflowed the importer's stack (F-48), and 0.8 survives it but returns a fragment, so the refusal stays for its message. `RefusalReason` says why. |
 
 ### `BoxTableToHtml` semantics
 
@@ -61,7 +61,7 @@ To add a new transformation:
 1. Add an enum value to `Clipthrough/Models/TextTransformation.cs`.
 2. Implement it in `Clipthrough/Services/Ai/TextTransformationService.cs#Apply`.
 3. Add a display label in `Clipthrough/Converters/TextTransformationDisplayConverter.cs`.
-4. Add an entry to `s_transformMenuEntries` in `Clipthrough/Views/MainWindow.axaml.cs` (drives the top menu and toolbar flyout).
+4. Add an entry to `TransformMenuCatalog.Entries` in `Clipthrough/Views/TransformMenuCatalog.cs` (drives the top menu and toolbar flyout).
 5. Add a matching `<MenuItem ... CommandParameter="{x:Static models:TextTransformation.YourValue}"/>` to the right-click context menu in `Clipthrough/Views/MainWindow.axaml`.
 6. Add unit tests in `Clipthrough.Tests/Unit/TextTransformationServiceTests.cs`.
 
@@ -78,7 +78,7 @@ When exactly one target is transformed (single selected clip or a selected text 
   HTML-producing transform meant remembering both. Forgetting one writes markup to the clipboard as plain text, silently.
   Add to that predicate, not to a comparison.
 - All others → `CopyTextAsync(result)`.
-- Always preceded by `_clipboardMonitorService.SuppressNext()` so the new clip isn't captured twice.
+- Always preceded by `_clipboardMonitorService.SuppressNext(text)`, with the text written, so the new clip isn't captured twice (suppression matches content; see CONCEPTS.md).
 
 Multi-clip batch transforms intentionally skip auto-copy — only the final clip would be on the clipboard anyway, and the user almost certainly wants to leave their clipboard alone.
 
@@ -108,11 +108,11 @@ record CustomHotkeyBinding {
 
 | Kind       | `value`                                         | Behaviour                                                            |
 | ---------- | ----------------------------------------------- | -------------------------------------------------------------------- |
-| `builtin`  | `TextTransformation` enum name                  | Runs `TextTransformationService.Apply(kind, latestClip)`.            |
+| `builtin`  | `TextTransformation` enum name                  | Runs `TextTransformationService.ApplyAsync(kind, latestClip)`.       |
 | `ai`       | AI preset `Name`                                | Runs `IAiTransformService.TransformAsync(preset.Prompt, latestClip)`.|
 | `prompt`   | Free-form prompt text                           | Runs `IAiTransformService.TransformAsync(value, latestClip)` directly — handy for one-off prompts without creating a preset. |
 | `aiprompt` | `<kind>[\|<prefill>]` (`<kind>` ∈ `auto`, `text`, `image-to-text`, `image-to-image`) | Opens the AI prompt dialog with the requested kind selected. Anything after the first `\|` is loaded into the prompt textbox so the user can edit/extend before submitting. `auto` (default) lets the VM pick the kind based on the active clip. |
 
-After producing `output`, the handler calls `_clipboardMonitorService.SuppressNext()`, copies via `CopyTextAsync`, and (when `PasteAfter` is true) simulates Ctrl+V after a short delay. The `aiprompt` kind is an exception: it just opens the dialog and ignores `PasteAfter` (the dialog's own submit path produces the new clip).
+After producing `output`, the handler (`HotkeyClipActions.TransformAndCopyAsync`) calls `_clipboardMonitorService.SuppressNext(output)`, copies via `CopyTextAsync`, and (when `PasteAfter` is true) simulates Ctrl+V after a short delay. The `aiprompt` kind is an exception: it just opens the dialog and ignores `PasteAfter` (the dialog's own submit path produces the new clip).
 
 The `Target` string is currently entered free-form in **Settings → Custom hotkey actions** (placed alongside the Local/Global hotkey sections). If you add a new kind, update both `ExecuteCustomHotkey` and the help text in `Clipthrough/Views/SettingsWindow.axaml`.

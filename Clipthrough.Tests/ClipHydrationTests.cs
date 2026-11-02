@@ -98,4 +98,55 @@ public sealed class ClipHydrationTests
 
         Assert.False(await vm.EnsureContentHydratedAsync());
     }
+
+    private static ClipEntry LongTextRow(bool truncated) => new()
+    {
+        Id = 78,
+        Content = truncated ? new string('a', ClipEntry.ListContentLength) : new string('a', ClipEntry.ListContentLength) + "the rest",
+        IsContentTruncated = truncated,
+        ContentType = ContentType.Text,
+        ContentFormat = ClipContentFormat.PlainText,
+        SourceApp = "Tests",
+        Hash = "hash-long",
+        LastCopiedAt = DateTimeOffset.UtcNow,
+        FirstCopiedAt = DateTimeOffset.UtcNow,
+    };
+
+    /// <summary>F-10: a row whose text the list read bounded is hydrated like a missing blob.</summary>
+    [AvaloniaFact]
+    public async Task ATruncatedTextRow_Hydrates()
+    {
+        var vm = new ClipItemViewModel(LongTextRow(truncated: true), contentHydrator: _ => Task.FromResult<ClipEntry?>(LongTextRow(truncated: false)));
+
+        Assert.True(await vm.EnsureContentHydratedAsync());
+        Assert.EndsWith("the rest", vm.Clip.Content, StringComparison.Ordinal);
+        Assert.EndsWith("the rest", vm.FullContent, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Copy runs right after selection, while selection's hydration is still in
+    /// flight. It has to wait for that hydration, not be told "nothing to do" and
+    /// read the row as it stands.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task ASecondCaller_WaitsForTheHydrationAlreadyRunning()
+    {
+        var gate = new TaskCompletionSource<ClipEntry?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        var vm = new ClipItemViewModel(LongTextRow(truncated: true), contentHydrator: _ =>
+        {
+            calls++;
+            return gate.Task;
+        });
+
+        var first = vm.EnsureContentHydratedAsync();
+        var second = vm.EnsureContentHydratedAsync();
+        Assert.False(second.IsCompleted, "the second caller was answered before the running hydration finished");
+
+        gate.SetResult(LongTextRow(truncated: false));
+        Assert.True(await first);
+        Assert.True(await second);
+        Assert.Equal(1, calls);
+        Assert.False(vm.Clip.IsContentTruncated);
+    }
 }

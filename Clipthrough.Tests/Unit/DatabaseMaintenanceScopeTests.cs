@@ -102,9 +102,11 @@ public sealed class DatabaseMaintenanceScopeTests
             IsRunning = false;
         }
 
-        public void SuppressNext() { }
+        public void SuppressNext(string? content = null) { }
 
         public void CancelSuppressNext() { }
+
+        public void SuppressNextForeignCopy() { }
     }
 
     private sealed class RecordingMonitor : IClipboardMonitorService
@@ -129,9 +131,11 @@ public sealed class DatabaseMaintenanceScopeTests
 
         public Task StopAsync() { StopAsyncCount++; IsRunning = false; return Task.CompletedTask; }
 
-        public void SuppressNext() { }
+        public void SuppressNext(string? content = null) { }
 
         public void CancelSuppressNext() { }
+
+        public void SuppressNextForeignCopy() { }
     }
 
     private sealed class RecordingOcrQueue : IBackgroundOcrQueue

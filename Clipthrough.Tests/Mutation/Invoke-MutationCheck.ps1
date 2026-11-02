@@ -124,7 +124,9 @@ if (Test-Path $PendingFile) {
 function Invoke-TestFilter([string]$Filter) {
     $raw = & dotnet test $TestProject --filter $Filter -p:BaseOutputPath=$OutputPath --nologo 2>&1 | Out-String
 
-    if ($raw -match 'error [A-Z]{2}\d+' -or $raw -match 'Build FAILED') {
+    # [A-Z]{2,}: analyzer ids such as IDE0051 have three letters. Missing them
+    # reported a mutant that orphaned a private member as 'no test summary'.
+    if ($raw -match 'error [A-Z]{2,}\d+' -or $raw -match 'Build FAILED') {
         return [pscustomobject]@{ Ran = $false; Failed = 0; Passed = 0; Reason = 'build failed'; Raw = $raw }
     }
     # CS0436 means a type in the test project's own sources is shadowing the

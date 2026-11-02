@@ -1,0 +1,206 @@
+[
+  {
+    "Id": "6.versions",
+    "Row": 6,
+    "Status": "INFO",
+    "Detail": "sqlite_version()=3.39.2 | sqlite_source_id()=2022-07-21 15:24:47 698edb77537b67c41adc68f9b892db56bcf9a55e00371a61420f3ddd668ealt1 | PRAGMA cipher_version=4.5.2 community | PRAGMA cipher_provider= | PRAGMA cipher_provider_version= | compile_options(selected)=COMPILER=msvc-1929 DEFAULT_PAGE_SIZE=4096 ENABLE_FTS3 ENABLE_FTS3_PARENTHESIS ENABLE_FTS4 ENABLE_FTS5 HAS_CODEC MAX_ATTACHED=10 MAX_DEFAULT_PAGE_SIZE=8192 TEMP_STORE=2 THREADSAFE=1 | compile_options(count)=46"
+  },
+  {
+    "Id": "1.open.a-plain-wal",
+    "Row": 1,
+    "Status": "PASS",
+    "Detail": "rows=199 tags=99 checksum=7F5AFB5BC08F1BF5414DCBD5F8CBBE62 integrity=ok fts_integrity=ok fts=[Hello:39, עולם:20, 日本語:20, façade:20, ünï:20, \uD83D\uDE00\uD83D\uDE80✨:20, Русский:20, example.com:20, edited:1]"
+  },
+  {
+    "Id": "1.open.b-enc-sqlcipher452",
+    "Row": 1,
+    "Status": "PASS",
+    "Detail": "rows=199 tags=99 checksum=7F5AFB5BC08F1BF5414DCBD5F8CBBE62 integrity=ok fts_integrity=ok fts=[Hello:39, עולם:20, 日本語:20, façade:20, ünï:20, \uD83D\uDE00\uD83D\uDE80✨:20, Русский:20, example.com:20, edited:1]"
+  },
+  {
+    "Id": "1.open.c-enc-rekeyed",
+    "Row": 1,
+    "Status": "PASS",
+    "Detail": "rows=199 tags=99 checksum=7F5AFB5BC08F1BF5414DCBD5F8CBBE62 integrity=ok fts_integrity=ok fts=[Hello:39, עולם:20, 日本語:20, façade:20, ünï:20, \uD83D\uDE00\uD83D\uDE80✨:20, Русский:20, example.com:20, edited:1]"
+  },
+  {
+    "Id": "1.open.d-enc-wal",
+    "Row": 1,
+    "Status": "PASS",
+    "Detail": "(with 156592-byte -wal) rows=199 tags=99 checksum=7F5AFB5BC08F1BF5414DCBD5F8CBBE62 integrity=ok fts_integrity=ok fts=[Hello:39, עולם:20, 日本語:20, façade:20, ünï:20, \uD83D\uDE00\uD83D\uDE80✨:20, Русский:20, example.com:20, edited:1]"
+  },
+  {
+    "Id": "2.write.a-plain-wal",
+    "Row": 2,
+    "Status": "PASS",
+    "Detail": "header=plaintext rows=248 tags=123 checksum=3153D056D471DC77F971B1876A6A5060 integrity=ok fts_integrity=ok fts=[Hello:48, עולם:25, 日本語:25, façade:25, ünï:25, \uD83D\uDE00\uD83D\uDE80✨:25, Русский:25, example.com:25, edited:2]"
+  },
+  {
+    "Id": "2.write.b-enc-sqlcipher452",
+    "Row": 2,
+    "Status": "PASS",
+    "Detail": "header=encrypted(7A3AFE35D01C81FA..) rows=248 tags=123 checksum=3153D056D471DC77F971B1876A6A5060 integrity=ok fts_integrity=ok fts=[Hello:48, עולם:25, 日本語:25, façade:25, ünï:25, \uD83D\uDE00\uD83D\uDE80✨:25, Русский:25, example.com:25, edited:2]"
+  },
+  {
+    "Id": "2.write.c-enc-rekeyed",
+    "Row": 2,
+    "Status": "PASS",
+    "Detail": "header=encrypted(7BAFA9AD134C71A1..) rows=248 tags=123 checksum=3153D056D471DC77F971B1876A6A5060 integrity=ok fts_integrity=ok fts=[Hello:48, עולם:25, 日本語:25, façade:25, ünï:25, \uD83D\uDE00\uD83D\uDE80✨:25, Русский:25, example.com:25, edited:2]"
+  },
+  {
+    "Id": "2.write.d-enc-wal",
+    "Row": 2,
+    "Status": "PASS",
+    "Detail": "header=encrypted(C1F5E51F7C8EF5F6..) rows=248 tags=123 checksum=3153D056D471DC77F971B1876A6A5060 integrity=ok fts_integrity=ok fts=[Hello:48, עולם:25, 日本語:25, façade:25, ünï:25, \uD83D\uDE00\uD83D\uDE80✨:25, Русский:25, example.com:25, edited:2]"
+  },
+  {
+    "Id": "2.create.new-encrypted-db",
+    "Row": 2,
+    "Status": "PASS",
+    "Detail": "header=encrypted(BA11B52DA073066B..) rows=299 tags=149 checksum=6D9AB09748CA97095359DF4718AE82C2 integrity=ok fts_integrity=ok fts=[Hello:59, עולם:30, 日本語:30, façade:30, ünï:30, \uD83D\uDE00\uD83D\uDE80✨:30, Русский:30, example.com:29, edited:1]"
+  },
+  {
+    "Id": "2.wal-left-behind-by-candidate (crash-then-rollback scenario)",
+    "Row": 2,
+    "Status": "PASS",
+    "Detail": "left .db 81920 B + -wal 156592 B for the current stack to replay; rows=199 tags=99 checksum=7F5AFB5BC08F1BF5414DCBD5F8CBBE62 integrity=ok fts_integrity=skipped fts=[Hello:39, עולם:20, 日本語:20, façade:20, ünï:20, \uD83D\uDE00\uD83D\uDE80✨:20, Русский:20, example.com:20, edited:1]"
+  },
+  {
+    "Id": "3.fts5-trigram+triggers",
+    "Row": 3,
+    "Status": "PASS",
+    "Detail": "MATCH edited=1 (exp 1, UPDATE trigger) deleted-row=0 (exp 0, DELETE trigger) kept-row=1 (exp 1) hebrew=30 (exp 30) 2-char-query=0; after 'optimize': integrity=ok fts-integrity=ok"
+  },
+  {
+    "Id": "3.foreign-key-cascade",
+    "Row": 3,
+    "Status": "PASS",
+    "Detail": "PRAGMA foreign_keys=1 orphans=0 tags-of-deleted-8=0 tags-of-deleted-12=0"
+  },
+  {
+    "Id": "3.backup-api.encrypted-to-encrypted",
+    "Row": 3,
+    "Status": "PASS",
+    "Detail": "dst header=encrypted(871694D9203ADEC1..) journal=wal rows=199 tags=99 checksum=7F5AFB5BC08F1BF5414DCBD5F8CBBE62 integrity=ok fts_integrity=ok fts=[Hello:39, עולם:20, 日本語:20, façade:20, ünï:20, \uD83D\uDE00\uD83D\uDE80✨:20, Русский:20, example.com:20, edited:1]"
+  },
+  {
+    "Id": "3.backup-api.plaintext-to-encrypted",
+    "Row": 3,
+    "Status": "INFO",
+    "Detail": "not used by the app; refused: SqliteException code=1 ext=1: SQLite Error 1: 'backup is not supported with encrypted databases'."
+  },
+  {
+    "Id": "3.rekey.encrypted-to-encrypted (app RekeyAsync path)",
+    "Row": 3,
+    "Status": "PASS",
+    "Detail": "journal_mode during rekey=wal; header(salt) before=encrypted(B7AE350AD3DFC3D1..) after=encrypted(B7AE350AD3DFC3D1..) (salt REUSED); old password now -> error 26; new password -> rows=199 tags=99 checksum=7F5AFB5BC08F1BF5414DCBD5F8CBBE62 integrity=ok fts_integrity=ok fts=[Hello:39, עולם:20, 日本語:20, façade:20, ünï:20, \uD83D\uDE00\uD83D\uDE80✨:20, Русский:20, example.com:20, edited:1]"
+  },
+  {
+    "Id": "3.encrypt-plaintext.attach-key+sqlcipher_export (app WriteRekeyedCopy path)",
+    "Row": 3,
+    "Status": "PASS",
+    "Detail": "ATTACH..KEY + sqlcipher_export: header=encrypted(F45BBDF41C65E9FE..), journal_mode=wal, data identical to fixture 'a-plain-wal'"
+  },
+  {
+    "Id": "3.encrypt-plaintext.pragma-rekey-in-WAL",
+    "Row": 3,
+    "Status": "FAIL",
+    "Detail": "PRAGMA rekey 'plain'->'enc' (journal wal, ends wal): header=plaintext - expected encrypted (operation was a silent no-op or wrong)"
+  },
+  {
+    "Id": "3.encrypt-plaintext.pragma-rekey-after-journal_mode=DELETE",
+    "Row": 3,
+    "Status": "FAIL",
+    "Detail": "PRAGMA rekey 'plain'->'enc' (journal wal->delete->wal, ends wal): header=plaintext - expected encrypted (operation was a silent no-op or wrong)"
+  },
+  {
+    "Id": "3.encrypt-plaintext.vacuum-into-keyed-uri",
+    "Row": 3,
+    "Status": "N-A",
+    "Detail": "stack has no keyed VACUUM INTO target"
+  },
+  {
+    "Id": "3.decrypt.attach-key-empty+sqlcipher_export (app WriteRekeyedCopy path)",
+    "Row": 3,
+    "Status": "PASS",
+    "Detail": "ATTACH..KEY + sqlcipher_export: header=plaintext, journal_mode=wal, data identical to fixture 'b-enc-sqlcipher452'"
+  },
+  {
+    "Id": "3.decrypt.pragma-rekey-empty-in-WAL",
+    "Row": 3,
+    "Status": "FAIL",
+    "Detail": "PRAGMA rekey 'enc'->'plain' (journal wal, ends wal): header=encrypted(7A3AFE35D01C81FA..) - expected plaintext (operation was a silent no-op or wrong)"
+  },
+  {
+    "Id": "3.decrypt.pragma-rekey-empty-after-journal_mode=DELETE",
+    "Row": 3,
+    "Status": "FAIL",
+    "Detail": "PRAGMA rekey 'enc'->'plain' (journal wal->delete->wal, ends wal): header=encrypted(7A3AFE35D01C81FA..) - expected plaintext (operation was a silent no-op or wrong)"
+  },
+  {
+    "Id": "3.decrypt.vacuum-into-plain-path",
+    "Row": 3,
+    "Status": "INFO",
+    "Detail": "VACUUM INTO a plain path wrote header=encrypted(7A3AFE35D01C81FA..); opens with the source key: yes (i.e. not a decrypt mechanism)"
+  },
+  {
+    "Id": "3.busy_timeout",
+    "Row": 3,
+    "Status": "PASS",
+    "Detail": "busy_timeout read back=5000; writer blocked by IMMEDIATE tx waited 651 ms then succeeded; with busy_timeout=0 -> error 5 (5=SQLITE_BUSY)"
+  },
+  {
+    "Id": "3.wal+checkpoint(TRUNCATE)",
+    "Row": 3,
+    "Status": "PASS",
+    "Detail": "journal_mode=wal; -wal 61832 bytes -> checkpoint row (0|0|0) -> 0 bytes"
+  },
+  {
+    "Id": "3.vacuum+integrity",
+    "Row": 3,
+    "Status": "PASS",
+    "Detail": "after VACUUM header=encrypted(BA11B52DA073066B..) integrity=ok fts-integrity=ok"
+  },
+  {
+    "Id": "3.purge-sensitive (DatabaseBackupService.PurgeSensitiveClips sequence)",
+    "Row": 3,
+    "Status": "PASS",
+    "Detail": "removed 28 rows (cascade), remaining sensitive=0, rows=171 tags=85 checksum=696D963A1A9DD621E38D3D7A37742F53 integrity=ok fts_integrity=ok fts=[Hello:34, עולם:17, 日本語:17, façade:18, ünï:18, \uD83D\uDE00\uD83D\uDE80✨:17, Русский:17, example.com:17, edited:1]"
+  },
+  {
+    "Id": "3.read-only-open",
+    "Row": 3,
+    "Status": "PASS",
+    "Detail": "Mode=ReadOnly read 199 rows; write -> error 8 (8=SQLITE_READONLY)"
+  },
+  {
+    "Id": "3.password-failure-codes (SqliteErrors.IsPasswordFailure expects 26)",
+    "Row": 3,
+    "Status": "PASS",
+    "Detail": "wrong key -> 26, no key -> 26, text file -> 26, missing file -> 14 (app expects 26/26/26/14)"
+  },
+  {
+    "Id": "3.special-characters-in-path",
+    "Row": 3,
+    "Status": "PASS",
+    "Detail": "file at intended path=True, stray files=0, rows=20"
+  },
+  {
+    "Id": "4.cipher-params.on-fixture-b",
+    "Row": 4,
+    "Status": "INFO",
+    "Detail": "PRAGMA cipher_version=4.5.2 community | PRAGMA kdf_iter=256000 | PRAGMA cipher_page_size=4096 | PRAGMA cipher_kdf_algorithm=PBKDF2_HMAC_SHA512 | PRAGMA cipher_hmac_algorithm=HMAC_SHA512 | PRAGMA cipher_use_hmac=1 | PRAGMA cipher_plaintext_header_size=0 | PRAGMA page_size=4096 | PRAGMA journal_mode=wal | PRAGMA cipher_settings=PRAGMA kdf_iter = 256000; PRAGMA cipher_page_size = 4096; PRAGMA cipher_use_hmac = 1; PRAGMA cipher_plaintext_header_size = 0; PRAGMA cipher_hmac_algorithm = HMAC_SHA512; PRAGMA cipher_kdf_algorithm = PBKDF2_HMAC_SHA512; | PRAGMA cipher_default_settings=PRAGMA cipher_default_kdf_iter = 256000; PRAGMA cipher_default_page_size = 4096; PRAGMA cipher_default_use_hmac = 1; PRAGMA cipher_default_plaintext_header_size = 0; PRAGMA cipher_default_hmac_algorithm = HMAC_SHA512; PRAGMA cipher_default_kdf_algorithm = PBKDF2_HMAC_SHA512;"
+  },
+  {
+    "Id": "4.cipher-params.on-candidate-created-db",
+    "Row": 4,
+    "Status": "INFO",
+    "Detail": "PRAGMA cipher_version=4.5.2 community | PRAGMA kdf_iter=256000 | PRAGMA cipher_page_size=4096 | PRAGMA cipher_kdf_algorithm=PBKDF2_HMAC_SHA512 | PRAGMA cipher_hmac_algorithm=HMAC_SHA512 | PRAGMA cipher_use_hmac=1 | PRAGMA cipher_plaintext_header_size=0 | PRAGMA page_size=4096 | PRAGMA journal_mode=wal | PRAGMA cipher_settings=PRAGMA kdf_iter = 256000; PRAGMA cipher_page_size = 4096; PRAGMA cipher_use_hmac = 1; PRAGMA cipher_plaintext_header_size = 0; PRAGMA cipher_hmac_algorithm = HMAC_SHA512; PRAGMA cipher_kdf_algorithm = PBKDF2_HMAC_SHA512; | PRAGMA cipher_default_settings=PRAGMA cipher_default_kdf_iter = 256000; PRAGMA cipher_default_page_size = 4096; PRAGMA cipher_default_use_hmac = 1; PRAGMA cipher_default_plaintext_header_size = 0; PRAGMA cipher_default_hmac_algorithm = HMAC_SHA512; PRAGMA cipher_default_kdf_algorithm = PBKDF2_HMAC_SHA512;"
+  },
+  {
+    "Id": "5.bench",
+    "Row": 5,
+    "Status": "INFO",
+    "Detail": "encrypted.open+schema_ms=569 | encrypted.insert_20000_rows_batch100_ms=2016 | encrypted.trigram_searches_200_ms=466 | encrypted.open+first_query_ms (KDF)=573 | encrypted.search_hits=10000 | plaintext.open+schema_ms=14 | plaintext.insert_20000_rows_batch100_ms=1531 | plaintext.trigram_searches_200_ms=290 | plaintext.open+first_query_ms (KDF)=3 | plaintext.search_hits=10000 | iterations(median of)=3"
+  }
+]

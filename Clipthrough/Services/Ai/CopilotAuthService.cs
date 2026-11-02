@@ -6,6 +6,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Clipthrough.Models;
 
 namespace Clipthrough.Services;
 
@@ -27,8 +28,8 @@ public sealed class CopilotAuthService : ICopilotAuthService, IDisposable
     private string? _copilotToken;
     private DateTimeOffset _copilotTokenExpiry;
 
-    public CopilotAuthService(IDataProtectionService dataProtection)
-        : this(new HttpClient(), ownsHttpClient: true, dataProtection)
+    public CopilotAuthService(IDataProtectionService dataProtection, AppDataRoot dataRoot)
+        : this(new HttpClient(), ownsHttpClient: true, dataProtection, dataRoot.CopilotTokenPath)
     {
     }
 
@@ -43,7 +44,16 @@ public sealed class CopilotAuthService : ICopilotAuthService, IDisposable
     {
     }
 
-    private CopilotAuthService(HttpClient http, bool ownsHttpClient, IDataProtectionService? dataProtection)
+    /// <summary>
+    /// Persistence pointed at <paramref name="tokenPath"/> instead of the user
+    /// profile, so tests can exercise it without touching a real token (F-31).
+    /// </summary>
+    internal CopilotAuthService(HttpClient http, IDataProtectionService dataProtection, string tokenPath)
+        : this(http, ownsHttpClient: false, dataProtection, tokenPath)
+    {
+    }
+
+    private CopilotAuthService(HttpClient http, bool ownsHttpClient, IDataProtectionService? dataProtection, string? tokenPath = null)
     {
         _http = http;
         _ownsHttpClient = ownsHttpClient;
@@ -54,12 +64,9 @@ public sealed class CopilotAuthService : ICopilotAuthService, IDisposable
         // Only set up token persistence when the protector can actually secure
         // on-disk data. On non-Windows platforms with the no-op fallback we keep
         // the token in-memory only — never write cleartext to disk.
-        if (dataProtection is not null && dataProtection.CanPersistSecrets)
+        if (dataProtection is not null && dataProtection.CanPersistSecrets && tokenPath is not null)
         {
-            _tokenPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Clipthrough",
-                "copilot-token.bin");
+            _tokenPath = tokenPath;
             TryLoadGitHubToken();
         }
     }
@@ -101,7 +108,7 @@ public sealed class CopilotAuthService : ICopilotAuthService, IDisposable
             }
             var raw = System.Text.Encoding.UTF8.GetBytes(_gitHubToken);
             var protectedBytes = _dataProtection.Protect(raw);
-            File.WriteAllBytes(_tokenPath, protectedBytes);
+            AtomicFile.WriteAllBytes(_tokenPath, protectedBytes);
         }
         catch (Exception ex)
         {

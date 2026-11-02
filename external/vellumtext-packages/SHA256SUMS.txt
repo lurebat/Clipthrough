@@ -1,0 +1,5 @@
+e708796b33bbb975ca53447a5a2ce540a1c3c49cc29c4b8fd48d0894fe625f28  VellumText.Core.0.9.0.nupkg
+339b0f51e9f4a0a8f536bc8482505ae2221ff1ccb57bfbf4bd62b57d820dc0f6  VellumText.Avalonia.0.9.0.nupkg
+c6c1484a6f166c2f83df29c0fe0378ca83b0a0b0cfc05bdec69c7cdd460859dc  VellumText.Interop.Html.0.9.0.nupkg
+f034352e453126418bcea3f309208c0ec5785773cba52adcd1b394d7b7ce10df  VellumText.Interop.Rtf.0.9.0.nupkg
+27c404a2337297aef133148b07d12029101d511ba5abc81a076b3d29f4455907  VellumText.Interop.Markdown.0.9.0.nupkg

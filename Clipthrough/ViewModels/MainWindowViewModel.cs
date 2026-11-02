@@ -25,6 +25,7 @@ using Clipthrough.Localization;
 using Clipthrough.Models;
 using Clipthrough.Presentation;
 using Clipthrough.Services;
+using Clipthrough.Services.Search;
 using ReactiveUI;
 
 namespace Clipthrough.ViewModels;
@@ -32,6 +33,21 @@ namespace Clipthrough.ViewModels;
 public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
     private const int PageSize = 200;
+
+    /// <summary>
+    /// How long after the last keystroke or filter change the list re-queries.
+    /// Measured at 60k clips, the query itself is 135-750 ms, so the throttle
+    /// was the smaller part of the wait; 150 ms still coalesces ordinary typing
+    /// into one query, while 80 ms re-queried three to seven times per word and
+    /// made the list jump while typing.
+    /// </summary>
+    internal static readonly TimeSpan SearchThrottle = TimeSpan.FromMilliseconds(150);
+
+    /// <summary>
+    /// How long work must have been running before the busy bar appears, so a
+    /// refresh that finishes sooner never blinks it on.
+    /// </summary>
+    internal static readonly TimeSpan BusyIndicatorDelay = TimeSpan.FromMilliseconds(200);
     private static readonly IBrush s_defaultDetailBorderBrush = new SolidColorBrush(Color.Parse("#243247"));
     private static readonly IBrush s_defaultDetailAccentBrush = new SolidColorBrush(Color.Parse("#64748B"));
     private static readonly IBrush s_warningBadgeBackgroundBrush = new SolidColorBrush(Color.Parse("#3A2807"));
@@ -48,7 +64,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly IClipStoreService _clipStoreService;
     private readonly IClipAngelImportService _clipAngelImportService;
     private readonly IClipboardMonitorService _clipboardMonitorService;
-    private readonly IClipSampleDataService _clipSampleDataService;
     private readonly ISettingsService _settingsService;
     private readonly ISystemInteractionService _systemInteractionService;
     private readonly IStorageOptionsService _storageOptionsService;
@@ -100,6 +115,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ContentDisplayMode _contentDisplayMode;
     private string _selectedClipRenderedText = AppText.PreviewSelectContent;
     private string _selectedClipRawContent = AppText.PreviewSelectRawContent;
+
+    // Whether the text the editor was last given is the whole clip. Recorded with
+    // that text in UpdateSelectedClipPresentation, because hydration replaces the
+    // row's clip a dispatcher turn before the selection re-presents it.
+    private bool _presentedClipIsComplete;
     private string _selectedClipImageHint = AppText.PreviewSelectImage;
     private bool _isStartupInProgress;
     private bool _isDatabaseReady;
@@ -108,6 +128,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _startupErrorTitle = string.Empty;
     private string _startupErrorMessage = string.Empty;
     private bool _areBackgroundServicesStarted;
+    private readonly CancellationTokenSource _deferredPayloadMoveCancellation = new();
     private bool _isDisposed;
 
     // In-flight or completed source-app icon loads, keyed by executable path and shared
@@ -131,6 +152,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // keep the UI thread idle so the popup snaps open quickly on the next show.
     // See ApplyCapturedClipOptimistically / ApplyUpdatedClipOptimistically / PerformRefreshAsync.
     private bool _isMainWindowVisible;
+    // True while the window is cloaked in standby: still "visible" above, so the
+    // list is maintained, but not in front of the user. See EnterStandbyAsync.
+    private bool _isInStandby;
     // Set true whenever a clip change (capture/update/OCR/maintenance) is observed
     // while the window is hidden, or when a refresh result was discarded because
     // the window became hidden mid-apply. On the next show we trigger one refresh.
@@ -167,8 +191,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _settingsRememberDatabasePassword;
     private Task _queuedRefreshTask = Task.CompletedTask;
     private long? _queuedRefreshPreferredSelectionId;
+
+    // The search the running refresh is waiting on, so a refresh queued for a
+    // different query can stop it. Guarded by _refreshQueueLock.
+    private CancellationTokenSource? _inFlightSearchCts;
+    private ClipSearchFilters? _inFlightSearchFilters;
+    private bool _inFlightSearchSemantic;
     private int _pendingClipMutations;
     private long _clipMutationVersion;
+
+    // Bumped each time a load-more page lands. A refresh re-reads to the depth
+    // on screen when it builds its request, so a page that lands after that is
+    // missing from its result; see PerformRefreshAsync. UI thread only.
+    private long _loadMorePageVersion;
 
     /// <summary>
     /// How long a refresh waits before re-reading a snapshot it found stale.
@@ -193,12 +228,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _editedClipSelectionLength;
     private long? _checkedSelectionAnchorId;
 
-    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, IClipSampleDataService clipSampleDataService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, IClipAngelImportService? clipAngelImportService = null, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null, Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null, ICopilotAuthService? copilotAuthService = null, IUpdateService? updateService = null, IDatabaseBackupService? databaseBackupService = null, IDragDropService? dragDropService = null)
+    public MainWindowViewModel(IClipStoreService clipStoreService, IClipboardMonitorService clipboardMonitorService, ISettingsService settingsService, ISystemInteractionService systemInteractionService, IStorageOptionsService storageOptionsService, ISensitivityService sensitivityService, IAppNotificationService notificationService, ISessionLogService sessionLogService, IClipExportService clipExportService, IImageEditorService imageEditorService, ISearchHistoryService searchHistoryService, IAiTransformService aiTransformService, IOcrService ocrService, IBackgroundOcrQueue backgroundOcrQueue, IBackgroundJobIndicator jobIndicator, DatabaseInitializer databaseInitializer, IClipAngelImportService? clipAngelImportService = null, Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null, Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null, ICopilotAuthService? copilotAuthService = null, IUpdateService? updateService = null, IDatabaseBackupService? databaseBackupService = null, IDragDropService? dragDropService = null)
     {
         _clipStoreService = clipStoreService;
         _clipAngelImportService = clipAngelImportService ?? new ClipAngelImportService(clipStoreService);
         _clipboardMonitorService = clipboardMonitorService;
-        _clipSampleDataService = clipSampleDataService;
         _settingsService = settingsService;
         _systemInteractionService = systemInteractionService;
         _storageOptionsService = storageOptionsService;
@@ -296,7 +330,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         JumpToTopCommand = ReactiveCommand.Create(() => { if (Clips.Count > 0) SelectedClip = Clips[0]; });
         OpenHelpCommand = ReactiveCommand.Create(OpenHelp);
         OpenAboutCommand = ReactiveCommand.Create(OpenAbout);
-        Maintenance = new DatabaseMaintenanceViewModel(databaseBackupService ?? new DatabaseBackupService(storageOptionsService, null, null, null), _storageOptionsService, _systemInteractionService, _notificationService, _clipboardMonitorService, _backgroundOcrQueue, _embeddingWorker, ReportError);
+        Maintenance = new DatabaseMaintenanceViewModel(databaseBackupService ?? new DatabaseBackupService(storageOptionsService, null, null, null, settingsService: settingsService, databaseInitializer: databaseInitializer), _storageOptionsService, _systemInteractionService, _notificationService, ReportError);
         CloseSettingsCommand = ReactiveCommand.Create(CloseSettings);
         SaveSettingsCommand = ReactiveCommand.CreateFromTask(SaveSettingsAsync);
         BrowseDatabasePathCommand = ReactiveCommand.CreateFromTask<Window?>(BrowseDatabasePathAsync);
@@ -324,7 +358,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RerunAllEmbeddingsCommand = ReactiveCommand.CreateFromTask(RerunAllEmbeddingsAsync);
         RefreshSemanticCoverageCommand = ReactiveCommand.CreateFromTask(RefreshSemanticCoverageAsync);
 
-        Update = new UpdateViewModel(updateService ?? new UpdateService(settingsService), _jobIndicator, _notificationService, status => StatusText = status);
+        Update = new UpdateViewModel(updateService ?? new UpdateService(settingsService, _storageOptionsService.DataRoot), _jobIndicator, _notificationService, status => StatusText = status);
 
         _settingsService.SettingsChanged += OnSettingsChanged;
 
@@ -381,8 +415,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         x => x.UseSemanticClipSearch)
                     .Select(static _ => Unit.Default))
                 .Skip(1)
-                .Throttle(TimeSpan.FromMilliseconds(300), RxSchedulers.MainThreadScheduler)
-                .InvokeCommand(RefreshCommand));
+                .Throttle(SearchThrottle, RxSchedulers.MainThreadScheduler)
+                // Straight into the refresh queue, not through RefreshCommand: a
+                // ReactiveCommand cannot execute while it is already executing, so
+                // a query change during a running refresh was dropped rather than
+                // queued, and a slow search left the list on a query the user had
+                // already moved on from (F-11). The queue coalesces, and cancels a
+                // search its new query supersedes.
+                .Subscribe(unit => { _ = RefreshReportingErrorsAsync(); }, ex => ReportError("Search refresh subscription", ex)));
 
         _subscriptions.Add(
             _clipboardMonitorService.CapturedClips
@@ -470,6 +510,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .ObserveOn(RxSchedulers.MainThreadScheduler)
                 .Subscribe(busy => IsCapturing = busy,
                     ex => Trace.TraceError($"Capture-busy subscription failed: {ex}")));
+
+        // The busy bar follows IsBusyOrCapturing, but only once it has held for
+        // BusyIndicatorDelay: most refreshes finish well inside that, and a bar
+        // that blinks on for each of them reads as flicker, not progress.
+        _subscriptions.Add(
+            this.WhenAnyValue(x => x.IsBusyOrCapturing)
+                .Select(busy => busy
+                    ? Observable.Timer(BusyIndicatorDelay, RxSchedulers.MainThreadScheduler).Select(static _ => true)
+                    : Observable.Return(false))
+                .Switch()
+                .DistinctUntilChanged()
+                .Subscribe(show => ShowBusyIndicator = show,
+                    ex => Trace.TraceError($"Busy-indicator subscription failed: {ex}")));
 
         _subscriptions.Add(
             Observable.Interval(TimeSpan.FromSeconds(10), RxSchedulers.MainThreadScheduler)
@@ -1016,6 +1069,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool IsBusyOrCapturing => IsBusy || IsCapturing;
 
+    /// <summary>Whether the busy bar is shown: busy for at least <see cref="BusyIndicatorDelay"/>.</summary>
+    public bool ShowBusyIndicator
+    {
+        get => _showBusyIndicator;
+        private set => this.RaiseAndSetIfChanged(ref _showBusyIndicator, value);
+    }
+
+    private bool _showBusyIndicator;
+
     public string StatusText
     {
         get => _statusText;
@@ -1026,6 +1088,48 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get => _isLoadingDatabase;
         private set => this.RaiseAndSetIfChanged(ref _isLoadingDatabase, value);
+    }
+
+    private LibraryUpgradeProgress? _libraryUpgradeProgress;
+
+    /// <summary>
+    /// True while the first start after an upgrade is running, from its first
+    /// progress report until loading ends (U-E1). The loading overlay then shows
+    /// the stage and, where the stage knows it, how far it has got.
+    /// </summary>
+    public bool IsUpgradingLibrary => _libraryUpgradeProgress is not null;
+
+    public string LibraryUpgradeTitle => AppText.LibraryUpgradeTitle;
+
+    public string LibraryUpgradeNote => AppText.LibraryUpgradeNote;
+
+    public string LibraryUpgradeStageText =>
+        _libraryUpgradeProgress is { } progress ? AppText.FormatLibraryUpgradeStage(progress) : string.Empty;
+
+    public double LibraryUpgradeProgressValue => (_libraryUpgradeProgress?.Fraction ?? 0) * 100;
+
+    public bool IsLibraryUpgradeProgressIndeterminate => _libraryUpgradeProgress?.Fraction is null;
+
+    private void SetLibraryUpgradeProgress(LibraryUpgradeProgress? progress)
+    {
+        // A report posted from the worker can land after loading has ended; it
+        // must not bring the overlay's upgrade state back.
+        if (progress is not null && !IsLoadingDatabase)
+        {
+            return;
+        }
+
+        _libraryUpgradeProgress = progress;
+        this.RaisePropertyChanged(nameof(IsUpgradingLibrary));
+        this.RaisePropertyChanged(nameof(LibraryUpgradeStageText));
+        this.RaisePropertyChanged(nameof(LibraryUpgradeProgressValue));
+        this.RaisePropertyChanged(nameof(IsLibraryUpgradeProgressIndeterminate));
+    }
+
+    /// <summary>Hands each report from the initializer's worker thread to the UI thread.</summary>
+    private sealed class UiThreadProgress(Action<LibraryUpgradeProgress> apply) : IProgress<LibraryUpgradeProgress>
+    {
+        public void Report(LibraryUpgradeProgress value) => Avalonia.Threading.Dispatcher.UIThread.Post(() => apply(value));
     }
 
     public string StartupErrorTitle
@@ -1226,6 +1330,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string SettingsExcludedAppsDescription => AppText.SettingsExcludedAppsDescription;
     public string SettingsExcludedAppsWatermark => AppText.SettingsExcludedAppsWatermark;
     public string SettingsExcludedAppsCaveat => AppText.SettingsExcludedAppsCaveat;
+
+    public string SettingsHonorClipboardHistoryOptOutLabel => AppText.SettingsHonorClipboardHistoryOptOutLabel;
 
     public string SettingsClipLimitLabel => AppText.SettingsClipLimitLabel;
 
@@ -1521,10 +1627,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string CheckedClipSummaryText => AppText.FormatCheckedClipCount(CheckedClipCount);
 
+    // Not while the row carries only a prefix of its text (F-10): an edit is saved
+    // as a new clip, and saving the prefix would lose everything after it. The
+    // hydration that selection starts re-presents the clip and re-raises this.
+    // It follows what the editor was given, not the row: the row is complete a
+    // dispatcher turn before the editor is, and an edit made in between was saved
+    // as the prefix plus the edit.
     public bool IsSelectedClipTextEditable =>
-        SelectedClip?.Clip.ContentType is ContentType.Text
-        || (SelectedClip?.Clip.ContentType is ContentType.RichText
-            && _contentDisplayMode is ContentDisplayMode.Textual or ContentDisplayMode.Raw);
+        _presentedClipIsComplete
+        && SelectedClip is { } selected
+        && (selected.Clip.ContentType is ContentType.Text
+            || (selected.Clip.ContentType is ContentType.RichText
+                && _contentDisplayMode is ContentDisplayMode.Textual or ContentDisplayMode.Raw));
 
     /// <summary>
     /// Rendered rich text is read-only. The pane is a real editor and is fully
@@ -1606,39 +1720,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get => _editedClipSelectionLength;
         set => this.RaiseAndSetIfChanged(ref _editedClipSelectionLength, value);
-    }
-
-    public IReadOnlyList<TextTransformation> TextTransformationOptions { get; } = Enum.GetValues<TextTransformation>();
-
-    private TextTransformation _selectedTextTransformation = TextTransformation.None;
-
-    public TextTransformation SelectedTextTransformation
-    {
-        get => _selectedTextTransformation;
-        set
-        {
-            if (_selectedTextTransformation == value)
-            {
-                return;
-            }
-
-            _selectedTextTransformation = value;
-            this.RaisePropertyChanged(nameof(SelectedTextTransformation));
-
-            if (value != TextTransformation.None && IsSelectedClipTextEditable && !string.IsNullOrEmpty(_editedClipText))
-            {
-                var transformed = TextTransformationService.Apply(value, _editedClipText);
-                if (!string.Equals(transformed, _editedClipText, StringComparison.Ordinal))
-                {
-                    EditedClipText = transformed;
-                    _ = CopyEditedClipAsync();
-                }
-
-                // Snap back to None so re-selecting same transformation re-triggers
-                _selectedTextTransformation = TextTransformation.None;
-                this.RaisePropertyChanged(nameof(SelectedTextTransformation));
-            }
-        }
     }
 
     public byte[]? SelectedClipImageBytes => SelectedClip?.Clip.ContentType == ContentType.Image ? SelectedClip.Clip.ContentBytes : null;
@@ -1875,11 +1956,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         get => _isWelcomeOpen;
         private set
         {
-            if (!this.RaiseAndSetIfChanged(ref _isWelcomeOpen, value))
+            // RaiseAndSetIfChanged returns the new value, not whether it
+            // changed, so it cannot be the guard. (audit F-46)
+            if (_isWelcomeOpen == value)
             {
                 return;
             }
 
+            this.RaiseAndSetIfChanged(ref _isWelcomeOpen, value);
             this.RaisePropertyChanged(nameof(IsMainWorkspaceVisible));
         }
     }
@@ -1904,11 +1988,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         get => _isPasswordPromptOpen;
         private set
         {
-            if (!this.RaiseAndSetIfChanged(ref _isPasswordPromptOpen, value))
+            if (_isPasswordPromptOpen == value)
             {
                 return;
             }
 
+            this.RaiseAndSetIfChanged(ref _isPasswordPromptOpen, value);
             this.RaisePropertyChanged(nameof(IsMainWorkspaceVisible));
         }
     }
@@ -2066,10 +2151,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         && !string.Equals(SettingsDatabasePassword, SettingsDatabasePasswordConfirm, StringComparison.Ordinal);
 
     /// <summary>
-    /// True when Save is about to persist a non-empty encryption password as
-    /// plaintext to disk (i.e. the user enabled "Remember password" and the
-    /// stored value would change). Drives the plaintext-storage confirmation
-    /// dialog.
+    /// True when Save is about to remember a non-empty encryption password (the
+    /// user enabled "Remember password" and the stored value would change).
+    /// Drives the confirmation dialog. The password is written DPAPI-protected,
+    /// never as plaintext - see <c>StorageOptionsService.BuildDocument</c>.
     /// </summary>
     public bool IsPendingPlaintextEncryptionPasswordChange =>
         SettingsRememberDatabasePassword
@@ -2089,7 +2174,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// True when the inline plaintext-storage warning under the password field
+    /// True when the inline remember-password warning under the password field
     /// should be visible: user typed a password and ticked "Remember".
     /// </summary>
     public bool IsRememberPasswordWarningVisible =>
@@ -2117,6 +2202,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
 
     public string SettingsThemeModeLabel => AppText.SettingsThemeModeLabel;
+    public string SettingsMotionLabel => AppText.SettingsMotionLabel;
+    public string SettingsMotionHint => AppText.SettingsMotionHint;
+
+    public string SettingsRegexBacktrackingLabel => AppText.SettingsRegexBacktrackingLabel;
+
+    public string SettingsRegexBacktrackingHint => AppText.SettingsRegexBacktrackingHint;
 
     public void Dispose()
     {
@@ -2126,7 +2217,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         _isDisposed = true;
-        CancelAllPendingDeletes();
+        _deferredPayloadMoveCancellation.Cancel();
+        CommitPendingDeletesOnExit();
         _clipboardMonitorService.Stop();
         _settingsService.SettingsChanged -= OnSettingsChanged;
         _jobIndicator.Changed -= OnJobIndicatorChanged;
@@ -2181,6 +2273,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 StatusText = settingsFault;
             }
 
+            // The same for storage.json, whose silent fallback is worse: the
+            // default library instead of the user's (F-22).
+            if (_storageOptionsService.LoadFault is { Length: > 0 } storageFault)
+            {
+                _notificationService.PublishError(AppText.StorageLoadFailedTitle, storageFault);
+                StatusText = storageFault;
+            }
+
             var draftSettings = _settingsService.HasSavedSettings ? _settingsService.Current : AppSettings.Default;
             LoadSettingsDraft(draftSettings);
             ApplyPersistedFilters(draftSettings, notify: true);
@@ -2225,11 +2325,43 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             StatusText = "Loading clipboard library\u2026";
             _isStarted = true;
 
-            _ = StartDatabaseInBackgroundAsync();
+            DatabaseStartupTask = StartDatabaseInBackgroundAsync();
         }
         finally
         {
             _isStartupInProgress = false;
+        }
+    }
+
+    /// <summary>
+    /// The latest background database start (from <see cref="InitializeAsync"/>,
+    /// library creation or unlock), which also starts the clipboard monitor and
+    /// workers. Null until one begins. Lets tests wait for the whole startup
+    /// rather than guess at it (F-30).
+    /// </summary>
+    internal Task? DatabaseStartupTask { get; private set; }
+
+    /// <summary>
+    /// Completes once no refresh is running or queued, including any a
+    /// discarded result re-queued. Lets tests wait for the list to settle
+    /// rather than guess at it.
+    /// </summary>
+    internal async Task WhenRefreshesIdleAsync()
+    {
+        while (true)
+        {
+            Task pending;
+            lock (_refreshQueueLock)
+            {
+                pending = _queuedRefreshTask;
+            }
+
+            if (pending.IsCompleted)
+            {
+                return;
+            }
+
+            await pending;
         }
     }
 
@@ -2243,11 +2375,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
                 IsLoadingDatabase = false;
+                SetLibraryUpgradeProgress(null);
                 IsWelcomeOpen = false;
             });
 
             StartBackgroundServices();
-            _ = ApplyMaintenanceAndRefreshAsync(forceRefresh: false);
+            TrackMaintenance(ApplyMaintenanceAndRefreshAsync(forceRefresh: false));
         }
         catch (Exception ex)
         {
@@ -2255,6 +2388,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
                 IsLoadingDatabase = false;
+                SetLibraryUpgradeProgress(null);
                 StartupErrorTitle = AppText.StartupErrorTitle;
                 StartupErrorMessage = ex.Message;
                 StatusText = AppText.FormatErrorStatus(ex.Message);
@@ -2286,6 +2420,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private Task RefreshAsync() => QueueRefreshAsync(null);
 
+    private async Task RefreshReportingErrorsAsync()
+    {
+        try
+        {
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            ReportError("Refresh", ex);
+        }
+    }
+
     private Task RefreshAsync(long? preferredSelectionId) => QueueRefreshAsync(preferredSelectionId);
 
     private Task QueueRefreshAsync(long? preferredSelectionId)
@@ -2302,8 +2448,36 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 _queuedRefreshTask = ProcessQueuedRefreshesAsync();
             }
+            else
+            {
+                CancelSupersededSearch();
+            }
 
             return _queuedRefreshTask;
+        }
+    }
+
+    /// <summary>
+    /// Stops the in-flight search when the query on screen is no longer the one
+    /// it answers. Refreshes run one at a time, so before this a slow search -
+    /// a full scan, or a regex that never finished (F-11) - held every later
+    /// refresh behind it, including clearing the search box. A refresh queued
+    /// for the same query (a capture, a write) lets the search finish instead,
+    /// so a steady stream of those cannot starve it.
+    /// </summary>
+    /// <remarks>Caller holds _refreshQueueLock.</remarks>
+    private void CancelSupersededSearch()
+    {
+        if (_inFlightSearchCts is null
+            || _inFlightSearchFilters is null
+            || !Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+        {
+            return;
+        }
+
+        if (!SameResultSet(_inFlightSearchFilters, BuildFilters(offset: 0), _inFlightSearchSemantic, UseSemanticClipSearch))
+        {
+            _inFlightSearchCts.Cancel();
         }
     }
 
@@ -2381,6 +2555,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RefreshRequest request;
             long versionAtCheck;
             var appliedWhileStale = false;
+            long pagesAtRequest = 0;
             var attempt = 0;
             while (true)
             {
@@ -2394,6 +2569,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     // extra page the user had paged in. Re-read to the depth they
                     // reached - but only while the query is unchanged, otherwise a
                     // new search would inherit the old depth and never shrink.
+                    pagesAtRequest = _loadMorePageVersion;
                     var probe = BuildFilters(offset: 0);
                     var limit = SameResultSet(_lastRefreshFilters, probe, _lastRefreshUsedSemantic, UseSemanticClipSearch)
                         ? Math.Max(PageSize, FtsRowsConsumed)
@@ -2402,7 +2578,53 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     return new RefreshRequest(BuildFilters(offset: 0, limit: limit), UseSemanticClipSearch);
                 });
                 if (sw is not null) Trace.TraceInformation($"[refresh-timing] built-request @ {sw.ElapsedMilliseconds}ms search='{request.Filters.SearchText}' semantic={request.UseSemanticClipSearch}");
-                fused = await SearchClipsAsync(request.Filters, request.UseSemanticClipSearch).ConfigureAwait(false);
+                using (var searchCts = new CancellationTokenSource())
+                {
+                    lock (_refreshQueueLock)
+                    {
+                        _inFlightSearchCts = searchCts;
+                        _inFlightSearchFilters = request.Filters;
+                        _inFlightSearchSemantic = request.UseSemanticClipSearch;
+                    }
+
+                    try
+                    {
+                        fused = await SearchClipsAsync(request.Filters, request.UseSemanticClipSearch, searchCts.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (searchCts.IsCancellationRequested)
+                    {
+                        // Superseded. The refresh that cancelled it is queued and
+                        // runs the current query; keep this one's selection intent.
+                        lock (_refreshQueueLock)
+                        {
+                            _hasQueuedRefresh = true;
+                            _queuedRefreshPreferredSelectionId ??= preferredSelectionId;
+                        }
+
+                        return;
+                    }
+                    catch (SearchPatternException ex)
+                    {
+                        // No trustworthy answer for this pattern. Keep the list as
+                        // it is and say why, rather than showing a partial result.
+                        var message = ex.Problem == SearchPatternProblem.NeedsBacktracking
+                            ? AppText.RegexNeedsBacktrackingStatus
+                            : AppText.RegexTooSlowStatus;
+                        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => StatusText = message);
+                        return;
+                    }
+                    finally
+                    {
+                        lock (_refreshQueueLock)
+                        {
+                            if (ReferenceEquals(_inFlightSearchCts, searchCts))
+                            {
+                                _inFlightSearchCts = null;
+                                _inFlightSearchFilters = null;
+                            }
+                        }
+                    }
+                }
                 if (sw is not null) Trace.TraceInformation($"[refresh-timing] db-search-complete @ {sw.ElapsedMilliseconds}ms items={fused.Result.Items.Count} total={fused.Result.TotalMatchingCount}");
 
                 versionAtCheck = Interlocked.Read(ref _clipMutationVersion);
@@ -2458,6 +2680,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     return false;
                 }
 
+                // A load-more page that landed after the request was built is not
+                // in this result, which was read to the old depth, so applying it
+                // would delete the page the user just scrolled in. Re-read to the
+                // new depth instead. Pages land only when the user scrolls, so
+                // unlike a write stream this cannot keep the refresh looping.
+                if (_loadMorePageVersion != pagesAtRequest)
+                {
+                    lock (_refreshQueueLock)
+                    {
+                        _hasQueuedRefresh = true;
+                    }
+
+                    return false;
+                }
+
                 ApplyRefreshResult(fused, preferredSelectionId);
                 _isClipListStale = false;
 
@@ -2472,11 +2709,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             });
 
             if (sw is not null) Trace.TraceInformation($"[refresh-timing] ui-applied={applied} @ {sw.ElapsedMilliseconds}ms");
-
-            if (applied && !string.IsNullOrWhiteSpace(request.Filters.SearchText))
-            {
-                await _searchHistoryService.SaveSearchAsync(request.Filters.SearchText).ConfigureAwait(false);
-            }
         }
         finally
         {
@@ -2496,7 +2728,47 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// time the list was open - hiding the window deliberately keeps
     /// <see cref="SelectedClip"/> intact, so callers cannot read it directly.
     /// </summary>
-    public ClipEntry? HotkeyTargetClip => _isMainWindowVisible ? SelectedClip?.Clip : null;
+    public ClipEntry? HotkeyTargetClip => _isMainWindowVisible && !_isInStandby ? SelectedClip?.Clip : null;
+
+    /// <summary>
+    /// Whether the popup is dismissed into standby: cloaked rather than hidden,
+    /// so it is out of the user's sight while its list is still kept current.
+    /// </summary>
+    public bool IsInStandby => _isInStandby;
+
+    /// <summary>
+    /// Dismisses the popup into standby (cloak-as-hide). Unlike
+    /// <see cref="SetMainWindowVisible"/>(false), the list stays live - captures
+    /// keep landing in it - because a cloaked window keeps rendering, and the
+    /// whole point is that the next summon shows a frame that is already
+    /// correct. What a fresh popup would have reset on show is reset here
+    /// instead, before the window disappears: the search is cleared and the
+    /// newest clip selected.
+    /// </summary>
+    /// <returns>The refresh the cleared search needs, so the view can hold the
+    /// next summon until it has landed.</returns>
+    public Task EnterStandbyAsync()
+    {
+        _isInStandby = true;
+        _recentSearchNavigationIndex = -1;
+        if (!_isDatabaseReady)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (!string.IsNullOrEmpty(SearchText) || _isClipListStale)
+        {
+            _selectNewestOnNextRefresh = true;
+            SearchText = string.Empty;
+            return RefreshAsync();
+        }
+
+        SelectedClip = GetDefaultAutoSelectedClip();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>The popup is back in front of the user.</summary>
+    public void LeaveStandby() => _isInStandby = false;
 
     /// <summary>
     /// Called by the application shell whenever the main window's visibility
@@ -2506,6 +2778,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     public void SetMainWindowVisible(bool isVisible)
     {
+        // Shown or hidden for real, the window is no longer in standby.
+        _isInStandby = false;
         if (_isMainWindowVisible == isVisible)
         {
             return;
@@ -2557,9 +2831,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         private static readonly HashSet<long> EmptyIds = [];
     }
 
-    private async Task<FusedSearchResult> SearchClipsAsync(ClipSearchFilters filters, bool useSemanticClipSearch)
+    private async Task<FusedSearchResult> SearchClipsAsync(ClipSearchFilters filters, bool useSemanticClipSearch, CancellationToken cancellationToken = default)
     {
-        var result = await _clipStoreService.SearchAsync(filters).ConfigureAwait(false);
+        var result = await _clipStoreService.SearchAsync(filters, cancellationToken).ConfigureAwait(false);
 
         // The store moves its own body to the pool, so the search is already off
         // the UI thread and does not want wrapping again. The fusion does: it
@@ -2808,6 +3082,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 // This page came from the query alone, so compare against the
                 // query's own totals rather than the on-screen count.
                 HasMoreResults = FtsRowsConsumed < result.TotalMatchingCount;
+                _loadMorePageVersion++;
                 this.RaisePropertyChanged(nameof(HasNoClips));
                 RaiseBulkSelectionProperties();
                 UpdateStatus(result);
@@ -2829,6 +3104,39 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         await ToggleFavoriteStateAsync(clip);
+    }
+
+    private string? _lastCommittedSearch;
+
+    /// <summary>
+    /// Records the current query in search history (F-36, OD-9b). Called only
+    /// when the user commits to a search - Enter in the search box, choosing a
+    /// result (click, copy, paste, open), or moving from the search box into the list
+    /// with the keyboard - never when a refresh lands. Recording on refresh
+    /// stored every pause-separated prefix: "inv", "invoice 2", "invoice 2024".
+    /// Once per query; an empty query is never recorded.
+    /// </summary>
+    internal Task CommitSearchQueryAsync()
+    {
+        var query = SearchText?.Trim();
+        if (string.IsNullOrEmpty(query) || string.Equals(query, _lastCommittedSearch, StringComparison.Ordinal))
+        {
+            return Task.CompletedTask;
+        }
+
+        _lastCommittedSearch = query;
+        // ISearchHistoryService has its own connection and no off-thread hop.
+        return Task.Run(async () =>
+        {
+            try
+            {
+                await _searchHistoryService.SaveSearchAsync(query).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Trace.TraceWarning($"Recording the search failed: {ex.Message}");
+            }
+        });
     }
 
     private async Task CopySelectedAsync()
@@ -2872,6 +3180,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 SelectedClip = clip;
             }
 
+            // Choosing a result commits the search that found it (OD-9b).
+            _ = CommitSearchQueryAsync();
+
             // Selection kicks hydration off but does not wait for it, and a list
             // row carries no content_bytes. Reading FullContent before those
             // arrive yields the plain-text fallback for a rich clip and no image
@@ -2902,8 +3213,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             if (clip.Clip.ContentType == ContentType.RichText)
             {
-                var renderedText = SelectedClipRenderedText;
-                _clipboardMonitorService.SuppressNext();
+                // From the hydrated clip, not SelectedClipRenderedText: the preview
+                // is refreshed by selection's own continuation, which may not have
+                // run yet, and until it does it holds the row's prefix (F-10).
+                var renderedText = ClipDisplayFormatter.BuildRenderedText(clip.Clip, Array.Empty<string>());
+                _clipboardMonitorService.SuppressNext(renderedText);
                 await _systemInteractionService.CopyRichContentAsync(clip.FullContent, renderedText, clip.Clip.ContentFormat);
                 StatusText = AppText.FormatCopiedClip(clip.DisplayContentType.ToLower(AppText.CurrentCulture));
                 PublishSensitiveCopyNotificationIfNeeded(clip);
@@ -2911,15 +3225,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 return true;
             }
 
-            var isFileList = clip.Clip.ContentType == ContentType.Files && SelectedClipFiles.Count > 0;
+            var fileItems = clip.Clip.ContentType == ContentType.Files
+                ? ClipDisplayFormatter.BuildFileItems(clip.FullContent)
+                : Array.Empty<string>();
+            var isFileList = fileItems.Count > 0;
             var contentToCopy = isFileList
-                ? string.Join(Environment.NewLine, SelectedClipFiles.Select(static file => file.FilePath))
+                ? string.Join(Environment.NewLine, fileItems)
                 : clip.FullContent;
 
-            _clipboardMonitorService.SuppressNext();
+            _clipboardMonitorService.SuppressNext(contentToCopy);
             await _systemInteractionService.CopyTextAsync(contentToCopy);
             StatusText = isFileList
-                ? AppText.FormatCopiedFileList(SelectedClipFiles.Count)
+                ? AppText.FormatCopiedFileList(fileItems.Count)
                 : AppText.FormatCopiedClip(clip.DisplayContentType.ToLower(AppText.CurrentCulture));
             PublishSensitiveCopyNotificationIfNeeded(clip);
             TrackPasteInBackground(clip.Clip.Id);
@@ -2941,8 +3258,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        // Copying a result commits the search that found it (OD-9b), whichever copy it is.
+        _ = CommitSearchQueryAsync();
+
         try
         {
+            await clip.EnsureContentHydratedAsync();
+
             // Clip.Content, not FullContent. FullContent is the *raw* display
             // string, and GetRawContentDisplay returns the decoded HTML or RTF
             // markup ahead of the text for any rich clip - so this used to put
@@ -2955,7 +3277,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 ? ClipDisplayFormatter.RenderRichContent(clip.FullContent)
                 : clip.Clip.Content;
 
-            _clipboardMonitorService.SuppressNext();
+            _clipboardMonitorService.SuppressNext(plainText);
             await _systemInteractionService.CopyTextAsync(plainText);
             StatusText = AppText.FormatCopiedClip("plain text");
             TrackPasteInBackground(clip.Clip.Id);
@@ -2997,15 +3319,43 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// Asks the user to confirm something (title, body, confirm label, cancel
+    /// label). Set by the window; null when no view is attached, in which case
+    /// a choice that needs confirming is declined.
+    /// </summary>
+    public Func<string, string, string, string, Task<bool>>? ConfirmAsync { get; set; }
+
     private async Task ExportSelectedAsync()
     {
-        if (SelectedClip is null)
+        // Captured once: a capture can move the selection while the dialog
+        // below is open, and the confirmation covers this clip only.
+        var target = SelectedClip;
+        if (target is null)
         {
             return;
         }
 
-        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);
-        _clipboardMonitorService.SuppressNext();
+        // Explicit Export writes a plaintext copy that outlives the clip -
+        // past its sensitive lifetime and outside database encryption, often
+        // into a OneDrive-synced folder. For a sensitive clip that is the
+        // user's call to make knowingly (OD-3a); without a way to ask, it is
+        // not made for them.
+        if (target.Clip.IsSensitive
+            && (ConfirmAsync is null
+                || !await ConfirmAsync(
+                    AppText.ExportSensitiveConfirmTitle,
+                    AppText.ExportSensitiveConfirmBody,
+                    AppText.ExportSensitiveConfirmAccept,
+                    AppText.ExportSensitiveConfirmCancel)))
+        {
+            StatusText = AppText.ExportSensitiveCancelledStatus;
+            return;
+        }
+
+        await target.EnsureContentHydratedAsync();
+        var exportResult = await _clipExportService.ExportAsync(target.Clip);
+        _clipboardMonitorService.SuppressNext(exportResult.PrimaryPath);
         await _systemInteractionService.CopyTextAsync(exportResult.PrimaryPath);
         await _systemInteractionService.OpenPathAsync(exportResult.PrimaryPath);
         StatusText = AppText.FormatExportedClipStatus(exportResult.PrimaryPath);
@@ -3029,12 +3379,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task OpenInEditorAsync()
     {
-        if (SelectedClip is null)
+        // Captured once: the selection can move while the clip is hydrated
+        // below, and the editor must get the clip the command was run on.
+        var target = SelectedClip;
+        if (target is null)
         {
             return;
         }
 
-        var editorPath = ResolveExternalEditorPath(SelectedClip);
+        _ = CommitSearchQueryAsync();
+        var editorPath = ResolveExternalEditorPath(target);
         if (!string.IsNullOrWhiteSpace(editorPath) && !System.IO.File.Exists(ExtractExecutablePath(editorPath)))
         {
             _notificationService.PublishError(
@@ -3043,7 +3397,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var exportResult = await _clipExportService.ExportAsync(SelectedClip.Clip);
+        await target.EnsureContentHydratedAsync();
+        var exportResult = await _clipExportService.ExportForToolAsync(target.Clip);
         await _systemInteractionService.OpenInEditorAsync(exportResult.PrimaryPath, editorPath);
         StatusText = $"{AppText.OpenedInEditorStatus}: {Path.GetFileName(exportResult.PrimaryPath)}";
     }
@@ -3058,7 +3413,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         try
         {
-            await _systemInteractionService.OpenPathAsync(url);
+            // OpenUrlAsync, not OpenPathAsync: a source URL comes from captured
+            // or imported content, and OpenPathAsync ShellExecutes anything - a
+            // \\host\share path leaked NetNTLM over SMB, a .cmd ran - while
+            // never opening an actual web link (F-20). OpenUrlAsync admits
+            // http, https and mailto only.
+            await _systemInteractionService.OpenUrlAsync(url);
             StatusText = $"Opened {url}";
         }
         catch (Exception ex)
@@ -3078,7 +3438,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         try
         {
-            _clipboardMonitorService.SuppressNext();
+            _clipboardMonitorService.SuppressNext(title);
             await _systemInteractionService.CopyTextAsync(title);
             StatusText = "Copied window title";
         }
@@ -3149,8 +3509,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var left = await _clipExportService.ExportAsync(checkedClips[0].Clip);
-        var right = await _clipExportService.ExportAsync(checkedClips[1].Clip);
+        await Task.WhenAll(checkedClips[0].EnsureContentHydratedAsync(), checkedClips[1].EnsureContentHydratedAsync());
+        var left = await _clipExportService.ExportForToolAsync(checkedClips[0].Clip);
+        var right = await _clipExportService.ExportForToolAsync(checkedClips[1].Clip);
 
         await _systemInteractionService.OpenInDiffToolAsync(left.PrimaryPath, right.PrimaryPath, diffToolPath);
         StatusText = AppText.CompareOpenedStatus;
@@ -3346,12 +3707,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (copyAsRichContent)
         {
             var renderedText = ClipDisplayFormatter.RenderRichContent(text);
-            _clipboardMonitorService.SuppressNext();
+            _clipboardMonitorService.SuppressNext(renderedText);
             await _systemInteractionService.CopyRichContentAsync(text, renderedText, SelectedClip.Clip.ContentFormat);
         }
         else
         {
-            _clipboardMonitorService.SuppressNext();
+            _clipboardMonitorService.SuppressNext(text);
             await _systemInteractionService.CopyTextAsync(text);
         }
 
@@ -3386,7 +3747,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public async Task CommitEditedClipOnFocusLossAsync() => await CommitEditedClipOnSelectionChangeAsync();
 
-    private async Task ApplyTextTransformationAsync(TextTransformation transformation)
+    private Task ApplyTextTransformationAsync(TextTransformation transformation)
+        => ApplyTextTransformationAsync(transformation, explicitTarget: null);
+
+    /// <summary>
+    /// The one built-in transform pipeline. The Edit menu and toolbar pass no
+    /// target (checked clips, else the selection or its selected slice); the
+    /// row context menu passes the clicked row. Keeping a single body is what
+    /// stops the paths drifting apart again: the row path used to decide
+    /// "is this HTML?" on its own and got Markdown → HTML wrong (F-04).
+    /// </summary>
+    private async Task ApplyTextTransformationAsync(TextTransformation transformation, ClipItemViewModel? explicitTarget)
     {
         if (transformation == TextTransformation.None)
         {
@@ -3396,10 +3767,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var producesHtml = TextTransformationService.ProducesHtml(transformation);
         var label = GetTextTransformationLabel(transformation);
         StatusText = $"Applying {label}…";
+        string? refusal = null;
         try
         {
             await ApplyTransformToTargetsAsync(
-                (source, _) => Task.FromResult(TextTransformationService.Apply(transformation, source)),
+                (source, cancellationToken) =>
+                {
+                    refusal ??= TextTransformationService.RefusalReason(transformation, source);
+                    return TextTransformationService.ApplyAsync(transformation, source, cancellationToken: cancellationToken);
+                },
                 label,
                 multiSummary: count => $"Applied {label} to {count} clips",
                 transformKind: $"builtin:{transformation}",
@@ -3407,7 +3783,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 noChangeNotificationTitle: producesHtml ? "Text table → HTML made no changes" : null,
                 noChangeNotificationMessage: producesHtml
                     ? "The selected text did not contain a supported table, so nothing was changed."
-                    : null);
+                    : null,
+                explicitTarget: explicitTarget,
+                builtinTransformation: transformation);
+
+            // A converter that declined to run says why, rather than "no change".
+            if (refusal is not null)
+            {
+                StatusText = refusal;
+            }
         }
         catch (Exception ex)
         {
@@ -3430,67 +3814,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var source = GetTransformSourceText(clip);
-        if (string.IsNullOrEmpty(source))
+        if (string.IsNullOrEmpty(await GetTransformSourceTextAsync(clip)))
         {
             StatusText = "Selected clip has no text or file paths to transform";
             return;
         }
 
-        var label = GetTextTransformationLabel(transformation);
-        StatusText = $"Applying {label}…";
-        try
-        {
-            var result = TextTransformationService.Apply(transformation, source);
-            if (string.Equals(result, source, StringComparison.Ordinal))
-            {
-                StatusText = $"{label} produced no change";
-                if (transformation == TextTransformation.BoxTableToHtml)
-                {
-                    _notificationService.PublishWarning(
-                        "Text table → HTML made no changes",
-                        "The selected text did not contain a supported table, so nothing was changed.");
-                }
-                return;
-            }
-
-            var textBytes = System.Text.Encoding.UTF8.GetBytes(result);
-            var isHtml = transformation == TextTransformation.BoxTableToHtml;
-            var captured = await _clipStoreService.CaptureAsync(new ClipCaptureRequest
-            {
-                ContentBytes = textBytes,
-                ContentText = result,
-                ContentType = isHtml ? ContentType.RichText : ContentType.Text,
-                ContentFormat = isHtml ? ClipContentFormat.Html : ClipContentFormat.PlainText,
-                SourceApp = clip.SourceApp,
-                SourceAppPath = clip.Clip.SourceAppPath,
-                SourceAppIconBytes = clip.SourceAppIconBytes,
-                SourceWindowTitle = clip.Clip.SourceWindowTitle,
-                IncrementExistingCopyCount = false,
-                SourceClipId = clip.Clip.Id,
-                TransformKind = $"builtin:{transformation}",
-                SkipPostInsertMaintenance = true,
-            });
-            var copyFailure = await CopyTransformResultToClipboardAsync(result, isHtml ? ClipContentFormat.Html : ClipContentFormat.PlainText);
-            if (copyFailure is null)
-            {
-                StatusText = "Transformed and copied to clipboard";
-            }
-            else
-            {
-                StatusText = $"Transformed, but copy failed: {copyFailure}";
-                _notificationService.PublishWarning("Transform copy failed", copyFailure);
-            }
-            await RefreshAsync(captured?.Id);
-        }
-        catch (Exception ex)
-        {
-            Trace.TraceWarning($"ApplyTransformationToSingleClip '{label}' failed: {ex}");
-            StatusText = $"Failed to apply {label}: {ex.Message}";
-            _notificationService.PublishError($"Failed to apply {label}", ex.Message);
-        }
+        await ApplyTextTransformationAsync(transformation, clip);
     }
-
     private async Task<string?> CopyTransformResultToClipboardAsync(string result, ClipContentFormat format)
     {
         if (string.IsNullOrEmpty(result))
@@ -3508,12 +3839,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (format == ClipContentFormat.Html)
             {
                 var plain = ClipDisplayFormatter.RenderRichContent(result);
-                _clipboardMonitorService.SuppressNext();
+                _clipboardMonitorService.SuppressNext(plain);
                 await _systemInteractionService.CopyRichContentAsync(result, plain, ClipContentFormat.Html);
             }
             else
             {
-                _clipboardMonitorService.SuppressNext();
+                _clipboardMonitorService.SuppressNext(result);
                 await _systemInteractionService.CopyTextAsync(result);
             }
 
@@ -3526,7 +3857,32 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private static string GetTransformSourceText(ClipItemViewModel clip)
+    private static async Task<string> GetTransformSourceTextAsync(ClipItemViewModel clip, TextTransformation? transformation = null)
+    {
+        // A list row may carry only a prefix of its text (F-10); a transform
+        // saves its result as a new clip, so it has to start from all of it.
+        // Hydrating also brings a rich clip's markup, which MarkupSource reads.
+        await clip.EnsureContentHydratedAsync();
+        if (transformation is { } builtin && TextTransformationService.MarkupSource(builtin, clip.Clip) is { } markup)
+        {
+            return markup;
+        }
+
+        return GetShownText(clip);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="result"/> is <paramref name="shown"/> again. The
+    /// Markdown exporter ends its last block with a line break that a clip's own
+    /// text does not carry, so trailing line breaks on the result do not count.
+    /// </summary>
+    private static bool ReadsAs(string result, string shown)
+        => result.AsSpan().TrimEnd("\r\n").SequenceEqual(shown);
+
+    /// <summary>
+    /// What a hydrated clip reads as: its text, or its file paths one per line.
+    /// </summary>
+    private static string GetShownText(ClipItemViewModel clip)
     {
         if (clip.Clip.ContentType != ContentType.Files)
         {
@@ -3546,17 +3902,31 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         string? transformKind = null,
         ClipContentFormat outputFormat = ClipContentFormat.PlainText,
         string? noChangeNotificationTitle = null,
-        string? noChangeNotificationMessage = null)
+        string? noChangeNotificationMessage = null,
+        ClipItemViewModel? explicitTarget = null,
+        TextTransformation? builtinTransformation = null)
     {
-        var checkedClips = Clips.Where(static c => c.IsChecked).ToList();
-        var useSelectionSlice = checkedClips.Count == 0
-            && SelectedClip is not null
-            && EditedClipSelectionLength > 0
-            && EditedClipSelectionStart >= 0
-            && EditedClipSelectionStart + EditedClipSelectionLength <= (EditedClipText?.Length ?? 0);
+        // An explicit target (the row a context menu was opened on) replaces the
+        // checked-clips / selection rule, and never uses a selection slice.
+        var checkedClips = explicitTarget is null ? Clips.Where(static c => c.IsChecked).ToList() : new List<ClipItemViewModel>();
 
-        var targets = checkedClips.Count > 0
-            ? checkedClips
+        // The converters are async, so the user can move the editor selection or
+        // pick another clip while one runs. Splice with the range and text that
+        // were converted, never with the live properties read after the await.
+        var sliceStart = EditedClipSelectionStart;
+        var sliceLength = EditedClipSelectionLength;
+        var sliceFullText = EditedClipText ?? string.Empty;
+        var sliceClip = SelectedClip;
+        var useSelectionSlice = explicitTarget is null
+            && checkedClips.Count == 0
+            && sliceClip is not null
+            && sliceLength > 0
+            && sliceStart >= 0
+            && sliceStart + sliceLength <= sliceFullText.Length
+            && !sliceClip.Clip.IsContentTruncated;
+
+        var targets = explicitTarget is not null ? new List<ClipItemViewModel> { explicitTarget }
+            : checkedClips.Count > 0 ? checkedClips
             : SelectedClip is not null ? new List<ClipItemViewModel> { SelectedClip } : new List<ClipItemViewModel>();
 
         var transformed = 0;
@@ -3571,10 +3941,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             string source;
             string result;
-            if (useSelectionSlice && ReferenceEquals(target, SelectedClip))
+            if (useSelectionSlice && ReferenceEquals(target, sliceClip))
             {
-                var full = EditedClipText ?? string.Empty;
-                var slice = full.Substring(EditedClipSelectionStart, EditedClipSelectionLength);
+                var full = sliceFullText;
+                var slice = full.Substring(sliceStart, sliceLength);
                 var transformedSlice = await transform(slice, CancellationToken.None);
                 if (string.Equals(slice, transformedSlice, StringComparison.Ordinal))
                 {
@@ -3582,19 +3952,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 }
                 source = full;
                 result = string.Concat(
-                    full.AsSpan(0, EditedClipSelectionStart),
+                    full.AsSpan(0, sliceStart),
                     transformedSlice,
-                    full.AsSpan(EditedClipSelectionStart + EditedClipSelectionLength));
+                    full.AsSpan(sliceStart + sliceLength));
             }
             else
             {
-                source = GetTransformSourceText(target);
+                source = await GetTransformSourceTextAsync(target, builtinTransformation);
                 if (string.IsNullOrEmpty(source))
                 {
                     continue;
                 }
                 result = await transform(source, CancellationToken.None);
-                if (string.Equals(result, source, StringComparison.Ordinal))
+                // No change is a result equal to its input or, when the input was
+                // not what the clip shows (HTML -> Markdown reads a rich clip's
+                // markup), a result that reads as the clip already does: a
+                // fragment whose Markdown is just its text changes nothing.
+                var shown = GetShownText(target);
+                if (string.Equals(result, source, StringComparison.Ordinal)
+                    || (!string.Equals(source, shown, StringComparison.Ordinal) && ReadsAs(result, shown)))
                 {
                     continue;
                 }
@@ -3705,7 +4081,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool IsOcrCoverageVisible => _ocrService.IsAvailable && !string.IsNullOrEmpty(OcrCoverageText);
 
-    private async Task RefreshSemanticCoverageAsync()
+    private CoalescingRefresh? _semanticCoverageRefresh;
+    private CoalescingRefresh? _ocrCoverageRefresh;
+
+    // Both chips refresh per OCR queue event or embedding batch, and each refresh
+    // is a full-library aggregate; overlapping triggers collapse into one
+    // trailing run instead of stacking identical queries (F-25).
+    private Task RefreshSemanticCoverageAsync()
+        => (_semanticCoverageRefresh ??= new CoalescingRefresh(RefreshSemanticCoverageCoreAsync)).RunAsync();
+
+    private Task RefreshOcrCoverageAsync()
+        => (_ocrCoverageRefresh ??= new CoalescingRefresh(RefreshOcrCoverageCoreAsync)).RunAsync();
+
+    private async Task RefreshSemanticCoverageCoreAsync()
     {
         if (_embeddingWorker is null)
         {
@@ -3748,7 +4136,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         this.RaisePropertyChanged(nameof(IsSemanticCoverageVisible));
     }
 
-    private async Task RefreshOcrCoverageAsync()
+    private async Task RefreshOcrCoverageCoreAsync()
     {
         if (!_ocrService.IsAvailable)
         {
@@ -3931,7 +4319,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             entries.Add((vm.Id, vm.Clip));
             DetachClip(vm);
-            Clips.Remove(vm);
+            IsListChangeAnimatable = clipVms.Length == 1;
+            try
+            {
+                Clips.Remove(vm);
+            }
+            finally
+            {
+                IsListChangeAnimatable = false;
+            }
             // The row leaves the list but the query still returns it until the
             // delete commits, so it keeps occupying a slot for paging.
             _hiddenPendingDeletes.Add(vm.Id);
@@ -3978,7 +4374,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         try
         {
             await Task.Delay(TimeSpan.FromSeconds(5), cts.Token);
-            await CommitPendingDeletesAsync(ids);
+            await CommitPendingDeletesAsync(ids, cts);
         }
         catch (OperationCanceledException)
         {
@@ -3994,7 +4390,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var anyRestored = false;
         foreach (var id in clipIds)
         {
-            if (_pendingDeletes.Remove(id))
+            if (TryRemoveOwnedPendingDelete(id, cts))
             {
                 _hiddenPendingDeletes.Remove(id);
                 anyRestored = true;
@@ -4007,21 +4403,88 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         cts.Cancel();
+        _animateSingleRestore = clipIds.Length == 1;
         await RefreshAsync();
         StatusText = clipIds.Length == 1 ? "Clip restored" : $"{clipIds.Length} clips restored";
     }
 
-    private async Task CommitPendingDeletesAsync(long[] clipIds)
+    private async Task CommitPendingDeletesAsync(long[] clipIds, CancellationTokenSource cts)
     {
         foreach (var id in clipIds)
         {
-            if (_pendingDeletes.Remove(id, out _))
+            if (TryRemoveOwnedPendingDelete(id, cts))
             {
                 await RunClipMutationAsync(() => _clipStoreService.DeleteAsync(id));
                 // The row is gone from the result set now, so it no longer
                 // occupies a paging slot.
                 _hiddenPendingDeletes.Remove(id);
             }
+        }
+    }
+
+    /// <summary>
+    /// Removes the pending delete of <paramref name="clipId"/> only if it still
+    /// belongs to the delete that owns <paramref name="cts"/>.
+    /// </summary>
+    /// <remarks>
+    /// A re-copy withdraws a pending delete, and the user can then delete the
+    /// same clip again, which starts a new undo window under the same id. The
+    /// earlier delete's timer and Undo button must not act on that later delete:
+    /// matching by id alone let the first timer commit the second delete seconds
+    /// into its undo window, and the second Undo then found nothing to restore.
+    /// </remarks>
+    private bool TryRemoveOwnedPendingDelete(long clipId, CancellationTokenSource cts)
+        => _pendingDeletes.TryGetValue(clipId, out var pending)
+            && ReferenceEquals(pending.Cts, cts)
+            && _pendingDeletes.Remove(clipId);
+
+    private void WithdrawPendingDelete(long clipId)
+    {
+        if (_pendingDeletes.Remove(clipId))
+        {
+            _hiddenPendingDeletes.Remove(clipId);
+        }
+    }
+
+    private static readonly TimeSpan PendingDeleteFlushTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Quitting inside the undo window commits the pending deletes (OD-8a, S41).
+    /// The user was told "Clip deleted"; cancelling instead - the old behaviour -
+    /// brought the clip back on the next launch and into every backup (F-14).
+    /// </summary>
+    /// <remarks>
+    /// Blocking, bounded, and off the UI thread, like FlushCurrentFilterState:
+    /// Dispose is synchronous and the process may be about to end. The undo
+    /// timers are cancelled first so the soft-delete tasks finish without
+    /// committing a second time.
+    /// </remarks>
+    private void CommitPendingDeletesOnExit()
+    {
+        var ids = _pendingDeletes.Keys.ToArray();
+        CancelAllPendingDeletes();
+        if (ids.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var commit = Task.Run(async () =>
+            {
+                foreach (var id in ids)
+                {
+                    await _clipStoreService.DeleteAsync(id);
+                }
+            });
+            if (!commit.Wait(PendingDeleteFlushTimeout))
+            {
+                Trace.TraceWarning($"Committing {ids.Length} pending delete(s) on exit timed out; they may still be in the database.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Committing pending deletes on exit failed: {ex.Message}");
         }
     }
 
@@ -4051,6 +4514,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SensitiveOnly = ShowSensitiveOnly,
         PastedOnly = ShowPastedOnly,
         UseRegex = UseRegexSearch,
+        RegexEngine = _settingsService.Current.RegexSearchEngine,
         CaseSensitive = CaseSensitiveSearch,
         UseWildcard = UseWildcardSearch,
         WholeWord = WholeWordSearch,
@@ -4078,6 +4542,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             || a.SensitiveOnly != b.SensitiveOnly
             || a.PastedOnly != b.PastedOnly
             || a.UseRegex != b.UseRegex
+            || (a.UseRegex && a.RegexEngine != b.RegexEngine)
             || a.CaseSensitive != b.CaseSensitive
             || a.UseWildcard != b.UseWildcard
             || a.WholeWord != b.WholeWord
@@ -4230,7 +4695,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 _semanticOnlyIds.Add(id);
             }
 
-            var stats = ApplyRefreshResultIncremental(items, checkedIds);
+            var animateRestore = _animateSingleRestore && IsSingleInsertion(Clips.Select(static c => c.Id).ToList(), items.Select(static c => c.Id).ToList());
+            _animateSingleRestore = false;
+            IsListChangeAnimatable = animateRestore;
+            ApplyDiffStats stats;
+            try
+            {
+                stats = ApplyRefreshResultIncremental(items, checkedIds);
+            }
+            finally
+            {
+                IsListChangeAnimatable = false;
+            }
             if (sw is not null)
             {
                 Trace.TraceInformation(
@@ -4262,6 +4738,38 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     private readonly record struct ApplyDiffStats(int Added, int Removed, int Replaced, int Moved, bool FullRebuild);
+
+    /// <summary>
+    /// Whether <paramref name="next"/> is <paramref name="shown"/> with exactly
+    /// one row added and nothing else changed or moved - the only refresh worth
+    /// animating.
+    /// </summary>
+    internal static bool IsSingleInsertion(IReadOnlyList<long> shown, IReadOnlyList<long> next)
+    {
+        if (next.Count != shown.Count + 1)
+        {
+            return false;
+        }
+
+        var skipped = false;
+        for (int i = 0, j = 0; i < next.Count; i++)
+        {
+            if (j < shown.Count && next[i] == shown[j])
+            {
+                j++;
+                continue;
+            }
+
+            if (skipped)
+            {
+                return false;
+            }
+
+            skipped = true;
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// Reconciles <see cref="Clips"/> with <paramref name="newItems"/> by doing
@@ -4472,6 +4980,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     private void ApplyCapturedClipOptimistically(ClipEntry clip)
     {
+        // A clip captured while its delete is pending is the user copying it
+        // again: they want it. Capture dedupes onto the pending row, so letting
+        // the commit run would delete the fresh copy with no undo left (F-13).
+        // Only this id is withdrawn; the rest of its batch is still deleted.
+        WithdrawPendingDelete(clip.Id);
+
         if (!TryGetOptimisticInsertIndex(clip, out var targetIndex))
         {
             RequestDeferredRefresh();
@@ -4483,8 +4997,29 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // assignment in the hidden case: SetMainWindowVisible re-selects the
         // newest clip on show, so paying for the SelectedClip property storm
         // on every capture would be wasted work.
-        UpsertClipItem(clip, targetIndex, select: _isMainWindowVisible);
+        IsListChangeAnimatable = true;
+        try
+        {
+            UpsertClipItem(clip, targetIndex, select: _isMainWindowVisible);
+        }
+        finally
+        {
+            IsListChangeAnimatable = false;
+        }
     }
+
+    /// <summary>
+    /// True only while <see cref="Clips"/> is being changed by one clip arriving
+    /// or leaving - a capture, a single delete, or the undo of one - which the
+    /// view may animate. Searches, page loads and refreshes leave it false, so
+    /// nothing that replaces many rows at once can animate by accident.
+    /// </summary>
+    public bool IsListChangeAnimatable { get; private set; }
+
+    // Set by the undo of a single delete; the refresh that restores the row
+    // consumes it, and animates only if that refresh turns out to be exactly
+    // the one row coming back.
+    private bool _animateSingleRestore;
 
     /// <summary>
     /// Works out where <paramref name="clip"/> belongs in the list as it is
@@ -4636,6 +5171,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (ReferenceEquals(clip, SelectedClip))
         {
             UpdateSelectedClipPresentation();
+            RaiseSelectionStateProperties();
 
             // Hydration is what gives an image clip its bytes, and three
             // separate things are computed from those bytes: whether the image
@@ -4659,7 +5195,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void UpdateSelectedClipPresentation()
     {
-        var rawContent = SelectedClip?.FullContent ?? ClipDisplayFormatter.GetRawContentDisplay(null);
+        var rawContent = SelectedClip?.DisplayContent ?? ClipDisplayFormatter.GetRawContentDisplay(null);
+        _presentedClipIsComplete = SelectedClip is { Clip.IsContentTruncated: false };
         var fileItems = ClipDisplayFormatter.BuildFileItems(rawContent);
         ReplaceSelectedClipFiles(fileItems);
         _selectedClipRawContent = rawContent;
@@ -5312,6 +5849,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var useSelectionSlice = checkedClips.Count == 0
             && SelectedClip is not null
             && ReferenceEquals(targets[0], SelectedClip)
+            && !SelectedClip.Clip.IsContentTruncated
             && EditedClipSelectionLength > 0
             && EditedClipSelectionStart >= 0
             && EditedClipSelectionStart + EditedClipSelectionLength <= (EditedClipText?.Length ?? 0)
@@ -5410,7 +5948,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     }
                     else
                     {
-                        source = GetTransformSourceText(target);
+                        source = await GetTransformSourceTextAsync(target);
                         result = await _aiTransformService.TransformAsync(prompt, source);
                     }
                 }
@@ -5655,7 +6193,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var ocrWasRunning = _backgroundOcrQueue.IsRunning;
         var embeddingWasRunning = _embeddingWorker?.IsRunning ?? false;
         await _backgroundOcrQueue.StopAsync();
-        if (_embeddingWorker is not null)
+        // Paused, not stopped, when the worker owns its lifetime (F-23): a
+        // settings save during the import must not restart it.
+        IAsyncDisposable? embeddingPause = null;
+        if (_embeddingWorker is Clipthrough.Services.Search.IPausableWorker pausable)
+            embeddingPause = await pausable.PauseAsync();
+        else if (_embeddingWorker is not null)
             await _embeddingWorker.StopAsync();
 
         try
@@ -5686,7 +6229,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 _backgroundOcrQueue.Start();
             }
 
-            if (embeddingWasRunning)
+            if (embeddingPause is not null)
+            {
+                await embeddingPause.DisposeAsync();
+            }
+            else if (embeddingWasRunning)
             {
                 _embeddingWorker?.Start();
             }
@@ -5733,7 +6280,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 DatabasePath = Settings.DatabasePath,
                 DatabasePassword = SettingsDatabasePassword,
                 RememberPassword = SettingsRememberDatabasePassword,
-            }.Normalize();
+            }.Normalize(_storageOptionsService.DataRoot);
         }
         catch (Exception ex)
         {
@@ -5792,6 +6339,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             EnablePasteAsPlainTextHotkey = Settings.EnablePasteAsPlainTextHotkey,
             PasteAsPlainTextHotkey = normalizedExtended["paste-as-plain-text"],
             ExcludedCaptureApps = Services.CaptureExclusionPolicy.ParsePatterns(Settings.ExcludedCaptureAppsText),
+            HonorClipboardHistoryOptOut = Settings.HonorClipboardHistoryOptOut,
             ExternalEditorPath = Settings.ExternalEditorPath.Trim(),
             ExternalImageEditorPath = Settings.ExternalImageEditorPath.Trim(),
             ExternalDiffToolPath = Settings.ExternalDiffToolPath.Trim(),
@@ -5816,6 +6364,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             MinimizeToTray = Settings.MinimizeToTray,
             StartWithWindows = Settings.StartWithWindows,
             ThemeMode = Settings.ThemeMode,
+            Motion = Settings.Motion,
             EnableNormalClipLifetime = Settings.EnableNormalClipLifetime,
             NormalClipLifetimeDays = normalClipLifetimeDays,
             EnableSensitiveClipLifetime = Settings.EnableSensitiveClipLifetime,
@@ -5826,6 +6375,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             MaxEntryCount = maxEntryCount,
             EnableSemanticSearch = SettingsEnableSemanticSearch,
             UseFuzzySettingsSearch = Settings.UseFuzzySearch,
+            RegexSearchEngine = Settings.RegexSearchEngine,
         };
 
         SecretPersistenceException? secretFailure = null;
@@ -5847,7 +6397,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // working, and the change can simply be made again.
             //
             // The two files are independent - settings.json and storage.json,
-            // both in LocalApplicationData - and AppSettings carries no storage
+            // both in the data folder (AppDataRoot) - and AppSettings carries no storage
             // location or password, so neither write needs the other to have
             // happened first.
             try
@@ -5873,7 +6423,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             StatusText = secretFailure is null
                 ? "Loading clipboard library\u2026"
                 : AppText.FormatSettingsSecretSaveFailed(secretFailure.SecretNameList);
-            _ = StartDatabaseInBackgroundAsync();
+            DatabaseStartupTask = StartDatabaseInBackgroundAsync();
             return;
         }
 
@@ -5907,7 +6457,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 _embeddingWorker?.Poke();
             }
         });
-        _ = ApplyMaintenanceAndRefreshAsync();
+        TrackMaintenance(ApplyMaintenanceAndRefreshAsync());
 
         if (_isDatabaseReady && _ocrService.IsAvailable)
         {
@@ -5920,7 +6470,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 {
                     await _clipStoreService.MarkAllSucceededForRerunAsync();
                 }
-                _ = Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync());
+                _ = TrackBackgroundDatabaseWork(Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync()));
             }
         }
 
@@ -5954,6 +6504,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.MinimizeToTray = settings.MinimizeToTray;
         Settings.StartWithWindows = settings.StartWithWindows;
         Settings.ThemeMode = settings.ThemeMode;
+        Settings.Motion = settings.Motion;
         Settings.EnableNormalClipLifetime = settings.EnableNormalClipLifetime;
         Settings.NormalClipLifetimeDays = settings.NormalClipLifetimeDays.ToString(CultureInfo.InvariantCulture);
         Settings.EnableSensitiveClipLifetime = settings.EnableSensitiveClipLifetime;
@@ -5989,6 +6540,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.EnablePasteAsPlainTextHotkey = settings.EnablePasteAsPlainTextHotkey;
         Settings.PasteAsPlainTextHotkey = settings.PasteAsPlainTextHotkey;
         Settings.ExcludedCaptureAppsText = Services.CaptureExclusionPolicy.FormatPatterns(settings.ExcludedCaptureApps);
+        Settings.HonorClipboardHistoryOptOut = settings.HonorClipboardHistoryOptOut;
         Settings.ExternalEditorPath = settings.ExternalEditorPath;
         Settings.ExternalImageEditorPath = settings.ExternalImageEditorPath;
         Settings.ExternalDiffToolPath = settings.ExternalDiffToolPath;
@@ -6012,11 +6564,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         SelectedCustomHotkeyDraft = SettingsCustomHotkeyDrafts.FirstOrDefault();
         Settings.UseFuzzySearch = settings.UseFuzzySettingsSearch;
+        Settings.RegexSearchEngine = settings.RegexSearchEngine;
         SettingsEnableSemanticSearch = settings.EnableSemanticSearch;
         IsDatabasePasswordVisible = false;
         RebuildCustomHotkeyTargetSuggestions();
     }
 
+
+    private RegexSearchEngine _lastRegexSearchEngine = AppSettings.Default.RegexSearchEngine;
 
     private void OnSettingsChanged(object? sender, AppSettings settings)
     {
@@ -6037,6 +6592,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             UseSemanticClipSearch = true;
         }
         _wasSemanticSearchEnabled = settings.EnableSemanticSearch;
+
+        // A regex search on screen was answered by the old engine; run it again.
+        if (UseRegexSearch && !string.IsNullOrEmpty(SearchText) && settings.RegexSearchEngine != _lastRegexSearchEngine)
+        {
+            _ = RefreshAsync();
+        }
+        _lastRegexSearchEngine = settings.RegexSearchEngine;
 
         SyncAiPresets(settings);
         RebuildCustomHotkeyTargetSuggestions();
@@ -6082,14 +6644,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 {
                     if (enabled)
                     {
+                        // A paused worker reports not running, so this also
+                        // records the wish while a maintenance pause holds it.
                         if (!worker.IsRunning)
                         {
                             worker.Start();
                             worker.Poke();
                         }
                     }
-                    else if (worker.IsRunning)
+                    else
                     {
+                        // Unconditionally: guarding on IsRunning skipped a "turn
+                        // it off" that arrived while a maintenance pause held the
+                        // worker stopped, and the release then restarted it (F-23).
                         await worker.StopAsync().ConfigureAwait(false);
                     }
                 }
@@ -6176,7 +6743,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private async Task StartDatabaseAsync()
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        await _databaseInitializer.InitializeAsync();
+        await _databaseInitializer.InitializeAsync(new UiThreadProgress(SetLibraryUpgradeProgress), allowDeferredPayloadMove: true);
         Trace.TraceInformation($"[startup-timing] DatabaseInitializer @ {sw.ElapsedMilliseconds}ms");
 
         if (!_settingsService.HasSavedSettings)
@@ -6208,17 +6775,29 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // Take a daily backup once the database has been opened, integrity-
         // checked, and migrated. Fire-and-forget so a slow file-system copy
         // never delays the first refresh.
-        _ = Task.Run(async () =>
+        TrackMaintenance(Task.Run(async () =>
         {
             try
             {
+                // Classify first (rubber-duck F-06-5): a clip captured just
+                // before a crash still has is_sensitive = 0 with its scan
+                // pending, and the backup purge only removes flagged rows.
+                // StartBackgroundServices runs the same recovery later; by then
+                // it usually finds nothing.
+                await RecoverPendingSensitivityAsync().ConfigureAwait(false);
+
+                // Expire first (OD-4a). Otherwise a sensitive clip that outlived
+                // its lifetime while the app was closed is copied into a backup
+                // that is kept for a week, before the maintenance loop's first
+                // tick a minute later removes it from the live library.
+                await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);
                 await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 Trace.TraceWarning($"Daily backup failed: {ex.Message}");
             }
-        });
+        }));
     }
 
     /// <summary>
@@ -6241,23 +6820,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         _areBackgroundServicesStarted = true;
+        DeferredUpgradeRun = TrackBackgroundDatabaseWork(RunDeferredPayloadMoveAsync());
         _clipboardMonitorService.Start();
         _backgroundOcrQueue.Start();
-        _ = Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync());
-        _ = RecoverPendingSensitivityAsync();
+        TrackBackgroundDatabaseWork(Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync()));
+        TrackBackgroundDatabaseWork(RecoverPendingSensitivityAsync());
         if (_embeddingWorker is not null && _settingsService.Current.EnableSemanticSearch)
         {
             _embeddingWorker.Start();
         }
         StartMaintenanceLoop();
-        _ = RefreshSemanticCoverageAsync();
-        _ = RefreshOcrCoverageAsync();
+        TrackBackgroundDatabaseWork(RefreshSemanticCoverageAsync());
+        TrackBackgroundDatabaseWork(RefreshOcrCoverageAsync());
         _subscriptions.Add(_backgroundOcrQueue.QueueChanged
             .RateLimit(TimeSpan.FromMilliseconds(150), RxSchedulers.TaskpoolScheduler)
             .ObserveOn(RxSchedulers.MainThreadScheduler)
             .Subscribe(__ =>
             {
-                _ = RefreshOcrCoverageAsync();
+                TrackBackgroundDatabaseWork(RefreshOcrCoverageAsync());
             }));
         if (_embeddingWorker is not null)
         {
@@ -6280,8 +6860,127 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 // and nothing is happening".
                 .RateLimit(TimeSpan.FromMilliseconds(500), RxSchedulers.TaskpoolScheduler)
                 .ObserveOn(RxSchedulers.MainThreadScheduler)
-                .Subscribe((int count) => { _ = RefreshSemanticCoverageAsync(); }));
+                .Subscribe((int count) => { TrackBackgroundDatabaseWork(RefreshSemanticCoverageAsync()); }));
         }
+    }
+
+    /// <summary>
+    /// The background upgrade run <see cref="StartBackgroundServices"/> started;
+    /// null until then. Exposed so tests can wait for it.
+    /// </summary>
+    internal Task? DeferredUpgradeRun { get; private set; }
+
+    /// <summary>
+    /// Finishes an upgrade's payload move in the background while the app is in
+    /// use (upgrade-start research, U4). Shown as a running job with its
+    /// progress; a library with nothing left to move returns at once.
+    /// </summary>
+    private async Task RunDeferredPayloadMoveAsync()
+    {
+        IDisposable? job = null;
+        var shownPercent = -1;
+        var gate = new object();
+        void OnProgress(LibraryUpgradeProgress progress)
+        {
+            var percent = (int)Math.Round((progress.Fraction ?? 0) * 100);
+            lock (gate)
+            {
+                // A new label per step of five, so the job line moves without
+                // raising a change for every batch.
+                if (_deferredPayloadMoveCancellation.IsCancellationRequested || (shownPercent >= 0 && percent / 5 == shownPercent / 5))
+                {
+                    return;
+                }
+
+                var previous = job;
+                job = _jobIndicator.Begin(AppText.FormatLibraryOptimizeJob(percent));
+                previous?.Dispose();
+                shownPercent = percent;
+            }
+        }
+
+        try
+        {
+            var upgraded = await Task.Run(
+                () => _databaseInitializer.RunDeferredPayloadMoveAsync(
+                    new DirectProgress(OnProgress),
+                    _deferredPayloadMoveCancellation.Token),
+                _deferredPayloadMoveCancellation.Token).ConfigureAwait(false);
+
+            // After the move, never alongside it: both are writers, and the merges
+            // a rebuild leaves are only drained when one ran (R1). Silent - it
+            // changes nothing anyone can see except how fast captures are.
+            await Task.Run(
+                () => _databaseInitializer.DrainSearchIndexMergesAsync(_deferredPayloadMoveCancellation.Token),
+                _deferredPayloadMoveCancellation.Token).ConfigureAwait(false);
+
+            // The startup backup waited for the integrity check this run has now
+            // passed (live check F3); without this the day would go unbacked-up.
+            // Expired clips first, as at startup (OD-4a). Only when the run had
+            // work: on an ordinary start nothing was held back, and the startup
+            // pass is already doing both (rubber-duck F-13-8).
+            if (upgraded)
+            {
+                try
+                {
+                    await _clipStoreService.ApplyMaintenanceAsync().ConfigureAwait(false);
+                    await Maintenance.EnsureDailyBackupAsync().ConfigureAwait(false);
+                }
+                catch (Exception backupFailure) when (backupFailure is not OperationCanceledException)
+                {
+                    Trace.TraceWarning($"Daily backup failed: {backupFailure.Message}");
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown. The batch in flight rolled back; the next start resumes.
+        }
+        catch (Exception ex)
+        {
+            // An integrity failure lands here too (the background move checks the
+            // library before rewriting it), so it is raised as a notification and
+            // not only as a status-bar line. Nothing was moved. It stays until the
+            // user closes it (owner decision after live check F3): it says to
+            // restore a backup, and a six-second toast is easily missed.
+            ReportError("Library storage optimization", ex);
+            _notificationService.Publish(new AppNotification
+            {
+                Title = AppText.LibraryOptimizeFailedTitle,
+
+                // Only after a failed integrity check, which is what says to restore a
+                // backup: the daily backup waited for the check, so nothing copied
+                // this session is in one (F-13-10).
+                Message = _databaseInitializer.HasFailedIntegrityCheck
+                    ? $"{ex.Message}\n\n{AppText.LibraryIntegrityFailedUnbackedClips}"
+                    : ex.Message,
+                Level = AppNotificationLevel.Error,
+                IsPersistent = true,
+                Actions =
+                [
+                    new AppNotificationAction
+                    {
+                        // Any action dismisses its notification; this one does nothing else.
+                        Label = AppText.CloseButtonLabel,
+                        ExecuteAsync = () => Task.CompletedTask,
+                    },
+                ],
+            });
+        }
+        finally
+        {
+            lock (gate)
+            {
+                job?.Dispose();
+                job = null;
+            }
+        }
+    }
+
+    /// <summary>Reports on the caller's thread; the job indicator marshals its own change event.</summary>
+    private sealed class DirectProgress(Action<LibraryUpgradeProgress> apply) : IProgress<LibraryUpgradeProgress>
+    {
+        public void Report(LibraryUpgradeProgress value) => apply(value);
     }
 
     /// <summary>
@@ -6498,7 +7197,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             IsLoadingDatabase = true;
             StatusText = "Loading clipboard library\u2026";
 
-            _ = StartDatabaseInBackgroundAsync();
+            DatabaseStartupTask = StartDatabaseInBackgroundAsync();
         }
         catch (Exception ex)
         {
@@ -6516,7 +7215,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
 
-    private static async Task<string?> PickDatabasePathAsync(IStorageProvider storageProvider, string currentPath)
+    private async Task<string?> PickDatabasePathAsync(IStorageProvider storageProvider, string currentPath)
     {
         var suggestedPath = GetSuggestedDatabasePath(currentPath);
         var suggestedDirectoryPath = Path.GetDirectoryName(suggestedPath);
@@ -6539,11 +7238,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return result?.TryGetLocalPath();
     }
 
-    private static string GetSuggestedDatabasePath(string currentPath)
+    private string GetSuggestedDatabasePath(string currentPath)
     {
         if (string.IsNullOrWhiteSpace(currentPath))
         {
-            return StorageOptions.GetDefaultDatabasePath();
+            return _storageOptionsService.DataRoot.DefaultDatabasePath;
         }
 
         try
@@ -6552,7 +7251,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
-            return StorageOptions.GetDefaultDatabasePath();
+            return _storageOptionsService.DataRoot.DefaultDatabasePath;
         }
     }
 
@@ -6667,6 +7366,72 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return rules.ToArray();
     }
 
+    /// <summary>
+    /// Every maintenance pass or daily backup still running that a database
+    /// start or a settings save started. Nothing in the app awaits them; tests
+    /// do, because they reopen the database after the test has finished with it.
+    /// </summary>
+    internal Task? MaintenanceTask
+    {
+        get
+        {
+            lock (_maintenanceTaskGate)
+            {
+                return _maintenanceTask;
+            }
+        }
+    }
+
+    private readonly Lock _maintenanceTaskGate = new();
+    private Task? _maintenanceTask;
+
+    private void TrackMaintenance(Task pass)
+    {
+        // A save can start a pass while the start's pass is still running, and
+        // the daily backup is tracked from a pool thread.
+        lock (_maintenanceTaskGate)
+        {
+            var previous = _maintenanceTask;
+            _maintenanceTask = previous is { IsCompleted: false } ? Task.WhenAll(previous, pass) : pass;
+        }
+    }
+
+    internal IReadOnlyCollection<Task> BackgroundDatabaseTasks
+    {
+        get
+        {
+            lock (_backgroundDatabaseWorkGate)
+            {
+                return _backgroundDatabaseWork.ToArray();
+            }
+        }
+    }
+
+    private readonly Lock _backgroundDatabaseWorkGate = new();
+    private readonly HashSet<Task> _backgroundDatabaseWork = [];
+
+    private Task TrackBackgroundDatabaseWork(Task work)
+    {
+        lock (_backgroundDatabaseWorkGate)
+        {
+            _backgroundDatabaseWork.Add(work);
+        }
+
+        _ = work.ContinueWith(
+            completed =>
+            {
+                lock (_backgroundDatabaseWorkGate)
+                {
+                    _backgroundDatabaseWork.Remove(completed);
+                }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+        return work;
+    }
+
     private async Task ApplyMaintenanceAndRefreshAsync(bool forceRefresh = true)
     {
         if (!_isDatabaseReady)
@@ -6684,6 +7449,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await RefreshAsync();
     }
 
+    /// <summary>How often the retention and size-cap maintenance runs on its own. Tests shorten it.</summary>
+    internal TimeSpan MaintenanceInterval { get; set; } = TimeSpan.FromMinutes(1);
+
     private void StartMaintenanceLoop()
     {
         if (_subscriptions.OfType<SerialDisposable>().Any())
@@ -6692,10 +7460,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         var maintenanceSubscription = new SerialDisposable();
-        maintenanceSubscription.Disposable = Observable.Interval(TimeSpan.FromMinutes(1), RxSchedulers.TaskpoolScheduler)
-            .SelectMany(_ => Observable.FromAsync(() => ApplyMaintenanceAndRefreshAsync(false)))
+        // A failed tick is reported and the next one still runs. Without the Catch
+        // inside the SelectMany the error reached this subscription, and OnError is
+        // terminal in Rx: live check F2 lost the periodic retention and size cap for
+        // the rest of the session after one failure.
+        maintenanceSubscription.Disposable = Observable.Interval(MaintenanceInterval, RxSchedulers.TaskpoolScheduler)
+            .SelectMany(_ => Observable.FromAsync(() => TrackBackgroundDatabaseWork(ApplyMaintenanceAndRefreshAsync(false)))
+                .Select(static _ => (Exception?)null)
+                .Catch(static (Exception ex) => Observable.Return<Exception?>(ex)))
             .ObserveOn(RxSchedulers.MainThreadScheduler)
-            .Subscribe(_ => { }, ex => ReportError("Maintenance loop", ex));
+            .Subscribe(
+                failure =>
+                {
+                    if (failure is not null)
+                    {
+                        ReportError("Maintenance loop", failure);
+                    }
+                },
+                ex => ReportError("Maintenance loop", ex));
         _subscriptions.Add(maintenanceSubscription);
     }
 
@@ -7312,7 +8094,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return ClipBitmapFactory.TryLoad(bytes);
         }
 
-        var trimmed = clip.Content.Trim();
+        var trimmed = clip.ContentPrefix.Trim();
 
         try
         {
@@ -7375,6 +8157,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return null;
         }
 
+        await Task.WhenAll(clips.Select(static c => c.EnsureContentHydratedAsync()));
         var entries = clips.Select(static c => c.Clip).ToArray();
         return await _dragDropService.BuildDragPayloadAsync(entries, storageProvider);
     }
@@ -7385,6 +8168,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// and emitted on the captured-clips stream so the UI sees it instantly.
     /// Returns the number of clips imported.
     /// </summary>
+    /// <remarks>
+    /// A drop is a deliberate import, so the clipboard-capture rules do not
+    /// apply: it is kept even when its source app is excluded, publishes
+    /// "Clipboard Viewer Ignore", or marks it CanIncludeInClipboardHistory = 0.
+    /// See the S39 refinement under "Settled decisions" in AGENTS.md.
+    /// </remarks>
     public async Task<int> ImportDroppedDataAsync(Avalonia.Input.IDataTransfer drop, ClipboardSourceApplicationInfo? sourceInfo)
     {
         if (drop is null)

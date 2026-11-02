@@ -15,6 +15,7 @@ using Clipthrough.Database;
 using Clipthrough.Localization;
 using Clipthrough.Models;
 using Clipthrough.Presentation;
+using Clipthrough.Services.Search;
 using Microsoft.Data.Sqlite;
 
 namespace Clipthrough.Services;
@@ -24,12 +25,12 @@ public sealed class ClipStoreService : IClipStoreService
     private const string ClipSelectColumns = """
             c.id,
             c.content,
-            c.content_bytes,
+            COALESCE((SELECT p.content_bytes FROM clip_payloads p WHERE p.clip_id = c.id), c.content_bytes),
             c.content_type,
             c.content_format,
             c.source_app,
             c.source_app_path,
-            c.source_app_icon,
+            COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), c.source_app_icon),
             c.hash,
             c.is_favorite,
             c.is_sensitive,
@@ -60,16 +61,26 @@ public sealed class ClipStoreService : IClipStoreService
     /// every row. Column count and ordinal positions match <see cref="ClipSelectColumns"/>:
     /// index 2 is always <c>NULL</c> (ContentBytes), index 7 is a 0/1 presence flag
     /// (SourceAppIconAvailable). Use with <see cref="ReadClipMeta"/>.  (U12)
+    ///
+    /// The text is bounded too (F-10): index 1 holds at most the first 4096
+    /// characters (<see cref="ClipEntry.ListContentLength"/>) and index 30 says whether
+    /// there was more. A row shows a title and a snippet; carrying a 2 MB log into every
+    /// list page cost the UI that string and its UTF-16 copy per row. An entry read this
+    /// way throws on <see cref="ClipEntry.Content"/> until it is hydrated.
+    ///
+    /// substr() and length() both stop at the first NUL in a TEXT value, so a clip
+    /// containing one is always flagged: its row holds only the text before the NUL,
+    /// however short the clip.
     /// </summary>
     private const string ClipListSelectColumns = """
             c.id,
-            c.content,
+            substr(c.content, 1, 4096),
             NULL,
             c.content_type,
             c.content_format,
             c.source_app,
             c.source_app_path,
-            (CASE WHEN c.source_app_icon IS NOT NULL AND LENGTH(c.source_app_icon) > 0 THEN 1 ELSE 0 END),
+            (c.source_app_icon_hash IS NOT NULL OR c.source_app_icon IS NOT NULL),
             c.hash,
             c.is_favorite,
             c.is_sensitive,
@@ -91,19 +102,27 @@ public sealed class ClipStoreService : IClipStoreService
             c.ocr_error,
             c.source_clip_id,
             c.transform_kind,
-            c.import_kind
+            c.import_kind,
+            (COALESCE(length(c.content), 0) > 4096 OR COALESCE(instr(c.content, char(0)), 0) > 0)
         """;
 
     /// <summary>
-    /// Ordinals of the five columns the search covers. They are deliberately identical in
-    /// <see cref="ClipSelectColumns"/> and <see cref="ClipListSelectColumns"/>. A scan
+    /// The list columns plus the full text, for the in-memory search scan: a match is
+    /// decided on the whole clip, never on the prefix a row carries (F-10).
+    /// </summary>
+    private const string ClipScanSelectColumns = ClipListSelectColumns + ", c.content";
+
+    /// <summary>
+    /// Ordinals of the five columns the search covers, in <see cref="ClipScanSelectColumns"/>:
+    /// the four metadata ordinals match <see cref="ClipSelectColumns"/>, and content is the
+    /// full text appended at the end rather than the bounded index 1. A scan
     /// reads only these to decide whether a row matches and materializes the rest of the
     /// entry only if it does: building a thirty-column <see cref="ClipEntry"/> - five
     /// timestamp parses included - for a row about to be discarded was roughly 70% of the
     /// cost of a non-FTS search.
     /// Guarded by ClipListSelectColumns_ExposeTheSearchedColumnsAtTheExpectedOrdinals.
     /// </summary>
-    private const int SearchOrdinalContent = 1;
+    private const int SearchOrdinalContent = 31; // the full text, ClipScanSelectColumns only
     private const int SearchOrdinalSourceApp = 5;
     private const int SearchOrdinalSourceWindowTitle = 17;
     private const int SearchOrdinalSourceUrl = 18;
@@ -260,11 +279,12 @@ public sealed class ClipStoreService : IClipStoreService
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
+        using var transaction = connection.BeginTransaction();
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             UPDATE clips
-            SET content = CASE WHEN $content IS NULL OR TRIM($content) = '' THEN content ELSE $content END,
-                content_bytes = $contentBytes,
+            SET content = CASE WHEN CAST($content AS TEXT) IS NULL OR TRIM(CAST($content AS TEXT)) = '' THEN content ELSE CAST($content AS TEXT) END,
                 content_type = $contentType,
                 content_format = $contentFormat,
                 byte_size = $byteSize,
@@ -279,8 +299,7 @@ public sealed class ClipStoreService : IClipStoreService
             WHERE id = $id;
             """;
         command.Parameters.AddWithValue("$id", clipId);
-        command.Parameters.AddWithValue("$content", string.IsNullOrWhiteSpace(contentText) ? DBNull.Value : contentText);
-        command.Parameters.AddWithValue("$contentBytes", request.ContentBytes);
+        command.Parameters.AddWithValue("$content", ClipTextParameter(contentText));
         command.Parameters.AddWithValue("$contentType", request.ContentType.ToStorageValue());
         command.Parameters.AddWithValue("$contentFormat", request.ContentFormat.ToStorageValue());
         command.Parameters.AddWithValue("$byteSize", byteSize);
@@ -289,6 +308,12 @@ public sealed class ClipStoreService : IClipStoreService
         command.Parameters.AddWithValue("$sourceWindowTitle", string.IsNullOrWhiteSpace(request.SourceWindowTitle) ? DBNull.Value : request.SourceWindowTitle);
         command.Parameters.AddWithValue("$sourceUrl", string.IsNullOrWhiteSpace(request.SourceUrl) ? DBNull.Value : request.SourceUrl);
         var changed = await command.ExecuteNonQueryAsync(cancellationToken);
+        if (changed > 0)
+        {
+            await WritePayloadAsync(connection, transaction, clipId, request.ContentBytes, iconBytes: null, cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
         if (changed > 0)
         {
             InvalidateStatsCache();
@@ -311,11 +336,17 @@ public sealed class ClipStoreService : IClipStoreService
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE clips SET source_app_icon = $sourceAppIcon WHERE id = $id;";
-        command.Parameters.AddWithValue("$id", clipId);
-        command.Parameters.AddWithValue("$sourceAppIcon", iconBytes);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        using (var transaction = connection.BeginTransaction())
+        {
+            await WritePayloadAsync(connection, transaction, clipId, contentBytes: null, iconBytes, cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "UPDATE clips SET source_app_icon_hash = $hash WHERE id = $id;";
+            command.Parameters.AddWithValue("$id", clipId);
+            command.Parameters.AddWithValue("$hash", Clipthrough.Database.DatabaseInitializer.AppIconHash(iconBytes));
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
 
         return await GetClipByIdAsync(connection, clipId, cancellationToken);
     }
@@ -342,7 +373,7 @@ public sealed class ClipStoreService : IClipStoreService
         {
             await connection.OpenAsync(cancellationToken);
             await using var command = connection.CreateCommand();
-            command.CommandText = "SELECT id FROM clips WHERE sensitivity_scanned_at IS NULL ORDER BY id;";
+            command.CommandText = PendingSensitivitySql;
 
             pending = [];
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -506,7 +537,7 @@ public sealed class ClipStoreService : IClipStoreService
         {
             var totalClips = await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips;", cancellationToken);
             var sensitiveClips = await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips WHERE is_sensitive = 1;", cancellationToken);
-            var storedBytes = await ExecuteScalarLongAsync(connection, $"SELECT COALESCE(SUM({StoredRowBytes}), 0) FROM clips;", cancellationToken);
+            var storedBytes = await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken);
             var lastCapturedAtStr = await ExecuteScalarStringAsync(connection, "SELECT MAX(COALESCE(last_copied_at, captured_at)) FROM clips;", cancellationToken);
 
             // Only publish if no concurrent invalidation happened during the queries.
@@ -696,7 +727,7 @@ public sealed class ClipStoreService : IClipStoreService
             SET ocr_status = 'running'
             WHERE id = $id
               AND content_type = 'image'
-              AND content_bytes IS NOT NULL
+              AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id) OR clips.content_bytes IS NOT NULL)
               AND (ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'failed' OR ocr_status = 'rerun');
             """;
         command.Parameters.AddWithValue("$id", clipId);
@@ -740,7 +771,12 @@ public sealed class ClipStoreService : IClipStoreService
                 await using (var markCommand = connection.CreateCommand())
                 {
                     markCommand.Transaction = transaction;
-                    markCommand.CommandText = "UPDATE clips SET is_sensitive = 1 WHERE id = $id;";
+                    // Sensitive now, so excluded from embedding like a clip marked
+                    // sensitive by hand: any vector derived from its OCR text goes.
+                    markCommand.CommandText = """
+                        UPDATE clips SET is_sensitive = 1, embedding_status = 'excluded' WHERE id = $id;
+                        DELETE FROM clip_embeddings WHERE clip_id = $id;
+                        """;
                     markCommand.Parameters.AddWithValue("$id", clipId);
                     await markCommand.ExecuteNonQueryAsync(cancellationToken);
                 }
@@ -788,7 +824,7 @@ public sealed class ClipStoreService : IClipStoreService
         command.CommandText = """
             SELECT id FROM clips
             WHERE content_type = 'image'
-              AND content_bytes IS NOT NULL
+              AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id) OR clips.content_bytes IS NOT NULL)
               AND (ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'failed' OR ocr_status = 'rerun')
             ORDER BY COALESCE(last_copied_at, captured_at) DESC
             LIMIT 500;
@@ -816,6 +852,20 @@ public sealed class ClipStoreService : IClipStoreService
         return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    internal const string PendingSensitivitySql = "SELECT id FROM clips WHERE sensitivity_scanned_at IS NULL ORDER BY id;";
+
+    internal const string OcrCoverageSql = """
+        SELECT
+            COUNT(*) AS eligible_total,
+            COALESCE(SUM(CASE WHEN ocr_status = 'succeeded' THEN 1 ELSE 0 END), 0) AS succeeded_count,
+            COALESCE(SUM(CASE WHEN ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'rerun' THEN 1 ELSE 0 END), 0) AS pending_count,
+            COALESCE(SUM(CASE WHEN ocr_status = 'running' THEN 1 ELSE 0 END), 0) AS running_count,
+            COALESCE(SUM(CASE WHEN ocr_status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_count
+        FROM clips
+        WHERE content_type = 'image'
+          AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id) OR clips.content_bytes IS NOT NULL);
+        """;
+
     public Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default)
         => RunOffCallerAsync(ct => GetOcrCoverageCoreAsync(ct), cancellationToken);
 
@@ -825,17 +875,8 @@ public sealed class ClipStoreService : IClipStoreService
         await connection.OpenAsync(cancellationToken);
 
         await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT
-                COUNT(*) AS eligible_total,
-                COALESCE(SUM(CASE WHEN ocr_status = 'succeeded' THEN 1 ELSE 0 END), 0) AS succeeded_count,
-                COALESCE(SUM(CASE WHEN ocr_status IS NULL OR ocr_status = 'pending' OR ocr_status = 'rerun' THEN 1 ELSE 0 END), 0) AS pending_count,
-                COALESCE(SUM(CASE WHEN ocr_status = 'running' THEN 1 ELSE 0 END), 0) AS running_count,
-                COALESCE(SUM(CASE WHEN ocr_status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_count
-            FROM clips
-            WHERE content_type = 'image'
-              AND content_bytes IS NOT NULL;
-            """;
+        command.CommandText = OcrCoverageSql;
+
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))
@@ -865,7 +906,7 @@ public sealed class ClipStoreService : IClipStoreService
             SET ocr_status = 'rerun'
             WHERE id = $id
               AND content_type = 'image'
-              AND content_bytes IS NOT NULL
+              AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id) OR clips.content_bytes IS NOT NULL)
               AND ocr_status = 'succeeded';
             """;
         command.Parameters.AddWithValue("$id", clipId);
@@ -886,7 +927,7 @@ public sealed class ClipStoreService : IClipStoreService
             UPDATE clips
             SET ocr_status = 'rerun'
             WHERE content_type = 'image'
-              AND content_bytes IS NOT NULL
+              AND (EXISTS (SELECT 1 FROM clip_payloads p WHERE p.clip_id = clips.id) OR clips.content_bytes IS NOT NULL)
               AND ocr_status = 'succeeded'
             RETURNING id;
             """;
@@ -921,16 +962,21 @@ public sealed class ClipStoreService : IClipStoreService
         int? finalClipCount = null;
         long? finalStoredBytes = null;
 
+        // A deferred upgrade start leaves the UTC backfill to the background run,
+        // while maintenance runs at once (F-13-2).
+        var utcBackfillPending = (settings.EnableSensitiveClipLifetime || settings.EnableNormalClipLifetime)
+            && await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM app_metadata WHERE key = 'utc_backfill_pending' AND value = '1';", cancellationToken, transaction) > 0;
+
         if (settings.EnableSensitiveClipLifetime)
         {
             // Deliberately not preserving pinned/favorite clips: an expiring secret
             // outranks the user's intent to keep it around.
-            removedClipIds.AddRange(await DeleteOlderThanAsync(connection, transaction, isSensitive: true, now.AddMinutes(-settings.SensitiveClipLifetimeMinutes), preserveUserKeptClips: false, cancellationToken));
+            removedClipIds.AddRange(await DeleteOlderThanAsync(connection, transaction, isSensitive: true, now.AddMinutes(-settings.SensitiveClipLifetimeMinutes), preserveUserKeptClips: false, utcBackfillPending, cancellationToken));
         }
 
         if (settings.EnableNormalClipLifetime)
         {
-            removedClipIds.AddRange(await DeleteOlderThanAsync(connection, transaction, isSensitive: false, now.AddDays(-settings.NormalClipLifetimeDays), preserveUserKeptClips: true, cancellationToken));
+            removedClipIds.AddRange(await DeleteOlderThanAsync(connection, transaction, isSensitive: false, now.AddDays(-settings.NormalClipLifetimeDays), preserveUserKeptClips: true, utcBackfillPending, cancellationToken));
         }
 
         if (settings.EnableMaxEntryCount)
@@ -946,9 +992,14 @@ public sealed class ClipStoreService : IClipStoreService
             }
         }
 
+        // Before the size cap reads its total, and whether or not this pass deleted
+        // anything: icons orphaned by the purges above (rubber-duck F-11-1), or
+        // since the last pass by a re-copy that replaced a clip's icon (F-11-3).
+        await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);
+
         if (settings.EnableMaxLibrarySize)
         {
-            var totalStoredBytes = await ExecuteScalarLongAsync(connection, $"SELECT COALESCE(SUM({StoredRowBytes}), 0) FROM clips;", cancellationToken, transaction);
+            var totalStoredBytes = await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken, transaction);
             finalStoredBytes = totalStoredBytes;
             var maxBytes = settings.MaxLibrarySizeMegabytes * 1024L * 1024L;
             if (totalStoredBytes > maxBytes)
@@ -957,6 +1008,20 @@ public sealed class ClipStoreService : IClipStoreService
                 removedClipIds.AddRange(deleted);
                 finalStoredBytes = remainingBytes;
                 finalClipCount -= deleted.Count;
+            }
+        }
+
+        if (removedClipIds.Count > 0)
+        {
+            // A removed clip may have been the last user of its icon (U-E1).
+            await Clipthrough.Database.DatabaseInitializer.DeleteOrphanedAppIconsAsync(connection, cancellationToken, transaction);
+            // Not load-bearing on this code: orphans are swept before the size
+            // total is read and the walk subtracts the icons its evictions free,
+            // so this re-reads the number it already has. Kept because a drift
+            // would only show as a wrong size in the status bar, silently.
+            if (finalStoredBytes is not null)
+            {
+                finalStoredBytes = await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken, transaction);
             }
         }
 
@@ -974,7 +1039,7 @@ public sealed class ClipStoreService : IClipStoreService
         {
             PurgedClipCount = removedClipIds.Count,
             TotalClipCount = finalClipCount ?? await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips;", cancellationToken),
-            TotalStoredBytes = finalStoredBytes ?? await ExecuteScalarLongAsync(connection, $"SELECT COALESCE(SUM({StoredRowBytes}), 0) FROM clips;", cancellationToken),
+            TotalStoredBytes = finalStoredBytes ?? await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken),
         };
     }
 
@@ -1077,25 +1142,47 @@ public sealed class ClipStoreService : IClipStoreService
             await deleteMatchesCommand.ExecuteNonQueryAsync(cancellationToken);
         }
 
+        // Write only the rows whose verdict changes (F-24). The blanket
+        // "SET is_sensitive = sensitivity_is_manual" rewrote every clip - its
+        // whole record, payload included - on every rule save: 15 s and 277 MB
+        // of write lock at 60k clips, to change a handful of flags at most.
+        await using (var matchedTable = connection.CreateCommand())
+        {
+            matchedTable.Transaction = transaction;
+            matchedTable.CommandText = "CREATE TEMP TABLE IF NOT EXISTS rebuild_matched (id INTEGER PRIMARY KEY); DELETE FROM temp.rebuild_matched;";
+            await matchedTable.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var insertMatched = connection.CreateCommand())
+        {
+            insertMatched.Transaction = transaction;
+            insertMatched.CommandText = "INSERT INTO temp.rebuild_matched (id) VALUES ($id);";
+            var matchedId = insertMatched.Parameters.Add("$id", SqliteType.Integer);
+            foreach (var (clipId, _) in matched)
+            {
+                matchedId.Value = clipId;
+                await insertMatched.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
+
         await using (var resetSensitiveCommand = connection.CreateCommand())
         {
             resetSensitiveCommand.Transaction = transaction;
-            resetSensitiveCommand.CommandText = "UPDATE clips SET is_sensitive = sensitivity_is_manual;";
+            resetSensitiveCommand.CommandText = """
+                UPDATE clips SET is_sensitive = sensitivity_is_manual
+                WHERE is_sensitive IS NOT sensitivity_is_manual
+                  AND id NOT IN (SELECT id FROM temp.rebuild_matched);
+                UPDATE clips SET is_sensitive = 1
+                WHERE is_sensitive IS NOT 1
+                  AND id IN (SELECT id FROM temp.rebuild_matched);
+                DROP TABLE temp.rebuild_matched;
+                """;
             await resetSensitiveCommand.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        await using (var updateCommand = connection.CreateCommand())
+        foreach (var (clipId, matches) in matched)
         {
-            updateCommand.Transaction = transaction;
-            updateCommand.CommandText = "UPDATE clips SET is_sensitive = 1 WHERE id = $id;";
-            var updateId = updateCommand.Parameters.Add("$id", SqliteType.Integer);
-
-            foreach (var (clipId, matches) in matched)
-            {
-                updateId.Value = clipId;
-                await updateCommand.ExecuteNonQueryAsync(cancellationToken);
-                await AddSensitivityMatchesAsync(connection, transaction, clipId, matches, cancellationToken);
-            }
+            await AddSensitivityMatchesAsync(connection, transaction, clipId, matches, cancellationToken);
         }
 
         // Reconcile embedding state with the sensitivity verdicts we just rewrote.
@@ -1109,7 +1196,7 @@ public sealed class ClipStoreService : IClipStoreService
             reconcile.Transaction = transaction;
             reconcile.CommandText = """
                 DELETE FROM clip_embeddings WHERE clip_id IN (SELECT id FROM clips WHERE is_sensitive = 1);
-                UPDATE clips SET embedding_status = 'excluded' WHERE is_sensitive = 1;
+                UPDATE clips SET embedding_status = 'excluded' WHERE is_sensitive = 1 AND embedding_status IS NOT 'excluded';
                 UPDATE clips SET embedding_status = NULL, embedding_attempts = 0 WHERE is_sensitive = 0 AND embedding_status = 'excluded';
                 """;
             await reconcile.ExecuteNonQueryAsync(cancellationToken);
@@ -1154,7 +1241,10 @@ public sealed class ClipStoreService : IClipStoreService
         await connection.OpenAsync(cancellationToken);
 
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT source_app_icon FROM clips WHERE id = $id LIMIT 1;";
+        command.CommandText = """
+            SELECT COALESCE((SELECT i.png FROM app_icons i WHERE i.hash = c.source_app_icon_hash), c.source_app_icon)
+            FROM clips c WHERE c.id = $id;
+            """;
         command.Parameters.AddWithValue("$id", clipId);
 
         var value = await command.ExecuteScalarAsync(cancellationToken);
@@ -1268,7 +1358,9 @@ public sealed class ClipStoreService : IClipStoreService
             var contentText = BuildStoredContentText(request);
             var hash = ComputeHash(request.ContentType, request.ContentFormat, request.ContentBytes);
             var matches = _sensitivityService.Scan(contentText);
-            var capturedAt = (request.CapturedAtOverride ?? DateTimeOffset.UtcNow).ToString("O", CultureInfo.InvariantCulture);
+            // UTC whatever the caller supplied (F-35): timestamps are compared as
+            // text, which orders correctly only when every value has the same offset.
+            var capturedAt = (request.CapturedAtOverride?.ToUniversalTime() ?? DateTimeOffset.UtcNow).ToString("O", CultureInfo.InvariantCulture);
             var byteSize = request.ContentBytes.LongLength;
 
             long clipId;
@@ -1288,12 +1380,11 @@ public sealed class ClipStoreService : IClipStoreService
                         updateCommand.Transaction = transaction;
                         updateCommand.CommandText = """
                             UPDATE clips
-                            SET content = CASE WHEN $content IS NULL OR TRIM($content) = '' THEN content ELSE $content END,
-                                content_bytes = CASE WHEN $contentBytes IS NULL THEN content_bytes ELSE $contentBytes END,
-                                content_format = $contentFormat,
+                            SET content = CASE WHEN CAST($content AS TEXT) IS NULL OR TRIM(CAST($content AS TEXT)) = '' THEN content ELSE CAST($content AS TEXT) END,
+                                                                content_format = $contentFormat,
                                 source_app = CASE WHEN $sourceApp IS NULL OR TRIM($sourceApp) = '' THEN source_app ELSE $sourceApp END,
                                 source_app_path = CASE WHEN $sourceAppPath IS NULL OR TRIM($sourceAppPath) = '' THEN source_app_path ELSE $sourceAppPath END,
-                                source_app_icon = CASE WHEN $sourceAppIcon IS NULL THEN source_app_icon ELSE $sourceAppIcon END,
+                                source_app_icon_hash = COALESCE($sourceAppIconHash, source_app_icon_hash),
                                 source_window_title = CASE WHEN $sourceWindowTitle IS NULL OR TRIM($sourceWindowTitle) = '' THEN source_window_title ELSE $sourceWindowTitle END,
                                 source_url = CASE WHEN $sourceUrl IS NULL OR TRIM($sourceUrl) = '' THEN source_url ELSE $sourceUrl END,
                                 is_favorite = CASE WHEN is_favorite = 1 OR $isFavorite = 1 THEN 1 ELSE 0 END,
@@ -1310,6 +1401,7 @@ public sealed class ClipStoreService : IClipStoreService
                             """;
                         AddUpsertParameters(updateCommand, request, contentText, hash, matches.Count > 0, capturedAt, byteSize, clipId);
                         await updateCommand.ExecuteNonQueryAsync(cancellationToken);
+                        await WritePayloadAsync(connection, transaction, clipId, request.ContentBytes, request.SourceAppIconBytes, cancellationToken);
                         imported++;
                     }
                     else
@@ -1323,15 +1415,15 @@ public sealed class ClipStoreService : IClipStoreService
                 insertCommand.Transaction = transaction;
                 insertCommand.CommandText = """
                     INSERT INTO clips (
-                        content, content_bytes, content_type, content_format,
-                        source_app, source_app_path, source_app_icon, source_window_title, source_url,
+                        content, content_type, content_format,
+                        source_app, source_app_path, source_app_icon_hash, source_window_title, source_url,
                         hash, is_favorite, is_sensitive, captured_at, copy_count,
                         first_copied_at, last_copied_at, byte_size,
                         image_width, image_height, source_clip_id, transform_kind, import_kind,
                         sensitivity_scanned_at)
                     VALUES (
-                        $content, $contentBytes, $contentType, $contentFormat,
-                        $sourceApp, $sourceAppPath, $sourceAppIcon, $sourceWindowTitle, $sourceUrl,
+                        CAST($content AS TEXT), $contentType, $contentFormat,
+                        $sourceApp, $sourceAppPath, $sourceAppIconHash, $sourceWindowTitle, $sourceUrl,
                         $hash, $isFavorite, $isSensitive, $capturedAt, 1,
                         $capturedAt, $capturedAt, $byteSize,
                         $imageWidth, $imageHeight, $sourceClipId, $transformKind, $importKind,
@@ -1340,6 +1432,7 @@ public sealed class ClipStoreService : IClipStoreService
                     """;
                 AddUpsertParameters(insertCommand, request, contentText, hash, matches.Count > 0, capturedAt, byteSize);
                 clipId = (long)(await insertCommand.ExecuteScalarAsync(cancellationToken) ?? 0L);
+                await WritePayloadAsync(connection, transaction, clipId, request.ContentBytes, request.SourceAppIconBytes, cancellationToken);
             }
 
             await AddSensitivityMatchesAsync(connection, transaction, clipId, matches, cancellationToken);
@@ -1360,7 +1453,9 @@ public sealed class ClipStoreService : IClipStoreService
         var contentText = BuildStoredContentText(request);
         var hash = ComputeHash(request.ContentType, request.ContentFormat, request.ContentBytes);
         var matches = scanSensitivity ? _sensitivityService.Scan(contentText) : Array.Empty<SensitivityMatch>();
-        var capturedAt = (request.CapturedAtOverride ?? DateTimeOffset.UtcNow).ToString("O", CultureInfo.InvariantCulture);
+        // UTC whatever the caller supplied (F-35): timestamps are compared as
+        // text, which orders correctly only when every value has the same offset.
+        var capturedAt = (request.CapturedAtOverride?.ToUniversalTime() ?? DateTimeOffset.UtcNow).ToString("O", CultureInfo.InvariantCulture);
         var byteSize = request.ContentBytes.LongLength;
 
         await using var connection = _connectionFactory.CreateConnection();
@@ -1386,12 +1481,11 @@ public sealed class ClipStoreService : IClipStoreService
                     updateCommand.Transaction = transaction;
                     updateCommand.CommandText = """
                         UPDATE clips
-                        SET content = CASE WHEN $content IS NULL OR TRIM($content) = '' THEN content ELSE $content END,
-                            content_bytes = CASE WHEN $contentBytes IS NULL THEN content_bytes ELSE $contentBytes END,
-                            content_format = $contentFormat,
+                        SET content = CASE WHEN CAST($content AS TEXT) IS NULL OR TRIM(CAST($content AS TEXT)) = '' THEN content ELSE CAST($content AS TEXT) END,
+                                                        content_format = $contentFormat,
                             source_app = CASE WHEN $sourceApp IS NULL OR TRIM($sourceApp) = '' THEN source_app ELSE $sourceApp END,
                             source_app_path = CASE WHEN $sourceAppPath IS NULL OR TRIM($sourceAppPath) = '' THEN source_app_path ELSE $sourceAppPath END,
-                            source_app_icon = CASE WHEN $sourceAppIcon IS NULL THEN source_app_icon ELSE $sourceAppIcon END,
+                            source_app_icon_hash = COALESCE($sourceAppIconHash, source_app_icon_hash),
                             source_window_title = CASE WHEN $sourceWindowTitle IS NULL OR TRIM($sourceWindowTitle) = '' THEN source_window_title ELSE $sourceWindowTitle END,
                             source_url = CASE WHEN $sourceUrl IS NULL OR TRIM($sourceUrl) = '' THEN source_url ELSE $sourceUrl END,
                             is_favorite = CASE WHEN is_favorite = 1 OR $isFavorite = 1 THEN 1 ELSE 0 END,
@@ -1409,6 +1503,7 @@ public sealed class ClipStoreService : IClipStoreService
                     AddUpsertParameters(updateCommand, request, contentText, hash, matches.Count > 0, capturedAt, byteSize, clipId);
                     updateCommand.Parameters.AddWithValue("$sensitivityScannedAt", scanSensitivity ? capturedAt : (object)DBNull.Value);
                     await updateCommand.ExecuteNonQueryAsync(cancellationToken);
+                    await WritePayloadAsync(connection, transaction, clipId, request.ContentBytes, request.SourceAppIconBytes, cancellationToken);
                 }
             }
             else
@@ -1418,12 +1513,11 @@ public sealed class ClipStoreService : IClipStoreService
                 insertCommand.CommandText = """
                     INSERT INTO clips (
                         content,
-                        content_bytes,
                         content_type,
                         content_format,
                         source_app,
                         source_app_path,
-                        source_app_icon,
+                        source_app_icon_hash,
                         source_window_title,
                         source_url,
                         hash,
@@ -1441,13 +1535,12 @@ public sealed class ClipStoreService : IClipStoreService
                         import_kind,
                         sensitivity_scanned_at)
                     VALUES (
-                        $content,
-                        $contentBytes,
+                        CAST($content AS TEXT),
                         $contentType,
                         $contentFormat,
                         $sourceApp,
                         $sourceAppPath,
-                        $sourceAppIcon,
+                        $sourceAppIconHash,
                         $sourceWindowTitle,
                         $sourceUrl,
                         $hash,
@@ -1469,6 +1562,7 @@ public sealed class ClipStoreService : IClipStoreService
                 AddUpsertParameters(insertCommand, request, contentText, hash, matches.Count > 0, capturedAt, byteSize);
                 insertCommand.Parameters.AddWithValue("$sensitivityScannedAt", scanSensitivity ? capturedAt : (object)DBNull.Value);
                 clipId = (long)(await insertCommand.ExecuteScalarAsync(cancellationToken) ?? 0L);
+                await WritePayloadAsync(connection, transaction, clipId, request.ContentBytes, request.SourceAppIconBytes, cancellationToken);
             }
         }
 
@@ -1483,6 +1577,99 @@ public sealed class ClipStoreService : IClipStoreService
         return await GetClipByIdAsync(connection, clipId, cancellationToken);
     }
 
+    /// <summary>
+    /// An FTS expression whose matches are a superset of what the in-memory
+    /// matcher accepts, or null when there is none (F-07).
+    /// </summary>
+    /// <remarks>
+    /// The trigram index folds case and matches any substring of the five
+    /// indexed columns, so a row that matches a case-sensitive, whole-word or
+    /// wildcard search necessarily contains each term (or, for a wildcard, each
+    /// literal run between <c>*</c> and <c>?</c>) case-insensitively somewhere in
+    /// those columns. Requiring all of them in FTS therefore never drops a match;
+    /// the exact matcher still runs on every candidate.
+    ///
+    /// Every term has to be three code points or longer: the index holds no
+    /// shorter trigram, so a shorter term would match nothing and drop real
+    /// matches. Regex is never prefiltered - a pattern has no reliable literal
+    /// terms - and its cost is bounded by the regex engine choice instead.
+    ///
+    /// "Case-insensitively" means the index's folding, which is narrower than a
+    /// .NET regex's IgnoreCase. A case-insensitive search therefore requires only
+    /// the runs of each term between characters the two treat differently (see
+    /// <see cref="FoldsLikeTheTrigramIndex"/>), and those runs that are still
+    /// three code points long.
+    /// </remarks>
+    internal static string? BuildPrefilterExpression(ClipSearchFilters filters)
+    {
+        if (filters.UseRegex || string.IsNullOrWhiteSpace(filters.SearchText))
+        {
+            return null;
+        }
+
+        var terms = filters.UseWildcard
+            ? filters.SearchText.Split(['*', '?'], StringSplitOptions.RemoveEmptyEntries)
+            : filters.SearchText.Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (terms.Length == 0 || terms.Any(static t => TrigramIndexableLength(t) < 3))
+        {
+            return null;
+        }
+
+        if (!filters.CaseSensitive)
+        {
+            terms = [.. terms.SelectMany(SplitAtFoldMismatches).Where(static t => TrigramIndexableLength(t) >= 3)];
+            if (terms.Length == 0)
+            {
+                return null;
+            }
+        }
+
+        return string.Join(" AND ", terms.Select(static t => "\"" + t.Replace("\"", "\"\"", StringComparison.Ordinal) + "\""));
+    }
+
+    private static IEnumerable<string> SplitAtFoldMismatches(string term)
+    {
+        var start = 0;
+        for (var i = 0; i <= term.Length; i++)
+        {
+            if (i == term.Length || !FoldsLikeTheTrigramIndex(term[i]))
+            {
+                if (i > start)
+                {
+                    yield return term[start..i];
+                }
+
+                start = i + 1;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether every character a case-insensitive .NET regex treats as equal to
+    /// <paramref name="c"/> is also folded together with it by the trigram index,
+    /// so requiring <paramref name="c"/> in FTS cannot drop a regex match (F-07-3).
+    /// The regex equivalences are wider: I and i also match U+0130 in every
+    /// culture and I matches U+0131 in Turkish, and letters newer than SQLite's
+    /// folding table do not fold at all. So only ASCII other than I and i, and
+    /// characters with no case mapping, are kept. The prefilter splits a term at
+    /// anything else and requires only the runs between - a looser filter, never
+    /// a different match. ThePrefilterSafeCharacters_FoldLikeTheRegex checks this
+    /// against the real index and regex for every BMP character.
+    /// </summary>
+    private static bool FoldsLikeTheTrigramIndex(char c)
+    {
+        if (c < 0x80)
+        {
+            return c is not ('I' or 'i');
+        }
+
+        var culture = CultureInfo.CurrentCulture;
+        return !char.IsSurrogate(c)
+            && char.ToUpperInvariant(c) == c
+            && char.ToLowerInvariant(c) == c
+            && char.ToUpper(c, culture) == c
+            && char.ToLower(c, culture) == c;
+    }
     private async Task<ClipSearchResult> SearchInMemoryAsync(SqliteConnection connection, ClipSearchFilters filters, CancellationToken cancellationToken)
     {
         // Build the matcher set for this search ONCE here — not per row. (U13)
@@ -1492,51 +1679,70 @@ public sealed class ClipStoreService : IClipStoreService
 
         var items = new List<ClipEntry>(filters.Limit);
         var whereClauses = BuildWhereClauses(filters, hasSearch: false);
+        var prefilter = BuildPrefilterExpression(filters);
+        if (prefilter is not null)
+        {
+            whereClauses.Add("c.id IN (SELECT rowid FROM clips_fts WHERE clips_fts MATCH $prefilter)");
+        }
+
         var whereClause = whereClauses.Count > 0 ? $"WHERE {string.Join(" AND ", whereClauses)}" : string.Empty;
         var totalMatchingCount = 0;
         // Stop counting at Offset+Limit+1 so we know there are more without a full table scan. (U15)
         var countCap = filters.Offset + filters.Limit + 1;
 
-        await using (var queryCommand = connection.CreateCommand())
+        try
         {
-            // Use metadata-only columns (no content_bytes / source_app_icon BLOBs). (U12)
-            // Ordering has exactly one authority - BuildOrderClause. This path
-            // used to hardcode the MostRecent clause, so the sort dropdown
-            // silently stopped working the moment the user ticked Regex or Case
-            // (which is what diverts us here in the first place).
-            queryCommand.CommandText = $"""
-                SELECT {ClipListSelectColumns}
-                FROM clips c
-                {whereClause}
-                {BuildOrderClause(filters.SortOption)};
-                """;
-            AddSearchParameters(queryCommand, filters, hasSearch: false);
-
-            await using var reader = await queryCommand.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
+            await using (var queryCommand = connection.CreateCommand())
             {
-                // Match against the five searched columns first. Only a row that survives
-                // is worth turning into a ClipEntry - the other twenty-five columns and
-                // five timestamp parses are pure waste for a row we are about to drop.
-                if (!MatchesSearch(SearchableFields.Read(reader), filters, matchers))
+                // Use metadata-only columns (no content_bytes / source_app_icon BLOBs). (U12)
+                // Ordering has exactly one authority - BuildOrderClause. This path
+                // used to hardcode the MostRecent clause, so the sort dropdown
+                // silently stopped working the moment the user ticked Regex or Case
+                // (which is what diverts us here in the first place).
+                queryCommand.CommandText = $"""
+                    SELECT {ClipScanSelectColumns}
+                    FROM clips c
+                    {whereClause}
+                    {BuildOrderClause(filters.SortOption)};
+                    """;
+                AddSearchParameters(queryCommand, filters, hasSearch: false);
+                if (prefilter is not null)
                 {
-                    continue;
+                    queryCommand.Parameters.AddWithValue("$prefilter", prefilter);
                 }
 
-                totalMatchingCount++;
-                if (totalMatchingCount <= filters.Offset)
+                await using var reader = await queryCommand.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
                 {
-                    continue;
-                }
+                    // Match against the five searched columns first. Only a row that survives
+                    // is worth turning into a ClipEntry - the other twenty-five columns and
+                    // five timestamp parses are pure waste for a row we are about to drop.
+                    if (!MatchesSearch(SearchableFields.Read(reader), filters, matchers))
+                    {
+                        continue;
+                    }
 
-                if (items.Count < filters.Limit)
-                {
-                    items.Add(ReadClipMeta(reader));
-                }
+                    totalMatchingCount++;
+                    if (totalMatchingCount <= filters.Offset)
+                    {
+                        continue;
+                    }
 
-                // Stop scanning once we've confirmed "at least one more beyond this page". (U15)
-                if (totalMatchingCount >= countCap) break;
+                    if (items.Count < filters.Limit)
+                    {
+                        items.Add(ReadClipMeta(reader));
+                    }
+
+                    // Stop scanning once we've confirmed "at least one more beyond this page". (U15)
+                    if (totalMatchingCount >= countCap) break;
+                }
             }
+        }
+        catch (RegexMatchTimeoutException ex)
+        {
+            // A partial scan is not an answer: stop and say so, so the caller
+            // keeps what it shows instead of displaying a truncated list.
+            throw new SearchPatternException(SearchPatternProblem.TooSlow, ex);
         }
 
         await LoadSensitivityMatchesAsync(connection, items, cancellationToken);
@@ -1547,7 +1753,7 @@ public sealed class ClipStoreService : IClipStoreService
             TotalMatchingCount = totalMatchingCount,
             TotalClipCount = _cachedTotalClipCount >= 0 ? _cachedTotalClipCount : await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips;", cancellationToken),
             SensitiveClipCount = _cachedSensitiveClipCount >= 0 ? _cachedSensitiveClipCount : await ExecuteScalarIntAsync(connection, "SELECT COUNT(*) FROM clips WHERE is_sensitive = 1;", cancellationToken),
-            TotalStoredBytes = _cachedTotalStoredBytes >= 0 ? _cachedTotalStoredBytes : await ExecuteScalarLongAsync(connection, $"SELECT COALESCE(SUM({StoredRowBytes}), 0) FROM clips;", cancellationToken),
+            TotalStoredBytes = _cachedTotalStoredBytes >= 0 ? _cachedTotalStoredBytes : await ExecuteScalarLongAsync(connection, TotalStoredBytesSql, cancellationToken),
             LastCapturedAt = _cachedLastCapturedAt,
         };
     }
@@ -1659,7 +1865,7 @@ public sealed class ClipStoreService : IClipStoreService
     {
         if (filters.UseRegex)
         {
-            return [BuildSearchRegex(filters.SearchText, filters.CaseSensitive)];
+            return [BuildSearchRegex(filters.SearchText, filters.CaseSensitive, filters.RegexEngine)];
         }
 
         if (filters.UseWildcard)
@@ -1778,13 +1984,15 @@ public sealed class ClipStoreService : IClipStoreService
     }
 
     /// <summary>
-    /// Above this many matches, walking the ordered index beats sorting the matches.
-    /// The crossover is where the two per-row costs meet: an index-only membership
-    /// probe is ~0.3 us against ~15 us to fetch a clips row (they carry content and
-    /// the source-app icon inline) and sort it, so a few thousand matches is the
-    /// point at which sorting them all costs more than reading the whole index.
+    /// At or above this many matches, walking the ordered index beats sorting the
+    /// matches. It was 2000, tuned on rows with no payload; on the U-D0 library,
+    /// whose rows carry their content, bytes and icon inline, fetching and sorting
+    /// a match costs far more than the ~15 us that tuning assumed. Measured there
+    /// at 60k clips (F-08): 516 matches sorted 570-649 ms vs 126 ms walking the
+    /// index; ~1,500 matches 705-752 ms vs 53 ms. 200 follows the audit's
+    /// 100-200 estimate; PerfProbes P1 re-measures it.
     /// </summary>
-    private const int BroadSearchMatchThreshold = 2000;
+    private const int BroadSearchMatchThreshold = 200;
 
     /// <summary>
     /// Builds the SQL WHERE clauses for a filter set. The structural subset
@@ -2096,6 +2304,7 @@ public sealed class ClipStoreService : IClipStoreService
             SourceClipId = reader.IsDBNull(27) ? null : reader.GetInt64(27),
             TransformKind = reader.IsDBNull(28) ? null : reader.GetString(28),
             ImportKind = reader.IsDBNull(29) ? null : reader.GetString(29),
+            IsContentTruncated = reader.GetInt64(30) == 1,
         };
     }
 
@@ -2187,20 +2396,6 @@ public sealed class ClipStoreService : IClipStoreService
         }
     }
 
-    private static async Task<int> ExecuteCountAsync(SqliteConnection connection, string sql, ClipSearchFilters filters, bool hasSearch, CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        if (hasSearch && !filters.UseRegex)
-        {
-            command.Parameters.AddWithValue("$search", BuildFtsExpression(filters.SearchText, filters.UseFuzzy));
-        }
-
-        AddContentTypeParameters(command, filters);
-
-        var scalar = await command.ExecuteScalarAsync(cancellationToken);
-        return Convert.ToInt32(scalar, CultureInfo.InvariantCulture);
-    }
 
     private static void AddContentTypeParameters(SqliteCommand command, ClipSearchFilters filters)
     {
@@ -2258,22 +2453,6 @@ public sealed class ClipStoreService : IClipStoreService
         return scalar is DBNull or null ? null : Convert.ToString(scalar, CultureInfo.InvariantCulture);
     }
 
-    private static async Task<string?> ExecuteScalarStringAsync(
-        SqliteConnection connection,
-        string sql,
-        CancellationToken cancellationToken,
-        params (string Name, object Value)[] parameters)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        foreach (var (name, value) in parameters)
-        {
-            command.Parameters.AddWithValue(name, value);
-        }
-
-        var scalar = await command.ExecuteScalarAsync(cancellationToken);
-        return scalar is DBNull or null ? null : Convert.ToString(scalar, CultureInfo.InvariantCulture);
-    }
 
     /// <summary>
     /// Pinning or favoriting a clip is an explicit "keep this" from the user, so
@@ -2301,13 +2480,27 @@ public sealed class ClipStoreService : IClipStoreService
         RETURNING id;
         """;
 
-    private static async Task<List<long>> DeleteOlderThanAsync(SqliteConnection connection, SqliteTransaction transaction, bool isSensitive, DateTimeOffset cutoff, bool preserveUserKeptClips, CancellationToken cancellationToken)
+    /// <summary>
+    /// The lifetime purge while an upgrade still owes the UTC backfill
+    /// (<c>utc_backfill_pending</c>, F-13-2). Until it has run, rows can carry a
+    /// non-zero offset, which the text comparison above orders wrong by up to that
+    /// offset (F-35): in a negative-offset zone it purged unexpired sensitive clips.
+    /// julianday reads the offset. It cannot use the index's date range, a cost
+    /// paid only for the minutes the background backfill takes.
+    /// </summary>
+    internal const string OffsetAwareRetentionDeleteStatement = $"""
+        DELETE FROM clips
+        WHERE is_sensitive = $isSensitive
+          AND julianday(last_copied_at) < julianday($cutoff)
+          AND ($keepUserKept = 0 OR NOT {UserKeptClipPredicate})
+        RETURNING id;
+        """;
+
+    private static async Task<List<long>> DeleteOlderThanAsync(SqliteConnection connection, SqliteTransaction transaction, bool isSensitive, DateTimeOffset cutoff, bool preserveUserKeptClips, bool utcBackfillPending, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = $"""
-            {RetentionDeleteStatement}
-            """;
+        command.CommandText = utcBackfillPending ? OffsetAwareRetentionDeleteStatement : RetentionDeleteStatement;
         command.Parameters.AddWithValue("$isSensitive", isSensitive ? 1 : 0);
         command.Parameters.AddWithValue("$cutoff", cutoff.ToString("O", CultureInfo.InvariantCulture));
         command.Parameters.AddWithValue("$keepUserKept", preserveUserKeptClips ? 1 : 0);
@@ -2354,7 +2547,7 @@ public sealed class ClipStoreService : IClipStoreService
     /// Stored rather than computed. The icon is written after the clip, by a
     /// background lookup, so a column maintained by the write paths would go stale -
     /// but a trigger pair on the clips table keeps it exact through every path
-    /// (see DatabaseInitializer.EnsureClipStoredBytesAsync). Spelling it as the
+    /// (see DatabaseInitializer.EnsureClipStoredBytesColumnAsync). Spelling it as the
     /// expression instead is correct but unindexable, and cost 445 ms per capture at
     /// 60k clips against 2.5 ms here.
     ///
@@ -2362,6 +2555,60 @@ public sealed class ClipStoreService : IClipStoreService
     /// per-row figure can express.
     /// </summary>
     private const string StoredRowBytes = "stored_bytes";
+
+    /// <summary>
+    /// What the library occupies for the size cap: every clip's payload, plus each
+    /// distinct source-app icon once (U-E1, F-39). Icons used to be stored, and
+    /// counted, once per clip.
+    /// </summary>
+    /// <remarks>
+    /// Icons count only once the payload move is done (rubber-duck F-13-5, owner
+    /// decision). While a deferred move is owed, orphaned icons cannot be swept -
+    /// finding them means scanning rows that still hold payloads inline - so
+    /// counting app_icons then made the cap evict clips to pay for icons nothing
+    /// uses. The total undercounts by the icons' bytes for that window instead,
+    /// and the eviction walk, which subtracts only stored_bytes, agrees with it.
+    /// Any walk that also subtracts an icon an eviction frees must do so only
+    /// under the same condition.
+    /// </remarks>
+    private const string TotalStoredBytesSql = $"""
+        SELECT COALESCE((SELECT SUM({StoredRowBytes}) FROM clips), 0)
+             + COALESCE((SELECT SUM(LENGTH(png)) FROM app_icons
+                         WHERE EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1')), 0);
+        """;
+
+    /// <summary>
+    /// Writes what the clips row no longer holds inline (U-E1, F-06): the payload
+    /// into clip_payloads, and the icon - once per distinct PNG - into app_icons.
+    /// The row's source_app_icon_hash is set by the caller's own statement. Runs in
+    /// the caller's transaction, so a clip is never committed without its payload.
+    /// A null or empty argument leaves what is stored alone.
+    /// </summary>
+    private static async Task WritePayloadAsync(SqliteConnection connection, SqliteTransaction? transaction, long clipId, byte[]? contentBytes, byte[]? iconBytes, CancellationToken cancellationToken)
+    {
+        if (contentBytes is { Length: > 0 })
+        {
+            await using var payload = connection.CreateCommand();
+            payload.Transaction = transaction;
+            payload.CommandText = """
+                INSERT INTO clip_payloads (clip_id, content_bytes) VALUES ($id, $bytes)
+                ON CONFLICT(clip_id) DO UPDATE SET content_bytes = excluded.content_bytes;
+                """;
+            payload.Parameters.AddWithValue("$id", clipId);
+            payload.Parameters.AddWithValue("$bytes", contentBytes);
+            await payload.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        if (iconBytes is { Length: > 0 })
+        {
+            await using var icon = connection.CreateCommand();
+            icon.Transaction = transaction;
+            icon.CommandText = "INSERT OR IGNORE INTO app_icons (hash, png) VALUES ($hash, $png);";
+            icon.Parameters.AddWithValue("$hash", Clipthrough.Database.DatabaseInitializer.AppIconHash(iconBytes));
+            icon.Parameters.AddWithValue("$png", iconBytes);
+            await icon.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
 
     private static async Task<List<long>> DeleteOldestAsync(SqliteConnection connection, SqliteTransaction transaction, int deleteCount, CancellationToken cancellationToken)
     {
@@ -2406,11 +2653,31 @@ public sealed class ClipStoreService : IClipStoreService
     private static async Task<(List<long> DeletedIds, long RemainingBytes)> DeleteUntilWithinSizeAsync(SqliteConnection connection, SqliteTransaction transaction, long totalStoredBytes, long maxBytes, CancellationToken cancellationToken)
     {
         var evictionCount = 0;
+
+        // The total counts each distinct icon once (U-E1), so evicting the last
+        // clip that uses one frees the icon too - the orphan sweep deletes it.
+        // Without this the walk keeps evicting after the library already fits
+        // (rubber-duck F-11-1). Keyed by hash: the clips still using that icon,
+        // and the icon's size. One lookup per distinct icon, not per row.
+        var iconReferences = new Dictionary<string, (long Remaining, long Bytes)>(StringComparer.Ordinal);
+
+        // Only when the total counts icons: while the payload move is owed it does
+        // not (rubber-duck F-13-5, TotalStoredBytesSql), so an eviction frees no
+        // icon bytes from it - and the per-icon count would scan the table then,
+        // because the icon index is built only after the move.
+        bool iconsCounted;
+        await using (var moveDone = connection.CreateCommand())
+        {
+            moveDone.Transaction = transaction;
+            moveDone.CommandText = "SELECT EXISTS (SELECT 1 FROM app_metadata WHERE key = 'payload_move_done' AND value = '1');";
+            iconsCounted = Convert.ToInt64(await moveDone.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture) == 1;
+        }
+
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
             command.CommandText = $"""
-                SELECT {StoredRowBytes}
+                SELECT {StoredRowBytes}, source_app_icon_hash
                 FROM clips
                 WHERE NOT {UserKeptClipPredicate}
                 {OldestFirstEvictionOrder};
@@ -2420,6 +2687,22 @@ public sealed class ClipStoreService : IClipStoreService
             {
                 evictionCount++;
                 totalStoredBytes -= Math.Max(0L, reader.IsDBNull(0) ? 0L : reader.GetInt64(0));
+
+                if (iconsCounted && !reader.IsDBNull(1))
+                {
+                    var hash = reader.GetString(1);
+                    if (!iconReferences.TryGetValue(hash, out var icon))
+                    {
+                        icon = await ReadIconReferencesAsync(connection, transaction, hash, cancellationToken);
+                    }
+
+                    icon.Remaining--;
+                    iconReferences[hash] = icon;
+                    if (icon.Remaining == 0)
+                    {
+                        totalStoredBytes -= icon.Bytes;
+                    }
+                }
             }
         }
 
@@ -2430,6 +2713,39 @@ public sealed class ClipStoreService : IClipStoreService
 
         var deletedIds = await DeleteOldestAsync(connection, transaction, evictionCount, cancellationToken);
         return (deletedIds, totalStoredBytes);
+    }
+
+    private static async Task<(long Remaining, long Bytes)> ReadIconReferencesAsync(SqliteConnection connection, SqliteTransaction transaction, string hash, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT (SELECT COUNT(*) FROM clips WHERE source_app_icon_hash = $hash),
+                   COALESCE((SELECT LENGTH(png) FROM app_icons WHERE hash = $hash), 0);
+            """;
+        command.Parameters.AddWithValue("$hash", hash);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await reader.ReadAsync(cancellationToken);
+        return (reader.GetInt64(0), reader.GetInt64(1));
+    }
+
+    /// <summary>
+    /// The value to bind for a clip's text, read back in SQL as
+    /// <c>CAST($content AS TEXT)</c>. SQLitePCLRaw binds a string of up to 512
+    /// UTF-8 bytes with its length but a longer one as NUL-terminated, so SQLite
+    /// kept only what came before an embedded U+0000 once a clip passed that
+    /// size. Text holding a NUL is bound as its UTF-8 bytes instead, which carry
+    /// their own length; the cast turns them back into the same TEXT value.
+    /// Everything else binds as a string, as before, and the cast is a no-op.
+    /// </summary>
+    private static object ClipTextParameter(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return DBNull.Value;
+        }
+
+        return text.Contains('\0', StringComparison.Ordinal) ? Encoding.UTF8.GetBytes(text) : text;
     }
 
     private static void AddUpsertParameters(
@@ -2447,13 +2763,13 @@ public sealed class ClipStoreService : IClipStoreService
             command.Parameters.AddWithValue("$id", clipId.Value);
         }
 
-        command.Parameters.AddWithValue("$content", string.IsNullOrWhiteSpace(contentText) ? DBNull.Value : contentText);
+        command.Parameters.AddWithValue("$content", ClipTextParameter(contentText));
         command.Parameters.AddWithValue("$contentBytes", request.ContentBytes.Length == 0 ? DBNull.Value : request.ContentBytes);
         command.Parameters.AddWithValue("$contentType", request.ContentType.ToStorageValue());
         command.Parameters.AddWithValue("$contentFormat", request.ContentFormat.ToStorageValue());
         command.Parameters.AddWithValue("$sourceApp", string.IsNullOrWhiteSpace(request.SourceApp) ? DBNull.Value : request.SourceApp);
         command.Parameters.AddWithValue("$sourceAppPath", string.IsNullOrWhiteSpace(request.SourceAppPath) ? DBNull.Value : request.SourceAppPath);
-        command.Parameters.AddWithValue("$sourceAppIcon", request.SourceAppIconBytes is { Length: > 0 } iconBytes ? iconBytes : DBNull.Value);
+        command.Parameters.AddWithValue("$sourceAppIconHash", request.SourceAppIconBytes is { Length: > 0 } iconBytes ? Clipthrough.Database.DatabaseInitializer.AppIconHash(iconBytes) : DBNull.Value);
         command.Parameters.AddWithValue("$sourceWindowTitle", string.IsNullOrWhiteSpace(request.SourceWindowTitle) ? DBNull.Value : request.SourceWindowTitle);
         command.Parameters.AddWithValue("$sourceUrl", string.IsNullOrWhiteSpace(request.SourceUrl) ? DBNull.Value : request.SourceUrl);
         command.Parameters.AddWithValue("$hash", hash);
@@ -2517,8 +2833,38 @@ public sealed class ClipStoreService : IClipStoreService
         return Convert.ToHexString(bytes);
     }
 
-    private static Regex BuildSearchRegex(string searchText, bool caseSensitive)
-        => new(searchText, (caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase) | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    /// <summary>
+    /// The backtracking engine's per-match budget. A pattern with nested
+    /// quantifiers against a long near-miss used to run for good, spinning a
+    /// core and parking every later refresh behind it (F-11).
+    /// </summary>
+    internal static readonly TimeSpan BacktrackingRegexTimeout = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>
+    /// Builds the user's regex on the engine they chose (OD-7, S38). The
+    /// default, NonBacktracking, runs in linear time, so no pattern can hang a
+    /// search; it rejects backreferences, lookarounds and atomic groups at
+    /// construction, which is reported as needing the other engine rather than
+    /// as an invalid pattern. Backtracking supports everything, bounded by
+    /// <see cref="BacktrackingRegexTimeout"/>.
+    /// </summary>
+    private static Regex BuildSearchRegex(string searchText, bool caseSensitive, RegexSearchEngine engine)
+    {
+        var options = (caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase) | RegexOptions.CultureInvariant;
+        if (engine == RegexSearchEngine.Backtracking)
+        {
+            return new Regex(searchText, options | RegexOptions.Compiled, BacktrackingRegexTimeout);
+        }
+
+        try
+        {
+            return new Regex(searchText, options | RegexOptions.NonBacktracking);
+        }
+        catch (NotSupportedException ex)
+        {
+            throw new SearchPatternException(SearchPatternProblem.NeedsBacktracking, ex);
+        }
+    }
 
     /// <summary>Checks all five columns indexed by FTS: content, source_app, source_window_title, source_url, ocr_text. (U13)</summary>
     private static bool IsRegexMatch(in SearchableFields row, Regex regex)
@@ -2599,6 +2945,21 @@ public sealed class ClipStoreService : IClipStoreService
     // A RerunAll resets the counter to give every clip a fresh set of attempts.
     private const int MaxEmbeddingAttempts = 3;
 
+    // INDEXED BY: without stored statistics the planner prefers
+    // idx_clips_retention (is_sensitive = 0, true of nearly every row) plus a
+    // temp B-tree, which visits the whole table - 2.3 s per claim at 60k clips,
+    // 17 s encrypted, even with nothing to claim (F-05). The backlog index
+    // reaches only the rows that still need a vector.
+    internal const string EmbeddingClaimSql = $"""
+        SELECT id, ({EmbeddingTextExpression}) AS etext
+        FROM clips INDEXED BY idx_clips_embedding_backlog
+        WHERE (embedding_status IS NULL OR embedding_status IN ('pending','rerun')
+               OR (embedding_status = 'failed' AND embedding_attempts < $maxAttempts))
+          AND {EmbeddingEligibilityClause}
+        ORDER BY COALESCE(last_copied_at, captured_at) DESC
+        LIMIT $limit;
+        """;
+
     public Task<IReadOnlyList<ClipEmbeddingCandidate>> ClaimPendingEmbeddingsAsync(int batchSize, CancellationToken cancellationToken = default)
         => RunOffCallerAsync(ct => ClaimPendingEmbeddingsCoreAsync(batchSize, ct), cancellationToken);
 
@@ -2609,22 +2970,15 @@ public sealed class ClipStoreService : IClipStoreService
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        var candidates = new List<ClipEmbeddingCandidate>(batchSize);
 
-        var results = new List<ClipEmbeddingCandidate>(batchSize);
-
+        // Read outside any write transaction. The claim runs on every capture
+        // and every idle tick; under BEGIN IMMEDIATE its SELECT held the write
+        // lock for its whole duration and each capture queued behind it (F-05).
         await using (var selectCommand = connection.CreateCommand())
         {
-            selectCommand.Transaction = transaction;
-            selectCommand.CommandText = $"""
-                SELECT id, ({EmbeddingTextExpression}) AS etext
-                FROM clips
-                WHERE (embedding_status IS NULL OR embedding_status IN ('pending','rerun')
-                       OR (embedding_status = 'failed' AND embedding_attempts < $maxAttempts))
-                  AND {EmbeddingEligibilityClause}
-                ORDER BY COALESCE(last_copied_at, captured_at) DESC
-                LIMIT $limit;
-                """;
+            selectCommand.CommandText = EmbeddingClaimSql;
+
             selectCommand.Parameters.AddWithValue("$limit", batchSize);
             selectCommand.Parameters.AddWithValue("$maxAttempts", MaxEmbeddingAttempts);
 
@@ -2635,28 +2989,49 @@ public sealed class ClipStoreService : IClipStoreService
                 var text = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
                 if (!string.IsNullOrWhiteSpace(text))
                 {
-                    results.Add(new ClipEmbeddingCandidate(id, text));
+                    candidates.Add(new ClipEmbeddingCandidate(id, text));
                 }
             }
         }
 
-        if (results.Count > 0)
+        if (candidates.Count == 0)
         {
-            await using var claim = connection.CreateCommand();
-            claim.Transaction = transaction;
-            var paramNames = new List<string>(results.Count);
-            for (var i = 0; i < results.Count; i++)
+            return candidates;
+        }
+
+        // The write is short and re-checks the backlog state: a row that was
+        // claimed, deleted, marked sensitive or embedded between the read and
+        // here is not flipped, and is not handed to the worker.
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await using var claim = connection.CreateCommand();
+        claim.Transaction = transaction;
+        var paramNames = new List<string>(candidates.Count);
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            var p = "$id" + i;
+            paramNames.Add(p);
+            claim.Parameters.AddWithValue(p, candidates[i].ClipId);
+        }
+        claim.Parameters.AddWithValue("$maxAttempts", MaxEmbeddingAttempts);
+        claim.CommandText = $"""
+            UPDATE clips SET embedding_status = 'processing'
+            WHERE id IN ({string.Join(",", paramNames)})
+              AND is_sensitive = 0
+              AND (embedding_status IS NULL OR embedding_status IN ('pending','rerun')
+                   OR (embedding_status = 'failed' AND embedding_attempts < $maxAttempts))
+            RETURNING id;
+            """;
+        var claimedIds = new HashSet<long>();
+        await using (var reader = await claim.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
             {
-                var p = "$id" + i;
-                paramNames.Add(p);
-                claim.Parameters.AddWithValue(p, results[i].ClipId);
+                claimedIds.Add(reader.GetInt64(0));
             }
-            claim.CommandText = $"UPDATE clips SET embedding_status = 'processing' WHERE id IN ({string.Join(",", paramNames)});";
-            await claim.ExecuteNonQueryAsync(cancellationToken);
         }
 
         await transaction.CommitAsync(cancellationToken);
-        return results;
+        return candidates.Where(c => claimedIds.Contains(c.ClipId)).ToList();
     }
 
     /// <inheritdoc />
@@ -2725,10 +3100,15 @@ public sealed class ClipStoreService : IClipStoreService
             await using (var upsert = connection.CreateCommand())
             {
                 upsert.Transaction = transaction;
+                // Only for a clip that is still claimed and still not sensitive.
+                // Eligibility is checked at claim time; a clip marked sensitive
+                // while inference ran (by hand, by a rule rebuild, by OCR) must
+                // not get a vector derived from its content afterwards, nor read
+                // 'succeeded' instead of 'excluded' (F-17).
                 upsert.CommandText = """
                     INSERT INTO clip_embeddings (clip_id, model_version, dimensions, vector, created_at)
                     SELECT $id, $model, $dim, $vec, $at
-                    WHERE EXISTS (SELECT 1 FROM clips WHERE id = $id)
+                    WHERE EXISTS (SELECT 1 FROM clips WHERE id = $id AND is_sensitive = 0 AND embedding_status = 'processing')
                     ON CONFLICT(clip_id) DO UPDATE SET
                         model_version = excluded.model_version,
                         dimensions    = excluded.dimensions,
@@ -2751,7 +3131,7 @@ public sealed class ClipStoreService : IClipStoreService
             await using (var status = connection.CreateCommand())
             {
                 status.Transaction = transaction;
-                status.CommandText = "UPDATE clips SET embedding_status = 'succeeded' WHERE id = $id;";
+                status.CommandText = "UPDATE clips SET embedding_status = 'succeeded' WHERE id = $id AND embedding_status = 'processing';";
                 status.Parameters.AddWithValue("$id", record.ClipId);
                 await status.ExecuteNonQueryAsync(cancellationToken);
             }
@@ -2777,6 +3157,12 @@ public sealed class ClipStoreService : IClipStoreService
         return rows > 0;
     }
 
+    /// <summary>Clips per rerun-all transaction (F-24). Settable for tests.</summary>
+    internal int RerunBatchSize { get; set; } = 2000;
+
+    /// <summary>Test hook: runs after each rerun-all batch commits, while the write lock is free.</summary>
+    internal Func<Task>? AfterRerunBatchCommitted { get; set; }
+
     public Task<IReadOnlyList<long>> MarkAllEmbeddingsForRerunAsync(CancellationToken cancellationToken = default)
         => RunOffCallerAsync(ct => MarkAllEmbeddingsForRerunCoreAsync(ct), cancellationToken);
 
@@ -2785,33 +3171,66 @@ public sealed class ClipStoreService : IClipStoreService
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
-
-        await using (var purge = connection.CreateCommand())
+        long minId;
+        long maxId;
+        await using (var bounds = connection.CreateCommand())
         {
-            purge.Transaction = transaction;
-            purge.CommandText = "DELETE FROM clip_embeddings;";
-            await purge.ExecuteNonQueryAsync(cancellationToken);
+            bounds.CommandText = "SELECT COALESCE(MIN(id), 0), COALESCE(MAX(id), -1) FROM clips;";
+            await using var reader = await bounds.ExecuteReaderAsync(cancellationToken);
+            await reader.ReadAsync(cancellationToken);
+            minId = reader.GetInt64(0);
+            maxId = reader.GetInt64(1);
         }
 
+        // One short transaction per id range rather than one over the library
+        // (F-24): that held the write lock for 74 s at 60k clips, and a capture
+        // issued meanwhile failed after busy_timeout and was lost. Clips captured
+        // after the bounds were read are new and unembedded anyway. A rerun cut
+        // short leaves the earlier ranges marked, which re-running completes.
+        var batchSize = Math.Max(1, RerunBatchSize);
         var ids = new List<long>();
-        await using (var update = connection.CreateCommand())
+        for (var low = minId; low <= maxId; low += batchSize)
         {
-            update.Transaction = transaction;
-            update.CommandText = $"""
-                UPDATE clips
-                SET embedding_status = 'rerun', embedding_attempts = 0
-                WHERE {EmbeddingEligibilityClause}
-                RETURNING id;
-                """;
-            await using var reader = await update.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
+            var high = low + batchSize - 1;
+            await using (var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken))
             {
-                ids.Add(reader.GetInt64(0));
+                await using (var purge = connection.CreateCommand())
+                {
+                    purge.Transaction = transaction;
+                    purge.CommandText = "DELETE FROM clip_embeddings WHERE clip_id BETWEEN $low AND $high;";
+                    purge.Parameters.AddWithValue("$low", low);
+                    purge.Parameters.AddWithValue("$high", high);
+                    await purge.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                await using (var update = connection.CreateCommand())
+                {
+                    update.Transaction = transaction;
+                    update.CommandText = $"""
+                        UPDATE clips
+                        SET embedding_status = 'rerun', embedding_attempts = 0
+                        WHERE id BETWEEN $low AND $high
+                          AND {EmbeddingEligibilityClause}
+                        RETURNING id;
+                        """;
+                    update.Parameters.AddWithValue("$low", low);
+                    update.Parameters.AddWithValue("$high", high);
+                    await using var reader = await update.ExecuteReaderAsync(cancellationToken);
+                    while (await reader.ReadAsync(cancellationToken))
+                    {
+                        ids.Add(reader.GetInt64(0));
+                    }
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            if (AfterRerunBatchCommitted is { } afterBatch)
+            {
+                await afterBatch().ConfigureAwait(false);
             }
         }
 
-        await transaction.CommitAsync(cancellationToken);
         return ids;
     }
 

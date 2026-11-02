@@ -25,22 +25,11 @@ public sealed class SqliteErrorsTests : IDisposable
 
     public SqliteErrorsTests()
     {
-        _directory = Path.Combine(Path.GetTempPath(), "Clipthrough.Tests", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_directory);
+        _directory = TestTempDirectories.CreateDirectory();
         _databasePath = Path.Combine(_directory, "encrypted.db");
     }
 
-    public void Dispose()
-    {
-        SqliteConnection.ClearAllPools();
-        try
-        {
-            Directory.Delete(_directory, recursive: true);
-        }
-        catch (IOException)
-        {
-        }
-    }
+    public void Dispose() => TestTempDirectories.TryDelete(_directory);
 
     private static string ConnectionString(string path, string? password, SqliteOpenMode mode)
     {
@@ -55,7 +44,7 @@ public sealed class SqliteErrorsTests : IDisposable
 
     private async Task CreateEncryptedDatabaseAsync(string password)
     {
-        await using var connection = new SqliteConnection(ConnectionString(_databasePath, password, SqliteOpenMode.ReadWriteCreate));
+        await using var connection = TestConnections.Create(ConnectionString(_databasePath, password, SqliteOpenMode.ReadWriteCreate));
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = "CREATE TABLE t(x); INSERT INTO t VALUES (1);";
@@ -66,7 +55,7 @@ public sealed class SqliteErrorsTests : IDisposable
     {
         return await Assert.ThrowsAsync<SqliteException>(async () =>
         {
-            await using var connection = new SqliteConnection(connectionString);
+            await using var connection = TestConnections.Create(connectionString);
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT count(*) FROM sqlite_master;";

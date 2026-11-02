@@ -1,0 +1,106 @@
+name: Windows release qualification (validation only)
+
+on:
+  push:
+    branches:
+      - 'validation/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    if: startsWith(github.ref, 'refs/heads/validation/')
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 120
+    steps:
+      - name: Checkout validation branch
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Install pinned Velopack CLI
+        run: dotnet tool install -g vpk --version 1.2.0
+
+      - name: Resolve candidate version
+        shell: pwsh
+        run: |
+          [xml]$project = Get-Content -Raw .\Clipthrough\Clipthrough.csproj
+          $version = @($project.Project.PropertyGroup.Version | Where-Object { $_ })[0]
+          if ([string]::IsNullOrWhiteSpace($version)) { throw "Candidate version is missing." }
+          "CANDIDATE_VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Restore and publish candidate
+        shell: pwsh
+        run: |
+          dotnet restore .\Clipthrough.Tests\Clipthrough.Tests.csproj
+          if ($LASTEXITCODE -ne 0) { throw "Restore failed with exit code $LASTEXITCODE." }
+          dotnet test .\Clipthrough.Tests\Clipthrough.Tests.csproj `
+            --configuration Release `
+            --no-restore `
+            --filter "FullyQualifiedName~ReleasePackagingTests"
+          if ($LASTEXITCODE -ne 0) { throw "Release packaging tests failed with exit code $LASTEXITCODE." }
+          dotnet publish .\Clipthrough\Clipthrough.csproj `
+            --configuration Release `
+            -r win-x64 `
+            --self-contained false `
+            -p:Version=$env:CANDIDATE_VERSION `
+            --output artifacts\qualification\publish
+          if ($LASTEXITCODE -ne 0) { throw "Publish failed with exit code $LASTEXITCODE." }
+          .\.github\scripts\Stage-PublishSymbols.ps1 `
+            -PublishDirectory artifacts\qualification\publish `
+            -SymbolsDirectory artifacts\qualification\symbols
+          if ($LASTEXITCODE -ne 0) { throw "Native symbol staging failed with exit code $LASTEXITCODE." }
+          vpk pack `
+            --packId Clipthrough `
+            --packVersion $env:CANDIDATE_VERSION `
+            --packDir artifacts\qualification\publish `
+            --mainExe Clipthrough.exe `
+            --exclude '(?!)' `
+            --framework net10.0.14-x64-runtime `
+            --outputDir artifacts\qualification\feed
+          if ($LASTEXITCODE -ne 0) { throw "Velopack packaging failed with exit code $LASTEXITCODE." }
+
+      - name: Build feed/update qualification helper
+        shell: pwsh
+        run: |
+          dotnet build .\.github\scripts\qualification\FeedApplyHarness.csproj `
+            --configuration Release `
+            -r win-x64 `
+            --self-contained false `
+            --output artifacts\qualification\feed-harness
+          if ($LASTEXITCODE -ne 0) { throw "Feed helper build failed with exit code $LASTEXITCODE." }
+          dotnet build .\.github\scripts\qualification-ui\HostedUiHarness.csproj `
+            --configuration Release `
+            --output artifacts\qualification\ui-harness
+          if ($LASTEXITCODE -ne 0) { throw "UI helper build failed with exit code $LASTEXITCODE." }
+
+      - name: Qualify release install, update and data survival
+        shell: pwsh
+        run: .\.github\scripts\Invoke-WindowsReleaseQualification.ps1 `
+          -PublishDirectory .\artifacts\qualification\publish `
+          -FeedDirectory .\artifacts\qualification\feed `
+          -HarnessDirectory .\artifacts\qualification\feed-harness `
+          -UiHarnessDirectory .\artifacts\qualification\ui-harness `
+          -CandidateVersion $env:CANDIDATE_VERSION `
+          -EvidencePath .\artifacts\qualification\evidence.json
+
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-release-qualification-${{ github.run_id }}
+          path: |
+            artifacts/qualification/evidence.json
+            artifacts/qualification/**/*.json
+            artifacts/qualification/**/*.log
+            artifacts/qualification/**/*.trx
+            artifacts/qualification/**/*.txt
+            artifacts/qualification/**/*.png
+            artifacts/qualification/**/*.rtf
+          if-no-files-found: warn
+          retention-days: 30

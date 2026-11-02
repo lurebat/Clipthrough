@@ -13,6 +13,7 @@ public partial class SessionLogsWindow : Window
     public SessionLogsWindow()
     {
         InitializeComponent();
+        WindowFitter.Attach(this);
         KeyDown += OnKeyDown;
     }
 

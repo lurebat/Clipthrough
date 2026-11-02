@@ -24,9 +24,7 @@ public sealed class DatabaseMaintenanceViewModel : ViewModelBase
     private readonly Database.SqliteConnectionFactory _connectionFactory;
     private readonly ISystemInteractionService _systemInteractionService;
     private readonly IAppNotificationService _notificationService;
-    private readonly IClipboardMonitorService _clipboardMonitorService;
-    private readonly IBackgroundOcrQueue _backgroundOcrQueue;
-    private readonly IEmbeddingWorker? _embeddingWorker;
+
     private readonly Action<string, Exception> _reportError;
 
     public DatabaseMaintenanceViewModel(
@@ -34,9 +32,6 @@ public sealed class DatabaseMaintenanceViewModel : ViewModelBase
         IStorageOptionsService storageOptionsService,
         ISystemInteractionService systemInteractionService,
         IAppNotificationService notificationService,
-        IClipboardMonitorService clipboardMonitorService,
-        IBackgroundOcrQueue backgroundOcrQueue,
-        IEmbeddingWorker? embeddingWorker,
         Action<string, Exception> reportError)
     {
         _databaseBackupService = databaseBackupService;
@@ -48,9 +43,7 @@ public sealed class DatabaseMaintenanceViewModel : ViewModelBase
         _connectionFactory = new Database.SqliteConnectionFactory(storageOptionsService);
         _systemInteractionService = systemInteractionService;
         _notificationService = notificationService;
-        _clipboardMonitorService = clipboardMonitorService;
-        _backgroundOcrQueue = backgroundOcrQueue;
-        _embeddingWorker = embeddingWorker;
+
         _reportError = reportError;
 
         OpenLogsFolderCommand = ReactiveCommand.CreateFromTask(OpenLogsFolderAsync);

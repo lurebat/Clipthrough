@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -60,23 +61,6 @@ public class EmbeddingClaimIndexTests
         return steps;
     }
 
-    // Mirrors ClipStoreService.ClaimPendingEmbeddingsAsync. Kept literal rather than
-    // shared, so that changing the real query without re-checking its plan fails here.
-    private const string ClaimQuery = """
-        SELECT id, (CASE WHEN content_type = 'image' THEN ocr_text ELSE content END) AS etext
-        FROM clips
-        WHERE (embedding_status IS NULL OR embedding_status IN ('pending','rerun')
-               OR (embedding_status = 'failed' AND embedding_attempts < 3))
-          AND is_sensitive = 0
-          AND sensitivity_scanned_at IS NOT NULL
-          AND (
-              (content_type IN ('text','richtext','files') AND content IS NOT NULL AND TRIM(content) <> '')
-              OR (content_type = 'image' AND ocr_status = 'succeeded' AND ocr_text IS NOT NULL AND TRIM(ocr_text) <> '')
-          )
-        ORDER BY COALESCE(last_copied_at, captured_at) DESC
-        LIMIT 32;
-        """;
-
     [Fact]
     public async Task EmbeddingClaim_DoesNotScanTheWholeTable()
     {
@@ -84,9 +68,87 @@ public class EmbeddingClaimIndexTests
         await scope.DatabaseInitializer.InitializeAsync();
         await SeedAsync(scope, 4000);
 
-        var plan = await PlanAsync(scope, ClaimQuery);
+        var plan = await PlanAsync(scope, Clipthrough.Services.ClipStoreService.EmbeddingClaimSql
+            .Replace("$maxAttempts", "3", StringComparison.Ordinal)
+            .Replace("$limit", "32", StringComparison.Ordinal));
 
         Assert.DoesNotContain(plan, step => step.StartsWith("SCAN clips", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// F-05. "Not a full scan" was satisfied by the plan the planner actually
+    /// chose at 60k clips - idx_clips_retention on is_sensitive plus a temp
+    /// B-tree, which still visits every row: 2.3 s per claim with nothing to
+    /// claim, 17 s encrypted. Only the backlog index is acceptable, so assert it
+    /// by name, against the query the store really runs.
+    /// </summary>
+    [Fact]
+    public async Task EmbeddingClaim_UsesTheBacklogIndex()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        await SeedAsync(scope, 4000);
+
+        var sql = Clipthrough.Services.ClipStoreService.EmbeddingClaimSql
+            .Replace("$maxAttempts", "3", StringComparison.Ordinal)
+            .Replace("$limit", "32", StringComparison.Ordinal);
+        var plan = await PlanAsync(scope, sql);
+
+        Assert.Contains(plan, step => step.Contains("idx_clips_embedding_backlog", StringComparison.Ordinal));
+        Assert.DoesNotContain(plan, step => step.Contains("idx_clips_retention", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// F-05. The claim's SELECT ran inside BEGIN IMMEDIATE, so every claim - one
+    /// per capture, and every 30 s while idle - held the write lock for the
+    /// length of the scan and a capture waited behind it. With nothing to claim
+    /// it now never asks for the write lock at all.
+    /// </summary>
+    [Fact]
+    public async Task AClaimWithNothingPending_DoesNotWaitForTheWriteLock()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        await SeedAsync(scope, 100);
+
+        await using var writer = scope.ConnectionFactory.CreateConnection();
+        await writer.OpenAsync();
+        await using var held = (Microsoft.Data.Sqlite.SqliteTransaction)await writer.BeginTransactionAsync();
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var claimed = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(32);
+        sw.Stop();
+
+        Assert.Empty(claimed);
+        Assert.True(sw.ElapsedMilliseconds < 2000, $"The claim waited {sw.ElapsedMilliseconds} ms for a write lock it did not need.");
+    }
+
+    [Fact]
+    public async Task AClaim_MarksOnlyTheRowsItReturns_AsProcessing()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await scope.DatabaseInitializer.InitializeAsync();
+        await SeedAsync(scope, 50);
+        await using var connection = scope.ConnectionFactory.CreateConnection();
+        await connection.OpenAsync();
+        await using (var pending = connection.CreateCommand())
+        {
+            pending.CommandText = "UPDATE clips SET embedding_status = 'pending' WHERE id <= 10;";
+            await pending.ExecuteNonQueryAsync();
+        }
+
+        var claimed = await scope.ClipStoreService.ClaimPendingEmbeddingsAsync(4);
+
+        Assert.Equal(4, claimed.Count);
+        await using var check = connection.CreateCommand();
+        check.CommandText = "SELECT id FROM clips WHERE embedding_status = 'processing' ORDER BY id;";
+        var processing = new List<long>();
+        await using (var reader = await check.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync()) processing.Add(reader.GetInt64(0));
+        }
+
+        Assert.Equal(claimed.Select(c => c.ClipId).Order(), processing);
     }
 
     [Fact]

@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Clipthrough.Localization;
 using Clipthrough.Models;
 using Clipthrough.Services.Search;
 using Microsoft.Data.Sqlite;
@@ -19,6 +20,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _configPath;
+    private readonly AppDataRoot _dataRoot;
     private readonly IDataProtectionService _dataProtection;
     private readonly IServiceProvider? _services;
 
@@ -29,14 +31,8 @@ public sealed class StorageOptionsService : IStorageOptionsService
     /// constructor cycle: StorageOptionsService -> workers -> ClipStoreService
     /// -> SqliteConnectionFactory -> StorageOptionsService.
     /// </summary>
-    public StorageOptionsService(IDataProtectionService dataProtection, IServiceProvider services)
-        : this(
-            dataProtection,
-            Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Clipthrough",
-                "storage.json"),
-            services)
+    public StorageOptionsService(IDataProtectionService dataProtection, AppDataRoot dataRoot, IServiceProvider services)
+        : this(dataProtection, dataRoot, dataRoot.StorageConfigPath, services)
     {
     }
 
@@ -48,12 +44,29 @@ public sealed class StorageOptionsService : IStorageOptionsService
     {
     }
 
+    // The data root of a test seam is the folder holding its storage.json, as
+    // a chosen root would be, so its default library is beside it too rather
+    // than in the user's real profile.
     internal StorageOptionsService(
         IDataProtectionService dataProtection,
         string configPath,
         IServiceProvider? services)
+        : this(
+            dataProtection,
+            AppDataRoot.Chosen(Path.GetDirectoryName(Path.GetFullPath(configPath))!, AppDataRootSource.CommandLine),
+            configPath,
+            services)
+    {
+    }
+
+    private StorageOptionsService(
+        IDataProtectionService dataProtection,
+        AppDataRoot dataRoot,
+        string configPath,
+        IServiceProvider? services)
     {
         _dataProtection = dataProtection;
+        _dataRoot = dataRoot;
         _configPath = configPath;
         _services = services;
 
@@ -66,11 +79,17 @@ public sealed class StorageOptionsService : IStorageOptionsService
         => DatabaseMaintenanceScope.EnterAsync(
             _services?.GetService<IClipboardMonitorService>(),
             _services?.GetService<IBackgroundOcrQueue>(),
-            _services?.GetService<IEmbeddingWorker>());
+            _services?.GetService<IEmbeddingWorker>(),
+            _services?.GetService<Clipthrough.Database.DatabaseInitializer>());
 
     public StorageOptions Current { get; private set; }
 
+    public AppDataRoot DataRoot => _dataRoot;
+
     public bool HasSavedConfig => File.Exists(_configPath);
+
+    /// <inheritdoc />
+    public string? LoadFault { get; private set; }
 
     public bool DatabaseExists => File.Exists(Current.DatabasePath);
 
@@ -87,14 +106,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
         try
         {
-            var builder = new SqliteConnectionStringBuilder
-            {
-                DataSource = dbPath,
-                Mode = SqliteOpenMode.ReadOnly,
-            };
-
-            using var connection = new SqliteConnection(builder.ToString());
-            connection.StateChange += ApplyBusyTimeoutOnOpen;
+            using var connection = Clipthrough.Database.SqliteConnectionFactory.Create(dbPath, password: null, SqliteOpenMode.ReadOnly);
             connection.Open();
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT count(*) FROM sqlite_master;";
@@ -148,15 +160,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
         try
         {
-            var builder = new SqliteConnectionStringBuilder
-            {
-                DataSource = dbPath,
-                Mode = SqliteOpenMode.ReadOnly,
-                Password = password,
-            };
-
-            using var connection = new SqliteConnection(builder.ToString());
-            connection.StateChange += ApplyBusyTimeoutOnOpen;
+            using var connection = Clipthrough.Database.SqliteConnectionFactory.Create(dbPath, password, SqliteOpenMode.ReadOnly);
             connection.Open();
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT count(*) FROM sqlite_master;";
@@ -171,7 +175,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
     public async Task SaveAsync(StorageOptions options, CancellationToken cancellationToken = default)
     {
-        var normalized = options.Normalize();
+        var normalized = options.Normalize(_dataRoot);
 
         await _gate.WaitAsync(cancellationToken);
         try
@@ -263,15 +267,6 @@ public sealed class StorageOptionsService : IStorageOptionsService
             // Release pooled handles on the source before reading it.
             SqliteConnection.ClearAllPools();
 
-            // If the destination already exists, keep a timestamped safety copy.
-            if (File.Exists(newPath))
-            {
-                var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
-                var safeguard = newPath + ".before-move-" + stamp;
-                File.Copy(newPath, safeguard, overwrite: false);
-                Trace.TraceInformation($"Existing target '{newPath}' backed up to '{safeguard}'.");
-            }
-
             // Copy source → temp (in the destination directory for same-volume rename).
             // Read through SQLite, not the file system: this copy becomes the
             // database and the source is deleted immediately afterwards, so a
@@ -279,11 +274,34 @@ public sealed class StorageOptionsService : IStorageOptionsService
             var tempPath = Path.Combine(Path.GetDirectoryName(newPath)!, Path.GetFileName(newPath) + ".moving-" + Guid.NewGuid().ToString("N"));
             SqliteDatabaseCopier.CopyDatabase(oldPath, previous.DatabasePassword, tempPath);
 
+            var stashed = new System.Collections.Generic.List<(string Live, string Stashed)>();
             try
             {
-                // Atomic rename: temp → newPath (overwrites any existing file).
+                // Whatever already sits at the target - a database that was not
+                // shut down cleanly, a cloud-synced copy - is set aside as a set:
+                // main file, -wal and -shm under one stamp. Renaming only the
+                // main file over it would leave its -wal beside the moved
+                // library, and SQLite replays that foreign WAL on the next open,
+                // replacing the user's history with the old target's. The same
+                // hazard RestoreCore guards against.
+                var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+                foreach (var suffix in new[] { string.Empty, "-wal", "-shm" })
+                {
+                    var existing = newPath + suffix;
+                    if (File.Exists(existing))
+                    {
+                        var safeguard = existing + ".before-move-" + stamp;
+                        File.Move(existing, safeguard);
+                        stashed.Add((existing, safeguard));
+                        Trace.TraceInformation($"Existing target file '{existing}' set aside as '{safeguard}'.");
+                    }
+                }
+
+                // Atomic rename: temp → newPath. Nothing is left at newPath now,
+                // but overwrite keeps a racing stray file from failing the move.
                 File.Move(tempPath, newPath, overwrite: true);
                 tempPath = null; // newPath owns it now — don't delete in finally.
+                stashed.Clear(); // The move landed; the set-aside files stay as the safeguard.
 
                 // Remove the source and its WAL/SHM sidecar files.
                 foreach (var suffix in new[] { string.Empty, "-wal", "-shm" })
@@ -308,6 +326,23 @@ public sealed class StorageOptionsService : IStorageOptionsService
                 {
                     try { File.Delete(tempPath); } catch { /* best effort */ }
                 }
+
+                // ...and put the displaced target back where it was, so a failed
+                // move changes nothing at either end.
+                foreach (var (live, safeguard) in stashed)
+                {
+                    try
+                    {
+                        if (!File.Exists(live))
+                        {
+                            File.Move(safeguard, live);
+                        }
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        Trace.TraceError($"Could not put '{safeguard}' back as '{live}' after a failed move: {ex.Message}");
+                    }
+                }
             }
         }
         catch
@@ -328,9 +363,8 @@ public sealed class StorageOptionsService : IStorageOptionsService
     /// Sequence:
     ///   1. Verify current password opens the DB.
     ///   2. Enter maintenance scope (stop workers, clear pool).
-    ///   3. Copy the DB to a temp file through SQLite's online backup API, so
-    ///      commits still in the WAL travel with it.
-    ///   4. Apply PRAGMA rekey to the copy.
+    ///   3-4. Write a copy keyed with the new password (<see cref="WriteRekeyedCopy"/>),
+    ///      read through SQLite so commits still in the WAL travel with it.
     ///   5. Verify the copy opens with the new password.
     ///   6. Atomic rename: temp → live DB path (DB file is the source of truth).
     ///   7. Update Current (key for the session + workers restarted on scope dispose).
@@ -340,6 +374,15 @@ public sealed class StorageOptionsService : IStorageOptionsService
     /// </summary>
     public async Task RekeyAsync(string currentPassword, string newPassword, bool rememberNewPassword, CancellationToken cancellationToken = default)
     {
+        // Both passwords go through the rule every unlock applies. Keying the
+        // file with the raw value - say, a pasted passphrase ending in a space -
+        // and then running the session on the trimmed one locked the user out
+        // of their whole history for good (F-02). The dialog refuses edge
+        // whitespace up front (S42); this keeps the service consistent with it
+        // for every other caller.
+        var currentKey = StorageOptions.NormalizePassword(currentPassword);
+        var newKey = StorageOptions.NormalizePassword(newPassword);
+
         await _gate.WaitAsync(cancellationToken);
         try
         {
@@ -352,7 +395,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
             }
 
             // Step 1: Verify the current password opens the DB before touching anything.
-            var openWith = current with { DatabasePassword = currentPassword ?? string.Empty };
+            var openWith = current with { DatabasePassword = currentKey };
             try
             {
                 await using var probe = OpenConnection(openWith);
@@ -369,36 +412,19 @@ public sealed class StorageOptionsService : IStorageOptionsService
             // Step 2: Enter maintenance scope (stop workers, clear pool).
             await using var scope = await EnterMaintenanceScopeAsync();
 
-            // Step 3: Copy the DB to a temp file. This copy is rekeyed and then
-            // renamed over the live database, so it has to be complete: a raw
-            // file copy taken after a busy checkpoint is malformed, and here
-            // that malformed file would become the user's database.
+            // Steps 3 and 4: write a copy of the DB keyed with the new password.
+            // The copy is renamed over the live database, so it has to be
+            // complete - see WriteRekeyedCopy.
             SqliteConnection.ClearAllPools();
-            var tempPath = dbPath + ".rekeying-" + Guid.NewGuid().ToString("N");
-            SqliteDatabaseCopier.CopyDatabase(dbPath, currentPassword, tempPath);
+            string? tempPath = dbPath + ".rekeying-" + Guid.NewGuid().ToString("N");
 
             try
             {
-                // Step 4: Rekey the copy with the new password.
-                var tempOptions = current with
-                {
-                    DatabasePath = tempPath,
-                    DatabasePassword = currentPassword ?? string.Empty,
-                };
+                WriteRekeyedCopy(dbPath, currentKey, newKey, tempPath);
 
-                await using (var conn = OpenConnection(tempOptions))
-                {
-                    await conn.OpenAsync(cancellationToken);
-                    await using var cmd = conn.CreateCommand();
-                    cmd.CommandText = $"PRAGMA rekey = '{EscapeSqlLiteral(newPassword ?? string.Empty)}';";
-                    await cmd.ExecuteNonQueryAsync(cancellationToken);
-                }
-
-                // Flush pooled connections to the temp file before verifying.
-                SqliteConnection.ClearAllPools();
-
-                // Step 5: Verify the rekeyed copy opens with the new password.
-                if (!CanOpenWithPassword(tempPath, newPassword ?? string.Empty))
+                // Step 5: Verify the rekeyed copy opens with the key the session
+                // will use from here on - not merely with what was passed in.
+                if (!CanOpenWithPassword(tempPath, newKey))
                 {
                     throw new InvalidOperationException(
                         "Rekey verification failed: the rekeyed copy does not open with the new password.");
@@ -412,19 +438,26 @@ public sealed class StorageOptionsService : IStorageOptionsService
                 // launch falls back to the unlock prompt — which accepts the new
                 // password the user just chose. Persisting first would instead point
                 // storage.json at a key the still-old DB rejects, locking them out.
+                // Removing encryption has no prompt to fall back on; LoadFromDisk
+                // drops a remembered key the plaintext file does not need.
                 SqliteConnection.ClearAllPools();
                 File.Move(tempPath, dbPath, overwrite: true);
                 tempPath = null; // dbPath owns it now.
 
                 var updated = (current with
                 {
-                    DatabasePassword = newPassword ?? string.Empty,
+                    DatabasePassword = newKey,
                     RememberPassword = rememberNewPassword,
-                }).Normalize();
+                }).Normalize(_dataRoot);
 
                 // Step 7: Update in-memory state so the running session (and the
                 // workers restarted on scope dispose) use the new key.
                 Current = updated;
+
+                // Step 7b: Bring the backups along, or every restore point taken
+                // before today stops restoring (F-15). Per-file best effort, and
+                // not cancellable: the live file is already rekeyed.
+                await Task.Run(() => DatabaseBackupService.RekeyBackups(dbPath, currentKey, newKey), CancellationToken.None);
 
                 // Step 8: Persist the remembered password last. If this throws the
                 // DB is already rekeyed and Current is correct for this session.
@@ -447,27 +480,102 @@ public sealed class StorageOptionsService : IStorageOptionsService
         }
     }
 
-    private SqliteConnection OpenConnection(StorageOptions options)
+    /// <inheritdoc />
+    public async Task RunExclusiveAsync(Action<StorageOptions> action, CancellationToken cancellationToken = default)
     {
-        var builder = new SqliteConnectionStringBuilder
+        await _gate.WaitAsync(cancellationToken);
+        try
         {
-            DataSource = options.DatabasePath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            ForeignKeys = true,
-            // Private cache (the default) is required: shared cache surfaces
-            // in-process write contention as SQLITE_LOCKED, which busy_timeout
-            // does NOT retry. Private cache surfaces it as SQLITE_BUSY, which
-            // the 5-second busy_timeout below DOES retry.
-        };
+            action(Current);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
 
-        if (!string.IsNullOrWhiteSpace(options.DatabasePassword))
+    /// <summary>
+    /// Writes a copy of <paramref name="sourcePath"/>, which opens with
+    /// <paramref name="currentKey"/>, to <paramref name="destinationPath"/>
+    /// keyed with <paramref name="newKey"/>. An empty key means unencrypted.
+    /// The source is only read. A partial destination is removed on failure.
+    /// </summary>
+    /// <remarks>
+    /// The copy is taken through the online backup API under the current key,
+    /// then <c>PRAGMA rekey</c> changes the copy's key. SQLite3 Multiple Ciphers
+    /// handles every direction with that pragma, which is why the SQLCipher-only
+    /// <c>sqlcipher_export</c> this used to need for the plaintext cases (F-16)
+    /// is gone (U-C9):
+    /// - between two keys, and from a key to none, it works in any journal mode;
+    /// - from none to a key it is refused in WAL mode, so the copy is switched to
+    ///   a rollback journal for the rekey and back to WAL afterwards. Journal
+    ///   mode is a property of the file, and the live library runs in WAL.
+    /// The cipher scheme the key is applied with comes from the connection's
+    /// recipe (SqliteConnectionFactory.DataSourceFor), not from the pragma.
+    /// </remarks>
+    internal static void WriteRekeyedCopy(string sourcePath, string currentKey, string newKey, string destinationPath)
+    {
+        SqliteDatabaseCopier.CopyDatabase(sourcePath, currentKey, destinationPath);
+        try
         {
-            builder.Password = options.DatabasePassword;
+            using var copy = OpenUnpooled(destinationPath, currentKey, SqliteOpenMode.ReadWrite);
+            var encryptingPlaintext = currentKey.Length == 0 && newKey.Length > 0;
+            var restoreWal = false;
+            if (encryptingPlaintext)
+            {
+                restoreWal = string.Equals(ExecuteScalarText(copy, "PRAGMA journal_mode;"), "wal", StringComparison.OrdinalIgnoreCase);
+                ExecuteScalarText(copy, "PRAGMA journal_mode = DELETE;");
+            }
+
+            ExecuteScalarText(copy, $"PRAGMA rekey = '{EscapeSqlLiteral(newKey)}';");
+
+            if (restoreWal)
+            {
+                ExecuteScalarText(copy, "PRAGMA journal_mode = WAL;");
+            }
+        }
+        catch
+        {
+            SqliteConnection.ClearAllPools();
+            foreach (var suffix in new[] { string.Empty, "-wal", "-shm", "-journal" })
+            {
+                try { File.Delete(destinationPath + suffix); } catch { /* best effort */ }
+            }
+
+            throw;
+        }
+    }
+
+    private static string ExecuteScalarText(SqliteConnection connection, string sql)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return Convert.ToString(command.ExecuteScalar(), CultureInfo.InvariantCulture) ?? string.Empty;
+    }
+
+    private static SqliteConnection OpenUnpooled(string path, string key, SqliteOpenMode mode)
+    {
+        // Unpooled so the file is released on Dispose and can be renamed.
+        var connection = Clipthrough.Database.SqliteConnectionFactory.Create(path, key, mode, pooling: false);
+        try
+        {
+            connection.Open();
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
         }
 
-        var connection = new SqliteConnection(builder.ToString());
-        connection.StateChange += ApplyBusyTimeoutOnOpen;
         return connection;
+    }
+    private SqliteConnection OpenConnection(StorageOptions options)
+    {
+        return Clipthrough.Database.SqliteConnectionFactory.Create(
+            options.DatabasePath,
+            string.IsNullOrWhiteSpace(options.DatabasePassword) ? null : options.DatabasePassword,
+            SqliteOpenMode.ReadWriteCreate,
+            foreignKeys: true);
     }
 
     public void SetInMemoryPassword(string password)
@@ -477,7 +585,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
             DatabasePath = Current.DatabasePath,
             DatabasePassword = password,
             RememberPassword = Current.RememberPassword,
-        }.Normalize();
+        }.Normalize(_dataRoot);
     }
 
     private StorageOptions LoadFromDisk()
@@ -486,14 +594,14 @@ public sealed class StorageOptionsService : IStorageOptionsService
         {
             if (!File.Exists(_configPath))
             {
-                return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize());
+                return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize(_dataRoot));
             }
 
             var json = File.ReadAllText(_configPath);
             var stored = JsonSerializer.Deserialize<StorageOptionsDocument>(json, JsonOptions);
             if (stored is null)
             {
-                return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize());
+                return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize(_dataRoot));
             }
 
             bool rememberPassword;
@@ -536,12 +644,30 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
             var options = new StorageOptions
             {
-                DatabasePath = stored.DatabasePath ?? StorageOptions.GetDefaultDatabasePath(),
+                DatabasePath = stored.DatabasePath ?? string.Empty,
                 DatabasePassword = loadedPassword,
                 RememberPassword = rememberPassword,
-            }.Normalize();
+            }.Normalize(_dataRoot);
 
             options = EnsureLegacyDefaultDatabaseCopied(options);
+
+            // A remembered key on a file that opens without one is stale: removing
+            // encryption swaps the plaintext file in before storage.json is
+            // rewritten, so a crash or failed write in between leaves exactly this.
+            // Keying every connection to a plaintext file fails with "file is not
+            // a database", and there is no prompt to fall back on because the file
+            // needs no password. Only a successful keyless read drops it, and only
+            // of a non-empty file: an empty one opens keyless too, and dropping
+            // the key there would build the library unencrypted.
+            if (options.DatabasePassword.Length > 0
+                && File.Exists(options.DatabasePath)
+                && new FileInfo(options.DatabasePath).Length > 0
+                && !RequiresPassword(options.DatabasePath))
+            {
+                Trace.TraceWarning("Dropping the remembered database password: the database is not encrypted.");
+                options = options with { DatabasePassword = string.Empty };
+                needsMigration = true;
+            }
 
             if (needsMigration)
             {
@@ -553,10 +679,38 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
             return options;
         }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        catch (JsonException ex)
         {
+            // Unreadable content - typically a save torn by a crash, a power
+            // loss or a full disk. The only recovery available is the default
+            // library, so the user must hear about it, and the file must be set
+            // aside before the next save overwrites the evidence (F-22).
+            LoadFault = QuarantineUnreadableConfig(ex);
+            return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize(_dataRoot));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Deliberately not quarantined: a locked or briefly unreadable file
+            // is usually transient, and moving it aside would lose a config
+            // that was never corrupt.
             Trace.TraceWarning($"Storage settings load failed: {ex.Message}");
-            return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize());
+            return EnsureLegacyDefaultDatabaseCopied(StorageOptions.Default.Normalize(_dataRoot));
+        }
+    }
+
+    private string QuarantineUnreadableConfig(JsonException ex)
+    {
+        var fileName = Path.GetFileName(_configPath);
+        try
+        {
+            var quarantinePath = AtomicFile.Quarantine(_configPath);
+            Trace.TraceError($"Storage settings could not be parsed and were moved to '{quarantinePath}': {ex.Message}");
+            return AppText.FormatStorageLoadFault(fileName, Path.GetFileName(quarantinePath));
+        }
+        catch (Exception moveFailure) when (moveFailure is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceError($"Storage settings could not be parsed, and moving them aside failed: {moveFailure.Message}");
+            return AppText.FormatStorageLoadFaultNotMoved(fileName);
         }
     }
 
@@ -573,7 +727,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
             Directory.CreateDirectory(directory);
 
             var document = BuildDocument(options);
-            File.WriteAllText(_configPath, JsonSerializer.Serialize(document, JsonOptions));
+            AtomicFile.WriteAllText(_configPath, JsonSerializer.Serialize(document, JsonOptions));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -581,22 +735,27 @@ public sealed class StorageOptionsService : IStorageOptionsService
         }
     }
 
-    private static StorageOptions EnsureLegacyDefaultDatabaseCopied(StorageOptions options)
+    private StorageOptions EnsureLegacyDefaultDatabaseCopied(StorageOptions options)
     {
-        if (string.Equals(options.DatabasePath, StorageOptions.GetDefaultDatabasePath(), StringComparison.OrdinalIgnoreCase))
-        {
-            TryCopyLegacyDatabase(StorageOptions.GetLegacyDefaultDatabasePath(), options.DatabasePath, options.DatabasePassword);
-            return options;
-        }
-
-        if (!StorageOptions.IsLegacyDefaultDatabasePath(options.DatabasePath))
+        if (_dataRoot.LegacyDatabasePath is not { } legacyPath)
         {
             return options;
         }
 
-        var migrated = options with { DatabasePath = StorageOptions.GetDefaultDatabasePath() };
+        if (string.Equals(options.DatabasePath, _dataRoot.DefaultDatabasePath, StringComparison.OrdinalIgnoreCase))
+        {
+            TryCopyLegacyDatabase(legacyPath, options.DatabasePath, options.DatabasePassword);
+            return options;
+        }
+
+        if (!string.Equals(options.DatabasePath, legacyPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return options;
+        }
+
+        var migrated = options with { DatabasePath = _dataRoot.DefaultDatabasePath };
         TryCopyLegacyDatabase(options.DatabasePath, migrated.DatabasePath, migrated.DatabasePassword);
-        return migrated.Normalize();
+        return migrated.Normalize(_dataRoot);
     }
 
     /// <summary>
@@ -649,7 +808,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
         Directory.CreateDirectory(directory);
 
         var document = BuildDocument(options);
-        await File.WriteAllTextAsync(_configPath, JsonSerializer.Serialize(document, JsonOptions), cancellationToken);
+        await AtomicFile.WriteAllTextAsync(_configPath, JsonSerializer.Serialize(document, JsonOptions), cancellationToken);
     }
 
     /// <summary>
@@ -681,7 +840,7 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
         return new StorageOptionsDocument
         {
-            DatabasePath = options.DatabasePath,
+            DatabasePath = _dataRoot.ToStoredPath(options.DatabasePath),
             RememberPassword = options.RememberPassword,
             // DatabasePassword (plaintext) is intentionally omitted — never written.
             DatabasePasswordProtected = protectedPassword,
@@ -690,22 +849,6 @@ public sealed class StorageOptionsService : IStorageOptionsService
 
     private static string EscapeSqlLiteral(string value) => value.Replace("'", "''", StringComparison.Ordinal);
 
-    /// <summary>
-    /// StateChange handler that applies <c>PRAGMA busy_timeout = 5000</c>
-    /// every time a connection transitions to the Open state. Mirrored from
-    /// <see cref="Clipthrough.Database.SqliteConnectionFactory"/> so that
-    /// every connection opened by this service (rekey probe, checkpoint,
-    /// path-move backup) also respects the contention retry budget.
-    /// </summary>
-    private static void ApplyBusyTimeoutOnOpen(object? sender, StateChangeEventArgs e)
-    {
-        if (e.CurrentState == ConnectionState.Open && sender is SqliteConnection connection)
-        {
-            using var cmd = connection.CreateCommand();
-            cmd.CommandText = "PRAGMA busy_timeout = 5000;";
-            cmd.ExecuteNonQuery();
-        }
-    }
 
     private sealed class StorageOptionsDocument
     {

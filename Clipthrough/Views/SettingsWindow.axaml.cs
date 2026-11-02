@@ -12,6 +12,7 @@ public partial class SettingsWindow : Window
     public SettingsWindow()
     {
         InitializeComponent();
+        WindowFitter.Attach(this);
         KeyDown += OnKeyDown;
     }
 

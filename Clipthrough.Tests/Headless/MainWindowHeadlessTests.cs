@@ -198,7 +198,6 @@ public sealed class MainWindowHeadlessTests
         using var viewModel = new MainWindowViewModel(
             scope.ClipStoreService,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -214,7 +213,7 @@ public sealed class MainWindowHeadlessTests
             new BackgroundJobIndicator(),
             scope.DatabaseInitializer);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         var window = new MainWindow
         {
@@ -259,7 +258,6 @@ public sealed class MainWindowHeadlessTests
         using var viewModel = new MainWindowViewModel(
             scope.ClipStoreService,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -275,7 +273,7 @@ public sealed class MainWindowHeadlessTests
             new BackgroundJobIndicator(),
             scope.DatabaseInitializer);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         var window = new MainWindow
         {
@@ -339,7 +337,6 @@ public sealed class MainWindowHeadlessTests
         using var viewModel = new MainWindowViewModel(
             scope.ClipStoreService,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -355,7 +352,7 @@ public sealed class MainWindowHeadlessTests
             new BackgroundJobIndicator(),
             scope.DatabaseInitializer);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.OpenAiPromptCommand.Execute().Subscribe();
         Dispatcher.UIThread.RunJobs();
 
@@ -402,7 +399,6 @@ public sealed class MainWindowHeadlessTests
         using var viewModel = new MainWindowViewModel(
             scope.ClipStoreService,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -418,7 +414,7 @@ public sealed class MainWindowHeadlessTests
             new BackgroundJobIndicator(),
             scope.DatabaseInitializer);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
         {
@@ -466,7 +462,6 @@ public sealed class MainWindowHeadlessTests
         using var viewModel = new MainWindowViewModel(
             scope.ClipStoreService,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -482,7 +477,7 @@ public sealed class MainWindowHeadlessTests
             new BackgroundJobIndicator(),
             scope.DatabaseInitializer);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         var clip = await scope.ClipStoreService.CaptureAsync(new ClipCaptureRequest
         {
@@ -511,12 +506,14 @@ public sealed class MainWindowHeadlessTests
 
         InvokePasteSelectedAndHide(window, viewModel);
 
-        // ExecutePasteSelectedAndHide is async void and delays 150ms before
-        // simulating the keystroke - and that delay only starts once the copy
-        // has completed. A fixed wait here races it, so poll instead.
+        // ExecutePasteSelectedAndHide is async void and waits for the target
+        // (PasteTiming) before simulating the keystroke - and that wait only
+        // starts once the copy has completed. A fixed wait here races it, so poll.
         await WaitForUiAsync(() => systemInteraction.SimulatedPasteCount == 1);
 
-        Assert.False(window.IsVisible);
+        // Out of the user's sight: cloaked into standby where cloaking works,
+        // hidden where it does not (PopupStandbyHeadlessTests covers both).
+        Assert.False(window.IsPresentedToUser);
         Assert.Equal("paste me", systemInteraction.LastCopiedText);
         Assert.Equal(1, systemInteraction.SimulatedPasteCount);
     }

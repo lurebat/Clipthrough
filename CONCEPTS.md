@@ -29,7 +29,7 @@ PasteCount tracks how many times Clipthrough pasted it back.
 its content. Sensitive clips are displayed with a warning badge in the UI.
 
 **SensitivityMatch** — A join result indicating which rule(s) triggered for a
-clip. Stored in a separate `sensitivity_matches` table; recomputed on rule
+clip. Stored in a separate `clip_sensitivity_matches` table; recomputed on rule
 change via `RebuildSensitivityMatchesAsync`.
 
 **SourceApp / SourceWindowTitle / SourceUrl** — Process name, window title, and
@@ -52,26 +52,43 @@ the original.
 **ClipCaptureRequest** — Input DTO for `IClipStoreService.CaptureAsync`. Carries
 content bytes, optional plain-text rendering, metadata, and flags.
 
-**CaptureFastAsync** — Variant of `CaptureAsync` that skips the FTS5 `INSERT`
-on duplicate content (used by the high-frequency clipboard monitor loop).
+**CaptureFastAsync** — Variant of `CaptureAsync` that skips the inline sensitivity
+scan and the retention sweep, leaving `sensitivity_scanned_at` NULL so the
+deferred scan picks the clip up. FTS indexing is unchanged. Used by the
+clipboard monitor and by drag-and-drop imports.
 
-**SuppressNext** — A one-shot flag on `IClipboardMonitorService`. Set before
-programmatically placing content on the clipboard (e.g. after a transform) so
-the subsequent `ClipboardChanged` event is ignored and the clip is not captured
-twice.
+**SuppressNext** — Called on `IClipboardMonitorService` before
+programmatically placing content on the clipboard (e.g. after a transform),
+with the text being written. The next `ClipboardChanged` event is ignored
+without reading the clipboard while Clipthrough still owns the clipboard (or
+the owner cannot be determined); if another process owns it, that application
+copied inside the coalesce window and its change is read and captured. For the
+rest of the suppression window any event whose text matches is recognised as a
+re-publish of our own write (Remote Desktop raises one per write) and not
+captured. Different content is captured. `SuppressNextForeignCopy` is the
+copy-without-saving variant: it skips the next change whoever makes it.
 
-**DragDropService** — Handles file and text drops onto the popup window. Calls
-`CaptureBatchAsync` so multiple dropped files land as individual clips in a
-single transaction.
+**DragDropService** — Turns a drop onto the popup window into one
+`ClipCaptureRequest` per item (`TryBuildCaptureRequestsAsync`). The view model
+captures each through `CaptureFastAsync`; there is no shared transaction.
 
 ---
 
 ## Storage and encryption
 
-**SQLCipher** — The encryption extension used for the SQLite database file when
-a password is set. Key derivation is performed once per connection open;
+**SQLCipher** — The on-disk encryption format of the database file when a
+password is set (SQLCipher 4: PBKDF2-HMAC-SHA512, 256000 iterations). It is
+written by SQLite3 Multiple Ciphers (`SQLite3MC.PCLRaw.bundle`), which supports
+several ciphers and needs the **cipher recipe** on every connection to pick this
+one. Key derivation is performed once per connection open;
 `busy_timeout=5000` is applied separately via `SqliteConnectionFactory`'s
 `StateChange` handler (not persisted, re-applied per connection).
+
+**cipher recipe** — `cipher=sqlcipher&legacy=4`, added to every connection's
+data source by `SqliteConnectionFactory.DataSourceFor`. Without it a connection
+silently uses another cipher: existing libraries fail to open and new ones are
+unreadable by SQLCipher. See
+`docs/solutions/every-connection-carries-the-cipher-recipe.md`.
 
 **WAL mode** — Write-Ahead Logging is enabled by `DatabaseInitializer` and is
 persistent per database file. It allows concurrent readers while a writer holds
@@ -80,19 +97,38 @@ retried `SQLITE_BUSY` waits.
 
 **DatabaseMaintenanceScope** — RAII-style async scope that quiesces all
 background workers and clears the SQLite connection pool before whole-database
-operations (rekey, path move, backup, restore). Workers are restarted on
-disposal even if the operation throws.
+operations (rekey, path move, restore). The daily backup does not enter it: it
+reads a consistent snapshot through SQLite while the app keeps running. On
+disposal - even if the operation throws - each worker returns to the state it
+had on entry; the embedding worker is paused rather than stopped.
 
-**StorageOptions / StorageOptionsService** — Manages the database path,
-encryption password (DPAPI-protected at rest), size caps, and retention policy.
+**StorageOptions / StorageOptionsService** — Manages the database path, the
+encryption password, and whether to remember it. A remembered password is
+DPAPI-protected at rest; where DPAPI is unavailable it is kept in memory only.
+Size caps and retention are `AppSettings`, not storage options.
 Resolves worker services lazily via `IServiceProvider` to avoid a circular DI
 dependency.
+
+**AppDataRoot (data folder)** — The one folder Clipthrough keeps its own files
+in: settings, `storage.json`, window placement, the Copilot token, logs and the
+default library. `AppDataRootResolver` picks it once at startup. The first source
+present wins: `--data-dir`, `CLIPTHROUGH_DATA_DIR`, the portable marker, then
+`%LOCALAPPDATA%\Clipthrough`. The resolved root is injected through DI. The default root keeps the library in the
+uninstall-safe sibling `ClipthroughData`; a chosen root keeps everything inside
+itself. `Source` records which way chose it.
+
+**portable mode** — A `portable.flag` file at the application root keeps the
+data in `ClipthroughData` beside it. The application root is the executable's
+folder for a plain ZIP, and the folder above `current\` (beside `Update.exe`)
+for a Velopack package, because each update replaces `current\`. In portable
+mode, `storage.json` records a library inside the folder relative to it.
 
 **DPAPI** — Windows Data Protection API used to protect secrets at rest:
 SQLCipher password (`storage.json`) and AI API key (sidecar `.bin` files). Non-Windows falls back to `NoOpDataProtectionService`,
 keeping secrets in memory only.
 
-**schema version** — Integer stored in `PRAGMA user_version`. Migrations in
+**schema version** — Integer stored in `app_metadata` under the key
+`schema_version` (not `PRAGMA user_version`). Migrations in
 `DatabaseInitializer` gate on the current value and apply idempotent `ALTER
 TABLE` statements. Bump only when adding a non-idempotent change.
 
@@ -154,8 +190,23 @@ errors.
 
 ---
 
-## ViewModels and decomposition
+## Popup and motion
 
+**standby** — The dismissed state of the popup: DWM-cloaked rather than hidden.
+The window keeps rendering, so it is reset out of sight and reappears on a
+current frame. `MainWindow.IsPresentedToUser` is false in standby though
+`IsVisible` stays true. See `MainWindow.Presentation.cs`.
+
+**paste budget** — The longest a paste may wait before sending Ctrl+V: the
+fixed sleep it replaced (150 ms after a dismiss, 120 ms for a hotkey). The wait
+ends as soon as the target holds the foreground plus a settle margin, and never
+runs past the budget. See `PasteTiming`.
+
+**motion policy** — The Animations setting (`MotionPreference`: System, On,
+Off) resolved against Windows' Animation effects. It reaches the UI as the
+`motion` class; nothing animates without it.
+
+## ViewModels and decomposition
 **MainWindowViewModel** — Primary ViewModel. Large; decomposed in v0.13.0 via
 issue #10 into sub-ViewModels: `UpdateViewModel` (self-update commands),
 `DatabaseMaintenanceViewModel` (integrity, backup, restore),
@@ -179,8 +230,10 @@ cutting per-row binding count.
 ## Transforms
 
 **TextTransformation** — Enum of built-in text operations (case, whitespace,
-lines, `BoxTableToHtml`). Applied by `TextTransformationService.Apply` — a pure
-static function.
+lines, `BoxTableToHtml`, HTML/Markdown). Applied by `TextTransformationService.ApplyAsync`:
+asynchronous only because the HTML/Markdown converters await VellumText's
+async importers; every other transformation is a pure function that completes
+synchronously.
 
 **AiTransformService** — OpenAI-compatible chat-completions client. Base URL /
 key / model come from `AppSettings.Ai*` with env-var fallback.

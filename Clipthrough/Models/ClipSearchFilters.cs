@@ -1,4 +1,4 @@
-﻿namespace Clipthrough.Models;
+namespace Clipthrough.Models;
 
 public sealed class ClipSearchFilters
 {
@@ -15,6 +15,12 @@ public sealed class ClipSearchFilters
     public bool SensitiveOnly { get; init; }
 
     public bool UseRegex { get; init; }
+
+    /// <summary>
+    /// The engine a regex search runs on. Carried on the filters so the store's
+    /// matcher stays a pure function of them.
+    /// </summary>
+    public RegexSearchEngine RegexEngine { get; init; } = RegexSearchEngine.NonBacktracking;
 
     public bool CaseSensitive { get; init; }
 

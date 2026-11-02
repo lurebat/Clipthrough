@@ -4,8 +4,8 @@
         Title="Clipthrough — Help"
         Width="780"
         Height="640"
-        MinWidth="520"
-        MinHeight="380"
+        MinWidth="360"
+        MinHeight="300"
         Background="{DynamicResource AppBackgroundBrush}"
         ShowInTaskbar="True"
         WindowStartupLocation="CenterOwner">

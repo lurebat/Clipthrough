@@ -30,14 +30,35 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
     private const uint CfUnicodeText = 13;
     private const uint GmemMoveable = 0x0002;
     private const uint GmemZeroinit = 0x0040;
-    private const string WindowsRunRegistryPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string WindowsRunValueName = "Clipthrough";
     private static readonly string[] HtmlFormats = ["HTML Format", "text/html", "public.html"];
     private static readonly string[] RtfFormats = ["Rich Text Format", "text/rtf", "public.rtf"];
     private WindowsGlobalHotKeyRegistration? _globalHotKeyRegistration;
     private readonly Dictionary<string, WindowsGlobalHotKeyRegistration> _namedHotKeys = new(StringComparer.Ordinal);
     private WindowsBalloonNotificationHost? _notificationHost;
     private nint _capturedPasteTarget;
+    // The window RestoreCapturedForeground last handed the foreground to, which
+    // a paste then waits for. Zero when the paste comes from a global hotkey and
+    // nothing was restored: the target is whatever already has the foreground.
+    private nint _lastRestoredPasteTarget;
+
+    // Appended to the Start with Windows command (AppDataRoot.RelaunchArguments),
+    // so a login starts Clipthrough on the data folder --data-dir chose.
+    private readonly IReadOnlyList<string> _startupArguments;
+    private readonly IStartupEntryStore? _startupEntry;
+    private readonly string? _processPath;
+
+    public SystemInteractionService(AppDataRoot dataRoot)
+        : this(dataRoot, OperatingSystem.IsWindows() ? new RunKeyStartupEntryStore() : null, Environment.ProcessPath)
+    {
+    }
+
+    /// <summary>Test seam: the Start with Windows entry and the executable it names.</summary>
+    internal SystemInteractionService(AppDataRoot dataRoot, IStartupEntryStore? startupEntry, string? processPath)
+    {
+        _startupArguments = dataRoot.RelaunchArguments;
+        _startupEntry = startupEntry;
+        _processPath = string.IsNullOrWhiteSpace(processPath) ? null : processPath;
+    }
 
     public async Task CopyTextAsync(string text)
     {
@@ -294,7 +315,7 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
     /// appears in the template, the paths in <paramref name="fallbackAppend"/> are appended
     /// as additional arguments.
     /// </summary>
-    private static (string Executable, System.Collections.Generic.List<string> Args) ParseCommandTemplate(
+    internal static (string Executable, System.Collections.Generic.List<string> Args) ParseCommandTemplate(
         string template,
         (string Token, string Value)[] substitutions,
         string[] fallbackAppend)
@@ -330,7 +351,7 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         return (exe, args);
     }
 
-    private static System.Collections.Generic.List<string> TokenizeCommandLine(string input)
+    internal static System.Collections.Generic.List<string> TokenizeCommandLine(string input)
     {
         var result = new System.Collections.Generic.List<string>();
         if (string.IsNullOrWhiteSpace(input))
@@ -391,6 +412,7 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         }
 
         var target = System.Threading.Interlocked.Exchange(ref _capturedPasteTarget, IntPtr.Zero);
+        _lastRestoredPasteTarget = target;
         if (target == IntPtr.Zero)
         {
             Trace.TraceWarning("[Paste] RestoreCapturedForeground: no captured target (HWND is zero).");
@@ -432,6 +454,165 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
             }
         }
     }
+
+    public async Task<bool> WaitForPasteTargetAsync(TimeSpan timeout, System.Threading.CancellationToken cancellationToken = default)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return true;
+        }
+
+        var target = System.Threading.Interlocked.Exchange(ref _lastRestoredPasteTarget, IntPtr.Zero);
+        var started = Stopwatch.GetTimestamp();
+        var ready = await PasteTiming.WaitUntilAsync(
+            () => IsPasteTargetForeground(target),
+            timeout,
+            PasteTiming.PollInterval,
+            cancellationToken);
+        if (CommandLineOptions.LogPopupTimings || !ready)
+        {
+            Trace.TraceInformation(
+                $"[Paste] target 0x{target:X} {(ready ? "forward" : "not forward")} after {Stopwatch.GetElapsedTime(started).TotalMilliseconds:F1} ms");
+        }
+
+        return ready;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static bool IsPasteTargetForeground(nint target)
+    {
+        var foreground = GetForegroundWindow();
+        if (foreground == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        if (target != IntPtr.Zero)
+        {
+            return foreground == target;
+        }
+
+        GetWindowThreadProcessId(foreground, out var processId);
+        return processId != (uint)Environment.ProcessId;
+    }
+
+    public bool TryCloakWindow(Window window, bool releaseForeground)
+    {
+        if (!OperatingSystem.IsWindows() || window.TryGetPlatformHandle()?.Handle is not { } hwnd || hwnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (!SetCloaked(hwnd, true))
+            {
+                return false;
+            }
+
+            if (releaseForeground)
+            {
+                // Hiding is the only reliable way to let the OS pick the window
+                // that should get the foreground next; showing again without
+                // activation keeps the window "visible", so it goes on rendering
+                // while cloaked. The pattern is PowerToys Command Palette's
+                // (MainWindow.HideWindow).
+                ShowWindow(hwnd, SW_HIDE);
+                ShowWindow(hwnd, SW_SHOWNA);
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Cloaking the window failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    public void UncloakWindow(Window window)
+    {
+        if (!OperatingSystem.IsWindows() || window.TryGetPlatformHandle()?.Handle is not { } hwnd || hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        try
+        {
+            SetCloaked(hwnd, false);
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning($"Uncloaking the window failed: {ex.Message}");
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static bool SetCloaked(nint hwnd, bool cloaked)
+    {
+        var value = cloaked ? 1 : 0;
+        var hr = DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, ref value, sizeof(int));
+        if (hr < 0)
+        {
+            Trace.TraceWarning($"DwmSetWindowAttribute(DWMWA_CLOAK, {cloaked}) failed: 0x{hr:X8}");
+            return false;
+        }
+
+        return true;
+    }
+
+    public bool AreOsAnimationsEnabled()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return true;
+        }
+
+        var enabled = 1;
+        return !SystemParametersInfo(SPI_GETCLIENTAREAANIMATION, 0, ref enabled, 0) || enabled != 0;
+    }
+
+    public IDisposable WatchOsAnimationSetting(Window window, Action onChanged)
+    {
+        ArgumentNullException.ThrowIfNull(onChanged);
+        if (!OperatingSystem.IsWindows())
+        {
+            return System.Reactive.Disposables.Disposable.Empty;
+        }
+
+        // Re-read on any WM_SETTINGCHANGE rather than only SPI_SETCLIENTAREAANIMATION:
+        // the read is one cheap call, and a broadcast that names a different
+        // section must not leave the answer stale.
+        Win32Properties.CustomWndProcHookCallback hook = (nint hwnd, uint msg, nint wParam, nint lParam, ref bool handled) =>
+        {
+            if (msg == WM_SETTINGCHANGE)
+            {
+                onChanged();
+            }
+
+            return IntPtr.Zero;
+        };
+        Win32Properties.AddWndProcHookCallback(window, hook);
+        return System.Reactive.Disposables.Disposable.Create(() => Win32Properties.RemoveWndProcHookCallback(window, hook));
+    }
+
+    private const uint SPI_GETCLIENTAREAANIMATION = 0x1042;
+    private const uint WM_SETTINGCHANGE = 0x001A;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SystemParametersInfo(uint action, uint param, ref int value, uint winIni);
+
+    private const int DWMWA_CLOAK = 13;
+    private const int SW_HIDE = 0;
+    private const int SW_SHOWNA = 8;
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(nint hwnd, int attribute, ref int value, int size);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShowWindow(nint hwnd, int command);
 
     public void SimulatePasteKeystroke()
     {
@@ -723,27 +904,87 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         }
     }
 
+    /// <summary>
+    /// The user turned Start with Windows on or off in Settings: write this
+    /// configuration's entry, or remove the entry, whoever wrote it.
+    /// </summary>
     public void SyncStartWithWindows(bool enabled)
+        => WithStartupEntry(store =>
+        {
+            if (!enabled)
+            {
+                store.Delete();
+                return;
+            }
+
+            if (_processPath is not { } processPath)
+            {
+                return;
+            }
+
+            var command = BuildStartupCommand(processPath);
+            if (!string.Equals(store.Read(), command, StringComparison.Ordinal))
+            {
+                store.Write(command);
+            }
+        });
+
+    /// <summary>
+    /// Applies this configuration's saved setting at startup. The entry is one
+    /// per Windows user, shared with every other configuration - the usual
+    /// install, an isolated --data-dir session, another copy - so only a
+    /// missing entry or this configuration's own is touched: on writes a
+    /// missing one, off removes its own, and another configuration's is left
+    /// alone either way. Only the Settings toggle replaces it.
+    /// </summary>
+    public void ReconcileStartWithWindows(bool enabled)
+        => WithStartupEntry(store =>
+        {
+            if (_processPath is not { } processPath || !OperatingSystem.IsWindows())
+            {
+                return;
+            }
+
+            var command = BuildStartupCommand(processPath);
+            var existing = store.Read();
+            if (string.IsNullOrWhiteSpace(existing))
+            {
+                if (enabled)
+                {
+                    store.Write(command);
+                }
+
+                return;
+            }
+
+            if (!StartupEntryCommand.IsSameConfiguration(existing, command))
+            {
+                Trace.TraceInformation($"Start with Windows: leaving the sign-in entry of another configuration in place ({existing}).");
+                return;
+            }
+
+            if (!enabled)
+            {
+                store.Delete();
+            }
+        });
+
+    private void WithStartupEntry(Action<IStartupEntryStore> action)
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        if (_startupEntry is null)
         {
             return;
         }
 
         try
         {
-            SyncStartWithWindowsCore(enabled);
+            action(_startupEntry);
         }
-        catch (UnauthorizedAccessException ex)
-        {
-            Trace.TraceWarning($"Start-with-Windows registration failed: {ex.Message}");
-        }
-        catch (System.Security.SecurityException ex)
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException)
         {
             Trace.TraceWarning($"Start-with-Windows registration failed: {ex.Message}");
         }
     }
-
     private static string NormalizePath(string path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -754,35 +995,44 @@ public sealed class SystemInteractionService : ISystemInteractionService, IDispo
         return path.Trim().Trim('"');
     }
 
-    [SupportedOSPlatform("windows")]
-    private static void SyncStartWithWindowsCore(bool enabled)
+    /// <summary>
+    /// The command the Run key starts at login: the executable, then the
+    /// data-folder arguments when the command line chose the folder.
+    /// </summary>
+    internal string BuildStartupCommand(string processPath)
     {
-        using var runKey = Registry.CurrentUser.CreateSubKey(WindowsRunRegistryPath, writable: true);
-        if (runKey is null)
+        var command = new StringBuilder(QuoteCommandArgument(processPath));
+        foreach (var argument in _startupArguments)
         {
-            return;
+            command.Append(' ').Append(argument.StartsWith('-') ? argument : QuoteArgument(argument));
         }
 
-        if (!enabled)
+        return command.ToString();
+    }
+
+    /// <summary>
+    /// Quotes one argument after the program name so the started process reads
+    /// it back unchanged: backslashes are literal except before a quote, so a
+    /// run of them before the closing quote - a drive root such as D:\ - is
+    /// doubled, or it would escape the quote.
+    /// </summary>
+    private static string QuoteArgument(string value)
+    {
+        var quoted = new StringBuilder("\"");
+        var backslashes = 0;
+        foreach (var c in value)
         {
-            runKey.DeleteValue(WindowsRunValueName, throwOnMissingValue: false);
-            return;
+            if (c == '\\')
+            {
+                backslashes++;
+                continue;
+            }
+
+            quoted.Append('\\', c == '"' ? (backslashes * 2) + 1 : backslashes).Append(c);
+            backslashes = 0;
         }
 
-        var processPath = Environment.ProcessPath;
-        if (string.IsNullOrWhiteSpace(processPath))
-        {
-            return;
-        }
-
-        var command = QuoteCommandArgument(processPath);
-        var existingValue = runKey.GetValue(WindowsRunValueName) as string;
-        if (string.Equals(existingValue, command, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        runKey.SetValue(WindowsRunValueName, command, RegistryValueKind.String);
+        return quoted.Append('\\', backslashes * 2).Append('"').ToString();
     }
 
     private static string QuoteCommandArgument(string value)

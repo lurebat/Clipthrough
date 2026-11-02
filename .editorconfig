@@ -61,6 +61,12 @@ dotnet_diagnostic.CA1310.severity = error  # specify StringComparison for correc
 dotnet_diagnostic.CA2201.severity = error  # do not raise reserved exception types
 dotnet_diagnostic.CA1823.severity = error  # unused private fields
 dotnet_diagnostic.CA2200.severity = error  # rethrow to preserve the stack trace
+# Unused private members (F-40). The audit's scratch build removed every one
+# these reported and still compiled; they read as live code to anyone
+# following a call graph. IDE rules only fail a build with
+# EnforceCodeStyleInBuild, which Clipthrough.csproj sets.
+dotnet_diagnostic.IDE0051.severity = error  # unused private member
+dotnet_diagnostic.IDE0052.severity = error  # private member assigned but never read
 
 # ---------------------------------------------------------------------------
 # Enforced: cheap, mechanical performance

@@ -20,22 +20,40 @@ public sealed class UpdateService : IUpdateService
     ];
 
     /// <summary>
-    /// Hosts from which update feeds are accepted. Must be HTTPS. Prevents feed
-    /// hijacking via the env-override or a tampered settings.json.
+    /// Where an update feed may come from: this repository, over HTTPS, and
+    /// nothing else (F-38, OD-5a). Checked against the URL's normalised path,
+    /// so "../" cannot climb out of it.
     /// </summary>
-    private static readonly string[] s_allowedFeedHosts =
+    /// <remarks>
+    /// What the pin covers: a feed URL arriving through settings.json or the
+    /// environment override can no longer name another account's releases.
+    /// A host-only check accepted any github.com repository, which anyone can
+    /// publish to.
+    ///
+    /// What it does not cover: the packages themselves are not signature
+    /// checked. Whoever can publish a release to this repository - its
+    /// account, or a CI token with release rights - can still ship an update.
+    /// Signing and verifying releases is a separate decision (S37).
+    /// </remarks>
+    private static readonly string[] s_allowedFeedPrefixes =
     [
-        "github.com",
-        "raw.githubusercontent.com",
-        "objects.githubusercontent.com",
+        "https://github.com/lurebat/Clipthrough/",
+        "https://raw.githubusercontent.com/lurebat/Clipthrough/",
     ];
 
     private readonly ISettingsService _settingsService;
 
-    public UpdateService(ISettingsService settingsService)
+    // Velopack restarts the app after applying an update; these bring it back
+    // to the same data folder (AppDataRoot.RelaunchArguments).
+    private readonly string[] _restartArguments;
+
+    public UpdateService(ISettingsService settingsService, AppDataRoot dataRoot)
     {
         _settingsService = settingsService;
+        _restartArguments = [.. dataRoot.RelaunchArguments];
     }
+
+    internal System.Collections.Generic.IReadOnlyList<string> RestartArguments => _restartArguments;
 
     public async Task<UpdateCheckResult> CheckForUpdatesAsync(
         bool ignoreAutoUpdateDisabled = false,
@@ -71,7 +89,7 @@ public sealed class UpdateService : IUpdateService
                 {
                     var pendingVersion = pendingUpdate.Version?.ToString();
                     Trace.TraceInformation($"Applying downloaded update {pendingVersion} on startup (AutoApplyUpdatesOnStartup=true).");
-                    mgr.ApplyUpdatesAndRestart(pendingUpdate);
+                    mgr.ApplyUpdatesAndRestart(pendingUpdate, _restartArguments);
                     return new UpdateCheckResult(true, pendingVersion, $"Applying update {pendingVersion}");
                 }
 
@@ -125,7 +143,7 @@ public sealed class UpdateService : IUpdateService
 
             var version = pendingUpdate.Version?.ToString();
             Trace.TraceInformation($"User-initiated apply: restarting to install update {version}.");
-            mgr.ApplyUpdatesAndRestart(pendingUpdate);
+            mgr.ApplyUpdatesAndRestart(pendingUpdate, _restartArguments);
             return true;
         }
         catch (Exception ex)
@@ -215,13 +233,14 @@ public sealed class UpdateService : IUpdateService
             return AppSettings.DefaultUpdateFeedUrl;
         }
 
-        var host = uri.Host;
-        if (!s_allowedFeedHosts.Any(h => string.Equals(h, host, StringComparison.OrdinalIgnoreCase)))
+        // Uri has already resolved any dot segments in the path.
+        var normalized = uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+        if (!s_allowedFeedPrefixes.Any(prefix => (normalized + "/").StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
         {
-            Trace.TraceWarning($"Update feed URL host '{host}' is not on the allowlist; using default.");
+            Trace.TraceWarning($"Update feed URL '{normalized}' is outside this repository; using default.");
             return AppSettings.DefaultUpdateFeedUrl;
         }
 
-        return trimmed;
+        return normalized;
     }
 }

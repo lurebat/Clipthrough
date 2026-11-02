@@ -21,16 +21,21 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
 
     public TestStorageOptionsService(string databasePath)
     {
+        DataRoot = AppDataRoot.Chosen(Path.GetDirectoryName(Path.GetFullPath(databasePath))!, AppDataRootSource.CommandLine);
         Current = new StorageOptions
         {
             DatabasePath = databasePath,
             DatabasePassword = string.Empty,
-        }.Normalize();
+        }.Normalize(DataRoot);
     }
 
     public StorageOptions Current { get; private set; }
 
+    public AppDataRoot DataRoot { get; }
+
     public bool HasSavedConfig => _hasSavedConfig;
+
+    public string? LoadFault { get; set; }
 
     public bool DatabaseExists => File.Exists(Current.DatabasePath);
 
@@ -43,7 +48,7 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
 
     public Task SaveAsync(StorageOptions options, CancellationToken cancellationToken = default)
     {
-        Current = options.Normalize();
+        Current = options.Normalize(DataRoot);
         _hasSavedConfig = true;
         SaveCount++;
         return Task.CompletedTask;
@@ -55,7 +60,13 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
         {
             DatabasePassword = newPassword ?? string.Empty,
             RememberPassword = rememberNewPassword,
-        }).Normalize();
+        }).Normalize(DataRoot);
+        return Task.CompletedTask;
+    }
+
+    public Task RunExclusiveAsync(Action<StorageOptions> action, CancellationToken cancellationToken = default)
+    {
+        action(Current);
         return Task.CompletedTask;
     }
 
@@ -66,7 +77,7 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
             DatabasePath = Current.DatabasePath,
             DatabasePassword = password,
             RememberPassword = Current.RememberPassword,
-        }.Normalize();
+        }.Normalize(DataRoot);
     }
 
     public void SetHasSavedConfig(bool value) => _hasSavedConfig = value;
@@ -88,6 +99,8 @@ internal sealed class TestStorageOptionsService : IStorageOptionsService
 internal sealed class TestSettingsService : ISettingsService
 {
     private AppSettings? _initializeCurrent;
+    private TaskCompletionSource? _holdNextSave;
+    private TaskCompletionSource _saveHeld = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public AppSettings Current { get; private set; } = AppSettings.Default;
 
@@ -107,15 +120,25 @@ internal sealed class TestSettingsService : ISettingsService
 
     public event EventHandler<AppSettings>? SettingsChanged;
 
-    public Task InitializeAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Makes <see cref="InitializeAsync"/> take this long. With no saved settings
+    /// the view model loads them inside its background database start, so this
+    /// holds the database "not ready" for a known time (F-30).
+    /// </summary>
+    public TimeSpan InitializeDelay { get; set; }
+
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
+        if (InitializeDelay > TimeSpan.Zero)
+        {
+            await Task.Delay(InitializeDelay, cancellationToken);
+        }
+
         if (_initializeCurrent is not null)
         {
             Current = _initializeCurrent;
             SettingsChanged?.Invoke(this, Current);
         }
-
-        return Task.CompletedTask;
     }
 
     public Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
@@ -148,10 +171,11 @@ internal sealed class TestSettingsService : ISettingsService
 
         LastMutation = mutate;
 
-        var hold = HoldNextSave;
-        HoldNextSave = null;
+        var hold = _holdNextSave;
+        _holdNextSave = null;
         if (hold is not null)
         {
+            _saveHeld.TrySetResult();
             await hold.Task;
         }
 
@@ -203,9 +227,23 @@ internal sealed class TestSettingsService : ISettingsService
     /// test can land an unrelated change while a save is in flight. That is the
     /// interleaving the real write gate allows and the one that used to lose
     /// updates. One-shot deliberately: the test's own update must not block on
-    /// the gate it is holding.
+    /// the gate it is holding - which only holds if the test waits for
+    /// <see cref="SaveHeld"/> before making it. A save made on another thread
+    /// (the settings dialog saves inside <c>Task.Run</c>) can otherwise arrive
+    /// second, leave the hold to the test's own update, and hang the test.
     /// </summary>
-    public TaskCompletionSource? HoldNextSave { get; set; }
+    public TaskCompletionSource? HoldNextSave
+    {
+        get => _holdNextSave;
+        set
+        {
+            _holdNextSave = value;
+            _saveHeld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+    }
+
+    /// <summary>Completes once a save has taken the <see cref="HoldNextSave"/> hold and is waiting on it.</summary>
+    public Task SaveHeld => _saveHeld.Task;
 
     public void SetCurrent(AppSettings settings)
     {
@@ -237,8 +275,18 @@ internal sealed class TestClipboardMonitorService : IClipboardMonitorService
 
     public bool IsRunning { get; private set; }
 
+    /// <summary>
+    /// When set, <see cref="Start"/> blocks until it completes (at most 30 s).
+    /// StartBackgroundServices starts the monitor first, so this holds every
+    /// background service behind it - letting a test see what startup did
+    /// before them without any of them racing it. Start runs on a thread-pool
+    /// thread, so blocking it does not stall the dispatcher.
+    /// </summary>
+    public Task? StartGate { get; init; }
+
     public void Start()
     {
+        StartGate?.Wait(TimeSpan.FromSeconds(30));
         IsRunning = true;
     }
 
@@ -261,7 +309,17 @@ internal sealed class TestClipboardMonitorService : IClipboardMonitorService
     /// </summary>
     public int PendingSuppressions { get; private set; }
 
-    public void SuppressNext() => PendingSuppressions++;
+    public string? LastSuppressedContent { get; private set; }
+
+    public void SuppressNext(string? content = null)
+    {
+        PendingSuppressions++;
+        LastSuppressedContent = content;
+    }
+
+    public int PendingForeignSuppressions { get; private set; }
+
+    public void SuppressNextForeignCopy() => PendingForeignSuppressions++;
 
     /// <summary>Mirrors the real gate: a withdrawn suppression is no longer pending.</summary>
     public void CancelSuppressNext()
@@ -277,10 +335,6 @@ internal sealed class TestClipboardMonitorService : IClipboardMonitorService
     public void SetCaptureBusy(bool isBusy) => _captureBusy.OnNext(isBusy);
 }
 
-internal sealed class TestClipSampleDataService : IClipSampleDataService
-{
-    public Task SeedAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-}
 
 internal sealed class TestNotificationService : IAppNotificationService
 {
@@ -324,9 +378,26 @@ internal sealed class TestClipExportService : IClipExportService
 
     public string? LastPrimaryPath { get; private set; }
 
+    public int ExportCount { get; private set; }
+
+    public int ToolExportCount { get; private set; }
+
+    /// <summary>The text the real service would have written: it reads Content, as this does.</summary>
+    public string? LastExportedContent { get; private set; }
+
     public Task<ClipExportResult> ExportAsync(ClipEntry clip, CancellationToken cancellationToken = default)
     {
+        ExportCount++;
+        LastExportedContent = clip.Content;
         LastExportDirectory = Path.Combine(Path.GetTempPath(), $"clip-export-{clip.Id}");
+        LastPrimaryPath = Path.Combine(LastExportDirectory, "rendered.txt");
+        return Task.FromResult(new ClipExportResult(LastExportDirectory, LastPrimaryPath));
+    }
+
+    public Task<ClipExportResult> ExportForToolAsync(ClipEntry clip, CancellationToken cancellationToken = default)
+    {
+        ToolExportCount++;
+        LastExportDirectory = Path.Combine(Path.GetTempPath(), $"clip-tool-copy-{clip.Id}");
         LastPrimaryPath = Path.Combine(LastExportDirectory, "rendered.txt");
         return Task.FromResult(new ClipExportResult(LastExportDirectory, LastPrimaryPath));
     }
@@ -421,14 +492,22 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
         return Task.CompletedTask;
     }
 
+    /// <summary>How many times OpenPathAsync ran - it ShellExecutes anything.</summary>
+    public int OpenPathCount { get; private set; }
+
+    /// <summary>The last URL given to OpenUrlAsync, the scheme-checked opener.</summary>
+    public string? LastOpenedUrl { get; private set; }
+
     public Task OpenPathAsync(string path)
     {
+        OpenPathCount++;
         LastOpenedPath = path;
         return Task.CompletedTask;
     }
 
     public Task OpenUrlAsync(string url)
     {
+        LastOpenedUrl = url;
         LastOpenedPath = url;
         return Task.CompletedTask;
     }
@@ -447,10 +526,68 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
 
     public void ClearTargetWindowCapture() { }
 
-    public void RestoreCapturedForeground() { }
+    public void RestoreCapturedForeground()
+    {
+        RestoreForegroundCount++;
+        Events.Add("restore");
+    }
+
+    /// <summary>The paste sequence as it happened: restore, cloak, uncloak, wait, paste.</summary>
+    public List<string> Events { get; } = [];
+
+    /// <summary>How many times the paste target was handed the foreground.</summary>
+    public int RestoreForegroundCount { get; private set; }
+
+    /// <summary>Every wait for the paste target, in order.</summary>
+    public List<TimeSpan> PasteTargetWaits { get; } = [];
+
+    public Task<bool> WaitForPasteTargetAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        PasteTargetWaits.Add(timeout);
+        Events.Add("wait");
+        return Task.FromResult(true);
+    }
+
+    /// <summary>Whether TryCloakWindow succeeds, as it does on Windows.</summary>
+    public bool CloakSupported { get; set; } = true;
+
+    /// <summary>Every cloak call, in order: (window, cloaked, releasedForeground).</summary>
+    public List<(Window Window, bool Cloaked, bool ReleasedForeground)> CloakCalls { get; } = [];
+
+    /// <summary>Windows currently cloaked.</summary>
+    public HashSet<Window> CloakedWindows { get; } = [];
+
+    /// <summary>Runs inside TryCloakWindow, to observe the state a cloak happens in.</summary>
+    public Action<Window>? OnCloak { get; set; }
+
+    public bool TryCloakWindow(Window window, bool releaseForeground)
+    {
+        if (!CloakSupported)
+        {
+            return false;
+        }
+
+        OnCloak?.Invoke(window);
+        Events.Add("cloak");
+        CloakCalls.Add((window, true, releaseForeground));
+        CloakedWindows.Add(window);
+        return true;
+    }
+
+    /// <summary>Runs inside UncloakWindow, to observe what the user is about to see.</summary>
+    public Action<Window>? OnUncloak { get; set; }
+
+    public void UncloakWindow(Window window)
+    {
+        OnUncloak?.Invoke(window);
+        Events.Add("uncloak");
+        CloakCalls.Add((window, false, false));
+        CloakedWindows.Remove(window);
+    }
 
     public void SimulatePasteKeystroke()
     {
+        Events.Add("paste");
         SimulatedPasteCount++;
     }
 
@@ -479,9 +616,38 @@ internal sealed class TestSystemInteractionService : ISystemInteractionService
 
     public bool IsTargetWindowElevated() => false;
 
-    public void SyncStartWithWindows(bool enabled)
+    /// <summary>What the OS reports for Animation effects.</summary>
+    public bool OsAnimationsEnabled { get; set; } = true;
+
+    public bool AreOsAnimationsEnabled() => OsAnimationsEnabled;
+
+    /// <summary>How many times something started watching the OS setting.</summary>
+    public int OsAnimationWatchCount { get; private set; }
+
+    private readonly List<Action> _osAnimationWatchers = [];
+
+    public IDisposable WatchOsAnimationSetting(Window window, Action onChanged)
     {
+        OsAnimationWatchCount++;
+        _osAnimationWatchers.Add(onChanged);
+        return System.Reactive.Disposables.Disposable.Create(() => _osAnimationWatchers.Remove(onChanged));
     }
+
+    /// <summary>Delivers a WM_SETTINGCHANGE to every watcher.</summary>
+    public void RaiseOsAnimationSettingChanged()
+    {
+        foreach (var watcher in _osAnimationWatchers.ToArray())
+        {
+            watcher();
+        }
+    }
+
+    /// <summary>Every Start with Windows call, in order: ("sync" | "reconcile", enabled).</summary>
+    public List<(string Kind, bool Enabled)> StartWithWindowsCalls { get; } = [];
+
+    public void SyncStartWithWindows(bool enabled) => StartWithWindowsCalls.Add(("sync", enabled));
+
+    public void ReconcileStartWithWindows(bool enabled) => StartWithWindowsCalls.Add(("reconcile", enabled));
 }
 
 internal sealed class TestSearchHistoryService : ISearchHistoryService
@@ -511,8 +677,7 @@ internal sealed class TemporaryDatabaseScope : IDisposable
 
     public TemporaryDatabaseScope()
     {
-        _directoryPath = Path.Combine(Path.GetTempPath(), "Clipthrough.Tests", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_directoryPath);
+        _directoryPath = TestTempDirectories.CreateDirectory();
         DatabasePath = Path.Combine(_directoryPath, "clipthrough.db");
 
         StorageOptionsService = new TestStorageOptionsService(DatabasePath);
@@ -527,6 +692,8 @@ internal sealed class TemporaryDatabaseScope : IDisposable
     }
 
     public string DatabasePath { get; }
+
+    public string DirectoryPath => _directoryPath;
 
     public TestStorageOptionsService StorageOptionsService { get; }
 
@@ -546,21 +713,20 @@ internal sealed class TemporaryDatabaseScope : IDisposable
 
     public ClipStoreService ClipStoreService { get; }
 
+    /// <summary>
+    /// Runs before the directory is deleted. A view model leaves database work
+    /// running that its synchronous Dispose does not await - a database start,
+    /// a maintenance pass, the daily backup, or other background database work - and
+    /// while it runs it reopens the database, so the delete fails however the pools
+    /// are cleared. See
+    /// HeadlessStartup.DrainDatabaseWorkBeforeDelete.
+    /// </summary>
+    internal Action? BeforeDelete { get; set; }
+
     public void Dispose()
     {
-        try
-        {
-            if (Directory.Exists(_directoryPath))
-            {
-                Directory.Delete(_directoryPath, recursive: true);
-            }
-        }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
+        BeforeDelete?.Invoke();
+        TestTempDirectories.TryDelete(_directoryPath);
     }
 }
 

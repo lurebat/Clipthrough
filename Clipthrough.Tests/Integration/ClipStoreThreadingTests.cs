@@ -253,6 +253,8 @@ public sealed class ClipStoreThreadingTests
 
         public void Clear() => _threads.Clear();
 
+        public AppDataRoot DataRoot => inner.DataRoot;
+
         public StorageOptions Current
         {
             get
@@ -263,6 +265,8 @@ public sealed class ClipStoreThreadingTests
         }
 
         public bool HasSavedConfig => inner.HasSavedConfig;
+
+        public string? LoadFault => inner.LoadFault;
 
         public bool DatabaseExists => inner.DatabaseExists;
 
@@ -276,5 +280,8 @@ public sealed class ClipStoreThreadingTests
 
         public Task RekeyAsync(string currentPassword, string newPassword, bool rememberNewPassword, CancellationToken cancellationToken = default)
             => inner.RekeyAsync(currentPassword, newPassword, rememberNewPassword, cancellationToken);
+
+        public Task RunExclusiveAsync(Action<StorageOptions> action, CancellationToken cancellationToken = default)
+            => inner.RunExclusiveAsync(action, cancellationToken);
     }
 }

@@ -1,5 +1,6 @@
 using Clipthrough.Models;
 using Clipthrough.Services;
+using System.IO;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -7,12 +8,25 @@ namespace Clipthrough.Tests.Unit;
 
 public sealed class UpdateServiceTests
 {
+    private static readonly AppDataRoot s_dataRoot = AppDataRoot.Chosen(Path.Combine(Path.GetTempPath(), "ct-update-unused"), AppDataRootSource.EnvironmentVariable);
+
+    // The updated app is restarted by Velopack, with these arguments; without
+    // them a session started with --data-dir comes back on the default folder.
+    [Fact]
+    public void TheRestartAfterAnUpdate_KeepsACommandLineDataFolder()
+    {
+        var root = AppDataRoot.Chosen(Path.Combine(Path.GetTempPath(), "ct-update-cli"), AppDataRootSource.CommandLine);
+
+        var service = new UpdateService(new TestSettingsService(), root);
+
+        Assert.Equal(["--data-dir", root.Directory], service.RestartArguments);
+    }
     [Fact]
     public async Task CheckForUpdatesAsync_RespectsDisabledAutoUpdateByDefault()
     {
         var settings = new TestSettingsService();
         settings.SetCurrent(AppSettings.Default with { EnableAutoUpdate = false });
-        var service = new UpdateService(settings);
+        var service = new UpdateService(settings, s_dataRoot);
 
         var result = await service.CheckForUpdatesAsync();
 
@@ -25,7 +39,7 @@ public sealed class UpdateServiceTests
     {
         var settings = new TestSettingsService();
         settings.SetCurrent(AppSettings.Default with { EnableAutoUpdate = false });
-        var service = new UpdateService(settings);
+        var service = new UpdateService(settings, s_dataRoot);
 
         var result = await service.CheckForUpdatesAsync(ignoreAutoUpdateDisabled: true);
 
@@ -80,13 +94,32 @@ public sealed class UpdateServiceTests
         Assert.Equal(AppSettings.DefaultUpdateFeedUrl, feedUrl);
     }
 
-    [Fact]
-    public void ResolveFeedUrl_AllowlistedHttpsFeedIsAccepted()
+    /// <summary>
+    /// The pin is to this repository, not to GitHub (F-38, OD-5a). A host-only
+    /// check accepted any account's releases as an update source, so a
+    /// tampered settings.json or environment variable could point the app at
+    /// a feed anyone can publish to.
+    /// </summary>
+    [Theory]
+    [InlineData("https://github.com/some-org/some-repo/releases/latest/download")]
+    [InlineData("https://github.com/lurebat/ClipthroughEvil/releases/latest/download")]
+    [InlineData("https://github.com/lurebat/Clipthrough/../../other/repo/releases/latest/download")]
+    [InlineData("https://raw.githubusercontent.com/other/repo/main")]
+    [InlineData("https://objects.githubusercontent.com/github-production-release-asset-2e65be/1")]
+    public void ResolveFeedUrl_AFeedOutsideThisRepositoryIsRejected(string configuredFeedUrl)
     {
-        const string customGitHubFeed = "https://github.com/some-org/some-repo/releases/latest/download";
-        var feedUrl = UpdateService.ResolveFeedUrl(customGitHubFeed, null);
+        var feedUrl = UpdateService.ResolveFeedUrl(configuredFeedUrl, null);
 
-        Assert.Equal(customGitHubFeed, feedUrl);
+        Assert.Equal(AppSettings.DefaultUpdateFeedUrl, feedUrl);
+    }
+
+    [Fact]
+    public void ResolveFeedUrl_AnotherFeedInThisRepositoryIsAccepted()
+    {
+        const string tagFeed = "https://github.com/lurebat/Clipthrough/releases/download/v0.17.1";
+        var feedUrl = UpdateService.ResolveFeedUrl(tagFeed, null);
+
+        Assert.Equal(tagFeed, feedUrl);
     }
 
     [Theory]

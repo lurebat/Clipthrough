@@ -1,7 +1,9 @@
 using System;
 using System.IO;
+using Clipthrough.Models;
 using Clipthrough.Services;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Clipthrough.Tests.Unit;
@@ -30,7 +32,7 @@ public sealed class LegacyDatabaseMigrationTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_tempRoot, recursive: true); } catch { /* test cleanup */ }
+        TestTempDirectories.TryDelete(_tempRoot);
     }
 
     [Fact]
@@ -63,7 +65,7 @@ public sealed class LegacyDatabaseMigrationTests : IDisposable
 
         Assert.True(File.Exists(migratedPath), "Migration should have produced a .db file.");
 
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        using var connection = TestConnections.Create(new SqliteConnectionStringBuilder
         {
             DataSource = migratedPath,
             Mode = SqliteOpenMode.ReadOnly,
@@ -116,6 +118,29 @@ public sealed class LegacyDatabaseMigrationTests : IDisposable
     }
 
     /// <summary>
+    /// The migration end to end, through the data root: only the default root
+    /// had a pre-0.6.3 version, and its library moves to the uninstall-safe
+    /// sibling on first launch. Local application data is a temp folder here.
+    /// </summary>
+    [Fact]
+    public void DefaultRoot_CopiesTheLegacyLibraryIntoItsUninstallSafeFolder()
+    {
+        var localAppData = Path.Combine(_tempRoot, "LocalAppData");
+        var root = AppDataRoot.Default(localAppData);
+        Directory.CreateDirectory(Path.GetDirectoryName(root.LegacyDatabasePath!)!);
+        SeedDatabaseWithUncheckpointedWalFrames(root.LegacyDatabasePath!, rowCount: 3, out var reader);
+        reader.Dispose();
+        SqliteConnection.ClearAllPools();
+
+        using var provider = new ServiceCollection().BuildServiceProvider();
+        var storage = new StorageOptionsService(new FakeDataProtectionService(), root, provider);
+        SqliteConnection.ClearAllPools();
+
+        Assert.Equal(Path.Combine(localAppData, "ClipthroughData", "clipthrough.db"), storage.Current.DatabasePath);
+        Assert.True(File.Exists(storage.Current.DatabasePath), "The legacy library should have been copied to the default location.");
+    }
+
+    /// <summary>
     /// Creates a SQLite database in WAL journaling mode with the specified
     /// number of rows committed to the WAL. Returns a still-open reader
     /// connection via <paramref name="readerToKeepAlive"/>: the caller must
@@ -132,7 +157,7 @@ public sealed class LegacyDatabaseMigrationTests : IDisposable
             Mode = SqliteOpenMode.ReadWriteCreate,
         };
 
-        var writer = new SqliteConnection(builder.ToString());
+        var writer = TestConnections.Create(builder.ToString());
         writer.Open();
         try
         {
@@ -168,7 +193,7 @@ public sealed class LegacyDatabaseMigrationTests : IDisposable
             // Open the reader before closing the writer; the reader will hold
             // a shared lock on the WAL so SQLite skips the last-close
             // checkpoint and leaves the .db-wal file behind.
-            readerToKeepAlive = new SqliteConnection(builder.ToString());
+            readerToKeepAlive = TestConnections.Create(builder.ToString());
             readerToKeepAlive.Open();
 
             using (var sanity = readerToKeepAlive.CreateCommand())

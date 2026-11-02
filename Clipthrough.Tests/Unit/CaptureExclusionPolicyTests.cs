@@ -170,6 +170,8 @@ public class CaptureExclusionPolicyTests
         }
 
         public byte[]? TryResolveIcon(string? processPath) => null;
+
+        public int? TryGetClipboardOwnerProcessId() => null;
     }
 
     [Fact]

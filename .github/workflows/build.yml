@@ -19,7 +19,10 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 10.0.x
+          # The SDK feature band comes from global.json, so CI builds with the
+          # band a developer does. A new band can bring new analyzers, and the
+          # build enforces a set of them at error.
+          global-json-file: global.json
 
       - name: Cache NuGet packages
         uses: actions/cache@v5
@@ -44,6 +47,13 @@ jobs:
           --collect:"XPlat Code Coverage"
           --results-directory TestResults
 
+      # The headless tests carry about a quarter of the mutation guards. A
+      # cleanup failure (work outliving a previous test) is re-run once; an
+      # assertion failure fails the build. See the script for the rules.
+      - name: Headless tests
+        shell: pwsh
+        run: ./.github/scripts/Invoke-HeadlessTests.ps1 -Configuration Release -NoBuild -ResultsDirectory TestResults
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7
@@ -51,8 +61,15 @@ jobs:
           name: test-results
           path: TestResults/**
 
-      - name: Publish
-        run: dotnet publish .\Clipthrough\Clipthrough.csproj --configuration Release --output artifacts\win-x64
+      - name: Publish (framework-dependent win-x64)
+        run: dotnet publish .\Clipthrough\Clipthrough.csproj --configuration Release -r win-x64 --self-contained false --output artifacts\win-x64
+
+      - name: Stage native symbols
+        shell: pwsh
+        run: >
+          ./.github/scripts/Stage-PublishSymbols.ps1
+          -PublishDirectory artifacts\win-x64
+          -SymbolsDirectory artifacts\symbols
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v7
@@ -60,3 +77,8 @@ jobs:
           name: Clipthrough-win-x64
           path: artifacts\win-x64\**
 
+      - name: Upload native symbols
+        uses: actions/upload-artifact@v7
+        with:
+          name: Clipthrough-win-x64-symbols
+          path: artifacts\symbols\**

@@ -24,7 +24,7 @@ using Xunit;
 
 namespace Clipthrough.Tests.Headless;
 
-public sealed class MainWindowViewModelHeadlessTests
+public sealed partial class MainWindowViewModelHeadlessTests
 {
     [AvaloniaFact]
     public async Task CapturedClipRefresh_SelectsNewestClip()
@@ -36,7 +36,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var firstClip = await CaptureTextClipAsync(scope.ClipStoreService, "first");
@@ -67,7 +67,6 @@ public sealed class MainWindowViewModelHeadlessTests
         using var viewModel = new MainWindowViewModel(
             clipStore,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -83,7 +82,8 @@ public sealed class MainWindowViewModelHeadlessTests
             new Clipthrough.Services.BackgroundJobIndicator(),
             scope.DatabaseInitializer);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
+        var searchesAfterStartup = clipStore.SearchCallCount;
 
         for (var i = 1; i <= 6; i++)
         {
@@ -101,12 +101,27 @@ public sealed class MainWindowViewModelHeadlessTests
             clipboardMonitor.Emit(clip);
         }
 
-        await Task.Delay(500);
-        Dispatcher.UIThread.RunJobs();
+        // Until the database start has finished and the burst has landed, not a
+        // fixed 500 ms: the burst is emitted while the library is still loading,
+        // and under load the start alone outlasted the sleep.
+        var clock = Stopwatch.StartNew();
+        while ((viewModel.IsLoadingDatabase || viewModel.SelectedClip?.Id != 6) && clock.Elapsed < TimeSpan.FromSeconds(10))
+        {
+            await Task.Delay(20);
+            Dispatcher.UIThread.RunJobs();
+        }
 
-        Assert.Equal(6, viewModel.SelectedClip?.Id);
-        Assert.InRange(clipStore.SearchCallCount, 2, 4);
+        // Measured from the end of startup. The old absolute "2 to 4 searches,
+        // clip 6 selected" counted the startup refresh, which this test raced
+        // (F-30): under the default sort a capture is inserted in place with no
+        // search at all, and a hidden window selects nothing until it is shown.
+        Assert.Equal(6, viewModel.Clips[0].Clip.Id);
+        Assert.InRange(clipStore.SearchCallCount - searchesAfterStartup, 0, 3);
         Assert.Equal(1, clipStore.MaxConcurrentSearches);
+
+        viewModel.SetMainWindowVisible(true);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(6, viewModel.SelectedClip?.Id);
     }
 
     [AvaloniaFact]
@@ -118,7 +133,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var systemInteraction = new TestSystemInteractionService();
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         var pinned = new ClipEntry
         {
@@ -161,7 +176,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var systemInteraction = new TestSystemInteractionService();
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var clip = await CaptureImageClipAsync(scope.ClipStoreService, CreatePngBytes(0), "image");
@@ -183,7 +198,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var systemInteraction = new TestSystemInteractionService();
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var missingPath = Path.Combine(Path.GetTempPath(), "clipthrough-absent-" + Guid.NewGuid().ToString("N"));
@@ -227,7 +242,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var systemInteraction = new TestSystemInteractionService();
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var clip = await CaptureFilesClipAsync(scope.ClipStoreService, ["C:\\Temp\\alpha.txt", "D:\\Data\\beta.txt"]);
@@ -243,6 +258,273 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.Equal($"C:\\TEMP\\ALPHA.TXT{Environment.NewLine}D:\\DATA\\BETA.TXT", systemInteraction.LastCopiedText);
     }
 
+    /// <summary>
+    /// The right-click Transform menu runs on the clicked row rather than the
+    /// selection, through its own command. It decided "is this HTML?" by
+    /// comparing against BoxTableToHtml alone, so Markdown → HTML from a row
+    /// stored the CF_HTML document as plain text and put it on the clipboard as
+    /// text: pasting gave the raw header and markup (F-04).
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RowTransform_MarkdownToHtml_StoresAndCopiesHtml()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var clip = await CaptureTextClipAsync(scope.ClipStoreService, "# Title\n\nSome **bold** text.");
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        var row = viewModel.Clips.Single(c => c.Clip.Id == clip.Id);
+        await row.ApplyTextTransformationCommand.Execute(TextTransformation.MarkdownToHtml).ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(ClipContentFormat.Html, systemInteraction.LastCopiedRichContentFormat);
+        Assert.Contains("<h1", systemInteraction.LastCopiedRichContent, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(systemInteraction.LastCopiedText);
+
+        var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        var stored = Assert.Single(all.Items, c => c.SourceClipId == clip.Id);
+        Assert.Equal(ClipContentFormat.Html, stored.ContentFormat);
+        Assert.Equal(ContentType.RichText, stored.ContentType);
+        Assert.Equal("builtin:MarkdownToHtml", stored.TransformKind);
+
+        // Live check C3: the stored text began with the CF_HTML header.
+        Assert.DoesNotContain("StartHTML", stored.ContentPrefix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Live check C3 (2026-10-29): HTML -> Markdown on a rich clip copied from
+    /// Edge did nothing, from every entry point. The transform read the clip's
+    /// plain text - which has no markup to convert - instead of the HTML stored
+    /// with it.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RowTransform_HtmlToMarkdown_OnARichBrowserClip_ConvertsItsHtml()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, new TestSessionLogService());
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var clip = (await RichBrowserClip.CaptureAsync(scope.ClipStoreService))!;
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        var row = viewModel.Clips.Single(c => c.Clip.Id == clip.Id);
+        await row.ApplyTextTransformationCommand.Execute(TextTransformation.HtmlToMarkdown).ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        var stored = Assert.Single(all.Items, c => c.SourceClipId == clip.Id);
+        Assert.Equal("builtin:HtmlToMarkdown", stored.TransformKind);
+        Assert.Contains("C3 Heading", stored.ContentPrefix, StringComparison.Ordinal);
+        Assert.Contains("**bold**", stored.ContentPrefix, StringComparison.Ordinal);
+        Assert.Contains("](https://example.com/c7-link)", stored.ContentPrefix, StringComparison.Ordinal);
+        Assert.DoesNotContain("<", stored.ContentPrefix, StringComparison.Ordinal);
+        Assert.Contains("**bold**", systemInteraction.LastCopiedText, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Rubber-duck F-16-3 follow-up. HTML -&gt; Markdown reads a rich clip's
+    /// markup, so the result must be compared with the text the clip shows, not
+    /// with that markup: a tagless fragment whose Markdown is just its text is no
+    /// change, and must not leave a duplicate clip behind.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RowTransform_HtmlToMarkdown_WhenTheMarkdownIsTheClipsText_ReportsNoChangeAndCreatesNothing()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, new TestSessionLogService());
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var clip = (await RichBrowserClip.CaptureTaglessAsync(scope.ClipStoreService, "Fish", "Fish"))!;
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        // Settle the startup refresh, so the list holds the captured row.
+        for (var attempt = 0; attempt < 200 && !viewModel.StatusText.Contains("matching", StringComparison.Ordinal); attempt++)
+        {
+            await Task.Delay(10);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.Contains("matching", viewModel.StatusText, StringComparison.Ordinal);
+
+
+        // Startup also owes a 300 ms debounced filter refresh, which no state
+        // here reveals, and every refresh ends by writing the list summary to
+        // StatusText. With the converter already warm from earlier tests the
+        // transform finishes inside that window, and the summary landing after
+        // it replaced the status under test. So assert on what the transform
+        // wrote, recorded as it happens, and count clips in the store.
+        var statusWrites = new List<string>();
+        void RecordStatus(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(MainWindowViewModel.StatusText))
+            {
+                statusWrites.Add(viewModel.StatusText);
+            }
+        }
+
+        viewModel.PropertyChanged += RecordStatus;
+        try
+        {
+            var row = viewModel.Clips.Single(c => c.Clip.Id == clip.Id);
+            await row.ApplyTextTransformationCommand.Execute(TextTransformation.HtmlToMarkdown).ToTask();
+            Dispatcher.UIThread.RunJobs();
+        }
+        finally
+        {
+            viewModel.PropertyChanged -= RecordStatus;
+        }
+
+        var transformStatuses = statusWrites.Where(s => !s.Contains("matching", StringComparison.Ordinal)).ToList();
+        Assert.True(transformStatuses.Count > 0, "The transform wrote no status at all.");
+        Assert.Equal("No text or file clips changed by transformation", transformStatuses[^1]);
+        Assert.Null(systemInteraction.LastCopiedText);
+        var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        Assert.Equal(clip.Id, Assert.Single(all.Items).Id);
+    }
+
+    /// <summary>
+    /// The other half: a tagless fragment whose entities decode still converts
+    /// from the list, because its Markdown differs from the text it shows.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RowTransform_HtmlToMarkdown_OnATaglessFragmentWithEntities_ConvertsIt()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, new TestSessionLogService());
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var clip = (await RichBrowserClip.CaptureTaglessAsync(scope.ClipStoreService, "Fish &amp; Chips", "Fish & Chips"))!;
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        var row = viewModel.Clips.Single(c => c.Clip.Id == clip.Id);
+        await row.ApplyTextTransformationCommand.Execute(TextTransformation.HtmlToMarkdown).ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        var stored = Assert.Single(all.Items, c => c.SourceClipId == clip.Id);
+        // The exporter backslash-escapes '&', which Markdown renders as a bare '&'.
+        Assert.Equal("Fish \\& Chips", stored.ContentPrefix.Trim());
+        Assert.Equal("Fish \\& Chips", systemInteraction.LastCopiedText?.Trim());
+    }
+
+    /// <summary>
+    /// Input too deeply nested to convert safely (F-48) is left alone, and the
+    /// status says why rather than a bare "no change".
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RowTransform_MarkdownToHtmlOnTooDeepInput_SaysWhyAndCreatesNothing()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, new TestSessionLogService());
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var clip = await CaptureTextClipAsync(scope.ClipStoreService, new string('[', 8192));
+        clipboardMonitor.Emit(clip);
+        Dispatcher.UIThread.RunJobs();
+
+        // Settle the startup refresh, so the list holds the captured row.
+        for (var attempt = 0; attempt < 200 && !viewModel.StatusText.Contains("matching", StringComparison.Ordinal); attempt++)
+        {
+            await Task.Delay(10);
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        Assert.Contains("matching", viewModel.StatusText, StringComparison.Ordinal);
+
+        // Startup also owes a 300 ms debounced filter refresh, which no state
+        // here reveals, and every refresh ends by writing the list summary to
+        // StatusText. Landing after the transform it replaced the message under
+        // test (about one headless run in ten). So assert on what the transform
+        // wrote, recorded as it happens, and let refreshes write what they like.
+        var statusWrites = new List<string>();
+        void RecordStatus(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(MainWindowViewModel.StatusText))
+            {
+                statusWrites.Add(viewModel.StatusText);
+            }
+        }
+
+        viewModel.PropertyChanged += RecordStatus;
+        try
+        {
+            var row = viewModel.Clips.Single(c => c.Clip.Id == clip.Id);
+            await row.ApplyTextTransformationCommand.Execute(TextTransformation.MarkdownToHtml).ToTask();
+            Dispatcher.UIThread.RunJobs();
+        }
+        finally
+        {
+            viewModel.PropertyChanged -= RecordStatus;
+        }
+
+        var transformStatuses = statusWrites.Where(s => !s.Contains("matching", StringComparison.Ordinal)).ToList();
+        Assert.True(transformStatuses.Count > 0, "The transform wrote no status at all.");
+        Assert.Equal(AppText.TransformInputTooDeeplyNested, transformStatuses[^1]);
+        Assert.Null(systemInteraction.LastCopiedRichContent);
+        var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        Assert.DoesNotContain(all.Items, c => c.SourceClipId == clip.Id);
+    }
+
+    /// <summary>
+    /// The row path must keep transforming the clicked row - not the selection
+    /// and not the checked clips - now that it shares the menu path's pipeline.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task RowTransform_AppliesToTheClickedRowOnly()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+        await viewModel.InitializeAsync();
+        viewModel.SetMainWindowVisible(true);
+
+        var clicked = await CaptureTextClipAsync(scope.ClipStoreService, "clicked row");
+        clipboardMonitor.Emit(clicked);
+        var selected = await CaptureTextClipAsync(scope.ClipStoreService, "selected row");
+        clipboardMonitor.Emit(selected);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(selected.Id, viewModel.SelectedClip?.Id);
+        viewModel.Clips.Single(c => c.Clip.Id == selected.Id).IsChecked = true;
+
+        var row = viewModel.Clips.Single(c => c.Clip.Id == clicked.Id);
+        await row.ApplyTextTransformationCommand.Execute(TextTransformation.UpperCase).ToTask();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("CLICKED ROW", systemInteraction.LastCopiedText);
+        var all = await scope.ClipStoreService.SearchAsync(new ClipSearchFilters());
+        Assert.Single(all.Items, c => c.SourceClipId is not null);
+    }
+
     [AvaloniaFact]
     public async Task SelectAllAndFavoriteSelected_UpdateAllCheckedClips()
     {
@@ -253,7 +535,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var firstClip = await CaptureTextClipAsync(scope.ClipStoreService, "first");
@@ -284,7 +566,6 @@ public sealed class MainWindowViewModelHeadlessTests
         using var viewModel = new MainWindowViewModel(
             gatedStore,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -300,7 +581,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new Clipthrough.Services.BackgroundJobIndicator(),
             scope.DatabaseInitializer);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var firstClip = await CaptureTextClipAsync(scope.ClipStoreService, "first");
@@ -358,7 +639,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "original");
@@ -385,7 +666,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "original");
@@ -415,7 +696,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         const string originalMarkup = "<p><span style=\"color:#ff0000\">original</span></p>";
@@ -439,7 +720,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         const string rtf = @"{\rtf1\ansi{\colortbl ;\red255\green0\blue0;}\cf1 original}";
@@ -468,7 +749,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         const string originalMarkup = "<p><strong>original</strong></p>";
@@ -499,7 +780,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         const string rtf = @"{\rtf1\ansi{\colortbl ;\red255\green0\blue0;}\cf1 original}";
@@ -524,7 +805,17 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
+
+        // InitializeAsync opens the database on a worker thread and returns.
+        // Until that lands every refresh is a no-op, so the RefreshAsync that
+        // selects the new clip would be dropped and the original stay selected.
+        for (var attempt = 0; attempt < 200 && viewModel.IsLoadingDatabase; attempt++)
+        {
+            await Task.Delay(25);
+            Dispatcher.UIThread.RunJobs();
+        }
+        Assert.False(viewModel.IsLoadingDatabase);
 
         var clip = CreateImageClipEntry(CreatePngBytes(unchecked((int)0xFFFF0000)), "original image");
         viewModel.SelectedClip = new ClipItemViewModel(clip);
@@ -555,7 +846,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         sessionLogService.Emit(new SessionLogEntry
         {
@@ -587,7 +878,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         Assert.True(viewModel.IsWelcomeOpen);
         Assert.Equal(AppText.WelcomeStatusText, viewModel.StatusText);
@@ -605,7 +896,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         Assert.False(viewModel.IsWelcomeOpen);
@@ -629,10 +920,35 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         Assert.True(viewModel.IsWelcomeOpen);
         Assert.Equal(AppText.WelcomeStatusText, viewModel.StatusText);
+    }
+
+    /// <summary>
+    /// A torn storage.json leaves the app on the default library. That is the
+    /// only recovery there is, but it must not be a silent one (F-22).
+    /// </summary>
+    [AvaloniaFact]
+    public async Task InitializeAsync_WhenStorageConfigWasUnreadable_TellsTheUser()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        scope.StorageOptionsService.LoadFault = "storage.json could not be read and was moved to storage.json.corrupt-x.";
+
+        var clipboardMonitor = new TestClipboardMonitorService();
+        var systemInteraction = new TestSystemInteractionService();
+        var sessionLogService = new TestSessionLogService();
+        using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
+
+        await viewModel.InitializeAsync();
+
+        var notification = scope.NotificationService.LastNotification;
+        Assert.NotNull(notification);
+        Assert.Equal(AppText.StorageLoadFailedTitle, notification.Title);
+        Assert.Equal(scope.StorageOptionsService.LoadFault, notification.Message);
+        Assert.Equal(AppNotificationLevel.Error, notification.Level);
+        Assert.True(viewModel.IsWelcomeOpen);
     }
 
     [AvaloniaFact]
@@ -660,7 +976,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         Assert.True(viewModel.ShowFavoritesOnly);
         Assert.True(viewModel.ShowSensitiveOnly);
@@ -717,7 +1033,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var systemInteraction = new TestSystemInteractionService();
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.OpenSettingsCommand.Execute().Subscribe();
         Dispatcher.UIThread.RunJobs();
@@ -927,7 +1243,7 @@ public sealed class MainWindowViewModelHeadlessTests
             scope, clipboardMonitor, systemInteraction, sessionLogService,
             semanticSearchService: semantic, embeddingWorker: embeddingWorker);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         // InitializeAsync kicks the database open on a worker thread and returns.
         // SaveSettingsAsync short-circuits to "still loading" until that lands, so
@@ -975,7 +1291,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.Settings.EnableToggleFavoritesHotkey = true;
         viewModel.Settings.ToggleFavoritesHotkey = "Ctrl+D";
@@ -1001,7 +1317,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.Settings.ExcludedCaptureAppsText = "1Password\n\n  *keepass*  \n";
         await viewModel.SaveSettingsCommand.Execute().ToTask();
@@ -1027,7 +1343,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         await viewModel.SaveSettingsCommand.Execute().ToTask();
 
         // Saving from the welcome screen kicks off StartDatabaseInBackgroundAsync,
@@ -1055,7 +1371,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "export me");
         clipboardMonitor.Emit(clip);
@@ -1077,7 +1393,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "favorite me");
@@ -1105,7 +1421,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "row favorite");
         clipboardMonitor.Emit(clip);
@@ -1130,7 +1446,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "favorite current");
@@ -1156,7 +1472,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "password=supersecret");
         clipboardMonitor.Emit(clip);
@@ -1202,7 +1518,7 @@ public sealed class MainWindowViewModelHeadlessTests
         using var viewModel = CreateViewModel(
             scope, clipboardMonitor, systemInteraction, sessionLogService, dragDropService: dragDrop);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         // Seed a rule that certainly matches the dropped payload, after VM
@@ -1263,7 +1579,7 @@ public sealed class MainWindowViewModelHeadlessTests
             backgroundOcrQueue: ocrQueue, dragDropService: dragDrop,
             ocrService: new TestOcrService(isAvailable: true));
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         var imported = await viewModel.ImportDroppedDataAsync(new Avalonia.Input.DataTransfer(), null);
@@ -1306,7 +1622,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSessionLogService(),
             clipStore: pagedStore,
             semanticSearchService: semantic);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.UseSemanticClipSearch = true;
         viewModel.SearchText = "alpha";
@@ -1380,7 +1696,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSessionLogService(),
             clipStore: pagedStore,
             semanticSearchService: new StubSemanticSearchService(oldestId));
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.UseSemanticClipSearch = true;
         viewModel.SearchText = "alpha";
@@ -1456,7 +1772,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             semanticSearchService: new StubSemanticSearchService(semanticOnlyId));
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.UseSemanticClipSearch = true;
         viewModel.SearchText = "alpha";
@@ -1491,7 +1807,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             embeddingWorker: worker);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.StartBackgroundServices();
         Assert.False(worker.IsRunning);
@@ -1525,7 +1841,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             embeddingWorker: worker);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.StartBackgroundServices();
         Assert.True(worker.IsRunning);
@@ -1578,7 +1894,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             embeddingWorker: worker);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.Dispose();
         viewModel.StartBackgroundServices();
@@ -1605,7 +1921,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             embeddingWorker: worker);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.StartBackgroundServices();
 
@@ -1627,7 +1943,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestClipboardMonitorService(),
             new TestSystemInteractionService(),
             new TestSessionLogService());
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         viewModel.Dispose();
         var savesAfterFirst = scope.SettingsService.SaveCallCount;
@@ -1676,7 +1992,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             clipStore: countingStore);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         for (var attempt = 0; attempt < 40 && viewModel.Clips.Count < rows; attempt++)
         {
@@ -1721,12 +2037,12 @@ public sealed class MainWindowViewModelHeadlessTests
         Clipthrough.Services.IOcrService? ocrService = null,
         IClipStoreService? clipStore = null,
         Clipthrough.Services.Search.ISemanticSearchService? semanticSearchService = null,
-        Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null)
+        Clipthrough.Services.Search.IEmbeddingWorker? embeddingWorker = null,
+        Clipthrough.Services.IDatabaseBackupService? databaseBackupService = null)
     {
-        return new MainWindowViewModel(
+        var viewModel = new MainWindowViewModel(
             clipStore ?? scope.ClipStoreService,
             clipboardMonitor,
-            new TestClipSampleDataService(),
             scope.SettingsService,
             systemInteraction,
             scope.StorageOptionsService,
@@ -1743,7 +2059,10 @@ public sealed class MainWindowViewModelHeadlessTests
             scope.DatabaseInitializer,
             semanticSearchService: semanticSearchService,
             embeddingWorker: embeddingWorker,
+            databaseBackupService: databaseBackupService,
             dragDropService: dragDropService);
+        HeadlessStartup.DrainDatabaseWorkBeforeDelete(scope, viewModel);
+        return viewModel;
     }
 
     /// <summary>
@@ -2145,13 +2464,12 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             clipStore: blockingStore);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
-        for (var attempt = 0; attempt < 80 && viewModel.Clips.Count < 200; attempt++)
-        {
-            await Task.Delay(25);
-            Dispatcher.UIThread.RunJobs();
-        }
+        // Startup re-applies the saved filters, which queues a refresh of its own;
+        // let it land before paging, and before every count asserted below.
+        await viewModel.WhenRefreshesIdleAsync();
+        Dispatcher.UIThread.RunJobs();
 
         Assert.Equal(200, viewModel.Clips.Count);
         await viewModel.LoadMoreCommand.Execute().ToTask();
@@ -2184,12 +2502,8 @@ public sealed class MainWindowViewModelHeadlessTests
 
         blockingStore.ReleaseWrites();
         await pendingWrite;
-
-        for (var attempt = 0; attempt < 200 && viewModel.Clips.Count != 200; attempt++)
-        {
-            await Task.Delay(25);
-            Dispatcher.UIThread.RunJobs();
-        }
+        await viewModel.WhenRefreshesIdleAsync();
+        Dispatcher.UIThread.RunJobs();
 
         // All 201 clips still match "keep", so a depth that failed to reset
         // shows up as 201.
@@ -2227,7 +2541,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestClipboardMonitorService(),
             new TestSystemInteractionService(),
             new TestSessionLogService());
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         for (var attempt = 0; attempt < 80 && viewModel.Clips.Count < 200; attempt++)
         {
@@ -2298,7 +2612,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             clipStore: pagedStore);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         for (var attempt = 0; attempt < 40 && viewModel.Clips.Count < 2; attempt++)
         {
@@ -2359,7 +2673,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             clipStore: pagedStore);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         for (var attempt = 0; attempt < 40 && viewModel.Clips.Count < 3; attempt++)
         {
@@ -2421,7 +2735,7 @@ public sealed class MainWindowViewModelHeadlessTests
             new TestSystemInteractionService(),
             new TestSessionLogService(),
             clipStore: pagedStore);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         for (var attempt = 0; attempt < 40 && viewModel.Clips.Count < 2; attempt++)
         {
@@ -2526,7 +2840,25 @@ public sealed class MainWindowViewModelHeadlessTests
         public Task<bool> MarkOcrForRerunAsync(long clipId, CancellationToken cancellationToken = default) => inner.MarkOcrForRerunAsync(clipId, cancellationToken);
         public Task<IReadOnlyList<long>> MarkAllSucceededForRerunAsync(CancellationToken cancellationToken = default) => inner.MarkAllSucceededForRerunAsync(cancellationToken);
         public Task<OcrCoverage> GetOcrCoverageAsync(CancellationToken cancellationToken = default) => inner.GetOcrCoverageAsync(cancellationToken);
-        public Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default) => inner.ApplyMaintenanceAsync(cancellationToken);
+        private volatile bool _maintenanceShouldFail;
+        private int _maintenanceCount;
+
+        public int MaintenanceCount => Volatile.Read(ref _maintenanceCount);
+
+        public void StartFailingMaintenance() => _maintenanceShouldFail = true;
+
+        public void StopFailingMaintenance() => _maintenanceShouldFail = false;
+
+        public Task<ClipMaintenanceResult> ApplyMaintenanceAsync(CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _maintenanceCount);
+            if (_maintenanceShouldFail)
+            {
+                throw new InvalidOperationException("Simulated maintenance failure.");
+            }
+
+            return inner.ApplyMaintenanceAsync(cancellationToken);
+        }
         public Task RebuildSensitivityMatchesAsync(CancellationToken cancellationToken = default) => inner.RebuildSensitivityMatchesAsync(cancellationToken);
         public Task<ClipEntry?> GetClipAtOffsetAsync(int offset, CancellationToken cancellationToken = default) => inner.GetClipAtOffsetAsync(offset, cancellationToken);
         public Task<ClipEntry?> GetByIdAsync(long clipId, CancellationToken cancellationToken = default) => inner.GetByIdAsync(clipId, cancellationToken);
@@ -2634,14 +2966,25 @@ public sealed class MainWindowViewModelHeadlessTests
             m_release.TrySetResult();
         }
 
-        public Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default)
+        /// <summary>
+        /// Awaited before each search reaches the store, so a test can hold a
+        /// refresh (offset 0) or a load-more page (offset past it) in flight.
+        /// </summary>
+        public Func<ClipSearchFilters, Task>? BeforeSearch { get; set; }
+
+        public async Task<ClipSearchResult> SearchAsync(ClipSearchFilters filters, CancellationToken cancellationToken = default)
         {
             lock (m_gate)
             {
                 m_searches.Add(filters.SearchText ?? string.Empty);
             }
 
-            return inner.SearchAsync(filters, cancellationToken);
+            if (BeforeSearch is { } beforeSearch)
+            {
+                await beforeSearch(filters);
+            }
+
+            return await inner.SearchAsync(filters, cancellationToken);
         }
 
         public async Task SetFavoriteAsync(long clipId, bool isFavorite, CancellationToken cancellationToken = default)
@@ -2712,7 +3055,7 @@ public sealed class MainWindowViewModelHeadlessTests
         await CaptureTextClipAsync(scope.ClipStoreService, "ordinary clip");
         await scope.ClipStoreService.SetPinnedAsync(pinned.Id, true);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
         await PumpAsync(() => viewModel.Clips.Count >= 2);
 
@@ -2746,7 +3089,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var oldest = await CaptureTextClipAsync(scope.ClipStoreService, "oldest clip");
         await CaptureTextClipAsync(scope.ClipStoreService, "middle clip");
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         viewModel.SelectedSortOption = viewModel.SortOptions.Single(option => option.Value == ClipSortOption.OldestFirst);
@@ -2780,7 +3123,7 @@ public sealed class MainWindowViewModelHeadlessTests
         await CaptureTextClipAsync(scope.ClipStoreService, "ordinary clip");
         await scope.ClipStoreService.SetFavoriteAsync(favorite.Id, true);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         viewModel.ShowFavoritesOnly = true;
@@ -2845,7 +3188,7 @@ public sealed class MainWindowViewModelHeadlessTests
         await Task.Delay(15);
         await scope.ClipStoreService.SetPinnedAsync(pinnedSecond.Id, true);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
         await PumpAsync(() => viewModel.Clips.Count >= 2);
 
@@ -2907,7 +3250,7 @@ public sealed class MainWindowViewModelHeadlessTests
         {
             await CaptureTextClipAsync(scope.ClipStoreService, "oldest clip");
 
-            await viewModel.InitializeAsync();
+            await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
             viewModel.SetMainWindowVisible(true);
 
             // Oldest first makes every capture take the declined path, which is
@@ -2950,6 +3293,53 @@ public sealed class MainWindowViewModelHeadlessTests
                 flakyStore.SearchCount > searchesAfterOutage,
                 "The deferred-refresh subscription died: the capture after recovery never triggered a search.");
             Assert.Contains(viewModel.Clips, clip => clip.Id == afterRecovery.Id);
+        }
+        finally
+        {
+            Trace.Listeners.Remove(listener);
+        }
+    }
+
+    private const string MaintenanceLoopFailure = "Maintenance loop failed";
+
+    /// <summary>
+    /// Live check F2: one failed tick ("no such table: clips" during the background
+    /// payload move) ended the periodic maintenance for the rest of the session,
+    /// because the error reached the Interval subscription and OnError is terminal
+    /// in Rx. Retention and the size cap then ran only after captures. A failed
+    /// tick is now reported and the next one still runs.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task MaintenanceLoop_SurvivesAFailingTick()
+    {
+        using var scope = new TemporaryDatabaseScope();
+        await PrepareInitializedScopeAsync(scope);
+        var flakyStore = new FlakySearchClipStore(scope.ClipStoreService);
+        using var viewModel = CreateViewModel(scope, new TestClipboardMonitorService(), new TestSystemInteractionService(), new TestSessionLogService(), clipStore: flakyStore);
+        viewModel.MaintenanceInterval = TimeSpan.FromMilliseconds(50);
+
+        var traced = new ConcurrentQueue<string>();
+        var listener = new TraceCaptureListener(traced);
+        Trace.Listeners.Add(listener);
+        try
+        {
+            flakyStore.StartFailingMaintenance();
+            await viewModel.InitializeAsync();
+            await PumpAsync(
+                () => traced.Count(message => message.Contains(MaintenanceLoopFailure, StringComparison.Ordinal)) >= 2,
+                maxAttempts: 60);
+
+            // Two failed ticks, not one: the second proves a tick after a failure ran.
+            Assert.True(
+                traced.Count(message => message.Contains(MaintenanceLoopFailure, StringComparison.Ordinal)) >= 2,
+                $"Expected the loop to keep ticking through failures; saw {flakyStore.MaintenanceCount} maintenance call(s).");
+
+            flakyStore.StopFailingMaintenance();
+            var callsAtRecovery = flakyStore.MaintenanceCount;
+            await PumpAsync(() => flakyStore.MaintenanceCount >= callsAtRecovery + 2, maxAttempts: 60);
+            Assert.True(
+                flakyStore.MaintenanceCount >= callsAtRecovery + 2,
+                "The maintenance loop stopped after its failures.");
         }
         finally
         {
@@ -3024,7 +3414,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         await CaptureTextClipAsync(scope.ClipStoreService, "oldest");
@@ -3102,7 +3492,7 @@ public sealed class MainWindowViewModelHeadlessTests
         Assert.Equal(AppSettings.MinMaxClipSizeBytes, scope.SettingsService.Current.MaxClipSizeBytes);
 
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
 
         // Over the size limit rather than undecodable. TryLoadImage checks the
@@ -3167,7 +3557,7 @@ public sealed class MainWindowViewModelHeadlessTests
         // non-header pages so PRAGMA quick_check inside DatabaseInitializer
         // fails. This is the scenario today's incident produced and the one
         // the startup-error overlay is meant to cover.
-        using (var seed = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+        using (var seed = TestConnections.Create(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
         {
             DataSource = scope.DatabasePath,
             Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadWriteCreate,
@@ -3200,7 +3590,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
 
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
 
         // Initialize kicks off StartDatabaseInBackgroundAsync as fire-and-
         // forget. Spin briefly until the background task either succeeds
@@ -3301,7 +3691,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var systemInteraction = new TestSystemInteractionService();
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
         var pngBytes = CreatePngBytes(0);
         var clip = await CaptureImageClipAsync(scope.ClipStoreService, pngBytes, "test image");
@@ -3329,7 +3719,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var systemInteraction = new TestSystemInteractionService();
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
         var pngBytes = CreatePngBytes(0);
         var clip = await CaptureImageClipAsync(scope.ClipStoreService, pngBytes, "test image");
@@ -3349,7 +3739,7 @@ public sealed class MainWindowViewModelHeadlessTests
         var systemInteraction = new TestSystemInteractionService();
         var sessionLogService = new TestSessionLogService();
         using var viewModel = CreateViewModel(scope, clipboardMonitor, systemInteraction, sessionLogService);
-        await viewModel.InitializeAsync();
+        await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
         viewModel.SetMainWindowVisible(true);
         var clip = await CaptureTextClipAsync(scope.ClipStoreService, "hello world");
         clipboardMonitor.Emit(clip);

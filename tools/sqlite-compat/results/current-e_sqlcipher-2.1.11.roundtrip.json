@@ -1,0 +1,242 @@
+[
+  {
+    "Description": "a-plain-wal fixture after candidate wrote 50 rows + update + cascading delete",
+    "File": "C:\\Users\\asafmahlev\\.copilot\\session-state\\118cff2e-a891-42ce-a8e1-386723af5f75\\files\\uc8\\work\\current\\rt-write-a-plain-wal.rt.db",
+    "Password": "",
+    "Rows": 248,
+    "Tags": 123,
+    "Checksum": "3153D056D471DC77F971B1876A6A5060",
+    "Fts": {
+      "Hello": 48,
+      "עולם": 25,
+      "日本語": 25,
+      "façade": 25,
+      "ünï": 25,
+      "\uD83D\uDE00\uD83D\uDE80✨": 25,
+      "Русский": 25,
+      "example.com": 25,
+      "edited": 2
+    },
+    "ExpectOpenFailure": false
+  },
+  {
+    "Description": "b-enc-sqlcipher452 fixture after candidate wrote 50 rows + update + cascading delete",
+    "File": "C:\\Users\\asafmahlev\\.copilot\\session-state\\118cff2e-a891-42ce-a8e1-386723af5f75\\files\\uc8\\work\\current\\rt-write-b-enc-sqlcipher452.rt.db",
+    "Password": "fixture-pass",
+    "Rows": 248,
+    "Tags": 123,
+    "Checksum": "3153D056D471DC77F971B1876A6A5060",
+    "Fts": {
+      "Hello": 48,
+      "עולם": 25,
+      "日本語": 25,
+      "façade": 25,
+      "ünï": 25,
+      "\uD83D\uDE00\uD83D\uDE80✨": 25,
+      "Русский": 25,
+      "example.com": 25,
+      "edited": 2
+    },
+    "ExpectOpenFailure": false
+  },
+  {
+    "Description": "c-enc-rekeyed fixture after candidate wrote 50 rows + update + cascading delete",
+    "File": "C:\\Users\\asafmahlev\\.copilot\\session-state\\118cff2e-a891-42ce-a8e1-386723af5f75\\files\\uc8\\work\\current\\rt-write-c-enc-rekeyed.rt.db",
+    "Password": "fixture-pass-2",
+    "Rows": 248,
+    "Tags": 123,
+    "Checksum": "3153D056D471DC77F971B1876A6A5060",
+    "Fts": {
+      "Hello": 48,
+      "עולם": 25,
+      "日本語": 25,
+      "façade": 25,
+      "ünï": 25,
+      "\uD83D\uDE00\uD83D\uDE80✨": 25,
+      "Русский": 25,
+      "example.com": 25,
+      "edited": 2
+    },
+    "ExpectOpenFailure": false
+  },
+  {
+    "Description": "d-enc-wal fixture after candidate wrote 50 rows + update + cascading delete",
+    "File": "C:\\Users\\asafmahlev\\.copilot\\session-state\\118cff2e-a891-42ce-a8e1-386723af5f75\\files\\uc8\\work\\current\\rt-write-d-enc-wal.rt.db",
+    "Password": "fixture-pass",
+    "Rows": 248,
+    "Tags": 123,
+    "Checksum": "3153D056D471DC77F971B1876A6A5060",
+    "Fts": {
+      "Hello": 48,
+      "עולם": 25,
+      "日本語": 25,
+      "façade": 25,
+      "ünï": 25,
+      "\uD83D\uDE00\uD83D\uDE80✨": 25,
+      "Русский": 25,
+      "example.com": 25,
+      "edited": 2
+    },
+    "ExpectOpenFailure": false
+  },
+  {
+    "Description": "new encrypted DB created from scratch by the candidate",
+    "File": "C:\\Users\\asafmahlev\\.copilot\\session-state\\118cff2e-a891-42ce-a8e1-386723af5f75\\files\\uc8\\work\\current\\rt-new-enc.rt.db",
+    "Password": "rt-new-pass",
+    "Rows": 299,
+    "Tags": 149,
+    "Checksum": "6D9AB09748CA97095359DF4718AE82C2",
+    "Fts": {
+      "Hello": 59,
+      "עולם": 30,
+      "日本語": 30,
+      "façade": 30,
+      "ünï": 30,
+      "\uD83D\uDE00\uD83D\uDE80✨": 30,
+      "Русский": 30,
+      "example.com": 29,
+      "edited": 1
+    },
+    "ExpectOpenFailure": false
+  },
+  {
+    "Description": "encrypted .db + 156592-byte uncheckpointed -wal written by the candidate (copied while open)",
+    "File": "C:\\Users\\asafmahlev\\.copilot\\session-state\\118cff2e-a891-42ce-a8e1-386723af5f75\\files\\uc8\\work\\current\\rt-wal-left.db",
+    "Password": "wal-pass",
+    "Rows": 199,
+    "Tags": 99,
+    "Checksum": "7F5AFB5BC08F1BF5414DCBD5F8CBBE62",
+    "Fts": {
+      "Hello": 39,
+      "עולם": 20,
+      "日本語": 20,
+      "façade": 20,
+      "ünï": 20,
+      "\uD83D\uDE00\uD83D\uDE80✨": 20,
+      "Русский": 20,
+      "example.com": 20,
+      "edited": 1
+    },
+    "ExpectOpenFailure": false
+  },
+  {
+    "Description": "backup-API copy (encrypted->encrypted) made by the candidate",
+    "File": "C:\\Users\\asafmahlev\\.copilot\\session-state\\118cff2e-a891-42ce-a8e1-386723af5f75\\files\\uc8\\work\\current\\bk-dst.rt.db",
+    "Password": "fixture-pass",
+    "Rows": 199,
+    "Tags": 99,
+    "Checksum": "7F5AFB5BC08F1BF5414DCBD5F8CBBE62",
+    "Fts": {
+      "Hello": 39,
+      "עולם": 20,
+      "日本語": 20,
+      "façade": 20,
+      "ünï": 20,
+      "\uD83D\uDE00\uD83D\uDE80✨": 20,
+      "Русский": 20,
+      "example.com": 20,
+      "edited": 1
+    },
+    "ExpectOpenFailure": false
+  },
+  {
+    "Description": "backup-API copy rekeyed encrypted->encrypted by the candidate (PRAGMA rekey in WAL mode)",
+    "File": "C:\\Users\\asafmahlev\\.copilot\\session-state\\118cff2e-a891-42ce-a8e1-386723af5f75\\files\\uc8\\work\\current\\rk-enc-enc.rt.db",
+    "Password": "rekeyed-pass",
+    "Rows": 199,
+    "Tags": 99,
+    "Checksum": "7F5AFB5BC08F1BF5414DCBD5F8CBBE62",
+    "Fts": {
+      "Hello": 39,
+      "עולם": 20,
+      "日本語": 20,
+      "façade": 20,
+      "ünï": 20,
+      "\uD83D\uDE00\uD83D\uDE80✨": 20,
+      "Русский": 20,
+      "example.com": 20,
+      "edited": 1
+    },
+    "ExpectOpenFailure": false
+  },
+  {
+    "Description": "ATTACH..KEY + sqlcipher_export (candidate) -> encrypted",
+    "File": "C:\\Users\\asafmahlev\\.copilot\\session-state\\118cff2e-a891-42ce-a8e1-386723af5f75\\files\\uc8\\work\\current\\enc-via-export.rt.db",
+    "Password": "enc-export-pass",
+    "Rows": 199,
+    "Tags": 99,
+    "Checksum": "7F5AFB5BC08F1BF5414DCBD5F8CBBE62",
+    "Fts": {
+      "Hello": 39,
+      "עולם": 20,
+      "日本語": 20,
+      "façade": 20,
+      "ünï": 20,
+      "\uD83D\uDE00\uD83D\uDE80✨": 20,
+      "Русский": 20,
+      "example.com": 20,
+      "edited": 1
+    },
+    "ExpectOpenFailure": false
+  },
+  {
+    "Description": "ATTACH..KEY + sqlcipher_export (candidate) -> plaintext",
+    "File": "C:\\Users\\asafmahlev\\.copilot\\session-state\\118cff2e-a891-42ce-a8e1-386723af5f75\\files\\uc8\\work\\current\\dec-via-export.rt.db",
+    "Password": "",
+    "Rows": 199,
+    "Tags": 99,
+    "Checksum": "7F5AFB5BC08F1BF5414DCBD5F8CBBE62",
+    "Fts": {
+      "Hello": 39,
+      "עולם": 20,
+      "日本語": 20,
+      "façade": 20,
+      "ünï": 20,
+      "\uD83D\uDE00\uD83D\uDE80✨": 20,
+      "Русский": 20,
+      "example.com": 20,
+      "edited": 1
+    },
+    "ExpectOpenFailure": false
+  },
+  {
+    "Description": "fixture b after candidate purged sensitive rows + FTS optimize + VACUUM",
+    "File": "C:\\Users\\asafmahlev\\.copilot\\session-state\\118cff2e-a891-42ce-a8e1-386723af5f75\\files\\uc8\\work\\current\\purge.rt.db",
+    "Password": "fixture-pass",
+    "Rows": 171,
+    "Tags": 85,
+    "Checksum": "696D963A1A9DD621E38D3D7A37742F53",
+    "Fts": {
+      "Hello": 34,
+      "עולם": 17,
+      "日本語": 17,
+      "façade": 18,
+      "ünï": 18,
+      "\uD83D\uDE00\uD83D\uDE80✨": 17,
+      "Русский": 17,
+      "example.com": 17,
+      "edited": 1
+    },
+    "ExpectOpenFailure": false
+  },
+  {
+    "Description": "encrypted DB created by the candidate under a path with space/#/%/non-ASCII",
+    "File": "C:\\Users\\asafmahlev\\.copilot\\session-state\\118cff2e-a891-42ce-a8e1-386723af5f75\\files\\uc8\\work\\current\\dir with space #1 %41 ü\\clip db #2.rt.db",
+    "Password": "path-pass",
+    "Rows": 20,
+    "Tags": 10,
+    "Checksum": "FEF6C887EAB83E3CE6AAFD0209006D6C",
+    "Fts": {
+      "Hello": 4,
+      "עולם": 2,
+      "日本語": 2,
+      "façade": 2,
+      "ünï": 2,
+      "\uD83D\uDE00\uD83D\uDE80✨": 2,
+      "Русский": 2,
+      "example.com": 2,
+      "edited": 0
+    },
+    "ExpectOpenFailure": false
+  }
+]
