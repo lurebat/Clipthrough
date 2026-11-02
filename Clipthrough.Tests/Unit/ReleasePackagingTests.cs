@@ -167,6 +167,28 @@ public sealed class ReleasePackagingTests
         Assert.False(pattern.IsMatch("ShareX.ImageEditor.pdb"));
     }
 
+    [Fact]
+    public void ReleaseUsesMeasuredRecoveryNotesAlongsideGeneratedNotes()
+    {
+        var workflow = File.ReadAllText(RepoFile(".github", "workflows", "release.yml"));
+        Assert.Contains("id: notes", workflow, StringComparison.Ordinal);
+        Assert.Contains("$path = \".github/release-notes/$env:RELEASE_VERSION.md\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("if (Test-Path -LiteralPath $path)", workflow, StringComparison.Ordinal);
+        Assert.Contains("body_path: ${{ steps.notes.outputs.body_path }}", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("body_path: .github/release-notes/0.18.0.md", workflow, StringComparison.Ordinal);
+        Assert.Contains("generate_release_notes: true", workflow, StringComparison.Ordinal);
+
+        var notePath = RepoFile(".github", "release-notes", "0.18.0.md");
+        Assert.True(File.Exists(notePath));
+        var notes = File.ReadAllText(notePath);
+        Assert.Contains("Velopack 1.2.0", notes, StringComparison.Ordinal);
+        Assert.Contains("storage.json", notes, StringComparison.Ordinal);
+        Assert.Contains("ClipthroughData", notes, StringComparison.Ordinal);
+        Assert.Contains("portable.flag", notes, StringComparison.Ordinal);
+        Assert.Contains("velopack/velopack#1086", notes, StringComparison.Ordinal);
+        Assert.Contains("velopack/velopack#1087", notes, StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// The release ZIP is the same publish output without Velopack in front
     /// of it, so the only thing that can refuse a runtime below the floor is

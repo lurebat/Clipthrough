@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Linq;
+using System.Reactive.Linq;
 using System.Reactive.Threading.Tasks;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
@@ -8,18 +10,93 @@ using System.Threading.Tasks;
 using Avalonia.Headless.XUnit;
 using Clipthrough.Models;
 using Clipthrough.Services;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace Clipthrough.Tests.Headless;
 
 /// <summary>
 /// Per-test database directories are deleted even when the test leaves the
-/// view model's database work running: a database start, a maintenance pass or
-/// the daily backup
+/// view model's database work running: a database start, a maintenance pass,
+/// the daily backup or background-service work
 /// (docs/solutions/test-temp-databases-leak-through-the-connection-pool.md).
 /// </summary>
 public sealed partial class MainWindowViewModelHeadlessTests
 {
+    [AvaloniaFact]
+    public async Task StartBackgroundDatabaseWork_IsDrainedBeforeScopeDelete()
+    {
+        var scope = new TemporaryDatabaseScope();
+        var queue = new BlockingBackgroundOcrQueue(scope.DatabasePath);
+        var viewModel = CreateViewModel(
+            scope,
+            new TestClipboardMonitorService(),
+            new TestSystemInteractionService(),
+            new TestSessionLogService(),
+            backgroundOcrQueue: queue);
+        Task? releaseQueue = null;
+        try
+        {
+            await PrepareInitializedScopeAsync(scope);
+            await HeadlessStartup.InitializeAndWaitForDatabaseAsync(viewModel);
+            Assert.True(queue.IsRunning, "The database start should have started the background OCR queue.");
+            await queue.BacklogStarted.WaitAsync(TimeSpan.FromSeconds(10));
+            await queue.BacklogTaskAssigned.WaitAsync(TimeSpan.FromSeconds(10));
+
+            var backlog = Assert.IsAssignableFrom<Task>(queue.BacklogTask);
+            if (viewModel.MaintenanceTask is { } maintenance)
+            {
+                await maintenance;
+            }
+
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            Task[] backgroundWork;
+            do
+            {
+                backgroundWork = viewModel.BackgroundDatabaseTasks.ToArray();
+                if (backgroundWork.Length == 1)
+                {
+                    break;
+                }
+
+                await Task.Delay(10);
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            }
+            while (DateTime.UtcNow < deadline);
+
+            var trackedBacklog = Assert.Single(backgroundWork);
+            Assert.False(trackedBacklog.IsCompleted, "The held OCR backlog was not tracked as background database work.");
+
+            releaseQueue = Task.Run(async () =>
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1));
+                queue.ReleaseBacklog();
+            });
+
+            viewModel.Dispose();
+            scope.Dispose();
+            await releaseQueue;
+
+            Assert.True(backlog.IsCompleted, "The scope deleted its directory before the OCR backlog finished.");
+            Assert.True(trackedBacklog.IsCompleted, "The scope returned before tracked background database work finished.");
+            Assert.False(Directory.Exists(scope.DirectoryPath), $"The test database directory was left behind: {scope.DirectoryPath}");
+        }
+        finally
+        {
+            queue.ReleaseBacklog();
+            viewModel.Dispose();
+            scope.Dispose();
+            if (queue.BacklogTask is { } backlog)
+            {
+                await backlog;
+            }
+            if (releaseQueue is not null)
+            {
+                await releaseQueue;
+            }
+        }
+    }
+
     /// <summary>
     /// Saving from the welcome screen starts the database in the background and
     /// returns; nothing awaits it. Before the scope waited for it, the start was
@@ -143,6 +220,50 @@ public sealed partial class MainWindowViewModelHeadlessTests
         public System.Collections.Generic.IReadOnlyList<DatabaseBackupInfo> ListBackups() => inner.ListBackups();
 
         public Task RestoreAsync(string backupPath, CancellationToken cancellationToken = default) => inner.RestoreAsync(backupPath, cancellationToken);
+    }
+
+    private sealed class BlockingBackgroundOcrQueue(string databasePath) : IBackgroundOcrQueue
+    {
+        private readonly TaskCompletionSource _backlogStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _backlogTaskAssigned = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _releaseBacklog = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public IObservable<long> OcrCompleted { get; } = Observable.Empty<long>();
+        public IObservable<System.Reactive.Unit> QueueChanged { get; } = Observable.Empty<System.Reactive.Unit>();
+        public bool IsRunning { get; private set; }
+        public Task BacklogStarted => _backlogStarted.Task;
+        public Task BacklogTaskAssigned => _backlogTaskAssigned.Task;
+        public Task? BacklogTask { get; private set; }
+
+        public void Start() => IsRunning = true;
+
+        public Task StopAsync()
+        {
+            IsRunning = false;
+            return Task.CompletedTask;
+        }
+
+        public void Enqueue(long clipId) { }
+
+        public Task EnqueueBacklogAsync(CancellationToken cancellationToken = default)
+        {
+            BacklogTask = HoldDatabaseOpenAsync(cancellationToken);
+            _backlogTaskAssigned.TrySetResult();
+            return BacklogTask;
+        }
+
+        public void ReleaseBacklog() => _releaseBacklog.TrySetResult();
+
+        private async Task HoldDatabaseOpenAsync(CancellationToken cancellationToken)
+        {
+            await using var connection = TestConnections.Create(new SqliteConnectionStringBuilder
+            {
+                DataSource = databasePath,
+            }.ToString());
+            await connection.OpenAsync(cancellationToken);
+            _backlogStarted.TrySetResult();
+            await _releaseBacklog.Task.WaitAsync(cancellationToken);
+        }
     }
 
     /// <summary>Forwards to a real store, but each maintenance pass first waits two seconds.</summary>

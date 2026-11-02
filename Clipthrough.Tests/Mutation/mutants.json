@@ -1915,7 +1915,7 @@
     "id": "semantic-coverage-samples-on-the-dispatcher",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "StartBackgroundServices runs on a thread-pool thread, so a dispatcher-bound periodic timer never ticks and the coverage chip freezes at its startup reading for the whole backlog drain.",
-    "find": "                .RateLimit(TimeSpan.FromMilliseconds(500), RxSchedulers.TaskpoolScheduler)\n                .ObserveOn(RxSchedulers.MainThreadScheduler)\n                .Subscribe((int count) => { _ = RefreshSemanticCoverageAsync(); }));",
+    "find": "                .RateLimit(TimeSpan.FromMilliseconds(500), RxSchedulers.TaskpoolScheduler)\n                .ObserveOn(RxSchedulers.MainThreadScheduler)\n                .Subscribe((int count) => { TrackBackgroundDatabaseWork(RefreshSemanticCoverageAsync()); }));",
     "replace": "                .RateLimit(TimeSpan.FromMilliseconds(500), RxSchedulers.MainThreadScheduler)\n                .Subscribe((int count) => { _ = RefreshSemanticCoverageAsync(); }));",
     "filter": "FullyQualifiedName~SemanticCoverageProgressHeadlessTests"
   },
@@ -3219,8 +3219,8 @@
     "id": "background-move-never-started",
     "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
     "why": "U4. The app opens without moving an upgraded library's payloads; nothing else ever moves them.",
-    "find": "        DeferredUpgradeRun = RunDeferredPayloadMoveAsync();",
-    "replace": "        DeferredUpgradeRun = Environment.ProcessorCount < 0 ? RunDeferredPayloadMoveAsync() : Task.CompletedTask;",
+    "find": "        DeferredUpgradeRun = TrackBackgroundDatabaseWork(RunDeferredPayloadMoveAsync());",
+    "replace": "        DeferredUpgradeRun = Environment.ProcessorCount < 0 ? TrackBackgroundDatabaseWork(RunDeferredPayloadMoveAsync()) : Task.CompletedTask;",
     "filter": "FullyQualifiedName~LibraryUpgradeProgressHeadlessTests.AnUpgradeFromSchema8"
   },
   {
@@ -5979,8 +5979,8 @@
     "id": "headless-scope-skips-maintenance-drain",
     "file": "Clipthrough.Tests/Headless/HeadlessStartup.cs",
     "why": "A save with the database open ends with a maintenance pass nothing awaits; without waiting for it the pass reopens the database while the scope deletes it, and the directory leaks.",
-    "find": "|| viewModel.MaintenanceTask is { IsCompleted: false })",
-    "replace": "|| (viewModel.MaintenanceTask is { IsCompleted: false } && deadline < DateTime.MinValue))",
+    "find": "|| viewModel.MaintenanceTask is { IsCompleted: false }",
+    "replace": "|| (viewModel.MaintenanceTask is { IsCompleted: false } && deadline < DateTime.MinValue)",
     "filter": "FullyQualifiedName~MainWindowViewModelHeadlessTests.ASaveWithTheDatabaseOpen_DoesNotLeaveItsDatabaseDirectoryBehind"
   },
   {
@@ -5990,5 +5990,21 @@
     "find": "        TrackMaintenance(Task.Run(async () =>",
     "replace": "        _ = (Task.Run(async () =>",
     "filter": "FullyQualifiedName~MainWindowViewModelHeadlessTests.TheStartupBackup_RunsBeforeTheScopeDeletesItsDirectory"
+  },
+  {
+    "id": "background-ocr-backlog-untracked",
+    "file": "Clipthrough/ViewModels/MainWindowViewModel.cs",
+    "why": "The OCR backlog can reopen the database after the headless scope clears the SQLite pools; the scope must track it and wait before deleting.",
+    "find": "        TrackBackgroundDatabaseWork(Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync()));",
+    "replace": "        _ = Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync());",
+    "filter": "FullyQualifiedName~MainWindowViewModelHeadlessTests.StartBackgroundDatabaseWork_IsDrainedBeforeScopeDelete"
+  },
+  {
+    "id": "headless-scope-skips-background-db-drain",
+    "file": "Clipthrough.Tests/Headless/HeadlessStartup.cs",
+    "why": "The scope must wait for background database work before clearing pools and deleting its directory.",
+    "find": "|| viewModel.BackgroundDatabaseTasks.Any(task => !task.IsCompleted)",
+    "replace": "|| (viewModel.BackgroundDatabaseTasks.Any(task => !task.IsCompleted) && DateTime.UtcNow > deadline)",
+    "filter": "FullyQualifiedName~MainWindowViewModelHeadlessTests.StartBackgroundDatabaseWork_IsDrainedBeforeScopeDelete"
   }
 ]

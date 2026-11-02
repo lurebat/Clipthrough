@@ -6470,7 +6470,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 {
                     await _clipStoreService.MarkAllSucceededForRerunAsync();
                 }
-                _ = Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync());
+                _ = TrackBackgroundDatabaseWork(Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync()));
             }
         }
 
@@ -6820,24 +6820,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         _areBackgroundServicesStarted = true;
-        DeferredUpgradeRun = RunDeferredPayloadMoveAsync();
+        DeferredUpgradeRun = TrackBackgroundDatabaseWork(RunDeferredPayloadMoveAsync());
         _clipboardMonitorService.Start();
         _backgroundOcrQueue.Start();
-        _ = Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync());
-        _ = RecoverPendingSensitivityAsync();
+        TrackBackgroundDatabaseWork(Task.Run(() => _backgroundOcrQueue.EnqueueBacklogAsync()));
+        TrackBackgroundDatabaseWork(RecoverPendingSensitivityAsync());
         if (_embeddingWorker is not null && _settingsService.Current.EnableSemanticSearch)
         {
             _embeddingWorker.Start();
         }
         StartMaintenanceLoop();
-        _ = RefreshSemanticCoverageAsync();
-        _ = RefreshOcrCoverageAsync();
+        TrackBackgroundDatabaseWork(RefreshSemanticCoverageAsync());
+        TrackBackgroundDatabaseWork(RefreshOcrCoverageAsync());
         _subscriptions.Add(_backgroundOcrQueue.QueueChanged
             .RateLimit(TimeSpan.FromMilliseconds(150), RxSchedulers.TaskpoolScheduler)
             .ObserveOn(RxSchedulers.MainThreadScheduler)
             .Subscribe(__ =>
             {
-                _ = RefreshOcrCoverageAsync();
+                TrackBackgroundDatabaseWork(RefreshOcrCoverageAsync());
             }));
         if (_embeddingWorker is not null)
         {
@@ -6860,7 +6860,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 // and nothing is happening".
                 .RateLimit(TimeSpan.FromMilliseconds(500), RxSchedulers.TaskpoolScheduler)
                 .ObserveOn(RxSchedulers.MainThreadScheduler)
-                .Subscribe((int count) => { _ = RefreshSemanticCoverageAsync(); }));
+                .Subscribe((int count) => { TrackBackgroundDatabaseWork(RefreshSemanticCoverageAsync()); }));
         }
     }
 
@@ -7396,6 +7396,42 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    internal IReadOnlyCollection<Task> BackgroundDatabaseTasks
+    {
+        get
+        {
+            lock (_backgroundDatabaseWorkGate)
+            {
+                return _backgroundDatabaseWork.ToArray();
+            }
+        }
+    }
+
+    private readonly Lock _backgroundDatabaseWorkGate = new();
+    private readonly HashSet<Task> _backgroundDatabaseWork = [];
+
+    private Task TrackBackgroundDatabaseWork(Task work)
+    {
+        lock (_backgroundDatabaseWorkGate)
+        {
+            _backgroundDatabaseWork.Add(work);
+        }
+
+        _ = work.ContinueWith(
+            completed =>
+            {
+                lock (_backgroundDatabaseWorkGate)
+                {
+                    _backgroundDatabaseWork.Remove(completed);
+                }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+        return work;
+    }
+
     private async Task ApplyMaintenanceAndRefreshAsync(bool forceRefresh = true)
     {
         if (!_isDatabaseReady)
@@ -7429,7 +7465,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // terminal in Rx: live check F2 lost the periodic retention and size cap for
         // the rest of the session after one failure.
         maintenanceSubscription.Disposable = Observable.Interval(MaintenanceInterval, RxSchedulers.TaskpoolScheduler)
-            .SelectMany(_ => Observable.FromAsync(() => ApplyMaintenanceAndRefreshAsync(false))
+            .SelectMany(_ => Observable.FromAsync(() => TrackBackgroundDatabaseWork(ApplyMaintenanceAndRefreshAsync(false)))
                 .Select(static _ => (Exception?)null)
                 .Catch(static (Exception ex) => Observable.Return<Exception?>(ex)))
             .ObserveOn(RxSchedulers.MainThreadScheduler)

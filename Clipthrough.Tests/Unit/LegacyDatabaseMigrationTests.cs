@@ -32,7 +32,7 @@ public sealed class LegacyDatabaseMigrationTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_tempRoot, recursive: true); } catch { /* test cleanup */ }
+        TestTempDirectories.TryDelete(_tempRoot);
     }
 
     [Fact]

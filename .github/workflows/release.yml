@@ -130,12 +130,24 @@ jobs:
           name: Clipthrough-${{ steps.ver.outputs.version }}-win-x64
           path: artifacts\release\*
 
+      - name: Select version-specific release notes
+        id: notes
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          $path = ".github/release-notes/$env:RELEASE_VERSION.md"
+          if (Test-Path -LiteralPath $path) {
+            echo "body_path=$path" >> $env:GITHUB_OUTPUT
+          }
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: Clipthrough ${{ steps.ver.outputs.tag }}
           draft: false
+          body_path: ${{ steps.notes.outputs.body_path }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           # Use GitHub's date+semver logic so that when two release workflows

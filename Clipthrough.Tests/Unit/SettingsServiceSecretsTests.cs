@@ -32,7 +32,7 @@ public sealed class SettingsServiceSecretsTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_tempRoot, recursive: true); } catch { /* test cleanup */ }
+        TestTempDirectories.TryDelete(_tempRoot);
     }
 
     /// <summary>

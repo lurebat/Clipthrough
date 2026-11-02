@@ -64,11 +64,13 @@ run with the fix above still left five directories, and three pieces of
   library into `backups\`.
 
 The view model's `Dispose` is synchronous, so it cannot wait for them. The
-view model now keeps the passes and the backup in `MaintenanceTask` (internal,
-for tests; the app still does not await it). `TemporaryDatabaseScope` has a
-`BeforeDelete` hook, and `HeadlessStartup.DrainDatabaseWorkBeforeDelete` sets
-it to wait for `DatabaseStartupTask` and `MaintenanceTask` while pumping the
-UI thread. The wait is bounded at 30 seconds. `CreateViewModel` in
+view model keeps maintenance passes and the backup in `MaintenanceTask`, and
+tracks other background database work separately in `BackgroundDatabaseTasks`.
+Both are internal test seams; the app still does not await them.
+`TemporaryDatabaseScope` has a `BeforeDelete` hook, and
+`HeadlessStartup.DrainDatabaseWorkBeforeDelete` sets it to wait for
+`DatabaseStartupTask`, `MaintenanceTask` and in-flight `BackgroundDatabaseTasks`
+while pumping the UI thread. The wait is bounded at 30 seconds. `CreateViewModel` in
 `MainWindowViewModelHeadlessTests` and `MainWindowTestHarness.Create` install
 it. It runs from the scope's `Dispose`, after the view model and window are
 torn down, which is the order
@@ -98,9 +100,12 @@ measurement, not between. `Invoke-MutationCheck.ps1` builds into the same
   GUID-named directories. Three mutants in `mutants.json` (`test-temp-*`)
   prove it fails when the pool clear, the age guard or the name guard is
   removed.
-- Background database work a view model starts and does not await goes into
-  `MaintenanceTask` through `TrackMaintenance`, so a test can wait for it.
-  The three `MainWindowViewModelHeadlessTests.TempCleanup.cs` tests cover the
-  database start, the maintenance pass and the daily backup. Their mutants
-  (`headless-scope-skips-*`, `startup-backup-untracked`) prove each one fails
-  without its wait.
+- Background database work a view model starts and does not await must be
+  tracked so tests can drain it before deleting their database. Maintenance
+  passes and the startup backup use `MaintenanceTask`; work started by
+  `StartBackgroundServices` uses `BackgroundDatabaseTasks`.
+  The `MainWindowViewModelHeadlessTests.TempCleanup.cs` tests cover the
+  database start, the maintenance pass, the daily backup and background-service
+  work. Their mutants (`headless-scope-skips-*`, `startup-backup-untracked`,
+  `background-ocr-backlog-untracked`) prove each guarded path fails without
+  its wait.

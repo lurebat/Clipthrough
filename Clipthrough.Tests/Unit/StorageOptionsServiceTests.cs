@@ -26,7 +26,7 @@ public sealed class StorageOptionsServiceTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_tempRoot, recursive: true); } catch { /* test cleanup */ }
+        TestTempDirectories.TryDelete(_tempRoot);
     }
 
     // NoOp protector (CanPersistSecrets = false): used for tests that verify
@@ -321,7 +321,7 @@ public sealed class StorageOptionsServicePhase2Tests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(_tempRoot, recursive: true); } catch { }
+        TestTempDirectories.TryDelete(_tempRoot);
     }
 
     private StorageOptionsService NewService(bool rememberPassword = false, string? password = null) =>

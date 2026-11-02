@@ -716,8 +716,9 @@ internal sealed class TemporaryDatabaseScope : IDisposable
     /// <summary>
     /// Runs before the directory is deleted. A view model leaves database work
     /// running that its synchronous Dispose does not await - a database start,
-    /// a maintenance pass, the daily backup - and while it runs it reopens the database,
-    /// so the delete fails however the pools are cleared. See
+    /// a maintenance pass, the daily backup, or other background database work - and
+    /// while it runs it reopens the database, so the delete fails however the pools
+    /// are cleared. See
     /// HeadlessStartup.DrainDatabaseWorkBeforeDelete.
     /// </summary>
     internal Action? BeforeDelete { get; set; }

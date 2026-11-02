@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
@@ -56,7 +57,9 @@ internal static class HeadlessStartup
             // The start assigns the maintenance task as it finishes, so both are
             // re-read on every pass.
             var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
-            while ((viewModel.DatabaseStartupTask is { IsCompleted: false } || viewModel.MaintenanceTask is { IsCompleted: false })
+            while ((viewModel.DatabaseStartupTask is { IsCompleted: false }
+                    || viewModel.MaintenanceTask is { IsCompleted: false }
+                    || viewModel.BackgroundDatabaseTasks.Any(task => !task.IsCompleted))
                 && DateTime.UtcNow < deadline)
             {
                 try { Dispatcher.UIThread.RunJobs(); } catch { /* test teardown */ }
