@@ -677,6 +677,8 @@ function Invoke-FailedApplyRollback {
             databasePath = Join-Path $installedRollbackRoot 'ClipthroughData\clipthrough.db'
             defaultDataRoot = $null
             defaultDatabasePath = $null
+            simulatedDefaultDataRoot = $null
+            simulatedDefaultDatabasePath = $null
             source = 'CommandLine'
             isPortable = $false
             prepared = $false
@@ -791,6 +793,8 @@ function Invoke-FailedApplyRollback {
             databasePath = Join-Path $rollbackRoot 'ClipthroughData\clipthrough.db'
             defaultDataRoot = $null
             defaultDatabasePath = $null
+            simulatedDefaultDataRoot = $null
+            simulatedDefaultDatabasePath = $null
             source = 'CommandLine'
             isPortable = $true
             prepared = $false
