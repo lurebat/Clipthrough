@@ -684,7 +684,10 @@ function Invoke-FailedApplyRollback {
             failure = [ordered]@{
                 replacementFailureObserved = $false
                 deleteSharingDenied = $false
+                payloadLockHeldThroughUpdaterExit = $false
                 applyLogReachedReplacement = $false
+                applyLogReportedReplacementFailure = $false
+                applyLogReportedBrokenState = $false
                 replacementFailureObservedWhileLocked = $false
                 currentManifestAbsent = $false
                 currentPayloadAbsent = $false
@@ -739,7 +742,10 @@ function Invoke-FailedApplyRollback {
             failure = [ordered]@{
                 replacementFailureObserved = $false
                 deleteSharingDenied = $false
+                payloadLockHeldThroughUpdaterExit = $false
                 applyLogReachedReplacement = $false
+                applyLogReportedReplacementFailure = $false
+                applyLogReportedBrokenState = $false
                 replacementFailureObservedWhileLocked = $false
                 currentManifestAbsent = $false
                 currentPayloadAbsent = $false
@@ -792,7 +798,10 @@ function Invoke-FailedApplyRollback {
             failure = [ordered]@{
                 replacementFailureObserved = $false
                 deleteSharingDenied = $false
+                payloadLockHeldThroughUpdaterExit = $false
                 applyLogReachedReplacement = $false
+                applyLogReportedReplacementFailure = $false
+                applyLogReportedBrokenState = $false
                 replacementFailureObservedWhileLocked = $false
                 currentManifestAbsent = $false
                 currentPayloadAbsent = $false
